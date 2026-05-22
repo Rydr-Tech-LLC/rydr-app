@@ -109,6 +109,44 @@ function randomCode(len = 8) {
   return `RB-${s.slice(0, 4)}-${s.slice(4, 8)}`;
 }
 
+function rewardGroupForRideType(rideType = "") {
+  const key = String(rideType).toLowerCase();
+  if (key.includes("xl")) return "xl";
+  if (key.includes("prestine") || key.includes("pristine")) return "prestine";
+  return "go_eco";
+}
+
+function rewardLabelForGroup(group = "go_eco") {
+  if (group === "xl") return "Rydr XL";
+  if (group === "prestine") return "Rydr Prestine";
+  return "Rydr Go / Rydr Eco";
+}
+
+function emptyRewardProgress() {
+  return { eligibleCount: 0, totalEligible: 0, codesEarned: 0 };
+}
+
+function nextRewardProgress(bank, rewardGroup) {
+  const current = bank?.progressByRideType?.[rewardGroup] || emptyRewardProgress();
+  return {
+    eligibleCount: (current.eligibleCount || 0) + 1,
+    totalEligible: (current.totalEligible || 0) + 1,
+    codesEarned: current.codesEarned || 0,
+  };
+}
+
+function assertCodeMatchesRide(data, rideType, distanceMi) {
+  if (typeof distanceMi === "number" && distanceMi > (data.maxMiles || 15)) {
+    throw new Error("ride_too_long");
+  }
+
+  const codeGroup = data.rewardGroup || "go_eco";
+  const requestedGroup = rewardGroupForRideType(rideType);
+  if (codeGroup !== requestedGroup) {
+    throw new Error("wrong_ride_type");
+  }
+}
+
 // Only READS a free code in the transaction; returns chosen code + indexRef to write later
 async function reserveUniqueCodeReadsOnly(t) {
   while (true) {
@@ -120,13 +158,15 @@ async function reserveUniqueCodeReadsOnly(t) {
 }
 
 // Combined accrual + (optional) mint inside ONE transaction with proper ordering.
-async function accrueAndMaybeMintInOneTxn(uid, rideId, distanceMi) {
+async function accrueAndMaybeMintInOneTxn(uid, rideId, distanceMi, rideType) {
   if (typeof distanceMi !== "number" || distanceMi < 5) {
     return { eligible: false, minted: null };
   }
 
   const userRef = db.collection("users").doc(uid);
   const contribRef = userRef.collection("rydrContrib").doc(rideId);
+  const rewardGroup = rewardGroupForRideType(rideType);
+  const rewardLabel = rewardLabelForGroup(rewardGroup);
 
   const result = await db.runTransaction(async (t) => {
     // === READS FIRST ===
@@ -134,12 +174,14 @@ async function accrueAndMaybeMintInOneTxn(uid, rideId, distanceMi) {
 
     if (contribSnap.exists) {
       const bank = (userSnap.exists ? userSnap.get("rydrBank") : null) || {};
-      return { eligible: true, minted: null, currentEligible: bank.eligibleCount || 0 };
+      const current = bank?.progressByRideType?.[rewardGroup]?.eligibleCount ?? bank.eligibleCount ?? 0;
+      return { eligible: true, minted: null, currentEligible: current };
     }
 
     const bank = (userSnap.exists ? userSnap.get("rydrBank") : null) || {};
-    const currentEligible = bank.eligibleCount || 0;
+    const currentEligible = bank?.progressByRideType?.[rewardGroup]?.eligibleCount ?? 0;
     const nextEligible = currentEligible + 1;
+    const updatedProgress = nextRewardProgress(bank, rewardGroup);
 
     let mintPlan = null;
     if (nextEligible % 10 === 0) {
@@ -152,6 +194,8 @@ async function accrueAndMaybeMintInOneTxn(uid, rideId, distanceMi) {
     t.set(contribRef, {
       contributedAt: admin.firestore.FieldValue.serverTimestamp(),
       distanceMi,
+      rideType: rideType || null,
+      rewardGroup,
     });
 
     t.set(
@@ -160,6 +204,9 @@ async function accrueAndMaybeMintInOneTxn(uid, rideId, distanceMi) {
         rydrBank: {
           eligibleCount: admin.firestore.FieldValue.increment(1),
           totalEligible: admin.firestore.FieldValue.increment(1),
+          progressByRideType: {
+            [rewardGroup]: updatedProgress,
+          },
         },
       },
       { merge: true }
@@ -179,6 +226,8 @@ async function accrueAndMaybeMintInOneTxn(uid, rideId, distanceMi) {
         code,
         status: "active", // active | reserved | used | void
         maxMiles: 15,
+        rewardGroup,
+        rewardLabel,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         reservedRideId: null,
         usedRideId: null,
@@ -193,18 +242,24 @@ async function accrueAndMaybeMintInOneTxn(uid, rideId, distanceMi) {
           rydrBank: {
             codesAvailable: admin.firestore.FieldValue.increment(1),
             codesEarned: admin.firestore.FieldValue.increment(1),
+            progressByRideType: {
+              [rewardGroup]: {
+                ...updatedProgress,
+                codesEarned: (updatedProgress.codesEarned || 0) + 1,
+              },
+            },
           },
         },
         { merge: true }
       );
 
-      return { eligible: true, minted: code, currentEligible: nextEligible };
+      return { eligible: true, minted: code, currentEligible: nextEligible, rewardGroup };
     }
 
-    return { eligible: true, minted: null, currentEligible: nextEligible };
+    return { eligible: true, minted: null, currentEligible: nextEligible, rewardGroup };
   });
 
-  return { eligible: true, minted: result.minted || null };
+  return { eligible: true, minted: result.minted || null, rewardGroup: result.rewardGroup || rewardGroup };
 }
 
 // ---------- Routes ----------
@@ -215,11 +270,11 @@ app.get("/", (_, res) => res.send("RydrBank service up"));
 // Earn (simulate ride completion). distanceMi >= 5 required to be eligible.
 app.post("/rides/complete", requireAuth, async (req, res) => {
   try {
-    const { rideId, distanceMi } = req.body || {};
+    const { rideId, distanceMi, rideType } = req.body || {};
     if (!rideId || typeof distanceMi !== "number") {
       return res.status(400).json({ error: "rideId and distanceMi required" });
     }
-    const out = await accrueAndMaybeMintInOneTxn(req.uid, rideId, distanceMi);
+    const out = await accrueAndMaybeMintInOneTxn(req.uid, rideId, distanceMi, rideType);
     return res.json(out);
   } catch (e) {
     console.error(e);
@@ -229,10 +284,11 @@ app.post("/rides/complete", requireAuth, async (req, res) => {
 
 // Reserve a code for a booking (mobile preview/apply)
 app.post("/promo/preview", requireAuth, async (req, res) => {
-  const { code, bookingId } = req.body || {};
+  const { code, bookingId, rideType, distanceMi } = req.body || {};
   if (!code) return res.status(400).json({ error: "code required" });
 
   try {
+    let rewardLabel = "Rydr Go / Rydr Eco";
     await db.runTransaction(async (t) => {
       const idxRef = db.collection("codes_index").doc(code);
       const idxSnap = await t.get(idxRef);
@@ -245,7 +301,14 @@ app.post("/promo/preview", requireAuth, async (req, res) => {
       const codeSnap = await t.get(codeRef);
       const data = codeSnap.data();
       if (!data) throw new Error("not_found");
+      if (data.status === "reserved" && data.reservedRideId === bookingId) {
+        assertCodeMatchesRide(data, rideType, distanceMi);
+        rewardLabel = data.rewardLabel || rewardLabelForGroup(data.rewardGroup || "go_eco");
+        return;
+      }
       if (data.status !== "active") throw new Error("not_active");
+      assertCodeMatchesRide(data, rideType, distanceMi);
+      rewardLabel = data.rewardLabel || rewardLabelForGroup(data.rewardGroup || "go_eco");
 
       t.update(codeRef, {
         status: "reserved",
@@ -255,7 +318,8 @@ app.post("/promo/preview", requireAuth, async (req, res) => {
 
     res.json({
       ok: true,
-      message: "RydrBank applied: up to 15 miles will be covered.",
+      rewardLabel,
+      message: "RydrBank applied: this eligible ride is covered.",
     });
   } catch (e) {
     console.error(e);
@@ -294,7 +358,7 @@ app.post("/promo/release", requireAuth, async (req, res) => {
 
 // Consume a code after the ride is completed (mobile)
 app.post("/promo/consume", requireAuth, async (req, res) => {
-  const { code, rideId } = req.body || {};
+  const { code, rideId, rideType, distanceMi } = req.body || {};
   if (!code || !rideId) return res.status(400).json({ error: "code and rideId required" });
 
   try {
@@ -311,8 +375,14 @@ app.post("/promo/consume", requireAuth, async (req, res) => {
       if (!data) throw new Error("not_found");
       if (data.status !== "reserved" && data.status !== "active")
         throw new Error("bad_status");
+      assertCodeMatchesRide(data, rideType, distanceMi);
 
-      t.update(codeRef, { status: "used", usedRideId: rideId, reservedRideId: null });
+      t.update(codeRef, {
+        status: "used",
+        usedRideId: rideId,
+        reservedRideId: null,
+        usedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
       t.set(
         db.collection("users").doc(ownerUid),
         { rydrBank: { codesAvailable: admin.firestore.FieldValue.increment(-1) } },
@@ -367,6 +437,8 @@ app.post("/promo/transfer", requireAuth, async (req, res) => {
           code: data.code,
           status: "active",
           maxMiles: data.maxMiles,
+          rewardGroup: data.rewardGroup || "go_eco",
+          rewardLabel: data.rewardLabel || rewardLabelForGroup(data.rewardGroup || "go_eco"),
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           reservedRideId: null,
           usedRideId: null,
@@ -380,6 +452,8 @@ app.post("/promo/transfer", requireAuth, async (req, res) => {
         t.update(idxRef, {
           currentOwnerUid: recipient.uid,
           codeDocPath: recipRef.path,
+          rewardGroup: data.rewardGroup || "go_eco",
+          rewardLabel: data.rewardLabel || rewardLabelForGroup(data.rewardGroup || "go_eco"),
           transferredAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
@@ -429,6 +503,9 @@ app.post("/promo/transfer", requireAuth, async (req, res) => {
         t.update(idxRef, {
           currentOwnerUid: `external:${recipientEmail.toLowerCase()}`,
           codeDocPath: null,
+          rewardGroup: data.rewardGroup || "go_eco",
+          rewardLabel: data.rewardLabel || rewardLabelForGroup(data.rewardGroup || "go_eco"),
+          maxMiles: data.maxMiles || 15,
           transferredAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
@@ -457,10 +534,11 @@ app.post("/promo/transfer", requireAuth, async (req, res) => {
 
 // Preview/apply (no auth) -> check external email owns the code
 app.post("/web/promo/preview", async (req, res) => {
-  const { code, email, bookingId } = req.body || {};
+  const { code, email, bookingId, rideType, distanceMi } = req.body || {};
   if (!code || !email) return res.status(400).json({ error: "code and email required" });
 
   try {
+    let rewardLabel = "Rydr Go / Rydr Eco";
     await db.runTransaction(async (t) => {
       const idxRef = db.collection("codes_index").doc(code);
       const idxSnap = await t.get(idxRef);
@@ -468,6 +546,15 @@ app.post("/web/promo/preview", async (req, res) => {
 
       const owner = idxSnap.get("currentOwnerUid");
       if (owner !== `external:${email.toLowerCase()}`) throw new Error("not_owner_external");
+      assertCodeMatchesRide(
+        {
+          rewardGroup: idxSnap.get("rewardGroup") || "go_eco",
+          maxMiles: idxSnap.get("maxMiles") || 15,
+        },
+        rideType,
+        distanceMi
+      );
+      rewardLabel = idxSnap.get("rewardLabel") || rewardLabelForGroup(idxSnap.get("rewardGroup") || "go_eco");
 
       // Optional: write a soft reservation doc if you want
       // (skipped here; preview just returns ok)
@@ -475,7 +562,8 @@ app.post("/web/promo/preview", async (req, res) => {
 
     return res.json({
       ok: true,
-      message: "RydrBank applied: up to 15 miles will be covered.",
+      rewardLabel,
+      message: "RydrBank applied: this eligible ride is covered.",
     });
   } catch (e) {
     console.error(e);
@@ -485,7 +573,7 @@ app.post("/web/promo/preview", async (req, res) => {
 
 // Consume (no auth) -> mark external code as used
 app.post("/web/promo/consume", async (req, res) => {
-  const { code, email, rideId } = req.body || {};
+  const { code, email, rideId, rideType, distanceMi } = req.body || {};
   if (!code || !email || !rideId)
     return res.status(400).json({ error: "code, email, rideId required" });
 
@@ -497,6 +585,14 @@ app.post("/web/promo/consume", async (req, res) => {
 
       const owner = idxSnap.get("currentOwnerUid");
       if (owner !== `external:${email.toLowerCase()}`) throw new Error("not_owner_external");
+      assertCodeMatchesRide(
+        {
+          rewardGroup: idxSnap.get("rewardGroup") || "go_eco",
+          maxMiles: idxSnap.get("maxMiles") || 15,
+        },
+        rideType,
+        distanceMi
+      );
 
       t.update(idxRef, {
         usedByExternal: email.toLowerCase(),
@@ -526,4 +622,3 @@ app.post("/web/promo/consume", async (req, res) => {
 // ---------- Start ----------
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => console.log("Listening on", PORT));
-

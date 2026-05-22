@@ -31,12 +31,10 @@ struct DriverSelectionView: View {
         return .init(distanceMiles: (miles * 10).rounded()/10, durationMinutes: round(minutes))
     }
 
-    // DEV/QA helper: treat “any saved promo code” as 100% off in cards so users
-    // can see a strikethrough and “FREE”. Your real discount logic still runs in RM.
+    // RydrBank reservations cover the eligible ride, so cards show FREE once applied.
     private var promoApplied: Bool {
-        let a = UserDefaults.standard.string(forKey: "appliedPromoCode") ?? ""
-        let b = UserDefaults.standard.string(forKey: "promoCode") ?? ""
-        return !(a.isEmpty && b.isEmpty)
+        let code = UserDefaults.standard.string(forKey: "appliedRydrBankCode") ?? ""
+        return !code.isEmpty
     }
 
     var body: some View {
@@ -245,6 +243,7 @@ private struct DriverCard: View {
     private var rideTypeDisplay: String {
         switch rideType.lowercased() {
         case "go":        return "Rydr Go"
+        case "eco":       return "Rydr Eco"
         case "xl":        return "Rydr XL"
         case "prestine":  return "Rydr Prestine"
         default:          return rideType
@@ -343,7 +342,6 @@ private extension Double {
         return (self * p).rounded() / p
     }
 }
-
 
 
 

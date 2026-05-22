@@ -12,11 +12,33 @@ import FirebaseFirestore
 
 // MARK: - Models
 
+struct RydrBankRideTypeProgress: Codable {
+    var eligibleCount: Int = 0
+    var totalEligible: Int = 0
+    var codesEarned: Int = 0
+}
+
 struct RydrBankSummary: Codable {
     var eligibleCount: Int = 0           // progress since last reward
     var totalEligible: Int = 0           // lifetime eligible rides (5+ mi)
     var codesEarned: Int = 0             // lifetime codes minted
     var codesAvailable: Int = 0          // currently active codes
+    var progressByRideType: [String: RydrBankRideTypeProgress] = [:]
+
+    enum CodingKeys: String, CodingKey {
+        case eligibleCount, totalEligible, codesEarned, codesAvailable, progressByRideType
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        eligibleCount = try container.decodeIfPresent(Int.self, forKey: .eligibleCount) ?? 0
+        totalEligible = try container.decodeIfPresent(Int.self, forKey: .totalEligible) ?? 0
+        codesEarned = try container.decodeIfPresent(Int.self, forKey: .codesEarned) ?? 0
+        codesAvailable = try container.decodeIfPresent(Int.self, forKey: .codesAvailable) ?? 0
+        progressByRideType = try container.decodeIfPresent([String: RydrBankRideTypeProgress].self, forKey: .progressByRideType) ?? [:]
+    }
 }
 
 struct RydrBankCode: Identifiable {
@@ -24,6 +46,8 @@ struct RydrBankCode: Identifiable {
     var code: String
     var status: String                   // "active" | "reserved" | "used" | "void"
     var maxMiles: Int = 15
+    var rewardGroup: String = "go_eco"
+    var rewardLabel: String = "Rydr Go / Rydr Eco"
     var createdAt: Timestamp?
     var reservedRideId: String?
     var usedRideId: String?
@@ -87,6 +111,8 @@ final class RydrBankVM: ObservableObject {
                         code: d["code"] as? String ?? "",
                         status: d["status"] as? String ?? "active",
                         maxMiles: d["maxMiles"] as? Int ?? 15,
+                        rewardGroup: d["rewardGroup"] as? String ?? "go_eco",
+                        rewardLabel: d["rewardLabel"] as? String ?? "Rydr Go / Rydr Eco",
                         createdAt: d["createdAt"] as? Timestamp,
                         reservedRideId: d["reservedRideId"] as? String,
                         usedRideId: d["usedRideId"] as? String,
@@ -177,7 +203,7 @@ struct RydrBankView: View {
         ScrollView {
             VStack(spacing: 18) {
                 balanceCard
-                progressCard(eligibleModulo: vm.summary.eligibleCount % 10)
+                progressSection
                 activeCodesSection
                 usedCodesSection
 
@@ -215,7 +241,7 @@ struct RydrBankView: View {
                 }
                 // TEMP END
 
-                Text("Earn 1 banked ride after every 10 completed rides of 5 miles or more. Each banked ride covers up to 15 miles on a single trip. Codes do not expire.")
+                Text("Earn 1 banked ride after every 10 completed rides of 5 miles or more in the matching ride type. Rydr Go and Rydr Eco share progress. Each banked ride covers one trip up to 15 miles.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal)
@@ -318,16 +344,28 @@ struct RydrBankView: View {
         .padding(.horizontal)
     }
 
+    private var progressSection: some View {
+        VStack(spacing: 10) {
+            progressCard(title: "Rydr Go / Rydr Eco", icon: "leaf.fill", rewardGroup: "go_eco")
+            progressCard(title: "Rydr XL", icon: "bus.fill", rewardGroup: "xl")
+            progressCard(title: "Rydr Prestine", icon: "sparkles", rewardGroup: "prestine")
+        }
+    }
+
     @ViewBuilder
-    private func progressCard(eligibleModulo: Int) -> some View {
+    private func progressCard(title: String, icon: String, rewardGroup: String) -> some View {
+        let eligibleCount = progress(for: rewardGroup).eligibleCount
+        let eligibleModulo = eligibleCount % 10
         let progress = max(0, min(eligibleModulo, 10))
         let remaining = max(0, 10 - progress)
 
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Progress to next reward")
-                    .font(.headline)
+                Image(systemName: icon)
                     .foregroundStyle(Styles.rydrGradient)
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
                 Spacer()
                 Text("\(progress)/10")
                     .font(.subheadline)
@@ -348,8 +386,8 @@ struct RydrBankView: View {
             .frame(height: 10)
 
             Text(remaining == 0
-                 ? "Reward ready! Your next eligible ride will mint a free ride code."
-                 : "\(remaining) more eligible \(remaining == 1 ? "ride" : "rides") (5+ miles) to earn a free ride.")
+                 ? "Reward ready! Your next eligible \(title) ride will mint a matching code."
+                 : "\(remaining) more eligible \(remaining == 1 ? "ride" : "rides") to earn a \(title) code.")
             .font(.footnote)
             .foregroundStyle(.secondary)
         }
@@ -360,6 +398,22 @@ struct RydrBankView: View {
                 .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 3)
         )
         .padding(.horizontal)
+    }
+
+    private func progress(for rewardGroup: String) -> RydrBankRideTypeProgress {
+        if let progress = vm.summary.progressByRideType[rewardGroup] {
+            return progress
+        }
+
+        if rewardGroup == "go_eco" {
+            return RydrBankRideTypeProgress(
+                eligibleCount: vm.summary.eligibleCount,
+                totalEligible: vm.summary.totalEligible,
+                codesEarned: vm.summary.codesEarned
+            )
+        }
+
+        return RydrBankRideTypeProgress()
     }
 
     private var activeOrReserved: [RydrBankCode] {
@@ -399,7 +453,7 @@ struct RydrBankView: View {
         VStack(alignment: .leading, spacing: 10) {
             if usedOrTransferred.isEmpty { EmptyView() } else {
                 HStack {
-                    Text("Used Codes")
+                    Text("Recently Used/Transferred")
                         .font(.headline)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -434,6 +488,9 @@ struct RydrBankView: View {
                 Text(code.code)
                     .font(.subheadline).bold()
                     .textSelection(.enabled)
+                Text(code.rewardLabel)
+                    .font(.caption)
+                    .foregroundStyle(Styles.rydrGradient)
 
                 HStack(spacing: 8) {
                     if code.status == "active" {
@@ -570,8 +627,3 @@ struct RydrBankView: View {
         clearTransferForm()
     }
 }
-
-
-
-
-

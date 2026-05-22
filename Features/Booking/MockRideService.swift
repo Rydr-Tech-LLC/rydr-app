@@ -24,9 +24,11 @@ final class MockRideService: RideService {
 
     // MARK: - Nearby drivers
 
-    func fetchNearbyDrivers(pickup: String, dropoff: String, near center: CLLocationCoordinate2D) async throws -> [Driver] {
+    func fetchNearbyDrivers(pickup: String, dropoff: String, rideType: String, near center: CLLocationCoordinate2D) async throws -> [Driver] {
         let names = ["Alex","Jamie","Taylor","Jordan","Riley","Morgan","Sam"]
-        let cars  = ["Toyota Camry","Honda Accord","Tesla Model 3","BMW 3 Series","Audi A4"]
+        let cars = rideType.localizedCaseInsensitiveContains("eco")
+            ? ["Tesla Model 3","Tesla Model Y","Ford Mustang Mach-E","Hyundai IONIQ 5","Kia EV6"]
+            : ["Toyota Camry","Honda Accord","Tesla Model 3","BMW 3 Series","Audi A4"]
 
         func jitter(_ delta: Double) -> Double { Double.random(in: -delta...delta) }
 

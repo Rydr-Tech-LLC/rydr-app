@@ -17,6 +17,13 @@ struct LoginView: View {
     @State private var showLogo = false
     @State private var errorMessage = ""
     @State private var showPasswordResetAlert = false
+    @State private var verificationID: String?
+    @State private var showVerificationView = false
+    
+    private var formattedPhoneNumber: String {
+        let digits = phoneNumber.filter { $0.isNumber }.prefix(10)
+        return "+1" + digits
+    }
     
     var body: some View {
         VStack(spacing: 25) {
@@ -36,13 +43,28 @@ struct LoginView: View {
             
             // MARK: - Phone Login
             if !isUsingEmail {
-                TextField("Enter your phone number", text: $phoneNumber)
-                    .keyboardType(.phonePad)
+                HStack {
+                    Text("🇺🇸 +1")
+                        .font(.headline)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 10)
+                        .background(Color(.systemGray6))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    TextField("Phone number", text: Binding(
+                        get: { phoneNumber },
+                        set: { phoneNumber = String($0.filter { $0.isNumber }.prefix(10)) }
+                    ))
+                    .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("Phone Number Field")
+                    .accessibilityLabel("US Phone Number Field")
+                }
+                .padding(.bottom, 4)
+                Text("US numbers only. Enter your 10-digit number.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
                 
                 Button("Send Code") {
-                    // TODO: Trigger Firebase OTP
+                    sendCode()
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
@@ -161,6 +183,19 @@ struct LoginView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
+        .sheet(isPresented: $showVerificationView) {
+            VerificationCodeView(
+                verificationID: verificationID ?? "",
+                phoneNumber: formattedPhoneNumber,
+                onSuccess: { user in
+                    showVerificationView = false
+                    session.login(name: user.displayName ?? "Rydr User", email: user.email ?? "")
+                },
+                onResendCode: {
+                    sendCode()
+                }
+            )
+        }
     }
     
     // MARK: - Password Reset
@@ -199,9 +234,22 @@ struct LoginView: View {
             
         }
     }
+    
+    private func sendCode() {
+        let formattedNumber = formattedPhoneNumber // always +1 plus digits
+        
+        PhoneAuthProvider.provider().verifyPhoneNumber(formattedNumber, uiDelegate: nil) { verificationID, error in
+            if let error = error {
+                errorMessage = "Failed to send code: \(error.localizedDescription)"
+                print("❌ Firebase OTP error:", error.localizedDescription)
+                return
+            }
+            
+            if let verificationID = verificationID {
+                print("✅ Code sent. VerificationID:", verificationID)
+                self.verificationID = verificationID
+                self.showVerificationView = true
+            }
+        }
+    }
 }
-
-
-
-
-

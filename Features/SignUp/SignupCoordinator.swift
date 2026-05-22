@@ -52,7 +52,9 @@ struct SignupCoordinator: View {
                     "phoneNumber": verifiedPhone,
                     "createdAt": FieldValue.serverTimestamp()
                 ])
-                path.append(.nameEntry)
+                Task { @MainActor in
+                    path.append(.nameEntry)
+                }
             }
             .navigationDestination(for: SignupStep.self) { step in
                 switch step {
@@ -68,7 +70,9 @@ struct SignupCoordinator: View {
                                 "lastName": lastName,
                                 "preferredName": preferredName
                             ])
-                            path.append(.emailPassword)
+                            Task { @MainActor in
+                                path.append(.emailPassword)
+                            }
                         },
                         onContinueWithSocial: {
                             upsertRider([
@@ -76,7 +80,9 @@ struct SignupCoordinator: View {
                                 "lastName": lastName,
                                 "preferredName": preferredName
                             ])
-                            path.append(.addressEntry)
+                            Task { @MainActor in
+                                path.append(.addressEntry)
+                            }
                         }
                     )
 
@@ -91,7 +97,9 @@ struct SignupCoordinator: View {
                                     if error.code == AuthErrorCode.emailAlreadyInUse.rawValue {
                                         upsertRider(["email": email])
                                         // (Optional) Sign the user in here if you aren’t already, then call provisionStripeCustomerIfNeeded()
-                                        path.append(.addressEntry)
+                                        Task { @MainActor in
+                                            path.append(.addressEntry)
+                                        }
                                     } else {
                                         print("❌ Firebase signup failed: \(error.localizedDescription)")
                                     }
@@ -110,7 +118,9 @@ struct SignupCoordinator: View {
                                 // 🔽 Add this line:
                                 provisionStripeCustomerIfNeeded()
 
-                                path.append(.addressEntry)
+                                Task { @MainActor in
+                                    path.append(.addressEntry)
+                                }
                             }
                         }
                     )
@@ -132,14 +142,16 @@ struct SignupCoordinator: View {
                                     "zip": zip
                                 ]
                             ])
-                            path.append(.paymentMethod)
+                            Task { @MainActor in
+                                path.append(.paymentMethod)
+                            }
                         }
                     )
 
                 case .paymentMethod:
                     PaymentScreenView(
-                        onComplete: { path.append(.termsAndVerification) },
-                        onSkip:     { path.append(.termsAndVerification) }   // ✅ optional
+                        onComplete: { Task { @MainActor in path.append(.termsAndVerification) } },
+                        onSkip:     { Task { @MainActor in path.append(.termsAndVerification) } }   // ✅ optional
                     )
 
                 case .termsAndVerification:
@@ -210,9 +222,11 @@ struct SignupCoordinator: View {
                     print("❌ Error saving rider: \(error.localizedDescription)")
                 } else {
                     print("✅ Rider saved to Firestore.")
-                    // 🔁 Pull name/preferred so Profile greeting updates immediately
-                    session.loadUserProfile()
-                    showMainApp = true
+                    Task { @MainActor in
+                        // 🔁 Pull name/preferred so Profile greeting updates immediately
+                        session.loadUserProfile()
+                        showMainApp = true
+                    }
                 }
             }
     }
@@ -260,11 +274,3 @@ struct SignupCoordinator: View {
         }
     }
 }
-
-
-
-
-
-
-
-

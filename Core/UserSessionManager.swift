@@ -44,12 +44,14 @@ class UserSessionManager: ObservableObject {
                     .joined(separator: " ")
                     .trimmingCharacters(in: .whitespaces)
 
-                self.userName = preferred.isEmpty
-                    ? (legal.isEmpty ? "Rydr User" : legal)
-                    : preferred
+                Task { @MainActor in
+                    self.userName = preferred.isEmpty
+                        ? (legal.isEmpty ? "Rydr User" : legal)
+                        : preferred
 
-                if let emailFromDb { self.userEmail = emailFromDb }
-                self.isLoggedIn = true
+                    if let emailFromDb { self.userEmail = emailFromDb }
+                    self.isLoggedIn = true
+                }
             }
     }
 
@@ -84,8 +86,10 @@ class UserSessionManager: ObservableObject {
         ]
 
         // Keep local display name in sync
-        self.userName = preferredName.isEmpty ? self.userName : preferredName
-        self.userEmail = email
+        Task { @MainActor in
+            self.userName = preferredName.isEmpty ? self.userName : preferredName
+            self.userEmail = email
+        }
 
         Firestore.firestore()
             .collection("riders").document(uid)

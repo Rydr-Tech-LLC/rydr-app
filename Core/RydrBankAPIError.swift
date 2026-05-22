@@ -34,11 +34,18 @@ struct RydrBankAPI {
 
         var req = URLRequest(url: base.appendingPathComponent(path))
         req.httpMethod = "POST"
+        req.timeoutInterval = 15
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.httpBody = try JSONSerialization.data(withJSONObject: json, options: [])
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 20
+        let session = URLSession(configuration: config)
+        defer { session.finishTasksAndInvalidate() }
+
+        let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw RydrBankAPIError.badResponse }
 
         // 2xx success → parse json (or empty)
@@ -58,10 +65,12 @@ struct RydrBankAPI {
 
     // MARK: - Public calls
 
-    static func preview(code: String, bookingId: String?) async throws -> [String: Any] {
+    static func preview(code: String, bookingId: String?, rideType: String, distanceMi: Double) async throws -> [String: Any] {
         try await authedRequest(path: "promo/preview", json: [
             "code": code,
-            "bookingId": bookingId ?? ""
+            "bookingId": bookingId ?? "",
+            "rideType": rideType,
+            "distanceMi": distanceMi
         ])
     }
 
@@ -69,14 +78,21 @@ struct RydrBankAPI {
         _ = try await authedRequest(path: "promo/release", json: ["code": code])
     }
 
-    static func consume(code: String, rideId: String) async throws {
-        _ = try await authedRequest(path: "promo/consume", json: ["code": code, "rideId": rideId])
+    static func consume(code: String, rideId: String, rideType: String, distanceMi: Double) async throws {
+        _ = try await authedRequest(path: "promo/consume", json: [
+            "code": code,
+            "rideId": rideId,
+            "rideType": rideType,
+            "distanceMi": distanceMi
+        ])
     }
 
     /// Used by your ride pipeline (simulating completion in dev).
-    static func rideComplete(rideId: String, distanceMi: Double) async throws -> [String: Any] {
+    static func rideComplete(rideId: String, distanceMi: Double, rideType: String) async throws -> [String: Any] {
         try await authedRequest(path: "rides/complete", json: [
-            "rideId": rideId, "distanceMi": distanceMi
+            "rideId": rideId,
+            "distanceMi": distanceMi,
+            "rideType": rideType
         ])
     }
 
@@ -87,7 +103,7 @@ struct RydrBankAPI {
 
         for i in 1...10 {
             let id = "ios_dev_ride_\(stamp)_\(i)"   // always unique
-            let resp = try await rideComplete(rideId: id, distanceMi: 6.0)
+            let resp = try await rideComplete(rideId: id, distanceMi: 6.0, rideType: "Rydr Go")
             if let m = resp["minted"] as? String { minted = m }
         }
         return minted

@@ -33,6 +33,11 @@ struct RideTypeSelectionView: View {
                         RideOptionCard(title: "Rydr Go", subtitle: "Affordable everyday rides", icon: "car.fill")
                     }
 
+                    // Rydr Eco
+                    NavigationLink(destination: BookingView(rideType: "Rydr Eco", userName: userName)) {
+                        RideOptionCard(title: "Rydr Eco", subtitle: "Electric vehicles like Tesla and Mach-E", icon: "leaf.fill")
+                    }
+
                     // Rydr XL
                     NavigationLink(destination: BookingView(rideType: "Rydr XL", userName: userName)) {
                         RideOptionCard(title: "Rydr XL", subtitle: "More space for extra passengers", icon: "bus.fill")
@@ -43,9 +48,9 @@ struct RideTypeSelectionView: View {
                         RideOptionCard(title: "Rydr Prestine", subtitle: "Premium vehicles and top-rated drivers", icon: "sparkles")
                     }
 
-                    // SafeRydr
-                    NavigationLink(destination: SafeRydrView()) {
-                        RideOptionCard(title: "SafeRydr", subtitle: "Focused on security and family-friendly rides", icon: "shield.checkerboard")
+                    // Cash Rydr Hub
+                    NavigationLink(destination: CashRydrHubView()) {
+                        RideOptionCard(title: "Cash Rydr Hub", subtitle: "Post or browse upcoming cash ride requests", icon: "rectangle.on.rectangle.angled")
                     }
                 }
                 .padding()
@@ -91,4 +96,3 @@ struct RideOptionCard: View {
 #Preview {
     RideTypeSelectionView()
 }
-

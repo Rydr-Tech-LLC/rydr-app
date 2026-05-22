@@ -8,8 +8,6 @@ import FirebaseAuth
 struct PhoneVerificationView: View {
     var onVerified: (String) -> Void
 
-    // Country selection
-    @State private var selectedCountry: Country = .us
     @State private var nationalNumber: String = ""
 
     @State private var sending = false
@@ -17,44 +15,37 @@ struct PhoneVerificationView: View {
     @State private var verificationID: String?
     @State private var goToCode = false
 
+    private var formattedPhoneNumber: String {
+        let digits = nationalNumber.filter { $0.isNumber }.prefix(10)
+        return "+1" + digits
+    }
+
     var body: some View {
         VStack(spacing: 20) {
             Text("Enter your phone").font(.title).bold()
 
-            // Phone input row: [country selector][national number]
-            HStack(spacing: 10) {
-                Menu {
-                    ForEach(Country.all, id: \.self) { c in
-                        Button {
-                            selectedCountry = c
-                        } label: {
-                            Label("\(c.flag) \(c.name) \(c.dialCode)", systemImage: "")
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(selectedCountry.flag)
-                        Text(selectedCountry.dialCode)
-                            .font(.body.weight(.semibold))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-
-                TextField("Phone number", text: $nationalNumber)
-                    .keyboardType(.phonePad)
-                    .textInputAutocapitalization(.never)
-                    .disableAutocorrection(true)
-                    .padding(12)
-                    .background(Color(.secondarySystemBackground))
-                    .cornerRadius(10)
-                    .onChange(of: nationalNumber) { oldValue, newValue in
-                        // keep only digits in the national part
-                        nationalNumber = newValue.filter { $0.isNumber }
-                    }
+            HStack {
+                Text("🇺🇸 +1")
+                    .font(.headline)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 10)
+                    .background(Color(.systemGray6))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                TextField("Phone number", text: Binding(
+                    get: { nationalNumber },
+                    set: { nationalNumber = String($0.filter { $0.isNumber }.prefix(10)) }
+                ))
+                .keyboardType(.numberPad)
+                .padding(12)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(10)
+                .accessibilityLabel("US Phone Number Field")
             }
+            .padding(.bottom, 4)
+
+            Text("US numbers only. Enter your 10-digit number.")
+                .font(.caption)
+                .foregroundColor(.secondary)
 
             if !errorMessage.isEmpty {
                 Text(errorMessage).foregroundColor(.red).font(.footnote)
@@ -71,30 +62,28 @@ struct PhoneVerificationView: View {
                     .foregroundColor(.white)
                     .cornerRadius(12)
             }
-            .disabled(sending || nationalNumber.isEmpty)
+            .disabled(sending || nationalNumber.count != 10)
 
             Spacer()
         }
         .padding()
         .navigationDestination(isPresented: $goToCode) {
-            let e164 = fullE164()
+            let e164 = formattedPhoneNumber
             VerificationCodeView(
                 verificationID: verificationID ?? "",
                 phoneNumber: e164,
-                onSuccess: { onVerified(e164) },
+                onSuccess: { user in
+                    onVerified(user.phoneNumber ?? "")
+                },
                 onResendCode: { sendCode(resend: true) }
             )
         }
     }
 
-    private func fullE164() -> String {
-        selectedCountry.dialCode + nationalNumber   // e.g. +1 + 4045551234
-    }
-
     private func sendCode(resend: Bool = false) {
         errorMessage = ""
         sending = true
-        let e164 = fullE164()
+        let e164 = formattedPhoneNumber
 
         // DEBUG/testing on simulator (don’t ship enabled):
         // Auth.auth().settings?.isAppVerificationDisabledForTesting = true
@@ -110,22 +99,4 @@ struct PhoneVerificationView: View {
         }
     }
 }
-
-// MARK: - Country model (minimal set; add more as needed)
-private struct Country: Hashable {
-    let name: String
-    let code: String      // ISO
-    let dialCode: String  // e.g. "+1"
-    let flag: String
-
-    static let us = Country(name: "United States", code: "US", dialCode: "+1", flag: "🇺🇸")
-    static let ca = Country(name: "Canada",        code: "CA", dialCode: "+1", flag: "🇨🇦")
-    static let mx = Country(name: "Mexico",        code: "MX", dialCode: "+52", flag: "🇲🇽")
-
-    static let all: [Country] = [.us, .ca, .mx]
-}
-
-
-
-
 

@@ -79,6 +79,9 @@ struct BookingView: View {
     // Promo code
     @State private var showPromo = false
     @State private var promoCode = ""
+    @State private var appliedRydrBankCode = UserDefaults.standard.string(forKey: "appliedRydrBankCode") ?? ""
+    @State private var promoBookingId = UserDefaults.standard.string(forKey: "appliedRydrBankBookingId") ?? UUID().uuidString
+    @State private var promoRequestID = UUID()
 
     // Promo Application
     private enum PromoStatus: Equatable {
@@ -89,7 +92,15 @@ struct BookingView: View {
     }
     @State private var promoStatus: PromoStatus = .idle
     private var isApplyingPromo: Bool { if case .applying = promoStatus { return true } else { return false } }
-    private var isPromoApplied: Bool { if case .success = promoStatus { return true } else { return false } }
+    private var isPromoApplied: Bool { !appliedRydrBankCode.isEmpty }
+    private var currentEstimate: RideEstimate {
+        let base: Double = 5.0
+        let pm = abs(pickupText.hashValue % 7)
+        let dm = abs(dropoffText.hashValue % 9)
+        let miles = base + Double(pm + dm) * 0.7
+        let minutes = miles * 3.0
+        return .init(distanceMiles: (miles * 10).rounded()/10, durationMinutes: round(minutes))
+    }
 
     // Shortcuts (Work / Home / Add)
     struct Shortcut: Identifiable {
@@ -170,11 +181,21 @@ struct BookingView: View {
                     showDriverSheet = false
                     showInProgress = true
                 },
-                onClose: { showDriverSheet = false }
+                onClose: {
+                    showDriverSheet = false
+                    releaseAppliedRydrBankCodeIfNeeded()
+                }
             )
         }
         // 🔹 Present in-progress view
-        .fullScreenCover(isPresented: $showInProgress) {
+        .fullScreenCover(isPresented: $showInProgress, onDismiss: {
+            appliedRydrBankCode = UserDefaults.standard.string(forKey: "appliedRydrBankCode") ?? ""
+            if appliedRydrBankCode.isEmpty {
+                promoCode = ""
+                promoStatus = .idle
+                promoBookingId = UUID().uuidString
+            }
+        }) {
             RideInProgressView(rideManager: rideManager)
         }
         .navigationBarBackButtonHidden(false)
@@ -303,7 +324,18 @@ struct BookingView: View {
                         VStack(spacing: 8) {
                             ForEach(recentDropoffs.prefix(5), id: \.self) { addr in
                                 Button {
-                                    dropoffText = addr; focusedField = nil
+                                    if focusedField == .pickup {
+                                        pickupText = addr
+                                    } else if focusedField == .dropoff {
+                                        dropoffText = addr
+                                    } else {
+                                        if pickupText.trimmingCharacters(in: .whitespaces).isEmpty {
+                                            pickupText = addr
+                                        } else {
+                                            dropoffText = addr
+                                        }
+                                    }
+                                    focusedField = nil
                                 } label: {
                                     HStack(spacing: 12) {
                                         Image(systemName: "mappin.circle.fill").font(.title3).foregroundStyle(Color.red)
@@ -570,28 +602,81 @@ struct BookingView: View {
             return
         }
 
-        promoStatus = .applying
+        let estimate = currentEstimate
+        guard estimate.distanceMiles <= 15 else {
+            showStatus(.failure("RydrBank codes can only be applied to rides up to 15 miles."))
+            return
+        }
 
-        // Simulate lightweight validation (replace with real API when ready)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            if isLikelyValidPromo(code) {
-                // persist for RideManager to read when pricing
-                UserDefaults.standard.set(code, forKey: "appliedPromoCode")
-                showStatus(.success("Promo applied."))
-            } else {
-                showStatus(.failure("That code is not valid."))
+        promoStatus = .applying
+        let requestID = UUID()
+        promoRequestID = requestID
+
+        Task {
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            await MainActor.run {
+                guard promoRequestID == requestID, isApplyingPromo else { return }
+                promoRequestID = UUID()
+                showStatus(.failure("RydrBank is taking too long to respond. Please try again."))
+            }
+        }
+
+        Task {
+            do {
+                let response = try await RydrBankAPI.preview(
+                    code: code,
+                    bookingId: promoBookingId,
+                    rideType: rideType,
+                    distanceMi: estimate.distanceMiles
+                )
+                let message = response["message"] as? String ?? "RydrBank applied. This ride is covered."
+                await MainActor.run {
+                    guard promoRequestID == requestID else { return }
+                    appliedRydrBankCode = code
+                    UserDefaults.standard.set(code, forKey: "appliedRydrBankCode")
+                    UserDefaults.standard.set(promoBookingId, forKey: "appliedRydrBankBookingId")
+                    showStatus(.success(message))
+                }
+            } catch {
+                await MainActor.run {
+                    guard promoRequestID == requestID else { return }
+                    showStatus(.failure(promoErrorMessage(for: error)))
+                }
             }
         }
     }
 
-    private func isLikelyValidPromo(_ code: String) -> Bool {
-        // Accepts formats like "RB-EXZS-UP98" (2 letters, dash, 2+ chars, dash, 2+ chars)
-        let pattern = #"^[A-Z]{2}-[A-Z0-9]{2,}-[A-Z0-9]{2,}$"#
-        return code.range(of: pattern, options: .regularExpression) != nil
+    private func promoErrorMessage(for error: Error) -> String {
+        if (error as? URLError)?.code == .timedOut {
+            return "RydrBank is taking too long to respond. Please try again."
+        }
+
+        guard let bankError = error as? RydrBankAPIError else {
+            return "That code could not be applied."
+        }
+
+        switch bankError {
+        case .server(let message):
+            switch message {
+            case "ride_too_long":
+                return "RydrBank codes can only be applied to rides up to 15 miles."
+            case "wrong_ride_type":
+                return "That code is for a different Rydr ride type."
+            case "not_active", "bad_status":
+                return "That code is no longer ready to use."
+            case "not_found":
+                return "That code was not found."
+            default:
+                return message.replacingOccurrences(of: "_", with: " ").capitalized
+            }
+        default:
+            return bankError.localizedDescription
+        }
     }
 
     private func showStatus(_ status: PromoStatus) {
         withAnimation(.spring()) { promoStatus = status }
+        if case .success = status { return }
         // Auto-dismiss the banner after a short moment
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             withAnimation(.easeOut) { promoStatus = .idle }
@@ -618,6 +703,10 @@ struct BookingView: View {
 
     // MARK: - Actions
     private func requestRide() {
+        if isPromoApplied && currentEstimate.distanceMiles > 15 {
+            showStatus(.failure("RydrBank codes can only be applied to rides up to 15 miles."))
+            return
+        }
         if !dropoffText.trimmingCharacters(in: .whitespaces).isEmpty {
             pushRecent(dropoffText)
         }
@@ -629,15 +718,20 @@ struct BookingView: View {
         )
         showDriverSheet = true
     }
+
+    private func releaseAppliedRydrBankCodeIfNeeded() {
+        let code = appliedRydrBankCode
+        guard !code.isEmpty else { return }
+        appliedRydrBankCode = ""
+        promoCode = ""
+        promoStatus = .idle
+        promoRequestID = UUID()
+        UserDefaults.standard.removeObject(forKey: "appliedRydrBankCode")
+        UserDefaults.standard.removeObject(forKey: "appliedRydrBankBookingId")
+        promoBookingId = UUID().uuidString
+
+        Task {
+            try? await RydrBankAPI.release(code: code)
+        }
+    }
 }
-
-
-
-
-
-
-
-
-
-
-

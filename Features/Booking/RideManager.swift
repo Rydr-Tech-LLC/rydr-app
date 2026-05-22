@@ -66,7 +66,7 @@ struct Ride: Identifiable, Equatable {
 enum DriverDecision { case accepted, declined }
 
 protocol RideService {
-    func fetchNearbyDrivers(pickup: String, dropoff: String, near: CLLocationCoordinate2D) async throws -> [Driver]
+    func fetchNearbyDrivers(pickup: String, dropoff: String, rideType: String, near: CLLocationCoordinate2D) async throws -> [Driver]
     func requestRide(driverId: String, pickup: String, dropoff: String, rideType: String) async throws -> String // returns rideId
     func awaitDriverDecision(rideId: String) async throws -> DriverDecision
     func driverLocationStream(rideId: String) -> AsyncStream<CLLocationCoordinate2D>
@@ -114,6 +114,7 @@ final class RideManager: ObservableObject {
     private var cachedDropoff = ""
     private var cachedRideType = ""
     private var currentServiceRideId: String?
+    private var currentAppliedRydrBankCode: String?
 
     init(rideService: RideService = MockRideService()) {
         self.rideService = rideService
@@ -139,25 +140,16 @@ final class RideManager: ObservableObject {
 
     /// Public helper for views to price with any saved promo applied.
     func applyPromo(to amount: Double) -> Double {
-        let pct = promoPercent(for: normalizedSavedPromoCode())  // e.g. 0.15
-        let cap: Double = 15.0                                   // max $ off
-        let discount = min(amount * pct, cap)
-        return ((amount - discount) * 100).rounded() / 100.0
+        hasAppliedRydrBankCode ? 0 : ((amount * 100).rounded() / 100.0)
+    }
+
+    var hasAppliedRydrBankCode: Bool {
+        !normalizedSavedPromoCode().isEmpty
     }
 
     private func normalizedSavedPromoCode() -> String {
-        // Read from UserDefaults so this object doesn’t rely on @AppStorage
-        if let v = UserDefaults.standard.string(forKey: "appliedPromoCode"), !v.isEmpty { return v }
-        if let v = UserDefaults.standard.string(forKey: "promoCode"), !v.isEmpty { return v }
+        if let v = UserDefaults.standard.string(forKey: "appliedRydrBankCode"), !v.isEmpty { return v }
         return ""
-    }
-
-    private func promoPercent(for code: String) -> Double {
-        let pattern = #"^[A-Z]{2}-[A-Z0-9]{2,}-[A-Z0-9]{2,}$"#
-        guard !code.isEmpty,
-              code.range(of: pattern, options: .regularExpression) != nil
-        else { return 0 }
-        return 0.15
     }
 
     // MARK: - Public API used by the UI
@@ -175,7 +167,7 @@ final class RideManager: ObservableObject {
 
         Task {
             do {
-                let drivers = try await rideService.fetchNearbyDrivers(pickup: pickup, dropoff: dropoff, near: center)
+                let drivers = try await rideService.fetchNearbyDrivers(pickup: pickup, dropoff: dropoff, rideType: rideType, near: center)
                 self.availableDrivers = drivers
             } catch {
                 self.availableDrivers = []
@@ -200,6 +192,8 @@ final class RideManager: ObservableObject {
                     rideType: cachedRideType
                 )
                 self.currentServiceRideId = rideId
+                let code = self.normalizedSavedPromoCode()
+                self.currentAppliedRydrBankCode = code.isEmpty ? nil : code
 
                 let decision = try await rideService.awaitDriverDecision(rideId: rideId)
                 switch decision {
@@ -220,7 +214,7 @@ final class RideManager: ObservableObject {
 
         // Compute fare with caps/fee + promo
         let fareBeforePromo = rawFare(estimate: cachedEstimate, with: driver, rideType: cachedRideType)
-        let fareAfterPromo  = applyPromo(to: fareBeforePromo)
+        let fareAfterPromo = currentAppliedRydrBankCode == nil ? applyPromo(to: fareBeforePromo) : 0
 
         // Seed a simple two-leg path relative to driver's start
         let start  = driver.coordinate
@@ -291,10 +285,26 @@ final class RideManager: ObservableObject {
         )
         lastReceipt = receipt
         history.insert(receipt, at: 0)
+        let backendRideId = currentServiceRideId ?? ride.id.uuidString
+        let appliedCode = currentAppliedRydrBankCode
+        let rideType = ride.rideType
+        let distance = ride.estimate.distanceMiles
         currentRide = nil
         currentServiceRideId = nil
+        currentAppliedRydrBankCode = nil
         stopMovement()
         state = .completed
+
+        Task {
+            if let appliedCode, !appliedCode.isEmpty {
+                try? await RydrBankAPI.consume(code: appliedCode, rideId: backendRideId, rideType: rideType, distanceMi: distance)
+                await MainActor.run {
+                    UserDefaults.standard.removeObject(forKey: "appliedRydrBankCode")
+                    UserDefaults.standard.removeObject(forKey: "appliedRydrBankBookingId")
+                }
+            }
+            _ = try? await RydrBankAPI.rideComplete(rideId: backendRideId, distanceMi: distance, rideType: rideType)
+        }
     }
 
     func cancelAll() {
@@ -304,6 +314,7 @@ final class RideManager: ObservableObject {
         currentRide = nil
         selectedDriver = nil
         currentServiceRideId = nil
+        releaseAppliedRydrBankCodeIfNeeded()
         state = .cancelled
     }
 
@@ -374,7 +385,7 @@ final class RideManager: ObservableObject {
         let key = rideType.lowercased()
         if key.contains("prestine") { return (8.0, 4.0, 1.0) }   // Rydr Prestine
         if key.contains("xl")       { return (5.0, 2.0, 0.5) }   // Rydr XL
-        return (4.0, 1.0, 0.5)                                  // Rydr Go (default)
+        return (4.0, 1.0, 0.5)                                  // Rydr Go / Eco (default)
     }
 
     /// Raw fare BEFORE promo discounts (booking fee + capped variable).
@@ -386,7 +397,17 @@ final class RideManager: ObservableObject {
         let total = c.booking + variable
         return (total * 100).rounded() / 100.0
     }
+
+    private func releaseAppliedRydrBankCodeIfNeeded() {
+        let code = normalizedSavedPromoCode()
+        guard !code.isEmpty else { return }
+        Task {
+            try? await RydrBankAPI.release(code: code)
+            await MainActor.run {
+                UserDefaults.standard.removeObject(forKey: "appliedRydrBankCode")
+                UserDefaults.standard.removeObject(forKey: "appliedRydrBankBookingId")
+            }
+        }
+    }
 }
-
-
 

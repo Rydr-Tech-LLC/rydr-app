@@ -23,6 +23,7 @@ struct RideInProgressView: View {
     @State private var showChat = false
     @State private var showPaymentSheet = false
     @State private var showNotesSheet = false
+    @State private var showTripOptionsSheet = false
     @State private var pickupNotes = ""
     @State private var gateCode = ""
     @State private var showEnd = false
@@ -54,6 +55,30 @@ struct RideInProgressView: View {
             .sheet(isPresented: $showNotesSheet) {
                 PickupNotesSheet(pickupNotes: $pickupNotes, gateCode: $gateCode)
             }
+            .sheet(isPresented: $showTripOptionsSheet) {
+                TripOptionsSheet(
+                    onChangePickup: { showTripOptionsSheet = false },
+                    onChangeDropoff: { showTripOptionsSheet = false },
+                    onAddStop: { showTripOptionsSheet = false },
+                    onPickupNotes: {
+                        showTripOptionsSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            showNotesSheet = true
+                        }
+                    },
+                    onReport: {
+                        showTripOptionsSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            showReportAlert = true
+                        }
+                    },
+                    onCancel: {
+                        showTripOptionsSheet = false
+                        rideManager.riderCancelAndAutoReassign()
+                    }
+                )
+                .presentationDetents([.medium])
+            }
             .sheet(isPresented: $showEnd) {
                 EndRideView(ride: rideManager.lastReceipt, onDone: { dismiss() })
             }
@@ -77,23 +102,19 @@ struct RideInProgressView: View {
     // MARK: Awaiting pickup — features up top, map as a section
     private var awaitingPickupUI: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 16) {
 
-                riderHeaderRow
+                statusCard
 
-                etaRow("Arrives in \(etaText)")
-
-                actionsRow
-
-                tripOptions
-
-                paymentRow
+                primaryActionsRow
 
                 mapSection
 
-                shareSection
+                quietControls
 
-                reportSection
+                paymentRow
+
+                shareSection
             }
             .padding(.horizontal)
             .padding(.bottom, 16)
@@ -107,101 +128,179 @@ struct RideInProgressView: View {
                 .ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 16) {
-                riderHeaderRow
-                etaRow("ETA to drop-off: \(etaText)")
-                HStack(spacing: 12) {
-                    pill("map", "Share status & ETA") { shareRide() }
-                    Spacer()
-                    pill("exclamationmark.triangle.fill", "Report") { showReportAlert = true }
-                }
+                statusCard
+                    .shadow(color: .black.opacity(0.08), radius: 18, y: 8)
+                primaryActionsRow
+                compactRideControls
                 .padding(.bottom, 12)
             }
             .padding()
-            .background(.ultraThinMaterial)
         }
     }
 
     // MARK: – UI blocks
 
-    private var riderHeaderRow: some View {
-        HStack {
-            Circle().fill(Color.gray.opacity(0.15))
-                .overlay(Text(String(rideManager.currentRide?.driver.name.prefix(1) ?? "D")))
-                .frame(width: 44, height: 44)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(rideManager.currentRide?.driver.name ?? "Driver")
-                    .font(.headline)
-                Text(rideManager.currentRide?.driver.carMakeModel ?? "")
+    private var statusCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                Circle()
+                    .fill(Color(.secondarySystemGroupedBackground))
+                    .overlay(
+                        Text(String(rideManager.currentRide?.driver.name.prefix(1) ?? "D"))
+                            .font(.headline.weight(.semibold))
+                    )
+                    .frame(width: 50, height: 50)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(rideManager.currentRide?.driver.name ?? "Driver")
+                        .font(.headline)
+                    Text(rideManager.currentRide?.driver.carMakeModel ?? "")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Text("$\(rideManager.currentRide?.fare ?? 0, specifier: "%.2f")")
+                    .font(.headline.weight(.semibold))
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: rideManager.currentRide?.status == .enRouteToPickup ? "clock.badge.checkmark" : "location.fill")
+                    .foregroundStyle(Styles.rydrGradient)
+                Text(statusHeadline)
+                    .font(.title2.weight(.bold))
+                Spacer()
+            }
+
+            if let ride = rideManager.currentRide {
+                VStack(alignment: .leading, spacing: 8) {
+                    routeLine(icon: "mappin.circle.fill", label: "Pickup", value: ride.pickup)
+                    routeLine(icon: "flag.checkered.circle.fill", label: "Drop-off", value: ride.dropoff)
+                }
+                .padding(12)
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .padding(16)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private var primaryActionsRow: some View {
+        HStack(spacing: 10) {
+            iconActionButton(icon: "message.fill", accessibilityLabel: "Message driver", tint: .red) {
+                showChat = true
+            }
+            iconActionButton(icon: "phone.fill", accessibilityLabel: "Call driver", tint: .red) {
+                callDriver()
+            }
+            iconActionButton(icon: "ellipsis", accessibilityLabel: "Trip options", tint: .secondary) {
+                showTripOptionsSheet = true
+            }
+        }
+    }
+
+    private var quietControls: some View {
+        Button {
+            showTripOptionsSheet = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "slider.horizontal.3")
+                    .foregroundStyle(Styles.rydrGradient)
+                Text("Trip options")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Image(systemName: "chevron.up")
+                    .font(.caption.weight(.bold))
                     .foregroundStyle(.secondary)
             }
-            Spacer()
-            Text("$\(rideManager.currentRide?.fare ?? 0, specifier: "%.2f")")
-                .font(.headline)
+            .padding(14)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            )
         }
+        .buttonStyle(.plain)
     }
 
-    private func etaRow(_ text: String) -> some View {
+    private var compactRideControls: some View {
         HStack(spacing: 10) {
-            Image(systemName: "clock.badge.checkmark")
-                .foregroundStyle(Styles.rydrGradient)          // ← gradient accent
-            Text(text)
-            Spacer()
-        }
-        .font(.title3).bold()
-    }
-
-    private var actionsRow: some View {
-        HStack(spacing: 12) {
-            pill("message.fill", "Message") { showChat = true }
-            pill("phone.fill", "Call") { callDriver() }
-            pill("xmark.circle.fill", "Cancel") { rideManager.riderCancelAndAutoReassign() }
-        }
-    }
-
-    private var tripOptions: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Trip options").font(.headline)
-            HStack(spacing: 12) {
-                pill("mappin.and.ellipse", "Change pickup") { /* hook to your picker */ }
-                pill("flag.checkered", "Change dropoff") { /* hook to your picker */ }
-                pill("plus", "Add stop") { /* hook */ }
+            Button {
+                shareRide()
+            } label: {
+                Label("Share ETA", systemImage: "square.and.arrow.up")
             }
-            HStack(spacing: 12) {
-                pill("key.fill", "Add gate code") { showNotesSheet = true }
-                pill("note.text", "Pickup notes") { showNotesSheet = true }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+
+            Button {
+                showTripOptionsSheet = true
+            } label: {
+                Label("Options", systemImage: "ellipsis")
             }
+            .buttonStyle(.bordered)
         }
     }
 
     private var paymentRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Paying with").font(.headline)
+        Button {
+            showPaymentSheet = true
+        } label: {
             HStack {
                 let card = rideManager.savedCards[min(rideManager.selectedCardIndex, max(0, rideManager.savedCards.count-1))]
-                HStack(spacing: 8) {
-                    Image(systemName: "creditcard.fill")
+                Image(systemName: "creditcard.fill")
+                    .font(.title3)
+                    .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Paying with")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Text("\(card.brand) ••\(card.last4)")
+                        .font(.subheadline.weight(.semibold))
                 }
                 Spacer()
-                // Gradient "Change" button
-                Button("Change") { showPaymentSheet = true }
-                    .font(.footnote.weight(.semibold))
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Styles.rydrGradient)
-                    )
-                    .foregroundStyle(.white)
+                Text("Change")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.red)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
             }
-            .font(.title3)
+            .padding(14)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            )
         }
+        .buttonStyle(.plain)
     }
 
     private var mapSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Map").font(.headline)
-            map.frame(height: 300)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+            HStack {
+                Text("Live map")
+                    .font(.headline)
+                Spacer()
+                Text(etaText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            map.frame(height: 360)
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18)
+                        .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                )
         }
     }
 
@@ -215,22 +314,12 @@ struct RideInProgressView: View {
             }
         }
         .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    private var reportSection: some View {
-        Button { showReportAlert = true } label: {
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(Styles.rydrGradient)      // ← gradient icon
-                Text("Report an incident")
-                Spacer()
-            }
-        }
-        .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
     }
 
     // MARK: Map + overlays
@@ -303,26 +392,60 @@ struct RideInProgressView: View {
 
     // MARK: small UI bits
 
-    private func pill(_ icon: String, _ text: String, action: @escaping () -> Void) -> some View {
+    private func iconActionButton(icon: String, accessibilityLabel: String, tint: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                Text(text)
-            }
-            .font(.footnote)
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .foregroundStyle(.white)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Styles.rydrGradient)                 // ← gradient pill background
+            Image(systemName: icon)
+                .font(.headline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+            .foregroundStyle(tint)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func routeLine(icon: String, label: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .foregroundStyle(Styles.rydrGradient)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var statusHeadline: String {
+        if rideManager.currentRide?.status == .enRouteToPickup {
+            return "Arrives in \(etaText)"
+        }
+        return "Heading to drop-off — arrives in \(etaText) (\(etaArrivalText))"
     }
 
     private var etaText: String {
         let min = max(1, Int(rideManager.remainingMinutesRounded))
         return "\(min) min"
+    }
+    
+    private var etaArrivalText: String {
+        let minutes = max(1, Int(rideManager.remainingMinutesRounded))
+        let date = Date().addingTimeInterval(TimeInterval(minutes * 60))
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter.string(from: date)
     }
 
     private func shareRide() {
@@ -337,6 +460,46 @@ struct RideInProgressView: View {
     private func callDriver() {
         if let url = URL(string: "tel://5550100"), UIApplication.shared.canOpenURL(url) {
             UIApplication.shared.open(url)
+        }
+    }
+
+    private struct TripOptionsSheet: View {
+        var onChangePickup: () -> Void
+        var onChangeDropoff: () -> Void
+        var onAddStop: () -> Void
+        var onPickupNotes: () -> Void
+        var onReport: () -> Void
+        var onCancel: () -> Void
+
+        var body: some View {
+            NavigationStack {
+                List {
+                    Section {
+                        optionRow("mappin.and.ellipse", "Change pickup", action: onChangePickup)
+                        optionRow("flag.checkered", "Change drop-off", action: onChangeDropoff)
+                        optionRow("plus", "Add stop", action: onAddStop)
+                    }
+
+                    Section {
+                        optionRow("note.text", "Pickup notes / gate code", action: onPickupNotes)
+                        optionRow("exclamationmark.triangle.fill", "Report an incident", action: onReport)
+                    }
+
+                    Section {
+                        Button(role: .destructive, action: onCancel) {
+                            Label("Cancel and find another driver", systemImage: "xmark.circle.fill")
+                        }
+                    }
+                }
+                .navigationTitle("Trip options")
+                .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+
+        private func optionRow(_ icon: String, _ title: String, action: @escaping () -> Void) -> some View {
+            Button(action: action) {
+                Label(title, systemImage: icon)
+            }
         }
     }
 
@@ -398,7 +561,3 @@ struct RideInProgressView: View {
         }
     }
 }
-
-
-
-

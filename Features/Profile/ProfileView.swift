@@ -76,9 +76,9 @@ struct ProfileView: View {
                     // Section: Features
                     SectionHeader(title: "Features")
                     TileGrid(columns: 2, tiles: [
-                        .init(title: "SafeRydr Mode",
-                              icon: "shield.lefthalf.filled",
-                              destination: AnyView(SafeRydrView())),
+                        .init(title: "Cash Rydr Hub",
+                              icon: "rectangle.on.rectangle.angled",
+                              destination: AnyView(CashRydrHubView())),
                         .init(title: "RydrBank",
                               icon: "banknote",
                               destination: AnyView(RydrBankView())),
@@ -277,7 +277,6 @@ struct SettingsView: View {
         .navigationTitle("Settings")
     }
 }
-
 
 
 

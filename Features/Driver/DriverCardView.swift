@@ -23,6 +23,8 @@ struct DriverCardView: View {
     }
     private var caps: TierCaps {
         switch rideType.lowercased() {
+        case "rydr eco", "eco":
+            return .init(bookingFee: 4, maxPerMile: 1.0, maxPerMinute: 0.50, title: "Rydr Eco")
         case "rydr xl", "xl":
             return .init(bookingFee: 5, maxPerMile: 2.0, maxPerMinute: 0.50, title: "Rydr XL")
         case "rydr prestine", "prestine", "pristine":
@@ -178,5 +180,4 @@ struct DriverCardView: View {
         }
     }
 }
-
 

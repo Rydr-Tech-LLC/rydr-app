@@ -21,6 +21,15 @@ struct MainTabView: View {
                 Text("Ride")
             }
 
+            // Cash Hub
+            NavigationStack {
+                CashRydrHubView()
+            }
+            .tabItem {
+                Image(systemName: "rectangle.on.rectangle.angled")
+                Text("Cash Hub")
+            }
+
             // Profile
             NavigationStack {
                 ProfileView()
@@ -53,7 +62,6 @@ struct MainTabView: View {
         .environmentObject(rideManager)             // ✅ inject to all tabs
     }
 }
-
 
 
 
