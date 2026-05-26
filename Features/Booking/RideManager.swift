@@ -50,7 +50,7 @@ struct Receipt: Identifiable, Equatable {
 }
 
 struct Ride: Identifiable, Equatable {
-    enum Status { case enRouteToPickup, enRouteToDropoff, completed, cancelled }
+    enum Status { case enRouteToPickup, waitingForRider, enRouteToDropoff, completed, cancelled }
     let id = UUID()
     var pickup: String
     var dropoff: String
@@ -98,6 +98,11 @@ final class RideManager: ObservableObject {
     @Published var liveDriverCoordinate: CLLocationCoordinate2D = .init(latitude: 33.7490, longitude: -84.3880)
     @Published var pickupCoordinate: CLLocationCoordinate2D?
     @Published var dropoffCoordinate: CLLocationCoordinate2D?
+    @Published var pickupEtaSecondsRemaining: Int = 0
+    @Published var destinationEtaSecondsRemaining: Int = 0
+    @Published var pickupWaitSecondsRemaining: Int = 180
+    @Published var paidPickupWaitSeconds: Int = 0
+    @Published var pickupWaitCharge: Double = 0
 
     // Mock movement driver
     private var movementTimer: Timer?
@@ -113,8 +118,12 @@ final class RideManager: ObservableObject {
     private var cachedPickup = ""
     private var cachedDropoff = ""
     private var cachedRideType = ""
+    private var cachedPickupCoordinate: CLLocationCoordinate2D?
+    private var cachedDropoffCoordinate: CLLocationCoordinate2D?
     private var currentServiceRideId: String?
     private var currentAppliedRydrBankCode: String?
+    private var currentBaseFare: Double = 0
+    private var currentWaitChargePerMinute: Double = 0
 
     init(rideService: RideService = MockRideService()) {
         self.rideService = rideService
@@ -130,8 +139,9 @@ final class RideManager: ObservableObject {
     var remainingMinutesRounded: Double {
         guard let ride = currentRide else { return 0 }
         switch ride.status {
-        case .enRouteToPickup:  return max(1, (ride.estimate.durationMinutes * 0.4).rounded())
-        case .enRouteToDropoff: return max(1, (ride.estimate.durationMinutes * 0.6).rounded())
+        case .enRouteToPickup:  return max(1, ceil(Double(pickupEtaSecondsRemaining) / 60.0))
+        case .waitingForRider:  return 0
+        case .enRouteToDropoff: return max(1, ceil(Double(destinationEtaSecondsRemaining) / 60.0))
         default: return 0
         }
     }
@@ -155,11 +165,21 @@ final class RideManager: ObservableObject {
     // MARK: - Public API used by the UI
 
     /// Step 1: fetch nearest drivers (via service)
-    func requestDrivers(pickup: String, dropoff: String, rideType: String, near center: CLLocationCoordinate2D) {
+    func requestDrivers(
+        pickup: String,
+        dropoff: String,
+        rideType: String,
+        near center: CLLocationCoordinate2D,
+        pickupCoordinate: CLLocationCoordinate2D? = nil,
+        dropoffCoordinate: CLLocationCoordinate2D? = nil,
+        estimate: RideEstimate? = nil
+    ) {
         cachedPickup = pickup
         cachedDropoff = dropoff
         cachedRideType = rideType
-        cachedEstimate = estimateFor(pickup: pickup, dropoff: dropoff)
+        cachedPickupCoordinate = pickupCoordinate
+        cachedDropoffCoordinate = dropoffCoordinate
+        cachedEstimate = estimate ?? estimateFor(pickup: pickup, dropoff: dropoff)
 
         attemptedDriverIDs.removeAll()
         selectedDriver = nil
@@ -215,11 +235,12 @@ final class RideManager: ObservableObject {
         // Compute fare with caps/fee + promo
         let fareBeforePromo = rawFare(estimate: cachedEstimate, with: driver, rideType: cachedRideType)
         let fareAfterPromo = currentAppliedRydrBankCode == nil ? applyPromo(to: fareBeforePromo) : 0
+        currentBaseFare = fareAfterPromo
+        currentWaitChargePerMinute = cappedWaitRate(for: driver, rideType: cachedRideType)
 
-        // Seed a simple two-leg path relative to driver's start
         let start  = driver.coordinate
-        let pickup = CLLocationCoordinate2D(latitude: start.latitude + 0.02, longitude: start.longitude + 0.02)
-        let drop   = CLLocationCoordinate2D(latitude: pickup.latitude + 0.03, longitude: pickup.longitude + 0.03)
+        let pickup = cachedPickupCoordinate ?? CLLocationCoordinate2D(latitude: start.latitude + 0.02, longitude: start.longitude + 0.02)
+        let drop = cachedDropoffCoordinate ?? CLLocationCoordinate2D(latitude: pickup.latitude + 0.03, longitude: pickup.longitude + 0.03)
         pickupCoordinate  = pickup
         dropoffCoordinate = drop
 
@@ -233,6 +254,11 @@ final class RideManager: ObservableObject {
             fare: fareAfterPromo
         )
         liveDriverCoordinate = start
+        pickupEtaSecondsRemaining = max(60, Int((cachedEstimate.durationMinutes * 0.4 * 60).rounded()))
+        destinationEtaSecondsRemaining = max(60, Int((cachedEstimate.durationMinutes * 0.6 * 60).rounded()))
+        pickupWaitSecondsRemaining = 180
+        paidPickupWaitSeconds = 0
+        pickupWaitCharge = 0
         startDriverMovement()
         state = .inProgress
     }
@@ -246,22 +272,17 @@ final class RideManager: ObservableObject {
         state = .selecting
     }
 
-    /// Rider cancels after acceptance → auto-bounce to next nearest (no manual selection).
+    /// Rider cancels before pickup → return to driver cards. Mid-ride → end with a prorated receipt.
     func riderCancelAndAutoReassign() {
-        locationTask?.cancel()
-        currentRide = nil
+        guard let ride = currentRide else { return }
 
-        Task {
-            if let id = currentServiceRideId {
-                try? await rideService.cancelRide(rideId: id)
-            }
-            currentServiceRideId = nil
-
-            if let next = availableDrivers.first(where: { !attemptedDriverIDs.contains($0.id) }) {
-                confirm(driver: next)
-            } else {
-                requestDrivers(pickup: cachedPickup, dropoff: cachedDropoff, rideType: cachedRideType, near: liveDriverCoordinate)
-            }
+        switch ride.status {
+        case .enRouteToPickup, .waitingForRider:
+            cancelBeforePickupAndReturnToSelection()
+        case .enRouteToDropoff:
+            cancelMidRideAndComplete()
+        default:
+            cancelAll()
         }
     }
 
@@ -292,6 +313,8 @@ final class RideManager: ObservableObject {
         currentRide = nil
         currentServiceRideId = nil
         currentAppliedRydrBankCode = nil
+        currentBaseFare = 0
+        currentWaitChargePerMinute = 0
         stopMovement()
         state = .completed
 
@@ -314,6 +337,8 @@ final class RideManager: ObservableObject {
         currentRide = nil
         selectedDriver = nil
         currentServiceRideId = nil
+        currentBaseFare = 0
+        currentWaitChargePerMinute = 0
         releaseAppliedRydrBankCodeIfNeeded()
         state = .cancelled
     }
@@ -328,25 +353,47 @@ final class RideManager: ObservableObject {
               let drop   = dropoffCoordinate else { return }
 
         let start = ride.driver.coordinate
-        var t: Double = 0
+        let pickupDurationTicks = 28
+        let waitDurationTicks = 8
+        let paidWaitDurationTicks = 6
+        let dropoffDurationTicks = 34
+        let pickupEtaStart = max(60, pickupEtaSecondsRemaining)
+        let destinationEtaStart = max(60, destinationEtaSecondsRemaining)
+        var tick = 0
 
         movementTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
             guard let self else { return }
-            t += 0.02
+            tick += 1
 
             // Ensure we mutate @Published state on the main actor.
             Task { @MainActor in
-                if t <= 0.5 {
-                    // first leg
-                    self.liveDriverCoordinate = self.interpolate(from: start, to: pickup, t: t / 0.5)
-                    if t >= 0.5, self.currentRide?.status == .enRouteToPickup {
-                        self.currentRide?.status = .enRouteToDropoff
-                    }
+                if tick <= pickupDurationTicks {
+                    let progress = Double(tick) / Double(pickupDurationTicks)
+                    self.liveDriverCoordinate = self.interpolate(from: start, to: pickup, t: progress)
+                    self.pickupEtaSecondsRemaining = max(0, Int(Double(pickupEtaStart) * (1 - progress)))
+                } else if tick <= pickupDurationTicks + waitDurationTicks {
+                    self.liveDriverCoordinate = pickup
+                    self.pickupEtaSecondsRemaining = 0
+                    self.currentRide?.status = .waitingForRider
+                    let waitProgress = Double(tick - pickupDurationTicks) / Double(waitDurationTicks)
+                    self.pickupWaitSecondsRemaining = max(0, Int(180.0 * (1 - waitProgress)))
+                    self.updatePaidPickupWait(seconds: 0)
+                } else if tick <= pickupDurationTicks + waitDurationTicks + paidWaitDurationTicks {
+                    self.liveDriverCoordinate = pickup
+                    self.pickupEtaSecondsRemaining = 0
+                    self.currentRide?.status = .waitingForRider
+                    self.pickupWaitSecondsRemaining = 0
+                    let paidProgress = Double(tick - pickupDurationTicks - waitDurationTicks) / Double(paidWaitDurationTicks)
+                    self.updatePaidPickupWait(seconds: Int((paidProgress * 120.0).rounded()))
                 } else {
-                    // second leg
-                    let localT = min(1.0, (t - 0.5) / 0.5)
-                    self.liveDriverCoordinate = self.interpolate(from: pickup, to: drop, t: localT)
-                    if localT >= 1.0 {
+                    if self.currentRide?.status == .waitingForRider {
+                        self.markRiderPickedUp()
+                    }
+                    let dropoffTick = tick - pickupDurationTicks - waitDurationTicks
+                    let progress = min(1.0, Double(dropoffTick) / Double(dropoffDurationTicks))
+                    self.liveDriverCoordinate = self.interpolate(from: pickup, to: drop, t: progress)
+                    self.destinationEtaSecondsRemaining = max(0, Int(Double(destinationEtaStart) * (1 - progress)))
+                    if progress >= 1.0 {
                         timer.invalidate()
                         self.completeRide()
                     }
@@ -398,6 +445,91 @@ final class RideManager: ObservableObject {
         return (total * 100).rounded() / 100.0
     }
 
+    func markRiderPickedUp() {
+        guard currentRide?.status == .waitingForRider else { return }
+        currentRide?.status = .enRouteToDropoff
+        destinationEtaSecondsRemaining = max(60, Int(((currentRide?.estimate.durationMinutes ?? cachedEstimate.durationMinutes) * 0.6 * 60).rounded()))
+    }
+
+    private func updatePaidPickupWait(seconds: Int) {
+        paidPickupWaitSeconds = max(0, seconds)
+        let minutes = Double(paidPickupWaitSeconds) / 60.0
+        pickupWaitCharge = ((minutes * currentWaitChargePerMinute) * 100).rounded() / 100
+        currentRide?.fare = ((currentBaseFare + pickupWaitCharge) * 100).rounded() / 100
+    }
+
+    private func cancelBeforePickupAndReturnToSelection() {
+        locationTask?.cancel()
+        decisionTask?.cancel()
+        stopMovement()
+
+        if let selectedDriver {
+            availableDrivers.removeAll { $0.id == selectedDriver.id }
+        }
+
+        let cancelledServiceRideId = currentServiceRideId
+        currentRide = nil
+        selectedDriver = nil
+        currentServiceRideId = nil
+        pickupEtaSecondsRemaining = 0
+        pickupWaitSecondsRemaining = 180
+        paidPickupWaitSeconds = 0
+        pickupWaitCharge = 0
+        currentBaseFare = 0
+        currentWaitChargePerMinute = 0
+
+        if availableDrivers.isEmpty {
+            requestDrivers(pickup: cachedPickup, dropoff: cachedDropoff, rideType: cachedRideType, near: liveDriverCoordinate)
+        } else {
+            state = .selecting
+        }
+
+        Task {
+            if let id = cancelledServiceRideId {
+                try? await rideService.cancelRide(rideId: id)
+            }
+        }
+    }
+
+    private func cancelMidRideAndComplete() {
+        guard let ride = currentRide else { return }
+
+        locationTask?.cancel()
+        decisionTask?.cancel()
+        stopMovement()
+
+        let totalSeconds = max(1, Int((ride.estimate.durationMinutes * 0.6 * 60).rounded()))
+        let traveledFraction = max(0.1, min(0.95, 1.0 - (Double(destinationEtaSecondsRemaining) / Double(totalSeconds))))
+        let proratedDistance = ((ride.estimate.distanceMiles * traveledFraction) * 10).rounded() / 10
+        let proratedMinutes = max(1, (ride.estimate.durationMinutes * 0.6 * traveledFraction).rounded())
+        let proratedFare = ((ride.fare * traveledFraction) * 100).rounded() / 100
+        let card = savedCards[min(selectedCardIndex, savedCards.count - 1)]
+
+        lastReceipt = Receipt(
+            rideId: ride.id,
+            date: Date(),
+            driverName: ride.driver.name,
+            pickup: ride.pickup,
+            dropoff: ride.dropoff,
+            distanceMiles: proratedDistance,
+            durationMinutes: proratedMinutes,
+            fare: proratedFare,
+            cardMasked: "\(card.brand) ••\(card.last4)"
+        )
+        if let lastReceipt {
+            history.insert(lastReceipt, at: 0)
+        }
+
+        currentRide = nil
+        selectedDriver = nil
+        currentServiceRideId = nil
+        currentAppliedRydrBankCode = nil
+        currentBaseFare = 0
+        currentWaitChargePerMinute = 0
+        releaseAppliedRydrBankCodeIfNeeded()
+        state = .completed
+    }
+
     private func releaseAppliedRydrBankCodeIfNeeded() {
         let code = normalizedSavedPromoCode()
         guard !code.isEmpty else { return }
@@ -409,5 +541,8 @@ final class RideManager: ObservableObject {
             }
         }
     }
-}
 
+    private func cappedWaitRate(for driver: Driver, rideType: String) -> Double {
+        min(driver.perMinute, caps(for: rideType).maxPerMinute)
+    }
+}

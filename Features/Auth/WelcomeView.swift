@@ -18,25 +18,28 @@ struct WelcomeView: View {
                     .frame(width: 300, height: 300)
                     .padding(.top, 50)
 
-                Text("Ride with Rydr")
+                Text("Choose how to use Rydr")
                     .font(.largeTitle)
                     .bold()
                     .padding(.horizontal)
 
-                // Login Button
-                NavigationLink(destination: LoginView()) {
-                    Text("Log In")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(GradientButtonStyle())
-
-                // Sign Up Button
                 NavigationLink(destination: SignupCoordinator()) {
-                    Text("Sign Up")
+                    Text("Continue as Rider")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GradientButtonStyle())
 
+                NavigationLink(destination: CashHubSignupView()) {
+                    Text("Use Cash Rydr Hub")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(GradientButtonStyle())
+
+                NavigationLink(destination: LoginView()) {
+                    Text("Log In to Existing Account")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
 
                 Spacer()
             }
@@ -49,5 +52,3 @@ struct WelcomeView: View {
     WelcomeView()
         .environmentObject(UserSessionManager())
 }
-
-

@@ -57,6 +57,13 @@ struct BookingView: View {
         span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
     )
     @StateObject private var locationFetcher = LocationFetcher()
+    @State private var pickupCoordinate: CLLocationCoordinate2D?
+    @State private var dropoffCoordinate: CLLocationCoordinate2D?
+    @State private var pickupResolvedAddress = ""
+    @State private var dropoffResolvedAddress = ""
+    @State private var routeEstimate: RideEstimate?
+    @State private var routeRequestID = UUID()
+    @State private var isResolvingLocations = false
 
     // Fields
     @State private var pickupText = ""
@@ -82,6 +89,7 @@ struct BookingView: View {
     @State private var appliedRydrBankCode = UserDefaults.standard.string(forKey: "appliedRydrBankCode") ?? ""
     @State private var promoBookingId = UserDefaults.standard.string(forKey: "appliedRydrBankBookingId") ?? UUID().uuidString
     @State private var promoRequestID = UUID()
+    @State private var requestValidationMessage: String?
 
     // Promo Application
     private enum PromoStatus: Equatable {
@@ -94,6 +102,10 @@ struct BookingView: View {
     private var isApplyingPromo: Bool { if case .applying = promoStatus { return true } else { return false } }
     private var isPromoApplied: Bool { !appliedRydrBankCode.isEmpty }
     private var currentEstimate: RideEstimate {
+        if let routeEstimate { return routeEstimate }
+        return fallbackEstimate
+    }
+    private var fallbackEstimate: RideEstimate {
         let base: Double = 5.0
         let pm = abs(pickupText.hashValue % 7)
         let dm = abs(dropoffText.hashValue % 9)
@@ -133,7 +145,15 @@ struct BookingView: View {
         GeometryReader { geo in
             ZStack {
                 // Map as background
-                Map(initialPosition: .region(region)) { UserAnnotation() }
+                Map(initialPosition: .region(region)) {
+                    UserAnnotation()
+                    if let pickupCoordinate {
+                        Marker("Pickup", coordinate: pickupCoordinate).tint(.red)
+                    }
+                    if let dropoffCoordinate {
+                        Marker("Drop-off", coordinate: dropoffCoordinate).tint(.blue)
+                    }
+                }
                     .ignoresSafeArea()
                     .onAppear {
                         // async location update
@@ -177,6 +197,7 @@ struct BookingView: View {
                 pickup: pickupText,
                 dropoff: dropoffText,
                 region: region,
+                estimate: currentEstimate,
                 onAccepted: {
                     showDriverSheet = false
                     showInProgress = true
@@ -194,6 +215,11 @@ struct BookingView: View {
                 promoCode = ""
                 promoStatus = .idle
                 promoBookingId = UUID().uuidString
+            }
+            if rideManager.state == .selecting {
+                DispatchQueue.main.async {
+                    showDriverSheet = true
+                }
             }
         }) {
             RideInProgressView(rideManager: rideManager)
@@ -241,6 +267,7 @@ struct BookingView: View {
                                         shortcutFocused = true
                                     } else {
                                         if pickupText.isEmpty { pickupText = sc.address } else { dropoffText = sc.address }
+                                        clearRouteResolution()
                                         focusedField = nil
                                     }
                                 } label: {
@@ -266,50 +293,9 @@ struct BookingView: View {
                         }
                     }
 
-                    if let editingID = editingShortcutID,
-                       let sc = shortcuts.first(where: { $0.id == editingID }) {
-                        HStack(spacing: 8) {
-                            bookingField(
-                                title: sc.address.isEmpty ? "Add \(sc.label) address" : "Edit \(sc.label) address",
-                                text: Binding(
-                                    get: { newShortcutAddress },
-                                    set: { newValue in
-                                        newShortcutAddress = newValue
-                                        shortcutCompleter.setRegion(region)
-                                        shortcutCompleter.setQuery(newValue)
-                                    }),
-                                icon: "location.magnifyingglass",
-                                onIconTap: {
-                                    shortcutFocused = true
-                                    shortcutCompleter.setRegion(region)
-                                    shortcutCompleter.setQuery(newShortcutAddress)
-                                }
-                            )
-                            .focused($shortcutFocused)
-
-                            Button {
-                                if let idx = shortcuts.firstIndex(where: { $0.id == sc.id }),
-                                   !newShortcutAddress.trimmingCharacters(in: .whitespaces).isEmpty {
-                                    shortcuts[idx].address = newShortcutAddress
-                                }
-                                newShortcutAddress = ""
-                                editingShortcutID = nil
-                                shortcutFocused = false
-                            } label: { Image(systemName: "checkmark.circle.fill").font(.title3) }
-
-                            Button {
-                                newShortcutAddress = ""
-                                editingShortcutID = nil
-                                shortcutFocused = false
-                            } label: { Image(systemName: "xmark.circle.fill").font(.title3) }
-                        }
-                        .overlay(alignment: .bottomLeading) {
-                            if shortcutFocused && !newShortcutAddress.isEmpty {
-                                compactSuggestions(for: shortcutCompleter) { suggestion in
-                                    newShortcutAddress = suggestion
-                                    shortcutFocused = false
-                                }
-                            }
+                    if let editingID = editingShortcutID {
+                        if let editingShortcut = shortcuts.first(where: { $0.id == editingID }) {
+                            shortcutEditor(for: editingShortcut)
                         }
                     }
                 }
@@ -324,35 +310,10 @@ struct BookingView: View {
                         VStack(spacing: 8) {
                             ForEach(recentDropoffs.prefix(5), id: \.self) { addr in
                                 Button {
-                                    if focusedField == .pickup {
-                                        pickupText = addr
-                                    } else if focusedField == .dropoff {
-                                        dropoffText = addr
-                                    } else {
-                                        if pickupText.trimmingCharacters(in: .whitespaces).isEmpty {
-                                            pickupText = addr
-                                        } else {
-                                            dropoffText = addr
-                                        }
-                                    }
-                                    focusedField = nil
+                                    handleRecentSelection(addr)
                                 } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: "mappin.circle.fill").font(.title3).foregroundStyle(Color.red)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(addr).lineLimit(1).foregroundColor(.primary)
-                                            if let city = addr.split(separator: ",").dropFirst().first {
-                                                Text(city.trimmingCharacters(in: .whitespaces))
-                                                    .font(.caption).foregroundColor(.secondary)
-                                            }
-                                        }
-                                        Spacer()
-                                    }
-                                    .padding(10)
-                                    .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
-                                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06), lineWidth: 1))
+                                    recentsRow(addr: addr, city: cityText(for: addr))
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -363,13 +324,7 @@ struct BookingView: View {
 
                 // ── Promo + Request button ─────────────────────────────────────
                 promoView
-
-                Button { requestRide() } label: {
-                    Text("Request \(rideType)").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(GradientButtonStyle())
-                .padding(.horizontal)
-                .padding(.bottom, 8)
+                requestRideSection
             }
             .padding(.horizontal)
             .padding(.bottom, 8)
@@ -386,6 +341,114 @@ struct BookingView: View {
         }
     }
 
+    @ViewBuilder
+    private func recentsRow(addr: String, city: String?) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "mappin.circle.fill")
+                .font(.title3)
+                .foregroundStyle(Color.red)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(addr)
+                    .lineLimit(1)
+                    .foregroundColor(.primary)
+                if let city = city {
+                    Text(city)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private func handleRecentSelection(_ addr: String) {
+        if focusedField == .pickup {
+            pickupText = addr
+        } else if focusedField == .dropoff {
+            dropoffText = addr
+        } else {
+            if pickupText.trimmingCharacters(in: .whitespaces).isEmpty {
+                pickupText = addr
+            } else {
+                dropoffText = addr
+            }
+        }
+        clearRouteResolution()
+        focusedField = nil
+    }
+
+    private func cityText(for address: String) -> String? {
+        let parts = address.split(separator: ",")
+        guard let city = parts.dropFirst().first else { return nil }
+        return String(city).trimmingCharacters(in: .whitespaces)
+    }
+
+    private func shortcutEditor(for shortcut: Shortcut) -> some View {
+        let titleText = shortcut.address.isEmpty ? "Add \(shortcut.label) address" : "Edit \(shortcut.label) address"
+        let addressBinding = Binding<String>(
+            get: { newShortcutAddress },
+            set: { newValue in
+                newShortcutAddress = newValue
+                shortcutCompleter.setRegion(region)
+                shortcutCompleter.setQuery(newValue)
+            }
+        )
+
+        return HStack(spacing: 8) {
+            bookingField(
+                title: titleText,
+                text: addressBinding,
+                icon: "location.magnifyingglass",
+                onIconTap: {
+                    shortcutFocused = true
+                    shortcutCompleter.setRegion(region)
+                    shortcutCompleter.setQuery(newShortcutAddress)
+                }
+            )
+            .focused($shortcutFocused)
+
+            Button {
+                saveShortcut(shortcut)
+            } label: {
+                Image(systemName: "checkmark.circle.fill").font(.title3)
+            }
+
+            Button {
+                clearShortcutEditor()
+            } label: {
+                Image(systemName: "xmark.circle.fill").font(.title3)
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if shortcutFocused && !newShortcutAddress.isEmpty {
+                compactSuggestions(for: shortcutCompleter) { suggestion in
+                    newShortcutAddress = suggestion
+                    shortcutFocused = false
+                }
+            }
+        }
+    }
+
+    private func saveShortcut(_ shortcut: Shortcut) {
+        if let idx = shortcuts.firstIndex(where: { $0.id == shortcut.id }),
+           !newShortcutAddress.trimmingCharacters(in: .whitespaces).isEmpty {
+            shortcuts[idx].address = newShortcutAddress
+        }
+        clearShortcutEditor()
+    }
+
+    private func clearShortcutEditor() {
+        newShortcutAddress = ""
+        editingShortcutID = nil
+        shortcutFocused = false
+    }
+
     // MARK: - Small, self-contained search card
     @ViewBuilder
     private var searchCard: some View {
@@ -397,11 +460,16 @@ struct BookingView: View {
             bookingField(title: "Pickup", text: $pickupText, icon: "mappin.and.ellipse")
                 .focused($focusedField, equals: .pickup)
                 .onChange(of: pickupText) { _, new in
+                    if new != pickupResolvedAddress {
+                        pickupCoordinate = nil
+                        pickupResolvedAddress = ""
+                        routeEstimate = nil
+                    }
                     pickupCompleter.setRegion(region); pickupCompleter.setQuery(new)
                 }
             if showPickupSuggestions {
-                suggestionsList(for: pickupCompleter) { selection in
-                    pickupText = selection; focusedField = nil
+                suggestionsList(for: pickupCompleter) { completion in
+                    Task { await selectPickup(completion) }
                 }
             }
 
@@ -409,12 +477,20 @@ struct BookingView: View {
             bookingField(title: "Dropoff", text: $dropoffText, icon: "flag.checkered")
                 .focused($focusedField, equals: .dropoff)
                 .onChange(of: dropoffText) { _, new in
+                    if new != dropoffResolvedAddress {
+                        dropoffCoordinate = nil
+                        dropoffResolvedAddress = ""
+                        routeEstimate = nil
+                    }
                     dropoffCompleter.setRegion(region); dropoffCompleter.setQuery(new)
                 }
                 .overlay(alignment: .trailing) {
                     if !dropoffText.isEmpty {
                         Button {
                             dropoffText = ""
+                            dropoffCoordinate = nil
+                            dropoffResolvedAddress = ""
+                            routeEstimate = nil
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 16, weight: .semibold))
@@ -423,10 +499,10 @@ struct BookingView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                }
+            }
             if showDropoffSuggestions {
-                suggestionsList(for: dropoffCompleter) { selection in
-                    dropoffText = selection; focusedField = nil
+                suggestionsList(for: dropoffCompleter) { completion in
+                    Task { await selectDropoff(completion) }
                 }
             }
         }
@@ -463,7 +539,7 @@ struct BookingView: View {
     @ViewBuilder
     private func suggestionsList(
         for completer: SearchCompleter,
-        onPick: @escaping (String) -> Void
+        onPick: @escaping (MKLocalSearchCompletion) -> Void
     ) -> some View {
         let items = Array(completer.results.prefix(10))
         if !items.isEmpty {
@@ -472,7 +548,7 @@ struct BookingView: View {
                     ForEach(items.indices, id: \.self) { i in
                         let item = items[i]
                         Button {
-                            onPick(item.title + (item.subtitle.isEmpty ? "" : ", " + item.subtitle))
+                            onPick(item)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.title).font(.subheadline).foregroundColor(.primary)
@@ -550,7 +626,9 @@ struct BookingView: View {
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06), lineWidth: 1))
                             .disabled(isApplyingPromo || isPromoApplied)
 
-                        Button(action: applyPromo) {
+                        Button {
+                            Task { await applyPromo() }
+                        } label: {
                             if isApplyingPromo {
                                 ProgressView().controlSize(.small)
                             } else {
@@ -595,10 +673,60 @@ struct BookingView: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.black.opacity(0.06), lineWidth: 1))
     }
 
-    private func applyPromo() {
+    private func validationBanner(text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.orange)
+            Text(text)
+                .font(.footnote)
+            Spacer()
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.thinMaterial))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.black.opacity(0.06), lineWidth: 1))
+    }
+
+    private var requestRideSection: some View {
+        VStack(spacing: 8) {
+            Button {
+                Task { await requestRide() }
+            } label: {
+                if isResolvingLocations {
+                    ProgressView()
+                        .tint(.white)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Text("Request \(rideType)")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(GradientButtonStyle())
+            .disabled(isResolvingLocations)
+
+            if let message = requestValidationMessage {
+                validationBanner(text: message)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+    }
+
+    @MainActor
+    private func applyPromo() async {
         let code = promoCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !code.isEmpty else {
             showStatus(.failure("Enter a promo code."))
+            return
+        }
+
+        let pickup = pickupText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dropoff = dropoffText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !pickup.isEmpty, !dropoff.isEmpty else {
+            showStatus(.failure("Add a pickup and drop-off before applying a RydrBank code."))
+            return
+        }
+        guard await resolveBookingLocationsIfNeeded(pickup: pickup, dropoff: dropoff) else {
+            showStatus(.failure("We could not find that pickup or drop-off on the map."))
             return
         }
 
@@ -685,7 +813,7 @@ struct BookingView: View {
 
     // MARK: - Recents persistence
     private func decodeRecents(from data: Data?) -> [String] {
-        guard let data else { return [] }
+        guard let data = data else { return [] }
         return (try? JSONDecoder().decode([String].self, from: data)) ?? []
     }
     private func saveRecents(_ list: [String]) {
@@ -702,21 +830,221 @@ struct BookingView: View {
     }
 
     // MARK: - Actions
-    private func requestRide() {
+    @MainActor
+    private func requestRide() async {
+        let pickup = pickupText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dropoff = dropoffText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !pickup.isEmpty, !dropoff.isEmpty else {
+            if pickup.isEmpty && dropoff.isEmpty {
+                requestValidationMessage = "Add a pickup and drop-off before requesting a ride."
+            } else if pickup.isEmpty {
+                requestValidationMessage = "Add a pickup before requesting a ride."
+            } else {
+                requestValidationMessage = "Add a drop-off before requesting a ride."
+            }
+            return
+        }
+
+        requestValidationMessage = nil
+
+        guard await resolveBookingLocationsIfNeeded(pickup: pickup, dropoff: dropoff) else {
+            requestValidationMessage = "Choose a valid pickup and drop-off from the map results."
+            return
+        }
+
         if isPromoApplied && currentEstimate.distanceMiles > 15 {
             showStatus(.failure("RydrBank codes can only be applied to rides up to 15 miles."))
             return
         }
-        if !dropoffText.trimmingCharacters(in: .whitespaces).isEmpty {
-            pushRecent(dropoffText)
-        }
+        let resolvedPickup = pickupText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedDropoff = dropoffText.trimmingCharacters(in: .whitespacesAndNewlines)
+        pushRecent(resolvedDropoff)
         rideManager.requestDrivers(
-            pickup: pickupText,
-            dropoff: dropoffText,
+            pickup: resolvedPickup,
+            dropoff: resolvedDropoff,
             rideType: rideType,
-            near: region.center
+            near: pickupCoordinate ?? region.center,
+            pickupCoordinate: pickupCoordinate,
+            dropoffCoordinate: dropoffCoordinate,
+            estimate: currentEstimate
         )
         showDriverSheet = true
+    }
+
+    private func clearRouteResolution() {
+        pickupCoordinate = nil
+        dropoffCoordinate = nil
+        pickupResolvedAddress = ""
+        dropoffResolvedAddress = ""
+        routeEstimate = nil
+        routeRequestID = UUID()
+    }
+
+    @MainActor
+    private func selectPickup(_ completion: MKLocalSearchCompletion) async {
+        do {
+            let item = try await searchMapItem(for: completion)
+            let address = formattedAddress(for: item, fallback: completion.title + (completion.subtitle.isEmpty ? "" : ", " + completion.subtitle))
+            pickupResolvedAddress = address
+            pickupCoordinate = item.placemark.coordinate
+            pickupText = address
+            focusedField = nil
+            recenterOnResolvedLocations()
+            updateRouteEstimateIfPossible()
+        } catch {
+            showStatus(.failure("That location could not be resolved. Please try another result."))
+        }
+    }
+
+    @MainActor
+    private func selectDropoff(_ completion: MKLocalSearchCompletion) async {
+        do {
+            let item = try await searchMapItem(for: completion)
+            let address = formattedAddress(for: item, fallback: completion.title + (completion.subtitle.isEmpty ? "" : ", " + completion.subtitle))
+            dropoffResolvedAddress = address
+            dropoffCoordinate = item.placemark.coordinate
+            dropoffText = address
+            focusedField = nil
+            recenterOnResolvedLocations()
+            updateRouteEstimateIfPossible()
+        } catch {
+            showStatus(.failure("That location could not be resolved. Please try another result."))
+        }
+    }
+
+    @MainActor
+    private func resolveBookingLocationsIfNeeded(pickup: String, dropoff: String) async -> Bool {
+        isResolvingLocations = true
+        defer { isResolvingLocations = false }
+
+        do {
+            if pickupCoordinate == nil || pickup != pickupResolvedAddress {
+                let item = try await searchMapItem(for: pickup)
+                pickupResolvedAddress = formattedAddress(for: item, fallback: pickup)
+                pickupCoordinate = item.placemark.coordinate
+                pickupText = pickupResolvedAddress
+            }
+
+            if dropoffCoordinate == nil || dropoff != dropoffResolvedAddress {
+                let item = try await searchMapItem(for: dropoff)
+                dropoffResolvedAddress = formattedAddress(for: item, fallback: dropoff)
+                dropoffCoordinate = item.placemark.coordinate
+                dropoffText = dropoffResolvedAddress
+            }
+
+            guard let pickupCoordinate, let dropoffCoordinate else { return false }
+            routeEstimate = try await calculateRouteEstimate(from: pickupCoordinate, to: dropoffCoordinate)
+            recenterOnResolvedLocations()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func updateRouteEstimateIfPossible() {
+        guard let pickupCoordinate, let dropoffCoordinate else { return }
+        let requestID = UUID()
+        routeRequestID = requestID
+        Task {
+            do {
+                let estimate = try await calculateRouteEstimate(from: pickupCoordinate, to: dropoffCoordinate)
+                await MainActor.run {
+                    guard routeRequestID == requestID else { return }
+                    routeEstimate = estimate
+                }
+            } catch {
+                await MainActor.run {
+                    guard routeRequestID == requestID else { return }
+                    routeEstimate = nil
+                }
+            }
+        }
+    }
+
+    private func recenterOnResolvedLocations() {
+        let coords = [pickupCoordinate, dropoffCoordinate].compactMap { $0 }
+        guard !coords.isEmpty else { return }
+        let minLat = coords.map(\.latitude).min() ?? region.center.latitude
+        let maxLat = coords.map(\.latitude).max() ?? region.center.latitude
+        let minLon = coords.map(\.longitude).min() ?? region.center.longitude
+        let maxLon = coords.map(\.longitude).max() ?? region.center.longitude
+        let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2, longitude: (minLon + maxLon) / 2)
+        let span = MKCoordinateSpan(
+            latitudeDelta: max(0.03, (maxLat - minLat) * 1.8),
+            longitudeDelta: max(0.03, (maxLon - minLon) * 1.8)
+        )
+        region = MKCoordinateRegion(center: center, span: span)
+    }
+
+    private func searchMapItem(for completion: MKLocalSearchCompletion) async throws -> MKMapItem {
+        let request = MKLocalSearch.Request(completion: completion)
+        request.region = region
+        return try await firstMapItem(for: request)
+    }
+
+    private func searchMapItem(for query: String) async throws -> MKMapItem {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        request.region = region
+        return try await firstMapItem(for: request)
+    }
+
+    private func firstMapItem(for request: MKLocalSearch.Request) async throws -> MKMapItem {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MKMapItem, Error>) in
+            MKLocalSearch(request: request).start { response, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                if let item = response?.mapItems.first {
+                    continuation.resume(returning: item)
+                } else {
+                    continuation.resume(throwing: NSError(domain: "RydrLocationSearch", code: 1, userInfo: nil))
+                }
+            }
+        }
+    }
+
+    private func calculateRouteEstimate(from pickup: CLLocationCoordinate2D, to dropoff: CLLocationCoordinate2D) async throws -> RideEstimate {
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: pickup))
+        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: dropoff))
+        request.transportType = .automobile
+
+        let route: MKRoute = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MKRoute, Error>) in
+            MKDirections(request: request).calculate { response, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                if let route = response?.routes.first {
+                    continuation.resume(returning: route)
+                } else {
+                    continuation.resume(throwing: NSError(domain: "RydrRouteEstimate", code: 1, userInfo: nil))
+                }
+            }
+        }
+
+        return RideEstimate(
+            distanceMiles: ((route.distance / 1609.344) * 10).rounded() / 10,
+            durationMinutes: max(1, (route.expectedTravelTime / 60).rounded())
+        )
+    }
+
+    private func formattedAddress(for item: MKMapItem, fallback: String) -> String {
+        let placemark = item.placemark
+        let parts = [
+            placemark.name,
+            placemark.locality,
+            placemark.administrativeArea
+        ]
+        .compactMap { value -> String? in
+            guard let value, !value.isEmpty else { return nil }
+            return value
+        }
+        let formatted = parts.joined(separator: ", ")
+        return formatted.isEmpty ? fallback : formatted
     }
 
     private func releaseAppliedRydrBankCodeIfNeeded() {

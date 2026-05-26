@@ -9,21 +9,51 @@ import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
 
+enum MainAppTab: Hashable {
+    case ride
+    case cashHub
+    case profile
+    case bank
+    case activity
+}
+
+enum RydrAccountAccess {
+    case rider
+    case cashHubOnly
+}
+
 @MainActor
 class UserSessionManager: ObservableObject {
     @AppStorage("isLoggedIn") var isLoggedIn: Bool = false
     @AppStorage("userName") var userName: String = ""
     @AppStorage("userEmail") var userEmail: String = ""
+    @Published var selectedTab: MainAppTab = .ride
+    @Published private(set) var accountAccess: RydrAccountAccess?
 
-    func login(name: String, email: String) {
+    var hasRiderAccess: Bool { accountAccess == .rider }
+    var isCashHubOnly: Bool { accountAccess == .cashHubOnly }
+
+    func login(
+        name: String,
+        email: String,
+        startingTab: MainAppTab = .ride,
+        access: RydrAccountAccess? = nil
+    ) {
         userName = name
         userEmail = email
+        selectedTab = startingTab
+        accountAccess = access
         isLoggedIn = true
+        if access == nil {
+            loadUserProfile()
+        }
     }
 
     func logout() {
         userName = ""
         userEmail = ""
+        selectedTab = .ride
+        accountAccess = nil
         isLoggedIn = false
     }
 
@@ -39,6 +69,8 @@ class UserSessionManager: ObservableObject {
                 let last  = data["lastName"] as? String ?? ""
                 let preferred = data["preferredName"] as? String ?? ""
                 let emailFromDb = data["email"] as? String
+                let completedRiderTerms = data["agreedToTerms"] as? Bool ?? false
+                let hasRiderAccess = data["hasRydrRiderAccess"] as? Bool ?? completedRiderTerms
 
                 let legal = [first, last]
                     .joined(separator: " ")
@@ -50,6 +82,10 @@ class UserSessionManager: ObservableObject {
                         : preferred
 
                     if let emailFromDb { self.userEmail = emailFromDb }
+                    self.accountAccess = hasRiderAccess ? .rider : .cashHubOnly
+                    if !hasRiderAccess && self.selectedTab != .profile {
+                        self.selectedTab = .cashHub
+                    }
                     self.isLoggedIn = true
                 }
             }
@@ -98,4 +134,3 @@ class UserSessionManager: ObservableObject {
             }
     }
 }
-

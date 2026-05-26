@@ -18,8 +18,10 @@ enum SignupStep: Hashable {
 
 struct SignupCoordinator: View {
     @EnvironmentObject private var session: UserSessionManager
+    let upgradingCashHubAccount: Bool
 
     @State private var path: [SignupStep] = []
+    @State private var hasLoadedExistingProfile = false
 
     // Shared user data across steps
     @State private var phoneNumber = ""
@@ -43,17 +45,35 @@ struct SignupCoordinator: View {
     // Navigate to main app
     @State private var showMainApp = false
 
+    init(upgradingCashHubAccount: Bool = false) {
+        self.upgradingCashHubAccount = upgradingCashHubAccount
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
-            // Your PhoneVerificationView should return a verified E.164 phone string
-            PhoneVerificationView { verifiedPhone in
-                phoneNumber = verifiedPhone
-                upsertRider([
-                    "phoneNumber": verifiedPhone,
-                    "createdAt": FieldValue.serverTimestamp()
-                ])
-                Task { @MainActor in
-                    path.append(.nameEntry)
+            Group {
+                if upgradingCashHubAccount && !hasLoadedExistingProfile {
+                    ProgressView("Loading your information...")
+                } else {
+                    // Your PhoneVerificationView should return a verified E.164 phone string
+                    PhoneVerificationView(
+                        initialPhoneNumber: phoneNumber,
+                        linkToCurrentUser: upgradingCashHubAccount
+                    ) { verifiedPhone in
+                        phoneNumber = verifiedPhone
+                        upsertRider([
+                            "phoneNumber": verifiedPhone,
+                            "createdAt": FieldValue.serverTimestamp()
+                        ])
+                        Task { @MainActor in
+                            path.append(.nameEntry)
+                        }
+                    }
+                }
+            }
+            .task {
+                if upgradingCashHubAccount && !hasLoadedExistingProfile {
+                    loadExistingProfile()
                 }
             }
             .navigationDestination(for: SignupStep.self) { step in
@@ -64,6 +84,7 @@ struct SignupCoordinator: View {
                         firstName: $firstName,
                         lastName: $lastName,
                         preferredName: $preferredName,
+                        allowsSocialSignup: !upgradingCashHubAccount,
                         onContinueWithForm: {
                             upsertRider([
                                 "firstName": firstName,
@@ -71,7 +92,7 @@ struct SignupCoordinator: View {
                                 "preferredName": preferredName
                             ])
                             Task { @MainActor in
-                                path.append(.emailPassword)
+                                path.append(upgradingCashHubAccount ? .addressEntry : .emailPassword)
                             }
                         },
                         onContinueWithSocial: {
@@ -212,6 +233,8 @@ struct SignupCoordinator: View {
             ],
             "agreedToTerms": agreedToTerms,
             "verifiedUser": isVerifiedUser,
+            "hasRydrRiderAccess": true,
+            "cashHubRole": CashHubRole.rider.rawValue,
             "createdAt": FieldValue.serverTimestamp()
         ]
 
@@ -224,11 +247,42 @@ struct SignupCoordinator: View {
                     print("✅ Rider saved to Firestore.")
                     Task { @MainActor in
                         // 🔁 Pull name/preferred so Profile greeting updates immediately
-                        session.loadUserProfile()
+                        session.login(
+                            name: preferredName.isEmpty ? "\(firstName) \(lastName)" : preferredName,
+                            email: email,
+                            startingTab: .ride,
+                            access: .rider
+                        )
                         showMainApp = true
                     }
                 }
             }
+    }
+
+    private func loadExistingProfile() {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            hasLoadedExistingProfile = true
+            return
+        }
+
+        Firestore.firestore().collection("riders").document(uid).getDocument { snap, _ in
+            let data = snap?.data() ?? [:]
+            let address = data["address"] as? [String: Any] ?? [:]
+
+            Task { @MainActor in
+                firstName = data["firstName"] as? String ?? ""
+                lastName = data["lastName"] as? String ?? ""
+                preferredName = data["preferredName"] as? String ?? ""
+                email = data["email"] as? String ?? Auth.auth().currentUser?.email ?? ""
+                phoneNumber = data["phoneNumber"] as? String ?? ""
+                streetAddress = address["street"] as? String ?? ""
+                addressLine2 = address["line2"] as? String ?? ""
+                city = address["city"] as? String ?? ""
+                state = address["state"] as? String ?? ""
+                zip = address["zip"] as? String ?? ""
+                hasLoadedExistingProfile = true
+            }
+        }
     }
 
     // MARK: - Stripe customer provisioning (as requested)

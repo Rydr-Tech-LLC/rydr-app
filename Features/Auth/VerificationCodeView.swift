@@ -10,6 +10,7 @@ import FirebaseAuth
 struct VerificationCodeView: View {
     let verificationID: String
     let phoneNumber: String
+    var linkToCurrentUser = false
     var onSuccess: (User) -> Void
     var onResendCode: () -> Void
 
@@ -109,7 +110,7 @@ struct VerificationCodeView: View {
             verificationCode: verificationCode
         )
 
-        Auth.auth().signIn(with: credential) { result, error in
+        let completion: (AuthDataResult?, Error?) -> Void = { result, error in
             isVerifying = false
             if let error = error {
                 errorMessage = "Verification failed: \(error.localizedDescription)"
@@ -117,6 +118,12 @@ struct VerificationCodeView: View {
                 print("✅ Phone verified and signed in")
                 onSuccess(user)
             }
+        }
+
+        if linkToCurrentUser, let user = Auth.auth().currentUser {
+            user.link(with: credential, completion: completion)
+        } else {
+            Auth.auth().signIn(with: credential, completion: completion)
         }
     }
 
@@ -138,4 +145,3 @@ struct VerificationCodeView: View {
         }
     }
 }
-

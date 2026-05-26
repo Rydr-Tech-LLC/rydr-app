@@ -14,6 +14,7 @@ struct NameEntryView: View {
     @Binding var firstName: String
     @Binding var lastName: String
     @Binding var preferredName: String
+    var allowsSocialSignup = true
 
     var onContinueWithForm: () -> Void
     var onContinueWithSocial: () -> Void
@@ -49,39 +50,41 @@ struct NameEntryView: View {
             .buttonStyle(.borderedProminent)
             .tint(.red)
 
-            Divider().padding(.vertical)
+            if allowsSocialSignup {
+                Divider().padding(.vertical)
 
-            // — Apple Sign Up button —
-            SignInWithAppleButton(
-                .signUp,
-                onRequest: { request in
-                    request.requestedScopes = [.fullName, .email]
-                },
-                onCompletion: { result in
-                    switch result {
-                    case .success(let authResults):
-                        handleAppleSignIn(result: authResults)
-                    case .failure(let error):
-                        errorMessage = "Apple sign‑up failed: \(error.localizedDescription)"
+                // — Apple Sign Up button —
+                SignInWithAppleButton(
+                    .signUp,
+                    onRequest: { request in
+                        request.requestedScopes = [.fullName, .email]
+                    },
+                    onCompletion: { result in
+                        switch result {
+                        case .success(let authResults):
+                            handleAppleSignIn(result: authResults)
+                        case .failure(let error):
+                            errorMessage = "Apple sign‑up failed: \(error.localizedDescription)"
+                        }
                     }
-                }
-            )
-            .signInWithAppleButtonStyle(.black)
-            .frame(height: 45)
+                )
+                .signInWithAppleButtonStyle(.black)
+                .frame(height: 45)
 
-            // — Google Sign Up button —
-            Button(action: handleGoogleSignIn) {
-                HStack {
-                    Image(systemName: "g.circle.fill")
-                        .font(.title2)
-                    Text("Sign Up with Google")
-                        .fontWeight(.medium)
+                // — Google Sign Up button —
+                Button(action: handleGoogleSignIn) {
+                    HStack {
+                        Image(systemName: "g.circle.fill")
+                            .font(.title2)
+                        Text("Sign Up with Google")
+                            .fontWeight(.medium)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.red.opacity(0.9))
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
                 }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.red.opacity(0.9))
-                .foregroundColor(.white)
-                .cornerRadius(10)
             }
 
             if !errorMessage.isEmpty {
@@ -157,6 +160,5 @@ struct NameEntryView: View {
         }
     }
 }
-
 
 

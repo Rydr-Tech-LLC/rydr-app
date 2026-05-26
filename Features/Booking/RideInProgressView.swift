@@ -46,6 +46,7 @@ struct RideInProgressView: View {
             }
             .onChange(of: rideManager.state, initial: false) { _, newState in
                 if newState == .completed { showEnd = true }
+                if newState == .selecting { dismiss() }
             }
             // Chat / payment / notes / end sheets
             .sheet(isPresented: $showChat) { ChatSheet() }
@@ -57,6 +58,7 @@ struct RideInProgressView: View {
             }
             .sheet(isPresented: $showTripOptionsSheet) {
                 TripOptionsSheet(
+                    cancelTitle: cancelTitle,
                     onChangePickup: { showTripOptionsSheet = false },
                     onChangeDropoff: { showTripOptionsSheet = false },
                     onAddStop: { showTripOptionsSheet = false },
@@ -92,18 +94,28 @@ struct RideInProgressView: View {
     // MARK: content (awaiting→pickup vs on the way to drop-off)
     @ViewBuilder
     private var content: some View {
-        if rideManager.currentRide?.status == .enRouteToPickup {
+        if rideManager.currentRide?.status == .enRouteToDropoff {
+            onTheWayToDropoffUI
+        } else if rideManager.currentRide != nil {
             awaitingPickupUI
         } else {
-            onTheWayToDropoffUI
+            ProgressView("Updating ride...")
         }
     }
 
     // MARK: Awaiting pickup — features up top, map as a section
     private var awaitingPickupUI: some View {
+        stackedRideUI
+    }
+
+    // MARK: En-route to drop-off — keep the same rider-facing layout
+    private var onTheWayToDropoffUI: some View {
+        stackedRideUI
+    }
+
+    private var stackedRideUI: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-
                 statusCard
 
                 primaryActionsRow
@@ -118,23 +130,6 @@ struct RideInProgressView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 16)
-        }
-    }
-
-    // MARK: En-route to drop-off — more focus on navigation
-    private var onTheWayToDropoffUI: some View {
-        ZStack(alignment: .bottom) {
-            map
-                .ignoresSafeArea()
-
-            VStack(alignment: .leading, spacing: 16) {
-                statusCard
-                    .shadow(color: .black.opacity(0.08), radius: 18, y: 8)
-                primaryActionsRow
-                compactRideControls
-                .padding(.bottom, 12)
-            }
-            .padding()
         }
     }
 
@@ -161,12 +156,12 @@ struct RideInProgressView: View {
 
                 Spacer()
 
-                Text("$\(rideManager.currentRide?.fare ?? 0, specifier: "%.2f")")
+                Text((rideManager.currentRide?.fare ?? 0), format: .currency(code: "USD"))
                     .font(.headline.weight(.semibold))
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: rideManager.currentRide?.status == .enRouteToPickup ? "clock.badge.checkmark" : "location.fill")
+                Image(systemName: statusIcon)
                     .foregroundStyle(Styles.rydrGradient)
                 Text(statusHeadline)
                     .font(.title2.weight(.bold))
@@ -291,7 +286,7 @@ struct RideInProgressView: View {
                 Text("Live map")
                     .font(.headline)
                 Spacer()
-                Text(etaText)
+                Text(mapEtaText)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
@@ -309,7 +304,7 @@ struct RideInProgressView: View {
             HStack {
                 Image(systemName: "square.and.arrow.up")
                     .foregroundStyle(Styles.rydrGradient)      // ← gradient icon
-                Text("Share status & ETA (\(etaText))")
+                Text("Share status & ETA (\(mapEtaText))")
                 Spacer()
             }
         }
@@ -366,6 +361,8 @@ struct RideInProgressView: View {
         case .enRouteToPickup?:
             guard let pickup = rideManager.pickupCoordinate else { return nil }
             return [rideManager.liveDriverCoordinate, pickup]
+        case .waitingForRider?:
+            return nil
         case .enRouteToDropoff?:
             guard let pickup = rideManager.pickupCoordinate,
                   let drop = rideManager.dropoffCoordinate else { return nil }
@@ -427,15 +424,58 @@ struct RideInProgressView: View {
     }
 
     private var statusHeadline: String {
-        if rideManager.currentRide?.status == .enRouteToPickup {
-            return "Arrives in \(etaText)"
+        switch rideManager.currentRide?.status {
+        case .enRouteToPickup?:
+            return "Driver arrives in \(etaText)"
+        case .waitingForRider?:
+            if rideManager.pickupWaitSecondsRemaining > 0 {
+                return "Driver is here · \(pickupWaitText) complimentary wait"
+            }
+            let charge = String(format: "+$%.2f", rideManager.pickupWaitCharge)
+            return "Paid wait time · \(paidWaitText) · \(charge)"
+        case .enRouteToDropoff?:
+            return "Heading to drop-off — arrives in \(etaText) (\(etaArrivalText))"
+        default:
+            return "Updating ride..."
         }
-        return "Heading to drop-off — arrives in \(etaText) (\(etaArrivalText))"
+    }
+
+    private var statusIcon: String {
+        switch rideManager.currentRide?.status {
+        case .enRouteToPickup?:
+            return "clock.badge.checkmark"
+        case .waitingForRider?:
+            return "figure.wave"
+        case .enRouteToDropoff?:
+            return "location.fill"
+        default:
+            return "clock"
+        }
     }
 
     private var etaText: String {
         let min = max(1, Int(rideManager.remainingMinutesRounded))
         return "\(min) min"
+    }
+
+    private var mapEtaText: String {
+        rideManager.currentRide?.status == .waitingForRider ? "Here now" : etaText
+    }
+
+    private var pickupWaitText: String {
+        let seconds = max(0, rideManager.pickupWaitSecondsRemaining)
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private var paidWaitText: String {
+        let seconds = max(0, rideManager.paidPickupWaitSeconds)
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private var cancelTitle: String {
+        rideManager.currentRide?.status == .enRouteToDropoff
+            ? "End ride now"
+            : "Cancel and find another driver"
     }
     
     private var etaArrivalText: String {
@@ -464,6 +504,7 @@ struct RideInProgressView: View {
     }
 
     private struct TripOptionsSheet: View {
+        let cancelTitle: String
         var onChangePickup: () -> Void
         var onChangeDropoff: () -> Void
         var onAddStop: () -> Void
@@ -487,7 +528,7 @@ struct RideInProgressView: View {
 
                     Section {
                         Button(role: .destructive, action: onCancel) {
-                            Label("Cancel and find another driver", systemImage: "xmark.circle.fill")
+                            Label(cancelTitle, systemImage: "xmark.circle.fill")
                         }
                     }
                 }

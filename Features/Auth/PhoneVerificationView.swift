@@ -6,6 +6,8 @@ import SwiftUI
 import FirebaseAuth
 
 struct PhoneVerificationView: View {
+    var initialPhoneNumber: String = ""
+    var linkToCurrentUser = false
     var onVerified: (String) -> Void
 
     @State private var nationalNumber: String = ""
@@ -67,17 +69,28 @@ struct PhoneVerificationView: View {
             Spacer()
         }
         .padding()
+        .onAppear(perform: applyInitialPhoneNumber)
+        .onChange(of: initialPhoneNumber) { _, _ in
+            applyInitialPhoneNumber()
+        }
         .navigationDestination(isPresented: $goToCode) {
             let e164 = formattedPhoneNumber
             VerificationCodeView(
                 verificationID: verificationID ?? "",
                 phoneNumber: e164,
+                linkToCurrentUser: linkToCurrentUser,
                 onSuccess: { user in
                     onVerified(user.phoneNumber ?? "")
                 },
                 onResendCode: { sendCode(resend: true) }
             )
         }
+    }
+
+    private func applyInitialPhoneNumber() {
+        guard nationalNumber.isEmpty else { return }
+        let digits = initialPhoneNumber.filter { $0.isNumber }
+        nationalNumber = String(digits.suffix(10))
     }
 
     private func sendCode(resend: Bool = false) {
@@ -99,4 +112,3 @@ struct PhoneVerificationView: View {
         }
     }
 }
-

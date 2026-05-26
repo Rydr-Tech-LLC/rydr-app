@@ -51,47 +51,12 @@ struct ProfileView: View {
                     .padding(.horizontal)
                     .padding(.top, 8)
 
-                    // Section: Account
-                    SectionHeader(title: "Account")
-                    TileGrid(columns: 2, tiles: [
-                        .init(title: "Personal Information",
-                              icon: "person.text.rectangle",
-                              destination: AnyView(PersonalInfoView())),
-                        .init(title: "Ride History & Receipts",
-                              icon: "clock.arrow.circlepath",
-                              destination: AnyView(RideHistoryView()
-                                .navigationTitle("Ride History"))),   // ✅ was Text("Coming soon")
-                        .init(title: "Payment Methods",
-                              icon: "creditcard",
-                              destination: AnyView(PaymentMethodView()
-                                .navigationTitle("Payment Methods"))),
-                        .init(title: "Notifications",
-                              icon: "bell.badge",
-                              destination: AnyView(Text("Coming soon").navigationTitle("Notifications"))),
-                        .init(title: "Settings",
-                              icon: "gearshape",
-                              destination: AnyView(SettingsView()))
-                    ])
-
-                    // Section: Features
-                    SectionHeader(title: "Features")
-                    TileGrid(columns: 2, tiles: [
-                        .init(title: "Cash Rydr Hub",
-                              icon: "rectangle.on.rectangle.angled",
-                              destination: AnyView(CashRydrHubView())),
-                        .init(title: "RydrBank",
-                              icon: "banknote",
-                              destination: AnyView(RydrBankView())),
-                        .init(title: "Help & Support",
-                              icon: "questionmark.circle",
-                              destination: AnyView(Text("Coming soon").navigationTitle("Help & Support"))),
-                        .init(title: "Community (Local Events)",
-                              icon: "person.3.sequence",
-                              destination: AnyView(Text("Coming soon").navigationTitle("Community")))
-                    ])
-
-                    // Preferences card
-                    preferencesCard
+                    if session.isCashHubOnly {
+                        cashHubOnlyAccountContent
+                    } else {
+                        riderAccountContent
+                        preferencesCard
+                    }
 
                     // Logout
                     Button {
@@ -114,6 +79,88 @@ struct ProfileView: View {
         .onAppear { session.loadUserProfile() }
         .sheet(isPresented: $showImagePicker, onDismiss: didPickPhoto) {
             ImagePicker(selectedImage: $pickedUIImage, sourceType: .photoLibrary)
+        }
+    }
+
+    private var cashHubOnlyAccountContent: some View {
+        Group {
+            SectionHeader(title: "Cash Rydr Hub Account")
+            TileGrid(columns: 2, tiles: [
+                .init(title: "Personal Information",
+                      icon: "person.text.rectangle",
+                      destination: AnyView(PersonalInfoView())),
+                .init(title: "Cash Rydr Hub",
+                      icon: "rectangle.on.rectangle.angled",
+                      destination: AnyView(CashRydrHubView())),
+                .init(title: "Help & Support",
+                      icon: "questionmark.circle",
+                      destination: AnyView(Text("Coming soon").navigationTitle("Help & Support"))),
+                .init(title: "Settings",
+                      icon: "gearshape",
+                      destination: AnyView(SettingsView()))
+            ])
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Want standard Rydr rides?")
+                    .font(.headline)
+                Text("Complete rider signup to access ride booking, payment methods, ride history, and eligible rider features. Your saved information will be filled in for you.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                NavigationLink {
+                    SignupCoordinator(upgradingCashHubAccount: true)
+                } label: {
+                    Text("Become a Rydr Rider")
+                        .font(.subheadline.bold())
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(GradientButtonStyle())
+            }
+            .padding()
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal)
+        }
+    }
+
+    private var riderAccountContent: some View {
+        Group {
+            SectionHeader(title: "Account")
+            TileGrid(columns: 2, tiles: [
+                .init(title: "Personal Information",
+                      icon: "person.text.rectangle",
+                      destination: AnyView(PersonalInfoView())),
+                .init(title: "Ride History & Receipts",
+                      icon: "clock.arrow.circlepath",
+                      destination: AnyView(RideHistoryView()
+                        .navigationTitle("Ride History"))),
+                .init(title: "Payment Methods",
+                      icon: "creditcard",
+                      destination: AnyView(PaymentMethodView()
+                        .navigationTitle("Payment Methods"))),
+                .init(title: "Notifications",
+                      icon: "bell.badge",
+                      destination: AnyView(Text("Coming soon").navigationTitle("Notifications"))),
+                .init(title: "Settings",
+                      icon: "gearshape",
+                      destination: AnyView(SettingsView()))
+            ])
+
+            SectionHeader(title: "Features")
+            TileGrid(columns: 2, tiles: [
+                .init(title: "Cash Rydr Hub",
+                      icon: "rectangle.on.rectangle.angled",
+                      destination: AnyView(CashRydrHubView())),
+                .init(title: "RydrBank",
+                      icon: "banknote",
+                      destination: AnyView(RydrBankView())),
+                .init(title: "Help & Support",
+                      icon: "questionmark.circle",
+                      destination: AnyView(Text("Coming soon").navigationTitle("Help & Support"))),
+                .init(title: "Community (Local Events)",
+                      icon: "person.3.sequence",
+                      destination: AnyView(Text("Coming soon").navigationTitle("Community")))
+            ])
         }
     }
 
@@ -277,7 +324,6 @@ struct SettingsView: View {
         .navigationTitle("Settings")
     }
 }
-
 
 
 

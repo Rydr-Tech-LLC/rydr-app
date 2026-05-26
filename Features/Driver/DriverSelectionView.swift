@@ -14,22 +14,13 @@ struct DriverSelectionView: View {
     let pickup: String
     let dropoff: String
     let region: MKCoordinateRegion
+    let estimate: RideEstimate
     let onAccepted: () -> Void
     let onClose: () -> Void
 
     // UI state
     @State private var showConnecting = false
     @State private var showUnavailableBanner = false
-
-    // Simple, deterministic estimate to match RideManager placeholder math
-    private var estimate: RideEstimate {
-        let base: Double = 5.0
-        let pm = abs(pickup.hashValue % 7)
-        let dm = abs(dropoff.hashValue % 9)
-        let miles = base + Double(pm + dm) * 0.7
-        let minutes = miles * 3.0
-        return .init(distanceMiles: (miles * 10).rounded()/10, durationMinutes: round(minutes))
-    }
 
     // RydrBank reservations cover the eligible ride, so cards show FREE once applied.
     private var promoApplied: Bool {
@@ -342,7 +333,6 @@ private extension Double {
         return (self * p).rounded() / p
     }
 }
-
 
 
 
