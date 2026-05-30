@@ -11,7 +11,7 @@ import MapKit
 
 /// A local, deterministic-ish mock of your backend.
 /// Swap this out later for a real network implementation of `RideService`.
-final class MockRideService: RideService {
+final class MockRideService: RideService, @unchecked Sendable {
 
     private struct RideSession {
         let id: String

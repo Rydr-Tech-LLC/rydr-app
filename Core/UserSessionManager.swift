@@ -59,18 +59,35 @@ class UserSessionManager: ObservableObject {
 
     /// Load rider info from Firestore and compute a display name.
     func loadUserProfile() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let user = Auth.auth().currentUser else { return }
+        let uid = user.uid
+        let displayName = user.displayName
+        let authEmail = user.email
         Firestore.firestore()
             .collection("riders").document(uid)
             .getDocument { snap, _ in
-                guard let data = snap?.data() else { return }
+                guard let data = snap?.data() else {
+                    Task { @MainActor in
+                        self.userName = displayName ?? "Rydr User"
+                        self.userEmail = authEmail ?? ""
+                        self.accountAccess = .cashHubOnly
+                        self.selectedTab = .profile
+                        self.isLoggedIn = true
+                    }
+                    return
+                }
 
                 let first = data["firstName"] as? String ?? ""
                 let last  = data["lastName"] as? String ?? ""
                 let preferred = data["preferredName"] as? String ?? ""
                 let emailFromDb = data["email"] as? String
                 let completedRiderTerms = data["agreedToTerms"] as? Bool ?? false
-                let hasRiderAccess = data["hasRydrRiderAccess"] as? Bool ?? completedRiderTerms
+                let explicitRiderAccess = data["hasRydrRiderAccess"] as? Bool ?? false
+                let address = data["address"] as? [String: Any] ?? [:]
+                let hasRiderAddress = ["street", "city", "state", "zip"].contains { key in
+                    !(address[key] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }
+                let hasRiderAccess = explicitRiderAccess || completedRiderTerms || hasRiderAddress
 
                 let legal = [first, last]
                     .joined(separator: " ")

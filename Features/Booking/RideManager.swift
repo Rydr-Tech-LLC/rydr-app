@@ -25,7 +25,7 @@ struct Driver: Identifiable, Equatable {
     static func == (lhs: Driver, rhs: Driver) -> Bool { lhs.id == rhs.id }
 }
 
-struct RideEstimate: Equatable {
+struct RideEstimate: Equatable, Codable {
     var distanceMiles: Double
     var durationMinutes: Double
 }
@@ -50,7 +50,7 @@ struct Receipt: Identifiable, Equatable {
 }
 
 struct Ride: Identifiable, Equatable {
-    enum Status { case enRouteToPickup, waitingForRider, enRouteToDropoff, completed, cancelled }
+    enum Status: String, Codable { case enRouteToPickup, waitingForRider, enRouteToDropoff, completed, cancelled }
     let id = UUID()
     var pickup: String
     var dropoff: String
@@ -65,7 +65,21 @@ struct Ride: Identifiable, Equatable {
 // MARK: - Service protocol
 enum DriverDecision { case accepted, declined }
 
-protocol RideService {
+enum RideRequestError: LocalizedError {
+    case driverTimedOut
+    case noDriversAvailable
+
+    var errorDescription: String? {
+        switch self {
+        case .driverTimedOut:
+            return "That driver did not respond in time. Pick another nearby driver."
+        case .noDriversAvailable:
+            return "No nearby drivers are available right now. Try again in a moment."
+        }
+    }
+}
+
+protocol RideService: Sendable {
     func fetchNearbyDrivers(pickup: String, dropoff: String, rideType: String, near: CLLocationCoordinate2D) async throws -> [Driver]
     func requestRide(driverId: String, pickup: String, dropoff: String, rideType: String) async throws -> String // returns rideId
     func awaitDriverDecision(rideId: String) async throws -> DriverDecision
@@ -86,6 +100,9 @@ final class RideManager: ObservableObject {
     @Published var currentRide: Ride?
     @Published var lastReceipt: Receipt?
     @Published var history: [Receipt] = []
+    @Published var isLoadingDrivers = false
+    @Published var rideRequestErrorMessage: String?
+    @Published var hasRecoveredActiveRide = false
 
     // Payment
     @Published var savedCards: [PaymentCard] = [
@@ -124,9 +141,12 @@ final class RideManager: ObservableObject {
     private var currentAppliedRydrBankCode: String?
     private var currentBaseFare: Double = 0
     private var currentWaitChargePerMinute: Double = 0
+    private let activeRideSnapshotKey = "rydr.activeRideSnapshot.v1"
+    private let driverDecisionTimeoutSeconds: UInt64 = 12
 
     init(rideService: RideService = MockRideService()) {
         self.rideService = rideService
+        restoreActiveRideIfNeeded()
     }
 
     deinit {
@@ -183,14 +203,22 @@ final class RideManager: ObservableObject {
 
         attemptedDriverIDs.removeAll()
         selectedDriver = nil
+        rideRequestErrorMessage = nil
+        isLoadingDrivers = true
         state = .selecting
 
         Task {
             do {
                 let drivers = try await rideService.fetchNearbyDrivers(pickup: pickup, dropoff: dropoff, rideType: rideType, near: center)
                 self.availableDrivers = drivers
+                self.isLoadingDrivers = false
+                if drivers.isEmpty {
+                    self.rideRequestErrorMessage = RideRequestError.noDriversAvailable.localizedDescription
+                }
             } catch {
                 self.availableDrivers = []
+                self.isLoadingDrivers = false
+                self.rideRequestErrorMessage = error.localizedDescription
             }
         }
     }
@@ -199,6 +227,7 @@ final class RideManager: ObservableObject {
     func confirm(driver: Driver) {
         selectedDriver = driver
         attemptedDriverIDs.insert(driver.id)
+        rideRequestErrorMessage = nil
         state = .awaitingDriver
 
         decisionTask?.cancel()
@@ -215,15 +244,16 @@ final class RideManager: ObservableObject {
                 let code = self.normalizedSavedPromoCode()
                 self.currentAppliedRydrBankCode = code.isEmpty ? nil : code
 
-                let decision = try await rideService.awaitDriverDecision(rideId: rideId)
+                let decision = try await self.awaitDriverDecisionWithTimeout(rideId: rideId)
                 switch decision {
                 case .accepted:
                     self.handleAccept()
                 case .declined:
-                    self.handleDecline()
+                    self.handleDecline(message: "That driver declined the ride. Pick another nearby driver.")
                 }
             } catch {
-                self.handleDecline()
+                guard !Task.isCancelled else { return }
+                self.handleDecline(message: error.localizedDescription)
             }
         }
     }
@@ -261,14 +291,19 @@ final class RideManager: ObservableObject {
         pickupWaitCharge = 0
         startDriverMovement()
         state = .inProgress
+        persistActiveRideSnapshot()
     }
 
     /// If driver declines, take user back to selection (remove that driver).
-    func handleDecline() {
+    func handleDecline(message: String? = nil) {
         if let declined = selectedDriver {
             availableDrivers.removeAll { $0.id == declined.id }
         }
         selectedDriver = nil
+        rideRequestErrorMessage = message
+        if availableDrivers.isEmpty {
+            rideRequestErrorMessage = RideRequestError.noDriversAvailable.localizedDescription
+        }
         state = .selecting
     }
 
@@ -316,6 +351,7 @@ final class RideManager: ObservableObject {
         currentBaseFare = 0
         currentWaitChargePerMinute = 0
         stopMovement()
+        clearActiveRideSnapshot()
         state = .completed
 
         Task {
@@ -340,6 +376,7 @@ final class RideManager: ObservableObject {
         currentBaseFare = 0
         currentWaitChargePerMinute = 0
         releaseAppliedRydrBankCodeIfNeeded()
+        clearActiveRideSnapshot()
         state = .cancelled
     }
 
@@ -378,6 +415,7 @@ final class RideManager: ObservableObject {
                     let waitProgress = Double(tick - pickupDurationTicks) / Double(waitDurationTicks)
                     self.pickupWaitSecondsRemaining = max(0, Int(180.0 * (1 - waitProgress)))
                     self.updatePaidPickupWait(seconds: 0)
+                    self.persistActiveRideSnapshot()
                 } else if tick <= pickupDurationTicks + waitDurationTicks + paidWaitDurationTicks {
                     self.liveDriverCoordinate = pickup
                     self.pickupEtaSecondsRemaining = 0
@@ -385,6 +423,7 @@ final class RideManager: ObservableObject {
                     self.pickupWaitSecondsRemaining = 0
                     let paidProgress = Double(tick - pickupDurationTicks - waitDurationTicks) / Double(paidWaitDurationTicks)
                     self.updatePaidPickupWait(seconds: Int((paidProgress * 120.0).rounded()))
+                    self.persistActiveRideSnapshot()
                 } else {
                     if self.currentRide?.status == .waitingForRider {
                         self.markRiderPickedUp()
@@ -393,6 +432,7 @@ final class RideManager: ObservableObject {
                     let progress = min(1.0, Double(dropoffTick) / Double(dropoffDurationTicks))
                     self.liveDriverCoordinate = self.interpolate(from: pickup, to: drop, t: progress)
                     self.destinationEtaSecondsRemaining = max(0, Int(Double(destinationEtaStart) * (1 - progress)))
+                    self.persistActiveRideSnapshot()
                     if progress >= 1.0 {
                         timer.invalidate()
                         self.completeRide()
@@ -449,6 +489,7 @@ final class RideManager: ObservableObject {
         guard currentRide?.status == .waitingForRider else { return }
         currentRide?.status = .enRouteToDropoff
         destinationEtaSecondsRemaining = max(60, Int(((currentRide?.estimate.durationMinutes ?? cachedEstimate.durationMinutes) * 0.6 * 60).rounded()))
+        persistActiveRideSnapshot()
     }
 
     private func updatePaidPickupWait(seconds: Int) {
@@ -477,6 +518,7 @@ final class RideManager: ObservableObject {
         pickupWaitCharge = 0
         currentBaseFare = 0
         currentWaitChargePerMinute = 0
+        clearActiveRideSnapshot()
 
         if availableDrivers.isEmpty {
             requestDrivers(pickup: cachedPickup, dropoff: cachedDropoff, rideType: cachedRideType, near: liveDriverCoordinate)
@@ -527,6 +569,7 @@ final class RideManager: ObservableObject {
         currentBaseFare = 0
         currentWaitChargePerMinute = 0
         releaseAppliedRydrBankCodeIfNeeded()
+        clearActiveRideSnapshot()
         state = .completed
     }
 
@@ -544,5 +587,182 @@ final class RideManager: ObservableObject {
 
     private func cappedWaitRate(for driver: Driver, rideType: String) -> Double {
         min(driver.perMinute, caps(for: rideType).maxPerMinute)
+    }
+
+    private func awaitDriverDecisionWithTimeout(rideId: String) async throws -> DriverDecision {
+        try await withThrowingTaskGroup(of: DriverDecision.self) { group in
+            let service = rideService
+            let timeoutSeconds = driverDecisionTimeoutSeconds
+            group.addTask {
+                try await service.awaitDriverDecision(rideId: rideId)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
+                throw RideRequestError.driverTimedOut
+            }
+
+            guard let decision = try await group.next() else {
+                throw RideRequestError.driverTimedOut
+            }
+            group.cancelAll()
+            return decision
+        }
+    }
+
+    private struct CoordinateSnapshot: Codable {
+        let latitude: Double
+        let longitude: Double
+
+        init(_ coordinate: CLLocationCoordinate2D) {
+            latitude = coordinate.latitude
+            longitude = coordinate.longitude
+        }
+
+        var coordinate: CLLocationCoordinate2D {
+            CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        }
+    }
+
+    private struct DriverSnapshot: Codable {
+        let id: String
+        let name: String
+        let carMakeModel: String
+        let rating: Double
+        let compliments: [String]
+        let perMinute: Double
+        let perMile: Double
+        let coordinate: CoordinateSnapshot
+        let score: Int
+
+        init(_ driver: Driver) {
+            id = driver.id
+            name = driver.name
+            carMakeModel = driver.carMakeModel
+            rating = driver.rating
+            compliments = driver.compliments
+            perMinute = driver.perMinute
+            perMile = driver.perMile
+            coordinate = CoordinateSnapshot(driver.coordinate)
+            score = driver.score
+        }
+
+        var driver: Driver {
+            Driver(
+                id: id,
+                name: name,
+                profileImage: nil,
+                carImage: nil,
+                carMakeModel: carMakeModel,
+                rating: rating,
+                compliments: compliments,
+                perMinute: perMinute,
+                perMile: perMile,
+                coordinate: coordinate.coordinate,
+                score: score
+            )
+        }
+    }
+
+    private struct ActiveRideSnapshot: Codable {
+        let savedAt: Date
+        let serviceRideId: String?
+        let pickup: String
+        let dropoff: String
+        let rideType: String
+        let estimate: RideEstimate
+        let driver: DriverSnapshot
+        let rideStartedAt: Date
+        let status: Ride.Status
+        let fare: Double
+        let liveDriverCoordinate: CoordinateSnapshot
+        let pickupCoordinate: CoordinateSnapshot?
+        let dropoffCoordinate: CoordinateSnapshot?
+        let pickupEtaSecondsRemaining: Int
+        let destinationEtaSecondsRemaining: Int
+        let pickupWaitSecondsRemaining: Int
+        let paidPickupWaitSeconds: Int
+        let pickupWaitCharge: Double
+        let appliedRydrBankCode: String?
+        let baseFare: Double
+        let waitChargePerMinute: Double
+    }
+
+    private func persistActiveRideSnapshot() {
+        guard state == .inProgress, let ride = currentRide else { return }
+        let snapshot = ActiveRideSnapshot(
+            savedAt: Date(),
+            serviceRideId: currentServiceRideId,
+            pickup: ride.pickup,
+            dropoff: ride.dropoff,
+            rideType: ride.rideType,
+            estimate: ride.estimate,
+            driver: DriverSnapshot(ride.driver),
+            rideStartedAt: ride.startedAt,
+            status: ride.status,
+            fare: ride.fare,
+            liveDriverCoordinate: CoordinateSnapshot(liveDriverCoordinate),
+            pickupCoordinate: pickupCoordinate.map(CoordinateSnapshot.init),
+            dropoffCoordinate: dropoffCoordinate.map(CoordinateSnapshot.init),
+            pickupEtaSecondsRemaining: pickupEtaSecondsRemaining,
+            destinationEtaSecondsRemaining: destinationEtaSecondsRemaining,
+            pickupWaitSecondsRemaining: pickupWaitSecondsRemaining,
+            paidPickupWaitSeconds: paidPickupWaitSeconds,
+            pickupWaitCharge: pickupWaitCharge,
+            appliedRydrBankCode: currentAppliedRydrBankCode,
+            baseFare: currentBaseFare,
+            waitChargePerMinute: currentWaitChargePerMinute
+        )
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        UserDefaults.standard.set(data, forKey: activeRideSnapshotKey)
+    }
+
+    private func clearActiveRideSnapshot() {
+        UserDefaults.standard.removeObject(forKey: activeRideSnapshotKey)
+        hasRecoveredActiveRide = false
+    }
+
+    private func restoreActiveRideIfNeeded() {
+        guard let data = UserDefaults.standard.data(forKey: activeRideSnapshotKey),
+              let snapshot = try? JSONDecoder().decode(ActiveRideSnapshot.self, from: data) else {
+            return
+        }
+
+        guard Date().timeIntervalSince(snapshot.savedAt) < 4 * 60 * 60 else {
+            clearActiveRideSnapshot()
+            return
+        }
+
+        var driver = snapshot.driver.driver
+        driver.coordinate = snapshot.liveDriverCoordinate.coordinate
+        currentRide = Ride(
+            pickup: snapshot.pickup,
+            dropoff: snapshot.dropoff,
+            rideType: snapshot.rideType,
+            estimate: snapshot.estimate,
+            driver: driver,
+            startedAt: snapshot.rideStartedAt,
+            status: snapshot.status,
+            fare: snapshot.fare
+        )
+        cachedPickup = snapshot.pickup
+        cachedDropoff = snapshot.dropoff
+        cachedRideType = snapshot.rideType
+        cachedEstimate = snapshot.estimate
+        currentServiceRideId = snapshot.serviceRideId
+        currentAppliedRydrBankCode = snapshot.appliedRydrBankCode
+        currentBaseFare = snapshot.baseFare
+        currentWaitChargePerMinute = snapshot.waitChargePerMinute
+        liveDriverCoordinate = snapshot.liveDriverCoordinate.coordinate
+        pickupCoordinate = snapshot.pickupCoordinate?.coordinate
+        dropoffCoordinate = snapshot.dropoffCoordinate?.coordinate
+        cachedPickupCoordinate = pickupCoordinate
+        cachedDropoffCoordinate = dropoffCoordinate
+        pickupEtaSecondsRemaining = snapshot.pickupEtaSecondsRemaining
+        destinationEtaSecondsRemaining = snapshot.destinationEtaSecondsRemaining
+        pickupWaitSecondsRemaining = snapshot.pickupWaitSecondsRemaining
+        paidPickupWaitSeconds = snapshot.paidPickupWaitSeconds
+        pickupWaitCharge = snapshot.pickupWaitCharge
+        state = .inProgress
+        hasRecoveredActiveRide = true
     }
 }

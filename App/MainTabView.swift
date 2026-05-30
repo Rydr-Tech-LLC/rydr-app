@@ -9,6 +9,7 @@ import SwiftUI
 struct MainTabView: View {
     @EnvironmentObject private var session: UserSessionManager
     @StateObject private var rideManager = RideManager()   // ✅ provide once here
+    @State private var showRecoveredRide = false
 
     var body: some View {
         Group {
@@ -22,6 +23,15 @@ struct MainTabView: View {
             if session.accountAccess == nil {
                 session.loadUserProfile()
             }
+            showRecoveredRide = rideManager.hasRecoveredActiveRide
+        }
+        .onChange(of: rideManager.hasRecoveredActiveRide, initial: false) { _, recovered in
+            showRecoveredRide = recovered
+        }
+        .fullScreenCover(isPresented: $showRecoveredRide, onDismiss: {
+            rideManager.hasRecoveredActiveRide = false
+        }) {
+            RideInProgressView(rideManager: rideManager)
         }
         .accentColor(.red)
         .environmentObject(rideManager)             // ✅ inject to all tabs
@@ -86,4 +96,3 @@ struct MainTabView: View {
         }
     }
 }
-

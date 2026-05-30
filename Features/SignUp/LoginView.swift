@@ -6,6 +6,7 @@
 //
 import SwiftUI
 import FirebaseAuth
+import FirebaseFirestore
 
 struct LoginView: View {
     @EnvironmentObject var session: UserSessionManager
@@ -17,8 +18,7 @@ struct LoginView: View {
     @State private var showLogo = false
     @State private var errorMessage = ""
     @State private var showPasswordResetAlert = false
-    @State private var verificationID: String?
-    @State private var showVerificationView = false
+    @State private var verificationSession: PhoneVerificationSession?
     
     private var formattedPhoneNumber: String {
         let digits = phoneNumber.filter { $0.isNumber }.prefix(10)
@@ -183,13 +183,13 @@ struct LoginView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
-        .sheet(isPresented: $showVerificationView) {
+        .sheet(item: $verificationSession) { verificationSession in
             VerificationCodeView(
-                verificationID: verificationID ?? "",
-                phoneNumber: formattedPhoneNumber,
+                verificationID: verificationSession.verificationID,
+                phoneNumber: verificationSession.phoneNumber,
                 onSuccess: { user in
-                    showVerificationView = false
-                    session.login(name: user.displayName ?? "Rydr User", email: user.email ?? "")
+                    self.verificationSession = nil
+                    completePhoneLogin(for: user)
                 },
                 onResendCode: {
                     sendCode()
@@ -239,17 +239,64 @@ struct LoginView: View {
         let formattedNumber = formattedPhoneNumber // always +1 plus digits
         
         PhoneAuthProvider.provider().verifyPhoneNumber(formattedNumber, uiDelegate: nil) { verificationID, error in
-            if let error = error {
-                errorMessage = "Failed to send code: \(error.localizedDescription)"
-                print("❌ Firebase OTP error:", error.localizedDescription)
-                return
-            }
-            
-            if let verificationID = verificationID {
+            Task { @MainActor in
+                if let error = error {
+                    errorMessage = "Failed to send code: \(error.localizedDescription)"
+                    print("❌ Firebase OTP error:", error.localizedDescription)
+                    return
+                }
+
+                guard let verificationID, !verificationID.isEmpty else {
+                    errorMessage = "Firebase did not return a verification session. Please resend the code."
+                    return
+                }
+
                 print("✅ Code sent. VerificationID:", verificationID)
-                self.verificationID = verificationID
-                self.showVerificationView = true
+                self.verificationSession = PhoneVerificationSession(
+                    verificationID: verificationID,
+                    phoneNumber: formattedNumber
+                )
             }
         }
+    }
+
+    private func completePhoneLogin(for user: User) {
+        let phone = user.phoneNumber ?? formattedPhoneNumber
+
+        Firestore.firestore()
+            .collection("riders")
+            .whereField("phoneNumber", isEqualTo: phone)
+            .limit(to: 2)
+            .getDocuments { snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        try? Auth.auth().signOut()
+                        errorMessage = "Unable to load phone account: \(error.localizedDescription)"
+                        return
+                    }
+
+                    let matchingProfiles = snapshot?.documents ?? []
+                    if let profile = matchingProfiles.first(where: { $0.documentID != user.uid }) {
+                        let email = profile.data()["email"] as? String ?? "the email on this account"
+                        try? Auth.auth().signOut()
+                        errorMessage = "This phone number is saved on \(email). Sign in with email first, then verify this phone number to link phone login."
+                        return
+                    }
+
+                    let profile = matchingProfiles.first?.data() ?? [:]
+                    let first = profile["firstName"] as? String ?? ""
+                    let last = profile["lastName"] as? String ?? ""
+                    let preferred = profile["preferredName"] as? String ?? ""
+                    let displayName = preferred.isEmpty
+                        ? [first, last].joined(separator: " ").trimmingCharacters(in: .whitespaces)
+                        : preferred
+                    let email = profile["email"] as? String ?? user.email ?? ""
+
+                    session.login(
+                        name: displayName.isEmpty ? user.displayName ?? "Rydr User" : displayName,
+                        email: email
+                    )
+                }
+            }
     }
 }

@@ -14,8 +14,7 @@ struct PhoneVerificationView: View {
 
     @State private var sending = false
     @State private var errorMessage = ""
-    @State private var verificationID: String?
-    @State private var goToCode = false
+    @State private var verificationSession: PhoneVerificationSession?
 
     private var formattedPhoneNumber: String {
         let digits = nationalNumber.filter { $0.isNumber }.prefix(10)
@@ -73,11 +72,10 @@ struct PhoneVerificationView: View {
         .onChange(of: initialPhoneNumber) { _, _ in
             applyInitialPhoneNumber()
         }
-        .navigationDestination(isPresented: $goToCode) {
-            let e164 = formattedPhoneNumber
+        .navigationDestination(item: $verificationSession) { verificationSession in
             VerificationCodeView(
-                verificationID: verificationID ?? "",
-                phoneNumber: e164,
+                verificationID: verificationSession.verificationID,
+                phoneNumber: verificationSession.phoneNumber,
                 linkToCurrentUser: linkToCurrentUser,
                 onSuccess: { user in
                     onVerified(user.phoneNumber ?? "")
@@ -98,17 +96,33 @@ struct PhoneVerificationView: View {
         sending = true
         let e164 = formattedPhoneNumber
 
+        if linkToCurrentUser, Auth.auth().currentUser?.phoneNumber == e164 {
+            sending = false
+            onVerified(e164)
+            return
+        }
+
         // DEBUG/testing on simulator (don’t ship enabled):
         // Auth.auth().settings?.isAppVerificationDisabledForTesting = true
 
         PhoneAuthProvider.provider().verifyPhoneNumber(e164, uiDelegate: nil) { id, error in
-            sending = false
-            if let error = error {
-                errorMessage = "Failed to send code: \(error.localizedDescription)"
-                return
+            Task { @MainActor in
+                sending = false
+                if let error = error {
+                    errorMessage = "Failed to send code: \(error.localizedDescription)"
+                    return
+                }
+
+                guard let id, !id.isEmpty else {
+                    errorMessage = "Firebase did not return a verification session. Please resend the code."
+                    return
+                }
+
+                verificationSession = PhoneVerificationSession(
+                    verificationID: id,
+                    phoneNumber: e164
+                )
             }
-            verificationID = id
-            goToCode = true
         }
     }
 }

@@ -7,6 +7,13 @@
 import SwiftUI
 import FirebaseAuth
 
+struct PhoneVerificationSession: Identifiable, Hashable {
+    let verificationID: String
+    let phoneNumber: String
+
+    var id: String { verificationID }
+}
+
 struct VerificationCodeView: View {
     let verificationID: String
     let phoneNumber: String
@@ -104,19 +111,33 @@ struct VerificationCodeView: View {
     private func verifyCode() {
         isVerifying = true
         errorMessage = ""
+        let trimmedVerificationID = verificationID.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedVerificationID.isEmpty else {
+            isVerifying = false
+            errorMessage = "Verification session is missing. Please resend the code and try again."
+            return
+        }
 
         let credential = PhoneAuthProvider.provider().credential(
-            withVerificationID: verificationID,
+            withVerificationID: trimmedVerificationID,
             verificationCode: verificationCode
         )
 
         let completion: (AuthDataResult?, Error?) -> Void = { result, error in
-            isVerifying = false
-            if let error = error {
-                errorMessage = "Verification failed: \(error.localizedDescription)"
-            } else if let user = result?.user {
-                print("✅ Phone verified and signed in")
-                onSuccess(user)
+            Task { @MainActor in
+                isVerifying = false
+                if let error = error {
+                    if let authCode = AuthErrorCode(rawValue: (error as NSError).code),
+                       authCode == .credentialAlreadyInUse || authCode == .providerAlreadyLinked {
+                        errorMessage = "That phone number is already attached to another sign-in. Sign in with the original account or remove the duplicate test phone user in Firebase, then try again."
+                    } else {
+                        errorMessage = "Verification failed: \(error.localizedDescription)"
+                    }
+                } else if let user = result?.user {
+                    print("✅ Phone verified and signed in")
+                    onSuccess(user)
+                }
             }
         }
 

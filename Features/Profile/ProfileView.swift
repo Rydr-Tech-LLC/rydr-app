@@ -12,6 +12,7 @@ struct ProfileView: View {
     @EnvironmentObject var session: UserSessionManager
 
     @State private var showImagePicker = false
+    @State private var showRiderUpgrade = false
     @State private var pickedUIImage: UIImage?
     @State private var profileImage: Image? = Image(systemName: "person.crop.circle.fill")
 
@@ -22,63 +23,65 @@ struct ProfileView: View {
     @State private var driverPref: String = "No preference"
 
     var body: some View {
-        NavigationStack {
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 24) {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 24) {
 
-                    // Header: avatar + greeting
-                    HStack(spacing: 16) {
-                        Button { showImagePicker = true } label: {
-                            (profileImage ?? Image(systemName: "person.crop.circle.fill"))
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 80, height: 80)
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(Color.gray.opacity(0.25), lineWidth: 1))
-                                .shadow(radius: 2)
-                        }
-                        .buttonStyle(.plain)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Hello, \(session.userName)")
-                                .font(.title3).bold()
-                            Text("View and manage your account")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
+                // Header: avatar + greeting
+                HStack(spacing: 16) {
+                    Button { showImagePicker = true } label: {
+                        (profileImage ?? Image(systemName: "person.crop.circle.fill"))
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 80, height: 80)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.gray.opacity(0.25), lineWidth: 1))
+                            .shadow(radius: 2)
                     }
-                    .padding(.horizontal)
-                    .padding(.top, 8)
+                    .buttonStyle(.plain)
 
-                    if session.isCashHubOnly {
-                        cashHubOnlyAccountContent
-                    } else {
-                        riderAccountContent
-                        preferencesCard
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Hello, \(session.userName)")
+                            .font(.title3).bold()
+                        Text("View and manage your account")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-
-                    // Logout
-                    Button {
-                        session.logout()
-                    } label: {
-                        Text("Log Out")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.red.opacity(0.1))
-                            .foregroundStyle(.red)
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 10)
+                    Spacer()
                 }
-                .navigationTitle("Profile")
+                .padding(.horizontal)
+                .padding(.top, 8)
+
+                if session.isCashHubOnly {
+                    cashHubOnlyAccountContent
+                } else {
+                    riderAccountContent
+                    preferencesCard
+                }
+
+                // Logout
+                Button {
+                    session.logout()
+                } label: {
+                    Text("Log Out")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.red.opacity(0.1))
+                        .foregroundStyle(.red)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 10)
             }
         }
+        .navigationTitle("Profile")
         .onAppear { session.loadUserProfile() }
         .sheet(isPresented: $showImagePicker, onDismiss: didPickPhoto) {
             ImagePicker(selectedImage: $pickedUIImage, sourceType: .photoLibrary)
+        }
+        .fullScreenCover(isPresented: $showRiderUpgrade) {
+            SignupCoordinator(upgradingCashHubAccount: true)
+                .environmentObject(session)
         }
     }
 
@@ -106,8 +109,8 @@ struct ProfileView: View {
                 Text("Complete rider signup to access ride booking, payment methods, ride history, and eligible rider features. Your saved information will be filled in for you.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                NavigationLink {
-                    SignupCoordinator(upgradingCashHubAccount: true)
+                Button {
+                    showRiderUpgrade = true
                 } label: {
                     Text("Become a Rydr Rider")
                         .font(.subheadline.bold())
@@ -324,7 +327,6 @@ struct SettingsView: View {
         .navigationTitle("Settings")
     }
 }
-
 
 
 

@@ -42,9 +42,20 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     Auth.auth().settings?.isAppVerificationDisabledForTesting = true
     #endif
 
-    // ✅ Stripe publishable key (your provided test key)
-    StripeAPI.defaultPublishableKey = "pk_test_51RcVGmBOkTOLtDHQgAvZmOvsvTxIqlcD3zLFgpkWD5pCQawjrFRBV3SjufrmGRb15GjVA7i351P1zfF7vbZ2J5gc00VuR0AYPc"
-    print("💳 Stripe PK set")
+    // ✅ Stripe publishable key
+    if let configuredKey = Bundle.main.object(forInfoDictionaryKey: "STRIPE_PUBLISHABLE_KEY") as? String,
+       !configuredKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      StripeAPI.defaultPublishableKey = configuredKey
+      print("💳 Stripe PK loaded from Info.plist")
+    } else {
+      #if DEBUG
+      StripeAPI.defaultPublishableKey = "pk_test_51RcVGmBOkTOLtDHQgAvZmOvsvTxIqlcD3zLFgpkWD5pCQawjrFRBV3SjufrmGRb15GjVA7i351P1zfF7vbZ2J5gc00VuR0AYPc"
+      print("💳 Stripe test PK loaded for DEBUG")
+      #else
+      assertionFailure("Missing STRIPE_PUBLISHABLE_KEY in Info.plist for Release builds.")
+      StripeAPI.defaultPublishableKey = ""
+      #endif
+    }
 
     return true
   }
@@ -71,7 +82,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     completionHandler(.noData)
   }
 }
-
 
 
 

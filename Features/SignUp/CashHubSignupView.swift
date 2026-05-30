@@ -21,6 +21,7 @@ struct CashHubSignupView: View {
     @State private var acceptedTerms = false
     @State private var isSaving = false
     @State private var errorMessage = ""
+    @State private var verificationSession: PhoneVerificationSession?
 
     private enum PasswordStrength {
         case weak
@@ -235,6 +236,22 @@ struct CashHubSignupView: View {
         }
         .navigationTitle("Cash Rydr Hub")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $verificationSession) { verificationSession in
+            VerificationCodeView(
+                verificationID: verificationSession.verificationID,
+                phoneNumber: verificationSession.phoneNumber,
+                linkToCurrentUser: true,
+                onSuccess: { user in
+                    self.verificationSession = nil
+                    saveCashHubProfile(uid: user.uid)
+                },
+                onResendCode: {
+                    if Auth.auth().currentUser != nil {
+                        sendCashHubPhoneVerification()
+                    }
+                }
+            )
+        }
     }
 
     private func requiredFieldLabel(_ label: String) -> some View {
@@ -304,7 +321,7 @@ struct CashHubSignupView: View {
                 }
                 return
             }
-            guard let uid = result?.user.uid else {
+            guard result?.user != nil else {
                 Task { @MainActor in
                     isSaving = false
                     errorMessage = "Account creation did not return a user."
@@ -312,36 +329,66 @@ struct CashHubSignupView: View {
                 return
             }
 
-            let cleanFirstName = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let cleanLastName = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let displayName = "\(cleanFirstName) \(cleanLastName)"
-            let fields: [String: Any] = [
-                "uid": uid,
-                "firstName": cleanFirstName,
-                "lastName": cleanLastName,
-                "preferredName": displayName,
-                "email": normalizedEmail,
-                "phoneNumber": normalizedPhone,
-                "cashHubTermsAccepted": true,
-                "cashHubTermsAcceptedAt": FieldValue.serverTimestamp(),
-                "cashHubRole": CashHubRole.rider.rawValue,
-                "hasRydrRiderAccess": false,
-                "createdAt": FieldValue.serverTimestamp()
-            ]
-            Firestore.firestore().collection("riders").document(uid).setData(fields, merge: true) { error in
-                Task { @MainActor in
+            sendCashHubPhoneVerification()
+        }
+    }
+
+    private func sendCashHubPhoneVerification() {
+        PhoneAuthProvider.provider().verifyPhoneNumber(normalizedPhone, uiDelegate: nil) { verificationID, error in
+            Task { @MainActor in
+                if let error {
                     isSaving = false
-                    if let error {
-                        errorMessage = error.localizedDescription
-                        return
-                    }
-                    session.login(
-                        name: displayName,
-                        email: normalizedEmail,
-                        startingTab: .cashHub,
-                        access: .cashHubOnly
-                    )
+                    errorMessage = "Failed to send verification code: \(error.localizedDescription)"
+                    return
                 }
+
+                guard let verificationID, !verificationID.isEmpty else {
+                    isSaving = false
+                    errorMessage = "Firebase did not return a verification session. Please resend the code."
+                    return
+                }
+
+                isSaving = false
+                verificationSession = PhoneVerificationSession(
+                    verificationID: verificationID,
+                    phoneNumber: normalizedPhone
+                )
+            }
+        }
+    }
+
+    private func saveCashHubProfile(uid: String) {
+        isSaving = true
+
+        let cleanFirstName = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLastName = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = "\(cleanFirstName) \(cleanLastName)"
+        let fields: [String: Any] = [
+            "uid": uid,
+            "firstName": cleanFirstName,
+            "lastName": cleanLastName,
+            "preferredName": displayName,
+            "email": normalizedEmail,
+            "phoneNumber": normalizedPhone,
+            "cashHubTermsAccepted": true,
+            "cashHubTermsAcceptedAt": FieldValue.serverTimestamp(),
+            "cashHubRole": CashHubRole.rider.rawValue,
+            "hasRydrRiderAccess": false,
+            "createdAt": FieldValue.serverTimestamp()
+        ]
+        Firestore.firestore().collection("riders").document(uid).setData(fields, merge: true) { error in
+            Task { @MainActor in
+                isSaving = false
+                if let error {
+                    errorMessage = error.localizedDescription
+                    return
+                }
+                session.login(
+                    name: displayName,
+                    email: normalizedEmail,
+                    startingTab: .cashHub,
+                    access: .cashHubOnly
+                )
             }
         }
     }

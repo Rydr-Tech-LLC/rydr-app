@@ -40,23 +40,44 @@ struct DriverSelectionView: View {
                     }
                     .padding(.horizontal)
 
-                    // Paged cards with dots
-                    TabView {
-                        ForEach(rideManager.availableDrivers) { d in
-                            DriverCard(
-                                rideManager: rideManager,
-                                driver: d,
-                                rideType: rideType,
-                                estimate: estimate,
-                                promoAppliedDevFree: promoApplied
-                            ) {
-                                confirm(d)   // ← show overlay, wait for accept/decline
-                            }
-                            .padding(.horizontal)
+                    if rideManager.isLoadingDrivers {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text("Finding nearby drivers...")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
                         }
+                        .frame(maxWidth: .infinity, minHeight: 320)
+                    } else if rideManager.availableDrivers.isEmpty {
+                        EmptyDriverState(message: rideManager.rideRequestErrorMessage ?? "No nearby drivers are available right now.") {
+                            rideManager.requestDrivers(
+                                pickup: pickup,
+                                dropoff: dropoff,
+                                rideType: rideType,
+                                near: region.center,
+                                estimate: estimate
+                            )
+                        }
+                        .padding(.horizontal)
+                    } else {
+                        // Paged cards with dots
+                        TabView {
+                            ForEach(rideManager.availableDrivers) { d in
+                                DriverCard(
+                                    rideManager: rideManager,
+                                    driver: d,
+                                    rideType: rideType,
+                                    estimate: estimate,
+                                    promoAppliedDevFree: promoApplied
+                                ) {
+                                    confirm(d)   // ← show overlay, wait for accept/decline
+                                }
+                                .padding(.horizontal)
+                            }
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .automatic))
+                        .indexViewStyle(.page(backgroundDisplayMode: .interactive))
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .automatic))
-                    .indexViewStyle(.page(backgroundDisplayMode: .interactive))
                 }
 
                 // Decline banner
@@ -327,13 +348,38 @@ private struct UnavailableBanner: View {
     }
 }
 
+private struct EmptyDriverState: View {
+    let message: String
+    let onRetry: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "car.2.slash")
+                .font(.system(size: 42, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(message)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+            Text("For testing, this keeps the ride request from looking stuck when no driver is available or the mock service fails.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Try Again", action: onRetry)
+                .buttonStyle(RydrGradientButton())
+        }
+        .frame(maxWidth: .infinity, minHeight: 320)
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 18).fill(.ultraThinMaterial))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.black.opacity(0.06), lineWidth: 1))
+    }
+}
+
 private extension Double {
     func rounded(to places: Int) -> Double {
         let p = pow(10.0, Double(places))
         return (self * p).rounded() / p
     }
 }
-
 
 
 

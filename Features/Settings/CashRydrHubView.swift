@@ -451,8 +451,17 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func removeRequest(_ request: CashRydrRequest) {
+        guard Auth.auth().currentUser?.uid == request.riderUid else {
+            errorMessage = "Only the rider who posted this request can delete it."
+            return
+        }
         db.collection("cashRydrRequests").document(request.id).delete { [weak self] error in
-            Task { @MainActor in self?.errorMessage = error?.localizedDescription }
+            Task { @MainActor in
+                self?.errorMessage = error?.localizedDescription
+                if error == nil {
+                    self?.confirmationMessage = "Your request has been deleted."
+                }
+            }
         }
     }
 
@@ -830,6 +839,7 @@ struct CashRydrHubView: View {
                 requests: myRequests,
                 responses: vm.responsesByRequest,
                 onEdit: { editingRequest = $0 },
+                onDelete: { vm.removeRequest($0) },
                 onVisibilityChange: { request, visibility in vm.updateVisibility(for: request, to: visibility) },
                 onOpenConnection: { viewingConnection = $0 },
                 onMessage: { messagingRequest = $0 },
@@ -1243,6 +1253,7 @@ private struct CashHubRiderPanelView: View {
     let requests: [CashRydrRequest]
     let responses: [String: [CashHubResponse]]
     let onEdit: (CashRydrRequest) -> Void
+    let onDelete: (CashRydrRequest) -> Void
     let onVisibilityChange: (CashRydrRequest, String) -> Void
     let onOpenConnection: (CashRydrRequest) -> Void
     let onMessage: (CashRydrRequest) -> Void
@@ -1251,6 +1262,7 @@ private struct CashHubRiderPanelView: View {
     let onDeclineOffer: (CashHubResponse, CashRydrRequest) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var requestPendingDeletion: CashRydrRequest?
 
     private var title: String {
         switch panel {
@@ -1288,6 +1300,8 @@ private struct CashHubRiderPanelView: View {
                                         Button("Edit") { onEdit(request) }.buttonStyle(.bordered)
                                     }
                                     Button("Message") { onMessage(request) }.buttonStyle(.bordered)
+                                    Button("Delete", role: .destructive) { requestPendingDeletion = request }
+                                        .buttonStyle(.bordered)
                                 }
                             }
                             .cashHubCard()
@@ -1335,6 +1349,28 @@ private struct CashHubRiderPanelView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
+                }
+            }
+            .confirmationDialog(
+                "Delete this request?",
+                isPresented: Binding(
+                    get: { requestPendingDeletion != nil },
+                    set: { if !$0 { requestPendingDeletion = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Request", role: .destructive) {
+                    if let requestPendingDeletion {
+                        onDelete(requestPendingDeletion)
+                    }
+                    requestPendingDeletion = nil
+                }
+                Button("Cancel", role: .cancel) { requestPendingDeletion = nil }
+            } message: {
+                if requestPendingDeletion?.isConnected == true {
+                    Text("This permanently deletes your request and removes the connected request from your Cash Hub view.")
+                } else {
+                    Text("This permanently deletes your request from Cash Rydr Hub.")
                 }
             }
         }
