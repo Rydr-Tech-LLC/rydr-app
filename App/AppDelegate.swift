@@ -11,6 +11,15 @@ import FirebaseAuth
 import FirebaseAppCheck
 import Stripe
 
+private final class RydrAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
+  func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
+    if #available(iOS 14.0, *) {
+      return AppAttestProvider(app: app)
+    }
+    return DeviceCheckProvider(app: app)
+  }
+}
+
 class AppDelegate: NSObject, UIApplicationDelegate {
 
   func application(
@@ -25,13 +34,8 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     print("🔐 AppCheck: Debug provider (simulator)")
     #else
     // Devices: prefer App Attest (iOS 14+), fallback to DeviceCheck
-    if #available(iOS 14.0, *) {
-      AppCheck.setAppCheckProviderFactory(AppAttestProviderFactory())
-      print("🔐 AppCheck: App Attest provider (device)")
-    } else {
-      AppCheck.setAppCheckProviderFactory(DeviceCheckProviderFactory())
-      print("🔐 AppCheck: DeviceCheck provider (device)")
-    }
+    AppCheck.setAppCheckProviderFactory(RydrAppCheckProviderFactory())
+    print("🔐 AppCheck: App Attest / DeviceCheck provider (device)")
     #endif
 
     // ✅ Firebase
@@ -82,7 +86,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     completionHandler(.noData)
   }
 }
-
 
 
 

@@ -49,7 +49,18 @@ struct RideInProgressView: View {
                 if newState == .selecting { dismiss() }
             }
             // Chat / payment / notes / end sheets
-            .sheet(isPresented: $showChat) { ChatSheet() }
+            .sheet(isPresented: $showChat) {
+                if let context = rideManager.activeRideChatContext {
+                    RideChatView(
+                        rideId: context.rideId,
+                        riderId: context.riderId,
+                        driverId: context.driverId,
+                        driverName: context.driverName
+                    )
+                } else {
+                    RideChatUnavailableView()
+                }
+            }
             .sheet(isPresented: $showPaymentSheet) {
                 PaymentPicker(cards: rideManager.savedCards, selected: $rideManager.selectedCardIndex)
             }
@@ -544,22 +555,21 @@ struct RideInProgressView: View {
         }
     }
 
-    // Minimal in-app chat mock
-    private struct ChatSheet: View {
-        @State private var text = ""
-        @State private var messages: [String] = ["Driver: On my way!", "You: Great, thanks."]
+    private struct RideChatUnavailableView: View {
+        @Environment(\.dismiss) private var dismiss
+
         var body: some View {
-            VStack {
-                List(messages, id: \.self) { Text($0) }
-                HStack {
-                    TextField("Message", text: $text)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Send") {
-                        guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                        messages.append(text); text = ""
+            NavigationStack {
+                ContentUnavailableView(
+                    "Ride chat unavailable",
+                    systemImage: "message",
+                    description: Text("Chat opens after a driver accepts your ride.")
+                )
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
                     }
                 }
-                .padding()
             }
         }
     }

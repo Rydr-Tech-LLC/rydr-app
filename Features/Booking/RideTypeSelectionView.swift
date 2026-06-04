@@ -48,6 +48,11 @@ struct RideTypeSelectionView: View {
                         RideOptionCard(title: "Rydr Prestine", subtitle: "Premium vehicles and top-rated drivers", icon: "sparkles")
                     }
 
+                    // Rydr Executive
+                    NavigationLink(destination: BookingView(rideType: "Rydr Executive", userName: userName)) {
+                        RideOptionCard(title: "Rydr Executive", subtitle: "Professional black-car service", icon: "briefcase.fill")
+                    }
+
                     // Cash Rydr Hub
                     NavigationLink(destination: CashRydrHubView()) {
                         RideOptionCard(title: "Cash Rydr Hub", subtitle: "Post or browse upcoming cash ride requests", icon: "rectangle.on.rectangle.angled")

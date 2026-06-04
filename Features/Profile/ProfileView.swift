@@ -97,7 +97,7 @@ struct ProfileView: View {
                       destination: AnyView(CashRydrHubView())),
                 .init(title: "Help & Support",
                       icon: "questionmark.circle",
-                      destination: AnyView(Text("Coming soon").navigationTitle("Help & Support"))),
+                      destination: AnyView(HelpSupportView())),
                 .init(title: "Settings",
                       icon: "gearshape",
                       destination: AnyView(SettingsView()))
@@ -159,7 +159,7 @@ struct ProfileView: View {
                       destination: AnyView(RydrBankView())),
                 .init(title: "Help & Support",
                       icon: "questionmark.circle",
-                      destination: AnyView(Text("Coming soon").navigationTitle("Help & Support"))),
+                      destination: AnyView(HelpSupportView())),
                 .init(title: "Community (Local Events)",
                       icon: "person.3.sequence",
                       destination: AnyView(Text("Coming soon").navigationTitle("Community")))
@@ -327,7 +327,6 @@ struct SettingsView: View {
         .navigationTitle("Settings")
     }
 }
-
 
 
 

@@ -119,7 +119,9 @@ private enum CashHubScheduling {
     }
 
     static func isAllowed(_ date: Date) -> Bool {
-        date >= Date().addingTimeInterval(minimumLeadTime)
+        let threshold = Date().addingTimeInterval(minimumLeadTime)
+        let minuteThreshold = Calendar.current.dateInterval(of: .minute, for: threshold)?.start ?? threshold
+        return date >= minuteThreshold
     }
 }
 
@@ -165,8 +167,35 @@ private enum CashHubRiderPanel: String, Identifiable {
     case requests
     case offers
     case messages
+    case favorites
 
     var id: String { rawValue }
+}
+
+private enum CashHubMessageMode: String {
+    case requestThread
+    case directConnection
+
+    var title: String {
+        switch self {
+        case .requestThread: return "Request Thread"
+        case .directConnection: return "Direct Message"
+        }
+    }
+
+    var responseKind: String {
+        switch self {
+        case .requestThread: return "message"
+        case .directConnection: return "directMessage"
+        }
+    }
+}
+
+private struct CashHubMessageContext: Identifiable {
+    let request: CashRydrRequest
+    let mode: CashHubMessageMode
+
+    var id: String { "\(request.id)-\(mode.rawValue)" }
 }
 
 @MainActor
@@ -180,6 +209,7 @@ private final class CashRydrHubVM: ObservableObject {
     @Published var isCheckingTerms = true
     @Published var termsAccepted = false
 
+    private let favoriteDriverLimit = 10
     private let db = Firestore.firestore()
     private var requestListener: ListenerRegistration?
     private var responseListeners: [String: ListenerRegistration] = [:]
@@ -336,6 +366,14 @@ private final class CashRydrHubVM: ObservableObject {
     func addFavoriteDriver(from offer: CashHubResponse) {
         guard let uid = Auth.auth().currentUser?.uid else {
             errorMessage = "Please log in to save favorite drivers."
+            return
+        }
+        if favoriteDrivers.contains(where: { $0.driverUid == offer.authorUid }) {
+            confirmationMessage = "\(offer.authorName) is already in your favorite drivers."
+            return
+        }
+        guard favoriteDrivers.count < favoriteDriverLimit else {
+            errorMessage = "You can save up to \(favoriteDriverLimit) favorite drivers. Remove one before adding another."
             return
         }
         let riderDocument = db.collection("riders").document(uid)
@@ -500,9 +538,17 @@ private final class CashRydrHubVM: ObservableObject {
         return true
     }
 
-    func sendMessage(to request: CashRydrRequest, message: String, authorName: String) -> Bool {
+    func sendMessage(to request: CashRydrRequest, message: String, authorName: String, mode: CashHubMessageMode = .requestThread) -> Bool {
         guard let uid = Auth.auth().currentUser?.uid else {
             errorMessage = "Please log in to send a message."
+            return false
+        }
+        if mode == .requestThread && request.isConnected {
+            errorMessage = "This request thread is closed because a driver has accepted the request."
+            return false
+        }
+        if mode == .directConnection && !request.isConnected {
+            errorMessage = "Direct messages open after a driver accepts the request."
             return false
         }
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -515,7 +561,7 @@ private final class CashRydrHubVM: ObservableObject {
             "authorUid": uid,
             "authorName": displayName(authorName, fallback: "Cash Hub User"),
             "authorRole": CashHubRole.rider.rawValue,
-            "kind": "message",
+            "kind": mode.responseKind,
             "message": trimmed,
             "createdAt": FieldValue.serverTimestamp()
         ], to: request)
@@ -772,7 +818,7 @@ struct CashRydrHubView: View {
     @State private var acceptedTermsCheckbox = false
     @State private var showPostRequest = false
     @State private var editingRequest: CashRydrRequest?
-    @State private var messagingRequest: CashRydrRequest?
+    @State private var messagingContext: CashHubMessageContext?
     @State private var viewingConnection: CashRydrRequest?
     @State private var riderPanel: CashHubRiderPanel?
     @State private var viewingFavoriteDriver: CashHubFavoriteDriver?
@@ -812,10 +858,16 @@ struct CashRydrHubView: View {
                 }
             }
         }
-        .sheet(item: $messagingRequest) { request in
-            CashHubMessageForm(request: request) { text in
-                if vm.sendMessage(to: request, message: text, authorName: session.userName) {
-                    messagingRequest = nil
+        .sheet(item: $messagingContext) { context in
+            let responses = vm.responsesByRequest[context.request.id] ?? []
+            CashHubMessageForm(
+                request: context.request,
+                mode: context.mode,
+                messages: responses.filter { $0.kind == context.mode.responseKind },
+                mentionCandidates: mentionCandidates(for: context.request, responses: responses)
+            ) { text in
+                if vm.sendMessage(to: context.request, message: text, authorName: session.userName, mode: context.mode) {
+                    messagingContext = nil
                 }
             }
         }
@@ -825,7 +877,7 @@ struct CashRydrHubView: View {
                 offer: vm.selectedOffer(for: request),
                 onMessage: {
                     viewingConnection = nil
-                    messagingRequest = request
+                    messagingContext = CashHubMessageContext(request: request, mode: .directConnection)
                 },
                 onCancel: {
                     vm.cancelConnection(for: request)
@@ -838,12 +890,16 @@ struct CashRydrHubView: View {
                 panel: panel,
                 requests: myRequests,
                 responses: vm.responsesByRequest,
+                favoriteDrivers: vm.favoriteDrivers,
                 onEdit: { editingRequest = $0 },
                 onDelete: { vm.removeRequest($0) },
                 onVisibilityChange: { request, visibility in vm.updateVisibility(for: request, to: visibility) },
                 onOpenConnection: { viewingConnection = $0 },
-                onMessage: { messagingRequest = $0 },
+                onMessage: { request, mode in messagingContext = CashHubMessageContext(request: request, mode: mode) },
                 onFavorite: { vm.addFavoriteDriver(from: $0) },
+                onViewFavoriteDriver: { viewingFavoriteDriver = $0 },
+                onRemoveFavoriteDriver: { vm.removeFavoriteDriver($0) },
+                onBlockFavoriteDriver: { driverPendingBlock = $0 },
                 onAcceptOffer: { offer, request in vm.acceptOffer(offer, for: request) },
                 onDeclineOffer: { offer, request in vm.declineOffer(offer, for: request) }
             )
@@ -896,14 +952,9 @@ struct CashRydrHubView: View {
                         onPost: { showPostRequest = true },
                         onRequests: { riderPanel = .requests },
                         onOffers: { riderPanel = .offers },
-                        onMessages: { riderPanel = .messages }
-                    )
-
-                    CashHubFavoriteDriversCard(
-                        drivers: Array(vm.favoriteDrivers.prefix(5)),
-                        onViewProfile: { viewingFavoriteDriver = $0 },
-                        onRemove: { vm.removeFavoriteDriver($0) },
-                        onBlock: { driverPendingBlock = $0 }
+                        onMessages: { riderPanel = .messages },
+                        onFavorites: { riderPanel = .favorites },
+                        favoriteDriverCount: vm.favoriteDrivers.count
                     )
 
                     ForEach(myRequests.filter(\.isConnected)) { request in
@@ -916,6 +967,16 @@ struct CashRydrHubView: View {
             }
         }
         .background(Color(.systemGroupedBackground))
+    }
+
+    private func mentionCandidates(for request: CashRydrRequest, responses: [CashHubResponse]) -> [String] {
+        var names = [request.riderName]
+        if let driverName = request.connectedDriverName {
+            names.append(driverName)
+        }
+        names.append(contentsOf: responses.map(\.authorName))
+        return Array(Set(names.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }))
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 }
 
@@ -974,6 +1035,8 @@ private struct CashHubActionGrid: View {
     let onRequests: () -> Void
     let onOffers: () -> Void
     let onMessages: () -> Void
+    let onFavorites: () -> Void
+    let favoriteDriverCount: Int
 
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
 
@@ -983,6 +1046,12 @@ private struct CashHubActionGrid: View {
             CashHubActionCard(title: "My Requests", icon: "list.bullet.clipboard", action: onRequests)
             CashHubActionCard(title: "Driver Offers", icon: "person.badge.plus", action: onOffers)
             CashHubActionCard(title: "Messages", icon: "bubble.left.and.bubble.right", action: onMessages)
+            CashHubActionCard(
+                title: "Favorite Drivers",
+                icon: "star.fill",
+                detail: "\(favoriteDriverCount)/10 saved",
+                action: onFavorites
+            )
         }
     }
 }
@@ -990,6 +1059,7 @@ private struct CashHubActionGrid: View {
 private struct CashHubActionCard: View {
     let title: String
     let icon: String
+    var detail: String?
     let action: () -> Void
 
     var body: some View {
@@ -1002,6 +1072,11 @@ private struct CashHubActionCard: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                if let detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding()
             .frame(minHeight: 95)
@@ -1026,7 +1101,7 @@ private struct CashHubFavoriteDriversCard: View {
                     .foregroundStyle(.primary)
                 Spacer()
                 if !drivers.isEmpty {
-                    Text("Recent")
+                    Text("\(drivers.count)/10 saved")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -1161,10 +1236,30 @@ private struct CashHubOnlineStatusLabel: View {
     let isOnline: Bool
 
     var body: some View {
-        Label(isOnline ? "Online" : "Offline", systemImage: "circle.fill")
-            .labelStyle(.titleAndIcon)
-            .font(.caption)
-            .foregroundStyle(isOnline ? .green : .secondary)
+        HStack(spacing: 5) {
+            statusIcon
+            Text(isOnline ? "Online" : "Offline")
+        }
+        .font(.caption)
+        .foregroundStyle(isOnline ? .green : .secondary)
+    }
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        if isOnline {
+            Circle()
+                .fill(Color.green)
+                .frame(width: 8, height: 8)
+        } else {
+            ZStack {
+                Circle()
+                    .stroke(Styles.rydrGradient, lineWidth: 1.6)
+                Image(systemName: "xmark")
+                    .font(.system(size: 6, weight: .bold))
+                    .foregroundStyle(Styles.rydrGradient)
+            }
+            .frame(width: 10, height: 10)
+        }
     }
 }
 
@@ -1252,12 +1347,16 @@ private struct CashHubRiderPanelView: View {
     let panel: CashHubRiderPanel
     let requests: [CashRydrRequest]
     let responses: [String: [CashHubResponse]]
+    let favoriteDrivers: [CashHubFavoriteDriver]
     let onEdit: (CashRydrRequest) -> Void
     let onDelete: (CashRydrRequest) -> Void
     let onVisibilityChange: (CashRydrRequest, String) -> Void
     let onOpenConnection: (CashRydrRequest) -> Void
-    let onMessage: (CashRydrRequest) -> Void
+    let onMessage: (CashRydrRequest, CashHubMessageMode) -> Void
     let onFavorite: (CashHubResponse) -> Void
+    let onViewFavoriteDriver: (CashHubFavoriteDriver) -> Void
+    let onRemoveFavoriteDriver: (CashHubFavoriteDriver) -> Void
+    let onBlockFavoriteDriver: (CashHubFavoriteDriver) -> Void
     let onAcceptOffer: (CashHubResponse, CashRydrRequest) -> Void
     let onDeclineOffer: (CashHubResponse, CashRydrRequest) -> Void
 
@@ -1269,7 +1368,12 @@ private struct CashHubRiderPanelView: View {
         case .requests: return "My Requests"
         case .offers: return "Driver Offers"
         case .messages: return "Messages"
+        case .favorites: return "Favorite Drivers"
         }
+    }
+
+    private var connectedRequests: [CashRydrRequest] {
+        requests.filter(\.isConnected)
     }
 
     var body: some View {
@@ -1296,10 +1400,13 @@ private struct CashHubRiderPanelView: View {
                                     if request.isConnected {
                                         Button("View Connection") { onOpenConnection(request) }
                                             .buttonStyle(.borderedProminent).tint(.green)
+                                        Text("Thread closed")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.secondary)
                                     } else {
                                         Button("Edit") { onEdit(request) }.buttonStyle(.bordered)
+                                        Button("Message") { onMessage(request, .requestThread) }.buttonStyle(.bordered)
                                     }
-                                    Button("Message") { onMessage(request) }.buttonStyle(.bordered)
                                     Button("Delete", role: .destructive) { requestPendingDeletion = request }
                                         .buttonStyle(.bordered)
                                 }
@@ -1312,7 +1419,7 @@ private struct CashHubRiderPanelView: View {
                                 CashHubOfferCard(
                                     offer: offer,
                                     isConnected: request.isConnected,
-                                    onMessage: { onMessage(request) },
+                                    onMessage: { onMessage(request, request.isConnected ? .directConnection : .requestThread) },
                                     onFavorite: { onFavorite(offer) },
                                     onAccept: { onAcceptOffer(offer, request) },
                                     onDecline: { onDeclineOffer(offer, request) }
@@ -1320,8 +1427,8 @@ private struct CashHubRiderPanelView: View {
                             }
                         }
                     case .messages:
-                        ForEach(requests) { request in
-                            let messages = (responses[request.id] ?? []).filter { !$0.message.isEmpty }
+                        ForEach(connectedRequests) { request in
+                            let messages = (responses[request.id] ?? []).filter { $0.kind == CashHubMessageMode.directConnection.responseKind && !$0.message.isEmpty }
                             if !messages.isEmpty {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("\(request.pickup) to \(request.destination)").font(.headline)
@@ -1330,14 +1437,31 @@ private struct CashHubRiderPanelView: View {
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
                                     }
-                                    Button("Message") { onMessage(request) }
+                                    Button("Message") { onMessage(request, .directConnection) }
+                                        .buttonStyle(.bordered)
+                                }
+                                .cashHubCard()
+                            } else {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("\(request.pickup) to \(request.destination)").font(.headline)
+                                    Text("No direct messages yet.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                    Button("Message") { onMessage(request, .directConnection) }
                                         .buttonStyle(.bordered)
                                 }
                                 .cashHubCard()
                             }
                         }
+                    case .favorites:
+                        CashHubFavoriteDriversCard(
+                            drivers: favoriteDrivers,
+                            onViewProfile: onViewFavoriteDriver,
+                            onRemove: onRemoveFavoriteDriver,
+                            onBlock: onBlockFavoriteDriver
+                        )
                     }
-                    if requests.isEmpty {
+                    if isPanelEmpty {
                         ContentUnavailableView(title, systemImage: "tray", description: Text("Nothing to show yet."))
                             .padding(.top, 50)
                     }
@@ -1373,6 +1497,17 @@ private struct CashHubRiderPanelView: View {
                     Text("This permanently deletes your request from Cash Rydr Hub.")
                 }
             }
+        }
+    }
+
+    private var isPanelEmpty: Bool {
+        switch panel {
+        case .requests, .offers:
+            return requests.isEmpty
+        case .messages:
+            return connectedRequests.isEmpty
+        case .favorites:
+            return false
         }
     }
 }
@@ -1678,9 +1813,34 @@ private struct CashHubOfferForm: View {
 
 private struct CashHubMessageForm: View {
     let request: CashRydrRequest
+    let mode: CashHubMessageMode
+    let messages: [CashHubResponse]
+    let mentionCandidates: [String]
     var onSend: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var message = ""
+
+    private var canSend: Bool {
+        switch mode {
+        case .requestThread: return !request.isConnected
+        case .directConnection: return request.isConnected
+        }
+    }
+
+    private var mentionSuggestions: [String] {
+        guard let query = activeMentionQuery else { return [] }
+        return mentionCandidates
+            .filter { $0.localizedCaseInsensitiveContains(query) || query.isEmpty }
+            .prefix(4)
+            .map { $0 }
+    }
+
+    private var activeMentionQuery: String? {
+        guard let atIndex = message.lastIndex(of: "@") else { return nil }
+        let afterAt = message[message.index(after: atIndex)...]
+        if afterAt.contains(where: { $0.isWhitespace || $0.isNewline }) { return nil }
+        return String(afterAt)
+    }
 
     var body: some View {
         NavigationStack {
@@ -1688,21 +1848,68 @@ private struct CashHubMessageForm: View {
                 Section("Regarding") {
                     Text("\(request.pickup) to \(request.destination)")
                 }
+                Section(mode.title) {
+                    if messages.isEmpty {
+                        Text(mode == .requestThread ? "No thread messages yet." : "No direct messages yet.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(messages) { response in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(response.authorName)
+                                    .font(.caption.weight(.semibold))
+                                Text(response.message)
+                                    .font(.subheadline)
+                            }
+                            .padding(.vertical, 3)
+                        }
+                    }
+                }
                 Section("Message") {
-                    TextField("Confirm details or ask a question", text: $message, axis: .vertical)
-                        .lineLimit(5, reservesSpace: true)
+                    if canSend {
+                        TextField("Use @ to mention someone by profile name", text: $message, axis: .vertical)
+                            .lineLimit(5, reservesSpace: true)
+                        if !mentionSuggestions.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(mentionSuggestions, id: \.self) { name in
+                                        Button("@\(name)") {
+                                            insertMention(name)
+                                        }
+                                        .font(.caption.weight(.semibold))
+                                        .buttonStyle(.bordered)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Text(mode == .requestThread
+                             ? "This request thread is closed because a driver has accepted the request."
+                             : "Direct messages open after a driver accepts the request.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
-            .navigationTitle("Message")
+            .navigationTitle(mode.title)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Send") { onSend(message) }
+                        .disabled(!canSend || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
+    }
+
+    private func insertMention(_ name: String) {
+        guard let atIndex = message.lastIndex(of: "@") else {
+            message += "@\(name) "
+            return
+        }
+        message.replaceSubrange(atIndex..<message.endIndex, with: "@\(name) ")
     }
 }
 

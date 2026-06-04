@@ -7,6 +7,7 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import FirebaseAuth
 
 // MARK: - Models
 struct Driver: Identifiable, Equatable {
@@ -28,6 +29,108 @@ struct Driver: Identifiable, Equatable {
 struct RideEstimate: Equatable, Codable {
     var distanceMiles: Double
     var durationMinutes: Double
+}
+
+enum RydrRideTier {
+    case eco
+    case go
+    case xl
+    case pristine
+    case executive
+}
+
+struct RideTierPricing {
+    let tier: RydrRideTier
+    let title: String
+    let minimumRideSubtotal: Double
+    let bookingFeeUnderFiveMiles: Double
+    let bookingFeeFiveMilesOrMore: Double
+    let maxPerMile: Double
+    let maxPerMinute: Double
+
+    func bookingFee(for distanceMiles: Double) -> Double {
+        distanceMiles < 5 ? bookingFeeUnderFiveMiles : bookingFeeFiveMilesOrMore
+    }
+}
+
+enum RydrPricing {
+    static let driverPayoutShare = 0.60
+
+    static func config(for rideType: String) -> RideTierPricing {
+        switch tier(for: rideType) {
+        case .eco:
+            return .init(
+                tier: .eco,
+                title: "Rydr Eco",
+                minimumRideSubtotal: 7.00,
+                bookingFeeUnderFiveMiles: 3.00,
+                bookingFeeFiveMilesOrMore: 5.00,
+                maxPerMile: 1.00,
+                maxPerMinute: 0.50
+            )
+        case .go:
+            return .init(
+                tier: .go,
+                title: "Rydr Go",
+                minimumRideSubtotal: 7.00,
+                bookingFeeUnderFiveMiles: 3.00,
+                bookingFeeFiveMilesOrMore: 6.00,
+                maxPerMile: 1.00,
+                maxPerMinute: 0.50
+            )
+        case .xl:
+            return .init(
+                tier: .xl,
+                title: "Rydr XL",
+                minimumRideSubtotal: 9.00,
+                bookingFeeUnderFiveMiles: 4.00,
+                bookingFeeFiveMilesOrMore: 8.00,
+                maxPerMile: 2.00,
+                maxPerMinute: 0.50
+            )
+        case .pristine:
+            return .init(
+                tier: .pristine,
+                title: "Rydr Pristine",
+                minimumRideSubtotal: 12.00,
+                bookingFeeUnderFiveMiles: 5.00,
+                bookingFeeFiveMilesOrMore: 10.00,
+                maxPerMile: 4.00,
+                maxPerMinute: 1.00
+            )
+        case .executive:
+            return .init(
+                tier: .executive,
+                title: "Rydr Executive",
+                minimumRideSubtotal: 18.00,
+                bookingFeeUnderFiveMiles: 8.00,
+                bookingFeeFiveMilesOrMore: 15.00,
+                maxPerMile: 4.00,
+                maxPerMinute: 1.00
+            )
+        }
+    }
+
+    private static func tier(for rideType: String) -> RydrRideTier {
+        let key = rideType.lowercased()
+        if key.contains("eco") { return .eco }
+        if key.contains("xl") { return .xl }
+        if key.contains("prestine") || key.contains("pristine") { return .pristine }
+        if key.contains("executive") { return .executive }
+        return .go
+    }
+}
+
+struct RideFareBreakdown: Equatable {
+    let distanceCost: Double
+    let timeCost: Double
+    let calculatedSubtotal: Double
+    let minimumFareAdjustment: Double
+    let rideSubtotal: Double
+    let bookingFee: Double
+    let finalRiderTotal: Double
+    let driverPayout: Double
+    let platformShare: Double
 }
 
 struct PaymentCard: Identifiable, Equatable {
@@ -60,6 +163,13 @@ struct Ride: Identifiable, Equatable {
     var startedAt: Date = Date()
     var status: Status = .enRouteToPickup
     var fare: Double = 0
+}
+
+struct RideChatContext: Equatable {
+    let rideId: String
+    let riderId: String
+    let driverId: String
+    let driverName: String
 }
 
 // MARK: - Service protocol
@@ -166,6 +276,20 @@ final class RideManager: ObservableObject {
         }
     }
 
+    var activeRideChatContext: RideChatContext? {
+        guard let ride = currentRide,
+              let riderId = Auth.auth().currentUser?.uid else {
+            return nil
+        }
+
+        return RideChatContext(
+            rideId: currentServiceRideId ?? ride.id.uuidString,
+            riderId: riderId,
+            driverId: ride.driver.id,
+            driverName: ride.driver.name
+        )
+    }
+
     // MARK: - Promo helpers
 
     /// Public helper for views to price with any saved promo applied.
@@ -262,7 +386,7 @@ final class RideManager: ObservableObject {
     func handleAccept() {
         guard let driver = selectedDriver else { return }
 
-        // Compute fare with caps/fee + promo
+        // Compute rider fare with caps, platform minimum subtotal, booking fee, and promo.
         let fareBeforePromo = rawFare(estimate: cachedEstimate, with: driver, rideType: cachedRideType)
         let fareAfterPromo = currentAppliedRydrBankCode == nil ? applyPromo(to: fareBeforePromo) : 0
         currentBaseFare = fareAfterPromo
@@ -342,6 +466,7 @@ final class RideManager: ObservableObject {
         lastReceipt = receipt
         history.insert(receipt, at: 0)
         let backendRideId = currentServiceRideId ?? ride.id.uuidString
+        let chatContext = activeRideChatContext
         let appliedCode = currentAppliedRydrBankCode
         let rideType = ride.rideType
         let distance = ride.estimate.distanceMiles
@@ -353,6 +478,7 @@ final class RideManager: ObservableObject {
         stopMovement()
         clearActiveRideSnapshot()
         state = .completed
+        closeRideChatIfNeeded(chatContext)
 
         Task {
             if let appliedCode, !appliedCode.isEmpty {
@@ -369,6 +495,7 @@ final class RideManager: ObservableObject {
     func cancelAll() {
         decisionTask?.cancel()
         locationTask?.cancel()
+        let chatContext = activeRideChatContext
         stopMovement()
         currentRide = nil
         selectedDriver = nil
@@ -378,6 +505,7 @@ final class RideManager: ObservableObject {
         releaseAppliedRydrBankCodeIfNeeded()
         clearActiveRideSnapshot()
         state = .cancelled
+        closeRideChatIfNeeded(chatContext)
     }
 
     // MARK: - Mock movement & helpers
@@ -467,22 +595,43 @@ final class RideManager: ObservableObject {
         return RideEstimate(distanceMiles: (miles * 10).rounded()/10, durationMinutes: round(minutes))
     }
 
-    /// Booking fees and caps per ride type.
-    private func caps(for rideType: String) -> (booking: Double, maxPerMile: Double, maxPerMinute: Double) {
-        let key = rideType.lowercased()
-        if key.contains("prestine") { return (8.0, 4.0, 1.0) }   // Rydr Prestine
-        if key.contains("xl")       { return (5.0, 2.0, 0.5) }   // Rydr XL
-        return (4.0, 1.0, 0.5)                                  // Rydr Go / Eco (default)
+    static func pricingConfig(for rideType: String) -> RideTierPricing {
+        RydrPricing.config(for: rideType)
     }
 
-    /// Raw fare BEFORE promo discounts (booking fee + capped variable).
+    static func fareBreakdown(estimate: RideEstimate, with driver: Driver, rideType: String) -> RideFareBreakdown {
+        let pricing = RydrPricing.config(for: rideType)
+        let perMile = min(driver.perMile, pricing.maxPerMile)
+        let perMinute = min(driver.perMinute, pricing.maxPerMinute)
+        let distanceCost = estimate.distanceMiles * perMile
+        let timeCost = estimate.durationMinutes * perMinute
+        let calculatedSubtotal = distanceCost + timeCost
+
+        // Platform minimum fare logic for short/low-cost rides. This raises the ride
+        // subtotal used for rider pricing and driver payout without changing driver rates.
+        let minimumFareAdjustment = max(0, pricing.minimumRideSubtotal - calculatedSubtotal)
+        let rideSubtotal = calculatedSubtotal + minimumFareAdjustment
+        let bookingFee = pricing.bookingFee(for: estimate.distanceMiles)
+        let driverPayout = rideSubtotal * RydrPricing.driverPayoutShare
+        let platformShare = (rideSubtotal - driverPayout) + bookingFee
+        let finalRiderTotal = rideSubtotal + bookingFee
+
+        return RideFareBreakdown(
+            distanceCost: (distanceCost * 100).rounded() / 100,
+            timeCost: (timeCost * 100).rounded() / 100,
+            calculatedSubtotal: (calculatedSubtotal * 100).rounded() / 100,
+            minimumFareAdjustment: (minimumFareAdjustment * 100).rounded() / 100,
+            rideSubtotal: (rideSubtotal * 100).rounded() / 100,
+            bookingFee: bookingFee,
+            finalRiderTotal: (finalRiderTotal * 100).rounded() / 100,
+            driverPayout: (driverPayout * 100).rounded() / 100,
+            platformShare: (platformShare * 100).rounded() / 100
+        )
+    }
+
+    /// Raw fare BEFORE promo discounts (adjusted ride subtotal + booking fee).
     private func rawFare(estimate: RideEstimate, with driver: Driver, rideType: String) -> Double {
-        let c = caps(for: rideType)
-        let perMile   = min(driver.perMile,   c.maxPerMile)
-        let perMinute = min(driver.perMinute, c.maxPerMinute)
-        let variable = estimate.distanceMiles * perMile + estimate.durationMinutes * perMinute
-        let total = c.booking + variable
-        return (total * 100).rounded() / 100.0
+        Self.fareBreakdown(estimate: estimate, with: driver, rideType: rideType).finalRiderTotal
     }
 
     func markRiderPickedUp() {
@@ -502,6 +651,7 @@ final class RideManager: ObservableObject {
     private func cancelBeforePickupAndReturnToSelection() {
         locationTask?.cancel()
         decisionTask?.cancel()
+        let chatContext = activeRideChatContext
         stopMovement()
 
         if let selectedDriver {
@@ -531,10 +681,12 @@ final class RideManager: ObservableObject {
                 try? await rideService.cancelRide(rideId: id)
             }
         }
+        closeRideChatIfNeeded(chatContext)
     }
 
     private func cancelMidRideAndComplete() {
         guard let ride = currentRide else { return }
+        let chatContext = activeRideChatContext
 
         locationTask?.cancel()
         decisionTask?.cancel()
@@ -571,6 +723,19 @@ final class RideManager: ObservableObject {
         releaseAppliedRydrBankCodeIfNeeded()
         clearActiveRideSnapshot()
         state = .completed
+        closeRideChatIfNeeded(chatContext)
+    }
+
+    private func closeRideChatIfNeeded(_ context: RideChatContext?) {
+        guard let context else { return }
+
+        Task {
+            try? await RideChatService().closeChat(
+                rideId: context.rideId,
+                riderId: context.riderId,
+                driverId: context.driverId
+            )
+        }
     }
 
     private func releaseAppliedRydrBankCodeIfNeeded() {
@@ -586,7 +751,7 @@ final class RideManager: ObservableObject {
     }
 
     private func cappedWaitRate(for driver: Driver, rideType: String) -> Double {
-        min(driver.perMinute, caps(for: rideType).maxPerMinute)
+        min(driver.perMinute, Self.pricingConfig(for: rideType).maxPerMinute)
     }
 
     private func awaitDriverDecisionWithTimeout(rideId: String) async throws -> DriverDecision {

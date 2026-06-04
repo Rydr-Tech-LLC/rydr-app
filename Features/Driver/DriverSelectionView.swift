@@ -140,11 +140,12 @@ private struct DriverCard: View {
     let promoAppliedDevFree: Bool
     let onConfirm: () -> Void
 
+    private var fareBreakdown: RideFareBreakdown {
+        RideManager.fareBreakdown(estimate: estimate, with: driver, rideType: rideType)
+    }
+
     private var baseFare: Double {
-        // Same as RideManager.fareFor() math
-        let variable = estimate.distanceMiles * driver.perMile + estimate.durationMinutes * driver.perMinute
-        let base: Double = 2.50
-        return (base + variable).rounded(to: 2)
+        fareBreakdown.finalRiderTotal
     }
 
     private var finalFare: Double {
@@ -220,6 +221,17 @@ private struct DriverCard: View {
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
+
+            if fareBreakdown.minimumFareAdjustment > 0 {
+                HStack {
+                    Text("Minimum Fare Adjustment")
+                    Spacer()
+                    Text("$\(fareBreakdown.minimumFareAdjustment, specifier: "%.2f")")
+                        .monospacedDigit()
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
 
             // Compliments (chips)
             ScrollView(.horizontal, showsIndicators: false) {
@@ -380,6 +392,5 @@ private extension Double {
         return (self * p).rounded() / p
     }
 }
-
 
 

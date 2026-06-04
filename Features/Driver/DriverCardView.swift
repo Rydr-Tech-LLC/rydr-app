@@ -14,34 +14,21 @@ struct DriverCardView: View {
     var rideType: String = "Rydr Go"                                            // fallback if host doesn't pass one
     var onConfirm: () -> Void
 
-    // Tier rules
-    private struct TierCaps {
-        let bookingFee: Double
-        let maxPerMile: Double
-        let maxPerMinute: Double
-        var title: String
-    }
-    private var caps: TierCaps {
-        switch rideType.lowercased() {
-        case "rydr eco", "eco":
-            return .init(bookingFee: 4, maxPerMile: 1.0, maxPerMinute: 0.50, title: "Rydr Eco")
-        case "rydr xl", "xl":
-            return .init(bookingFee: 5, maxPerMile: 2.0, maxPerMinute: 0.50, title: "Rydr XL")
-        case "rydr prestine", "prestine", "pristine":
-            return .init(bookingFee: 8, maxPerMile: 4.0, maxPerMinute: 1.00, title: "Rydr Prestine")
-        default:
-            return .init(bookingFee: 4, maxPerMile: 1.0, maxPerMinute: 0.50, title: "Rydr Go")
-        }
+    private var pricingConfig: RideTierPricing {
+        RideManager.pricingConfig(for: rideType)
     }
 
     // Capped rates for this tier
-    private var perMile: Double   { min(driver.perMile,   caps.maxPerMile) }
-    private var perMinute: Double { min(driver.perMinute, caps.maxPerMinute) }
+    private var perMile: Double { min(driver.perMile, pricingConfig.maxPerMile) }
+    private var perMinute: Double { min(driver.perMinute, pricingConfig.maxPerMinute) }
 
     // Estimated fare (booking fee + time + distance)
+    private var fareBreakdown: RideFareBreakdown {
+        RideManager.fareBreakdown(estimate: estimate, with: driver, rideType: rideType)
+    }
+
     private var price: Double {
-        let v = estimate.distanceMiles * perMile + estimate.durationMinutes * perMinute
-        return ((caps.bookingFee + v) * 100).rounded() / 100.0
+        fareBreakdown.finalRiderTotal
     }
 
     var body: some View {
@@ -74,7 +61,7 @@ struct DriverCardView: View {
                         Text("$\(price, specifier: "%.2f")")
                             .font(.title3.bold())
                             .monospacedDigit()
-                        Text(caps.title)
+                        Text(pricingConfig.title)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -132,7 +119,7 @@ struct DriverCardView: View {
 
                 // Rate breakdown row (small print)
                 HStack(spacing: 10) {
-                    label(value: caps.bookingFee, unit: "booking")
+                    label(value: fareBreakdown.bookingFee, unit: "booking")
                     Divider().frame(height: 14)
                     label(value: perMile, unit: "/mi")
                     label(value: perMinute, unit: "/min")
@@ -140,6 +127,17 @@ struct DriverCardView: View {
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+
+                if fareBreakdown.minimumFareAdjustment > 0 {
+                    HStack {
+                        Text("Minimum Fare Adjustment")
+                        Spacer()
+                        Text("$\(fareBreakdown.minimumFareAdjustment, specifier: "%.2f")")
+                            .monospacedDigit()
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
 
                 // Confirm CTA
                 Button {
@@ -180,4 +178,3 @@ struct DriverCardView: View {
         }
     }
 }
-

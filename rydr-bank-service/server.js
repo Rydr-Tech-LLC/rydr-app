@@ -113,12 +113,14 @@ function rewardGroupForRideType(rideType = "") {
   const key = String(rideType).toLowerCase();
   if (key.includes("xl")) return "xl";
   if (key.includes("prestine") || key.includes("pristine")) return "prestine";
+  if (key.includes("executive")) return "executive";
   return "go_eco";
 }
 
 function rewardLabelForGroup(group = "go_eco") {
   if (group === "xl") return "Rydr XL";
   if (group === "prestine") return "Rydr Prestine";
+  if (group === "executive") return "Rydr Executive";
   return "Rydr Go / Rydr Eco";
 }
 

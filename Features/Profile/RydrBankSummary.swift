@@ -241,7 +241,7 @@ struct RydrBankView: View {
                 }
                 // TEMP END
 
-                Text("Earn 1 banked ride after every 10 completed rides of 5 miles or more in the matching ride type. Rydr Go and Rydr Eco share progress. Each banked ride covers one trip up to 15 miles.")
+                Text("Earn 1 banked ride after every 10 completed rides of 5 miles or more in the matching ride type. Rydr Go and Rydr Eco share progress. XL, Prestine, and Executive track separately. Each banked ride covers one trip up to 15 miles.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal)
@@ -349,6 +349,7 @@ struct RydrBankView: View {
             progressCard(title: "Rydr Go / Rydr Eco", icon: "leaf.fill", rewardGroup: "go_eco")
             progressCard(title: "Rydr XL", icon: "bus.fill", rewardGroup: "xl")
             progressCard(title: "Rydr Prestine", icon: "sparkles", rewardGroup: "prestine")
+            progressCard(title: "Rydr Executive", icon: "briefcase.fill", rewardGroup: "executive")
         }
     }
 
