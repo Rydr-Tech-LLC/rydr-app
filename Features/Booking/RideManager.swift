@@ -139,8 +139,78 @@ struct PaymentCard: Identifiable, Equatable {
     let brand: String              // "Visa", "Mastercard", etc.
 }
 
+struct ReceiptChargeLine: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let amount: Double
+}
+
+struct ReceiptChargeBreakdown: Equatable {
+    var rideFare: Double = 0
+    var distanceCharge: Double = 0
+    var timeCharge: Double = 0
+    var minimumFareAdjustment: Double = 0
+    var bookingFee: Double = 0
+    var waitCharge: Double = 0
+    var destinationChangeCharge: Double = 0
+    var additionalStopCharge: Double = 0
+    var timeAdjustment: Double = 0
+    var promoDiscount: Double = 0
+    var tip: Double = 0
+    var otherAdjustment: Double = 0
+
+    static func legacy(total: Double) -> ReceiptChargeBreakdown {
+        ReceiptChargeBreakdown(rideFare: total)
+    }
+
+    var calculatedTotal: Double {
+        [
+            rideFare,
+            distanceCharge,
+            timeCharge,
+            minimumFareAdjustment,
+            bookingFee,
+            waitCharge,
+            destinationChangeCharge,
+            additionalStopCharge,
+            timeAdjustment,
+            promoDiscount,
+            tip,
+            otherAdjustment
+        ].reduce(0, +).currencyRounded
+    }
+
+    var lineItems: [ReceiptChargeLine] {
+        [
+            line("ride-fare", "Ride fare", rideFare),
+            line("distance", "Distance", distanceCharge),
+            line("time", "Time", timeCharge),
+            line("minimum-fare", "Minimum fare adjustment", minimumFareAdjustment),
+            line("booking-fee", "Booking fee", bookingFee),
+            line("wait-time", "Wait time", waitCharge),
+            line("destination-change", "Destination change", destinationChangeCharge),
+            line("additional-stop", "Additional stop", additionalStopCharge),
+            line("time-adjustment", "Ride time adjustment", timeAdjustment),
+            line("promo", "RydrBank credit", promoDiscount),
+            line("tip", "Tip", tip),
+            line("adjustment", "Adjustment", otherAdjustment)
+        ].compactMap { $0 }
+    }
+
+    func addingTip(_ tipAmount: Double) -> ReceiptChargeBreakdown {
+        var copy = self
+        copy.tip = tipAmount.currencyRounded
+        return copy
+    }
+
+    private func line(_ id: String, _ title: String, _ amount: Double) -> ReceiptChargeLine? {
+        guard abs(amount) >= 0.01 else { return nil }
+        return ReceiptChargeLine(id: id, title: title, amount: amount.currencyRounded)
+    }
+}
+
 struct Receipt: Identifiable, Equatable {
-    let id = UUID()
+    let id: UUID
     let rideId: UUID
     let date: Date
     let driverName: String
@@ -150,6 +220,57 @@ struct Receipt: Identifiable, Equatable {
     let durationMinutes: Double
     let fare: Double
     let cardMasked: String
+    let chargeBreakdown: ReceiptChargeBreakdown
+
+    init(
+        id: UUID = UUID(),
+        rideId: UUID,
+        date: Date,
+        driverName: String,
+        pickup: String,
+        dropoff: String,
+        distanceMiles: Double,
+        durationMinutes: Double,
+        fare: Double,
+        cardMasked: String,
+        chargeBreakdown: ReceiptChargeBreakdown? = nil
+    ) {
+        self.id = id
+        self.rideId = rideId
+        self.date = date
+        self.driverName = driverName
+        self.pickup = pickup
+        self.dropoff = dropoff
+        self.distanceMiles = distanceMiles
+        self.durationMinutes = durationMinutes
+        self.fare = fare.currencyRounded
+        self.cardMasked = cardMasked
+        self.chargeBreakdown = chargeBreakdown ?? .legacy(total: fare)
+    }
+
+    func addingTip(cents: Int) -> Receipt {
+        let tipAmount = (Double(max(0, cents)) / 100.0).currencyRounded
+        let updatedBreakdown = chargeBreakdown.addingTip(tipAmount)
+        return Receipt(
+            id: id,
+            rideId: rideId,
+            date: date,
+            driverName: driverName,
+            pickup: pickup,
+            dropoff: dropoff,
+            distanceMiles: distanceMiles,
+            durationMinutes: durationMinutes,
+            fare: updatedBreakdown.calculatedTotal,
+            cardMasked: cardMasked,
+            chargeBreakdown: updatedBreakdown
+        )
+    }
+}
+
+private extension Double {
+    var currencyRounded: Double {
+        (self * 100).rounded() / 100
+    }
 }
 
 struct Ride: Identifiable, Equatable {
@@ -452,6 +573,7 @@ final class RideManager: ObservableObject {
 
         guard let ride = currentRide else { return }
         let card = savedCards[min(selectedCardIndex, savedCards.count - 1)]
+        let chargeBreakdown = receiptChargeBreakdown(for: ride, finalFare: ride.fare)
         let receipt = Receipt(
             rideId: ride.id,
             date: Date(),
@@ -461,7 +583,8 @@ final class RideManager: ObservableObject {
             distanceMiles: ride.estimate.distanceMiles,
             durationMinutes: ride.estimate.durationMinutes,
             fare: ride.fare,
-            cardMasked: "\(card.brand) ••\(card.last4)"
+            cardMasked: "\(card.brand) ••\(card.last4)",
+            chargeBreakdown: chargeBreakdown
         )
         lastReceipt = receipt
         history.insert(receipt, at: 0)
@@ -489,6 +612,15 @@ final class RideManager: ObservableObject {
                 }
             }
             _ = try? await RydrBankAPI.rideComplete(rideId: backendRideId, distanceMi: distance, rideType: rideType)
+        }
+    }
+
+    func applyTipToLastReceipt(cents: Int) {
+        guard cents >= 0, let receipt = lastReceipt else { return }
+        let updatedReceipt = receipt.addingTip(cents: cents)
+        lastReceipt = updatedReceipt
+        if let index = history.firstIndex(where: { $0.id == receipt.id }) {
+            history[index] = updatedReceipt
         }
     }
 
@@ -634,6 +766,33 @@ final class RideManager: ObservableObject {
         Self.fareBreakdown(estimate: estimate, with: driver, rideType: rideType).finalRiderTotal
     }
 
+    private func receiptChargeBreakdown(
+        for ride: Ride,
+        finalFare: Double,
+        includeRideTimeAdjustment: Bool = false
+    ) -> ReceiptChargeBreakdown {
+        let fareBreakdown = Self.fareBreakdown(estimate: ride.estimate, with: ride.driver, rideType: ride.rideType)
+        var receiptBreakdown = ReceiptChargeBreakdown(
+            distanceCharge: fareBreakdown.distanceCost,
+            timeCharge: fareBreakdown.timeCost,
+            minimumFareAdjustment: fareBreakdown.minimumFareAdjustment,
+            bookingFee: fareBreakdown.bookingFee,
+            waitCharge: pickupWaitCharge,
+            promoDiscount: currentAppliedRydrBankCode == nil ? 0 : -fareBreakdown.finalRiderTotal
+        )
+
+        let reconciliation = (finalFare - receiptBreakdown.calculatedTotal).currencyRounded
+        if abs(reconciliation) >= 0.01 {
+            if includeRideTimeAdjustment {
+                receiptBreakdown.timeAdjustment = reconciliation
+            } else {
+                receiptBreakdown.otherAdjustment = reconciliation
+            }
+        }
+
+        return receiptBreakdown
+    }
+
     func markRiderPickedUp() {
         guard currentRide?.status == .waitingForRider else { return }
         currentRide?.status = .enRouteToDropoff
@@ -698,6 +857,11 @@ final class RideManager: ObservableObject {
         let proratedMinutes = max(1, (ride.estimate.durationMinutes * 0.6 * traveledFraction).rounded())
         let proratedFare = ((ride.fare * traveledFraction) * 100).rounded() / 100
         let card = savedCards[min(selectedCardIndex, savedCards.count - 1)]
+        let chargeBreakdown = receiptChargeBreakdown(
+            for: ride,
+            finalFare: proratedFare,
+            includeRideTimeAdjustment: true
+        )
 
         lastReceipt = Receipt(
             rideId: ride.id,
@@ -708,7 +872,8 @@ final class RideManager: ObservableObject {
             distanceMiles: proratedDistance,
             durationMinutes: proratedMinutes,
             fare: proratedFare,
-            cardMasked: "\(card.brand) ••\(card.last4)"
+            cardMasked: "\(card.brand) ••\(card.last4)",
+            chargeBreakdown: chargeBreakdown
         )
         if let lastReceipt {
             history.insert(lastReceipt, at: 0)

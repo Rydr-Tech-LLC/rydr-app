@@ -116,38 +116,28 @@ struct RideReceiptDetailView: View {
 
                 // Summary card
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Driver").font(.subheadline).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(receipt.driverName).bold()
-                    }
-                    HStack {
-                        Text("When").font(.subheadline).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(receipt.date.formatted(date: .abbreviated, time: .shortened)).bold()
-                    }
-                    HStack {
-                        Text("Route").font(.subheadline).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(receipt.pickup + " → " + receipt.dropoff)
-                            .bold().lineLimit(1)
-                    }
-                    HStack {
-                        Text("Distance / Time").font(.subheadline).foregroundStyle(.secondary)
-                        Spacer()
-                        Text("\(String(format: "%.1f", receipt.distanceMiles)) mi • \(Int(receipt.durationMinutes)) min").bold()
-                    }
+                    receiptRow("Driver", receipt.driverName)
+                    receiptRow("When", receipt.date.formatted(date: .abbreviated, time: .shortened))
+                    receiptRow("Route", receipt.pickup + " → " + receipt.dropoff, lineLimit: 1)
+                    receiptRow("Distance / Time", "\(String(format: "%.1f", receipt.distanceMiles)) mi • \(Int(receipt.durationMinutes)) min")
+
                     Divider()
-                    HStack {
-                        Text("Total").font(.headline).bold()
-                        Spacer()
-                        Text("$" + String(format: "%.2f", receipt.fare)).font(.headline).bold()
+
+                    receiptAmountRow("Total", receipt.fare, isTotal: true)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Charge breakdown")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+
+                        ForEach(receipt.chargeBreakdown.lineItems) { item in
+                            receiptAmountRow(item.title, item.amount)
+                        }
                     }
-                    HStack {
-                        Text("Paid with").font(.subheadline).foregroundStyle(.secondary)
-                        Spacer()
-                        Text(receipt.cardMasked).bold()
-                    }
+
+                    Divider()
+
+                    receiptRow("Paid with", receipt.cardMasked)
                 }
                 .padding(14)
                 .background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
@@ -159,6 +149,39 @@ struct RideReceiptDetailView: View {
         }
         .navigationTitle("Receipt")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func receiptRow(_ title: String, _ value: String, lineLimit: Int? = nil) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .multilineTextAlignment(.trailing)
+                .lineLimit(lineLimit)
+                .foregroundStyle(Styles.rydrGradient)
+        }
+    }
+
+    private func receiptAmountRow(_ title: String, _ amount: Double, isTotal: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .font(isTotal ? .headline : .subheadline)
+                .fontWeight(isTotal ? .bold : .regular)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 12)
+            Text(currency(amount))
+                .font(isTotal ? .headline.bold() : .subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(Styles.rydrGradient)
+        }
+    }
+
+    private func currency(_ amount: Double) -> String {
+        let sign = amount < 0 ? "-$" : "$"
+        return sign + String(format: "%.2f", abs(amount))
     }
 }
 

@@ -93,7 +93,11 @@ struct RideInProgressView: View {
                 .presentationDetents([.medium])
             }
             .sheet(isPresented: $showEnd) {
-                EndRideView(ride: rideManager.lastReceipt, onDone: { dismiss() })
+                EndRideView(
+                    ride: rideManager.lastReceipt,
+                    onDone: { dismiss() },
+                    onTipSelected: { rideManager.applyTipToLastReceipt(cents: $0) }
+                )
             }
             .alert("Report an incident", isPresented: $showReportAlert) {
                 Button("OK", role: .cancel) { }
