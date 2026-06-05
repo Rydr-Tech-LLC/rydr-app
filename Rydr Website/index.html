@@ -63,7 +63,42 @@
         </div>
 
         <div class="hero-visual reveal" aria-label="Rydr app preview">
-          <img class="hero-phone" src="assets/hero-rydr.png" alt="Rydr mobile app interface" />
+          <div class="rydr-device" aria-hidden="true">
+            <div class="device-notch"></div>
+            <div class="device-screen">
+              <div class="device-header">
+                <span>Rydr</span>
+                <strong>Choose Your Driver</strong>
+              </div>
+              <div class="device-map">
+                <span class="route-dot route-start"></span>
+                <span class="route-line"></span>
+                <span class="route-dot route-end"></span>
+                <span class="driver-pin pin-one">A</span>
+                <span class="driver-pin pin-two">M</span>
+              </div>
+              <div class="device-sheet">
+                <div class="sheet-grabber"></div>
+                <div class="device-driver selected">
+                  <div class="avatar">M</div>
+                  <div>
+                    <strong>Maya</strong>
+                    <span>5.0 rating · Ford Mach-E</span>
+                  </div>
+                  <b>$17.85</b>
+                </div>
+                <div class="device-driver">
+                  <div class="avatar">A</div>
+                  <div>
+                    <strong>Ari</strong>
+                    <span>4.9 rating · Toyota Camry</span>
+                  </div>
+                  <b>$18.42</b>
+                </div>
+                <button type="button">Confirm Rydr Go</button>
+              </div>
+            </div>
+          </div>
           <div class="hero-card driver-snapshot">
             <div class="avatar">M</div>
             <div>
@@ -164,22 +199,45 @@
       </section>
 
       <section class="section-pad bank-section" id="rydrbank">
-        <div class="phone-frame reveal">
-          <img src="assets/mobile-preview.png" alt="RydrBank and Rydr mobile app preview" />
+        <div class="bank-achievement reveal" aria-label="RydrBank ride progress tracker">
+          <div class="bank-achievement-header">
+            <span>RydrBank</span>
+            <strong>Ride progress</strong>
+          </div>
+          <div class="progress-ring" aria-label="8 of 10 eligible rides completed">
+            <span>8</span>
+            <small>of 10 rides</small>
+          </div>
+          <div class="milestone-track">
+            <span class="complete"></span>
+            <span class="complete"></span>
+            <span class="complete"></span>
+            <span class="complete"></span>
+            <span class="complete"></span>
+            <span class="complete"></span>
+            <span class="complete"></span>
+            <span class="complete"></span>
+            <span></span>
+            <span class="reward"></span>
+          </div>
+          <div class="unlock-card">
+            <strong>Free ride reward unlocks at 10 rides</strong>
+            <p>Eligible completed rides move riders toward free ride value in the matching ride group.</p>
+          </div>
         </div>
         <div class="section-copy reveal">
           <p class="eyebrow gradient-text">RydrBank</p>
-          <h2>Riders should feel rewarded for riding.</h2>
+          <h2>Ride more. Earn free rides.</h2>
           <p>
-            RydrBank tracks eligible ride progress toward future ride value. Riders can follow
-            reward status, apply ride credits when eligible, and unlock free ride opportunities
-            through consistent platform use.
+            RydrBank is Rydr’s ride progression system. Eligible completed rides move riders toward
+            reward milestones, and once requirements are met, riders unlock free ride opportunities.
+            Every completed eligible ride brings riders closer to real ride value.
           </p>
           <div class="reward-grid">
-            <article><strong>Ride rewards</strong><span>Eligible completed rides build progress.</span></article>
-            <article><strong>Loyalty benefits</strong><span>Riders see progress by matching ride group.</span></article>
-            <article><strong>Ride credits</strong><span>Banked codes can cover eligible trips up to app limits.</span></article>
-            <article><strong>Reward tracking</strong><span>Balances, active codes, and used rewards stay visible.</span></article>
+            <article><strong>Ride count tracking</strong><span>Eligible completed rides build visible progress.</span></article>
+            <article><strong>Milestone progress</strong><span>Riders see how close they are to reward eligibility.</span></article>
+            <article><strong>Free ride unlocks</strong><span>Completed requirements unlock future ride value.</span></article>
+            <article><strong>Reward status</strong><span>Active, reserved, and used ride rewards stay organized.</span></article>
           </div>
         </div>
       </section>
@@ -217,14 +275,15 @@
         <div class="executive-inner">
           <div class="executive-copy executive-reveal">
             <div class="executive-badge">
-              <span>Flagship Offering</span>
-              <em>Limited availability</em>
+              <span>By Invitation</span>
+              <em>Upper echelon travel</em>
             </div>
             <p class="executive-kicker">Rydr Executive</p>
             <h2>More Than A Ride.<br />An Arrival.</h2>
             <p>
-              Luxury transportation for riders who expect elevated comfort, professional service,
-              premium vehicles, and an experience that feels considered from pickup to arrival.
+              A top-tier Rydr experience for riders who expect elevated comfort, professional
+              service, luxury vehicles, and a destination experience that begins before the door
+              opens.
             </p>
             <p class="executive-age">Available for riders 21+.</p>
             <div class="executive-actions">
@@ -288,20 +347,35 @@
       </section>
 
       <section class="section-pad cash-hub" id="cash-hub">
-        <div class="section-heading reveal">
-          <p class="eyebrow gradient-text">Cash Rydr Hub</p>
-          <h2>More Ways to Earn.</h2>
+        <div class="cash-launch-copy reveal">
+          <p class="eyebrow gradient-text">Major Ecosystem Feature</p>
+          <h2>Introducing Cash Rydr Hub.</h2>
           <p>
-            Cash Rydr Hub supports the Rydr ecosystem as a community marketplace. It is separate
-            from standard Rydr dispatched rides and gives riders and independent drivers a place to
-            connect around local opportunities.
+            Cash Rydr Hub expands what Rydr can do for local transportation. Riders can explore cash
+            ride opportunities and community connections, while independent drivers gain more ways
+            to discover local demand beyond standard Rydr rides.
           </p>
+          <div class="cash-launch-actions">
+            <a class="btn btn-primary" href="#get-started">Explore Cash Rydr Hub</a>
+            <span>Separate from standard Rydr-dispatched rides.</span>
+          </div>
         </div>
-        <div class="hub-grid">
-          <article class="reveal"><strong>Local opportunities</strong><p>Post or browse community ride requests and local needs.</p></article>
-          <article class="reveal"><strong>Community marketplace</strong><p>Classified-style listings help people connect directly.</p></article>
-          <article class="reveal"><strong>Gig opportunities</strong><p>Drivers can find additional ways to earn outside standard requests.</p></article>
-          <article class="reveal"><strong>Driver networking</strong><p>Favorite drivers, messages, and offers keep relationships organized.</p></article>
+        <div class="cash-hub-stage reveal" aria-label="Cash Rydr Hub product preview">
+          <div class="cash-request-card primary">
+            <span>Cash ride request</span>
+            <strong>Airport pickup · 6:30 PM</strong>
+            <p>2 passengers · Driver offers open</p>
+          </div>
+          <div class="cash-request-card">
+            <span>Community route</span>
+            <strong>Downtown to event district</strong>
+            <p>Flexible timing · Local drivers nearby</p>
+          </div>
+          <div class="cash-signal-grid">
+            <article><strong>Cash rides</strong><p>Expanded flexibility for riders arranging local transportation.</p></article>
+            <article><strong>Driver opportunities</strong><p>More ways for independent drivers to see nearby demand.</p></article>
+            <article><strong>Community transportation</strong><p>Connections for local needs, events, and planned trips.</p></article>
+          </div>
         </div>
       </section>
 
