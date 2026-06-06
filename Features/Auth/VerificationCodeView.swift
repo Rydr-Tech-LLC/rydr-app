@@ -19,6 +19,7 @@ struct VerificationCodeView: View {
     let phoneNumber: String
     var linkToCurrentUser = false
     var onSuccess: (User) -> Void
+    var onCredentialSuccess: ((AuthCredential, User) -> Void)? = nil
     var onResendCode: () -> Void
 
     @State private var verificationCode = ""
@@ -136,6 +137,10 @@ struct VerificationCodeView: View {
                     }
                 } else if let user = result?.user {
                     print("✅ Phone verified and signed in")
+                    if let onCredentialSuccess {
+                        onCredentialSuccess(credential, user)
+                        return
+                    }
                     onSuccess(user)
                 }
             }

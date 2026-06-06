@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: rydr-backend
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+      - key: FIREBASE_DATABASE_URL
+        sync: false
+      - key: EVENTBRITE_PRIVATE_TOKEN
+        sync: false
+      - key: TICKETMASTER_API_KEY
+        sync: false

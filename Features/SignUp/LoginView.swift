@@ -9,6 +9,18 @@ import FirebaseAuth
 import FirebaseFirestore
 
 struct LoginView: View {
+    private struct LoginProfile {
+        let name: String
+        let email: String
+        let phoneNumber: String
+    }
+
+    private struct PhoneLoginRepair {
+        let profile: LoginProfile
+        let credential: AuthCredential
+        let duplicatePhoneUser: User
+    }
+
     @EnvironmentObject var session: UserSessionManager
     
     @State private var isUsingEmail = false
@@ -19,6 +31,9 @@ struct LoginView: View {
     @State private var errorMessage = ""
     @State private var showPasswordResetAlert = false
     @State private var verificationSession: PhoneVerificationSession?
+    @State private var pendingPhoneLoginRepair: PhoneLoginRepair?
+    @State private var phoneRepairPassword = ""
+    @State private var isRepairingPhoneLogin = false
     
     private var formattedPhoneNumber: String {
         let digits = phoneNumber.filter { $0.isNumber }.prefix(10)
@@ -78,6 +93,29 @@ struct LoginView: View {
                 }
                 .font(.caption)
                 .accessibilityLabel("Switch to email and password login")
+
+                if let repair = pendingPhoneLoginRepair {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Confirm your password for \(repair.profile.email) to enable phone login on this account.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        SecureField("Password", text: $phoneRepairPassword)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityLabel("Password for Phone Login Link")
+
+                        Button(isRepairingPhoneLogin ? "Linking..." : "Link Phone and Log In") {
+                            repairPhoneLogin()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(phoneRepairPassword.isEmpty || isRepairingPhoneLogin ? Color.gray : Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                        .disabled(phoneRepairPassword.isEmpty || isRepairingPhoneLogin)
+                    }
+                    .padding(.top, 8)
+                }
             }
             
             // MARK: - Email Login
@@ -107,7 +145,7 @@ struct LoginView: View {
                         if let error = error {
                             errorMessage = "Login failed: \(error.localizedDescription)"
                         } else if let user = result?.user {
-                            session.login(name: user.displayName ?? "Rydr User", email: user.email ?? email)
+                            completeEmailLogin(for: user, fallbackEmail: email)
                         }
                         
                     }
@@ -187,9 +225,14 @@ struct LoginView: View {
             VerificationCodeView(
                 verificationID: verificationSession.verificationID,
                 phoneNumber: verificationSession.phoneNumber,
+                linkToCurrentUser: false,
                 onSuccess: { user in
                     self.verificationSession = nil
                     completePhoneLogin(for: user)
+                },
+                onCredentialSuccess: { credential, user in
+                    self.verificationSession = nil
+                    completePhoneLogin(for: user, credential: credential)
                 },
                 onResendCode: {
                     sendCode()
@@ -237,6 +280,9 @@ struct LoginView: View {
     
     private func sendCode() {
         let formattedNumber = formattedPhoneNumber // always +1 plus digits
+        pendingPhoneLoginRepair = nil
+        phoneRepairPassword = ""
+        isRepairingPhoneLogin = false
         
         PhoneAuthProvider.provider().verifyPhoneNumber(formattedNumber, uiDelegate: nil) { verificationID, error in
             Task { @MainActor in
@@ -260,7 +306,41 @@ struct LoginView: View {
         }
     }
 
-    private func completePhoneLogin(for user: User) {
+    private func completeEmailLogin(for user: User, fallbackEmail: String) {
+        Firestore.firestore()
+            .collection("riders")
+            .document(user.uid)
+            .getDocument { snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        errorMessage = "Login failed while loading your profile: \(error.localizedDescription)"
+                        return
+                    }
+
+                    let profile = snapshot?.data() ?? [:]
+                    let loginProfile = makeLoginProfile(from: profile, user: user, fallbackEmail: fallbackEmail)
+                    session.login(name: loginProfile.name, email: loginProfile.email)
+                }
+            }
+    }
+
+    private func makeLoginProfile(from profile: [String: Any], user: User, fallbackEmail: String) -> LoginProfile {
+        let first = profile["firstName"] as? String ?? ""
+        let last = profile["lastName"] as? String ?? ""
+        let preferred = profile["preferredName"] as? String ?? ""
+        let legalName = [first, last]
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
+        let name = preferred.isEmpty
+            ? (legalName.isEmpty ? user.displayName ?? "Rydr User" : legalName)
+            : preferred
+        let email = profile["email"] as? String ?? user.email ?? fallbackEmail
+        let phoneNumber = profile["phoneNumber"] as? String ?? ""
+
+        return LoginProfile(name: name, email: email, phoneNumber: phoneNumber)
+    }
+
+    private func completePhoneLogin(for user: User, credential: AuthCredential? = nil) {
         let phone = user.phoneNumber ?? formattedPhoneNumber
 
         Firestore.firestore()
@@ -277,9 +357,24 @@ struct LoginView: View {
 
                     let matchingProfiles = snapshot?.documents ?? []
                     if let profile = matchingProfiles.first(where: { $0.documentID != user.uid }) {
-                        let email = profile.data()["email"] as? String ?? "the email on this account"
-                        try? Auth.auth().signOut()
-                        errorMessage = "This phone number is saved on \(email). Sign in with email first, then verify this phone number to link phone login."
+                        let loginProfile = makeLoginProfile(
+                            from: profile.data(),
+                            user: user,
+                            fallbackEmail: profile.data()["email"] as? String ?? ""
+                        )
+
+                        if let credential {
+                            pendingPhoneLoginRepair = PhoneLoginRepair(
+                                profile: loginProfile,
+                                credential: credential,
+                                duplicatePhoneUser: user
+                            )
+                            phoneRepairPassword = ""
+                            errorMessage = "This phone number belongs to \(loginProfile.email). Confirm your password to link phone login."
+                        } else {
+                            try? Auth.auth().signOut()
+                            errorMessage = "This phone number is saved on \(loginProfile.email). Sign in with email first, then verify this phone number to link phone login."
+                        }
                         return
                     }
 
@@ -298,5 +393,59 @@ struct LoginView: View {
                     )
                 }
             }
+    }
+
+    private func repairPhoneLogin() {
+        guard let repair = pendingPhoneLoginRepair else { return }
+        guard !phoneRepairPassword.isEmpty else {
+            errorMessage = "Enter your password to link phone login."
+            return
+        }
+
+        isRepairingPhoneLogin = true
+        errorMessage = ""
+
+        repair.duplicatePhoneUser.delete { deleteError in
+            if let deleteError {
+                Task { @MainActor in
+                    isRepairingPhoneLogin = false
+                    errorMessage = "Unable to prepare phone login linking: \(deleteError.localizedDescription)"
+                }
+                return
+            }
+
+            Auth.auth().signIn(withEmail: repair.profile.email, password: phoneRepairPassword) { result, signInError in
+                if let signInError {
+                    Task { @MainActor in
+                        isRepairingPhoneLogin = false
+                        errorMessage = "Password confirmation failed: \(signInError.localizedDescription)"
+                    }
+                    return
+                }
+
+                guard let emailUser = result?.user else {
+                    Task { @MainActor in
+                        isRepairingPhoneLogin = false
+                        errorMessage = "Unable to load your email account after password confirmation."
+                    }
+                    return
+                }
+
+                emailUser.link(with: repair.credential) { _, linkError in
+                    Task { @MainActor in
+                        isRepairingPhoneLogin = false
+
+                        if let linkError {
+                            errorMessage = "Unable to link phone login: \(linkError.localizedDescription)"
+                            return
+                        }
+
+                        pendingPhoneLoginRepair = nil
+                        phoneRepairPassword = ""
+                        session.login(name: repair.profile.name, email: repair.profile.email)
+                    }
+                }
+            }
+        }
     }
 }

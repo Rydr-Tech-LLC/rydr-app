@@ -113,36 +113,7 @@ struct SignupCoordinator: View {
                         password: $password,
                         confirmPassword: $confirmPassword,
                         onNext: {
-                            Auth.auth().createUser(withEmail: email, password: password) { result, error in
-                                if let error = error as NSError? {
-                                    if error.code == AuthErrorCode.emailAlreadyInUse.rawValue {
-                                        upsertRider(["email": email])
-                                        // (Optional) Sign the user in here if you aren’t already, then call provisionStripeCustomerIfNeeded()
-                                        Task { @MainActor in
-                                            path.append(.addressEntry)
-                                        }
-                                    } else {
-                                        print("❌ Firebase signup failed: \(error.localizedDescription)")
-                                    }
-                                    return
-                                }
-
-                                upsertRider([
-                                    "uid": result?.user.uid ?? "",
-                                    "email": email,
-                                    "firstName": firstName,
-                                    "lastName": lastName,
-                                    "preferredName": preferredName,
-                                    "phoneNumber": phoneNumber
-                                ])
-
-                                // 🔽 Add this line:
-                                provisionStripeCustomerIfNeeded()
-
-                                Task { @MainActor in
-                                    path.append(.addressEntry)
-                                }
-                            }
+                            createOrLinkFirebaseAccount()
                         }
                     )
 
@@ -208,6 +179,72 @@ struct SignupCoordinator: View {
             .setData(fields, merge: true) { err in
                 if let err = err { print("❌ upsertRider error: \(err)") }
             }
+    }
+
+    private func createOrLinkFirebaseAccount() {
+        if let currentUser = Auth.auth().currentUser {
+            linkEmailPassword(to: currentUser)
+        } else {
+            createEmailPasswordAccount()
+        }
+    }
+
+    private func linkEmailPassword(to user: User) {
+        if user.email?.caseInsensitiveCompare(email) == .orderedSame {
+            finishAuthAccountSetup(for: user)
+            return
+        }
+
+        let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+        user.link(with: credential) { result, error in
+            if let error = error as NSError? {
+                if error.code == AuthErrorCode.providerAlreadyLinked.rawValue {
+                    finishAuthAccountSetup(for: user)
+                } else {
+                    print("❌ Firebase email link failed: \(error.localizedDescription)")
+                }
+                return
+            }
+
+            finishAuthAccountSetup(for: result?.user ?? user)
+        }
+    }
+
+    private func createEmailPasswordAccount() {
+        Auth.auth().createUser(withEmail: email, password: password) { result, error in
+            if let error = error as NSError? {
+                if error.code == AuthErrorCode.emailAlreadyInUse.rawValue {
+                    print("❌ Firebase signup failed: email already in use")
+                } else {
+                    print("❌ Firebase signup failed: \(error.localizedDescription)")
+                }
+                return
+            }
+
+            guard let user = result?.user else {
+                print("❌ Firebase signup failed: account creation did not return a user")
+                return
+            }
+
+            finishAuthAccountSetup(for: user)
+        }
+    }
+
+    private func finishAuthAccountSetup(for user: User) {
+        upsertRider([
+            "uid": user.uid,
+            "email": email,
+            "firstName": firstName,
+            "lastName": lastName,
+            "preferredName": preferredName,
+            "phoneNumber": phoneNumber
+        ])
+
+        provisionStripeCustomerIfNeeded()
+
+        Task { @MainActor in
+            path.append(.addressEntry)
+        }
     }
 
     /// Final save (still uses merge so it’s idempotent), then load profile & go to app.
