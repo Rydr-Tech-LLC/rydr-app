@@ -335,39 +335,13 @@ struct RideInProgressView: View {
     // MARK: Map + overlays
 
     private var map: some View {
-        Map(position: $camera) {
-            if let coords = legPolyline {
-                MapPolyline(coordinates: coords)
-                    .stroke(polylineStyle, lineWidth: 6)
-            }
-
-            // Driver pin (custom)
-            Annotation("", coordinate: rideManager.liveDriverCoordinate) {
-                ZStack {
-                    Circle().fill(.background).frame(width: 28, height: 28)
-                    Image(systemName: "car.fill")
-                        .foregroundStyle(Styles.rydrGradient)  // ← gradient car icon
-                }
-            }
-
-            // Pickup / dropoff markers
-            if let pickup = rideManager.pickupCoordinate {
-                Marker("Pickup", coordinate: pickup)
-                    .tint(.red)
-            }
-            if let drop = rideManager.dropoffCoordinate {
-                Marker("Drop-off", coordinate: drop)
-                    .tint(.blue)
-            }
-        }
-    }
-
-    private var polylineStyle: some ShapeStyle {
-        if #available(iOS 18.0, *) {
-            return Styles.rydrGradient
-        } else {
-            return Color.red.opacity(0.85) // iOS 17 MapPolyline can't take a gradient directly
-        }
+        RydrRideProgressMapView(
+            position: $camera,
+            driverCoordinate: rideManager.liveDriverCoordinate,
+            pickupCoordinate: rideManager.pickupCoordinate,
+            dropoffCoordinate: rideManager.dropoffCoordinate,
+            routeCoordinates: legPolyline ?? []
+        )
     }
 
     /// Coordinates for the active leg (driver→pickup, then pickup→dropoff)

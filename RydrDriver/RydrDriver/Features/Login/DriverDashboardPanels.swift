@@ -49,16 +49,18 @@ struct DriverTopBar: View {
             Button(action: onFareInsights) {
                 VStack(spacing: 2) {
                     Text(currencyFormatter.string(from: vm.earningsToday as NSDecimalNumber) ?? "$0.00")
-                        .font(.headline.monospacedDigit().weight(.bold))
-                    Text(vm.isOnline ? "Online" : "Offline")
+                        .font(.headline.monospacedDigit().weight(.black))
+                    Text(statusText)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(vm.isOnline ? Color.green : Color.white.opacity(0.68))
+                        .lineLimit(1)
                 }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+                .frame(minWidth: 128)
                 .background(
                     Capsule()
-                        .fill(Color.black.opacity(0.86))
+                        .fill(Color.black.opacity(0.88))
                         .overlay(Capsule().stroke(Color.white.opacity(0.16), lineWidth: 1))
                 )
                 .foregroundStyle(.white)
@@ -86,6 +88,13 @@ struct DriverTopBar: View {
             }
         }
         .padding(.top, 8)
+    }
+
+    private var statusText: String {
+        guard vm.isOnline else { return "Offline" }
+        return vm.rideFilterPreferences.workZoneEnabled
+            ? "Online · \(Int(vm.rideFilterPreferences.effectivePickupMiles.rounded())) mi zone"
+            : "Online"
     }
 }
 
@@ -305,21 +314,26 @@ struct DriverBottomStatusBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: vm.isOnline ? "checkmark.circle.fill" : "location.circle.fill")
+            Image(systemName: "scope")
                 .font(.title3)
-                .foregroundStyle(vm.isOnline ? .green : .primary)
+                .foregroundStyle(Color.red)
             VStack(alignment: .leading, spacing: 2) {
-                Text(vm.isOnline ? "Online and accepting rides" : "Offline")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(vm.isOnline ? .green : .primary)
+                Text(activeFilterSummary)
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
                 Text(bottomStatusMessage)
-                    .font(.caption)
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
             }
             Spacer()
+            Image(systemName: "chevron.up")
+                .font(.caption.weight(.black))
+                .foregroundStyle(.secondary)
         }
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(.regularMaterial)
@@ -335,6 +349,14 @@ struct DriverBottomStatusBar: View {
             return reason
         }
         return "Rate saved. Go online when ready."
+    }
+
+    private var activeFilterSummary: String {
+        let workZone = vm.rideFilterPreferences.workZoneEnabled
+            ? "\(Int(vm.rideFilterPreferences.effectivePickupMiles.rounded())) mi"
+            : "Off"
+        let destination = vm.rideFilterPreferences.hasDestinationFilter ? "On" : "Off"
+        return "Work Zone: \(workZone) · Destination: \(destination)"
     }
 
     private func tierSort(_ lhs: String, _ rhs: String) -> Bool {

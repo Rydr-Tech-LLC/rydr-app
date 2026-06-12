@@ -29,6 +29,8 @@ private struct DriverCashRideRequest: Identifiable, Equatable {
     var connectedDriverName: String?
     var agreedPrice: Double?
     var createdAt: Date?
+    var pickupCoordinate: CLLocationCoordinate2D?
+    var destinationCoordinate: CLLocationCoordinate2D?
 
     var isOpen: Bool { status == "open" }
     var isScheduledForCurrentDriver: Bool {
@@ -38,6 +40,10 @@ private struct DriverCashRideRequest: Identifiable, Equatable {
             && driverQueueStatus != "completed"
             && driverQueueStatus != "missed"
             && driverQueueStatus != "cancelled"
+    }
+
+    static func == (lhs: DriverCashRideRequest, rhs: DriverCashRideRequest) -> Bool {
+        lhs.id == rhs.id
     }
 }
 
@@ -83,8 +89,8 @@ private final class DriverCashRydrHubVM: ObservableObject {
         requestListener?.remove()
         isLoading = true
         requestListener = db.collection("cashRydrRequests")
-            .addSnapshotListener { [weak self] snapshot, error in
-                Task { @MainActor in
+            .addSnapshotListener { snapshot, error in
+                Task { @MainActor [weak self] in
                     guard let self else { return }
                     self.isLoading = false
                     if let error {
@@ -191,17 +197,19 @@ private final class DriverCashRydrHubVM: ObservableObject {
         if let amount = cleanAmount(request.budgetRange) {
             payload["agreedPrice"] = amount
         }
+        let authorName = displayName(driverName)
 
-        db.collection("cashRydrRequests").document(request.id).setData(payload, merge: true) { [weak self] error in
-            Task { @MainActor in
+        db.collection("cashRydrRequests").document(request.id).setData(payload, merge: true) { error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
                 if let error {
-                    self?.errorMessage = error.localizedDescription
+                    self.errorMessage = error.localizedDescription
                     return
                 }
-                self?.confirmationMessage = "Cash ride accepted and added to your scheduled queue."
-                self?.addResponse([
+                self.confirmationMessage = "Cash ride accepted and added to your scheduled queue."
+                self.addResponse([
                     "authorUid": uid,
-                    "authorName": self?.displayName(driverName) ?? "Cash Hub Driver",
+                    "authorName": authorName,
                     "authorRole": "driver",
                     "kind": "directMessage",
                     "message": "I accepted this cash ride. Please confirm any final pickup details before the scheduled time.",
@@ -232,11 +240,56 @@ private final class DriverCashRydrHubVM: ObservableObject {
             break
         }
 
-        db.collection("cashRydrRequests").document(request.id).setData(payload, merge: true) { [weak self] error in
-            Task { @MainActor in
-                self?.errorMessage = error?.localizedDescription
+        db.collection("cashRydrRequests").document(request.id).setData(payload, merge: true) { error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.errorMessage = error?.localizedDescription
                 if error == nil {
-                    self?.confirmationMessage = "Cash ride marked \(status)."
+                    self.confirmationMessage = "Cash ride marked \(status)."
+                }
+            }
+        }
+    }
+
+    func releaseScheduledRide(_ request: DriverCashRideRequest, driverName: String) {
+        guard let uid = Auth.auth().currentUser?.uid,
+              request.connectedDriverUid == uid else {
+            errorMessage = "Only the accepting driver can release this cash ride."
+            return
+        }
+
+        let isLateRelease = request.scheduledTime.timeIntervalSince(Date()) <= 3600
+        var payload: [String: Any] = [
+            "status": "open",
+            "driverQueueStatus": "released",
+            "releasedByUid": uid,
+            "releasedByName": displayName(driverName),
+            "releasedAt": FieldValue.serverTimestamp(),
+            "lateReleasePenalty": isLateRelease,
+            "connectedDriverUid": FieldValue.delete(),
+            "connectedDriverName": FieldValue.delete(),
+            "acceptedByUid": FieldValue.delete(),
+            "acceptedByName": FieldValue.delete(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        if isLateRelease {
+            payload["lateReleasePenaltyReason"] = "Released within 1 hour of scheduled pickup."
+        }
+
+        let requestRef = db.collection("cashRydrRequests").document(request.id)
+        requestRef.setData(payload, merge: true) { error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let error {
+                    self.errorMessage = error.localizedDescription
+                    return
+                }
+
+                if isLateRelease {
+                    self.recordLateReleasePenalty(driverUid: uid, request: request)
+                    self.confirmationMessage = "Ride released. Late release marker added because this was within 1 hour of pickup."
+                } else {
+                    self.confirmationMessage = "Ride released back to Cash Hub."
                 }
             }
         }
@@ -246,11 +299,28 @@ private final class DriverCashRydrHubVM: ObservableObject {
         db.collection("cashRydrRequests")
             .document(request.id)
             .collection("responses")
-            .addDocument(data: data) { [weak self] error in
-                Task { @MainActor in
+            .addDocument(data: data) { error in
+                Task { @MainActor [weak self] in
                     self?.errorMessage = error?.localizedDescription
                 }
             }
+    }
+
+    private func recordLateReleasePenalty(driverUid: String, request: DriverCashRideRequest) {
+        let driverRef = db.collection("drivers").document(driverUid)
+        driverRef.setData([
+            "cashHubLateReleaseCount": FieldValue.increment(Int64(1)),
+            "cashHubLastLateReleaseAt": FieldValue.serverTimestamp(),
+            "cashHubLastLateReleaseRequestId": request.id,
+            "updatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
+
+        driverRef.collection("cashHubPenaltyMarkers").addDocument(data: [
+            "requestId": request.id,
+            "scheduledTime": Timestamp(date: request.scheduledTime),
+            "reason": "Released within 1 hour of scheduled pickup.",
+            "createdAt": FieldValue.serverTimestamp()
+        ])
     }
 
     private func syncResponseListeners(for requests: [DriverCashRideRequest]) {
@@ -266,8 +336,8 @@ private final class DriverCashRydrHubVM: ObservableObject {
                 .document(request.id)
                 .collection("responses")
                 .order(by: "createdAt", descending: false)
-                .addSnapshotListener { [weak self] snapshot, error in
-                    Task { @MainActor in
+                .addSnapshotListener { snapshot, error in
+                    Task { @MainActor [weak self] in
                         guard let self else { return }
                         if let error {
                             self.errorMessage = error.localizedDescription
@@ -307,7 +377,9 @@ private final class DriverCashRydrHubVM: ObservableObject {
             connectedDriverUid: data["connectedDriverUid"] as? String ?? data["acceptedByUid"] as? String,
             connectedDriverName: data["connectedDriverName"] as? String ?? data["acceptedByName"] as? String,
             agreedPrice: data["agreedPrice"] as? Double,
-            createdAt: (data["createdAt"] as? Timestamp)?.dateValue()
+            createdAt: (data["createdAt"] as? Timestamp)?.dateValue(),
+            pickupCoordinate: coordinate(from: data["pickupCoordinate"] ?? data["pickupLocation"] ?? data["pickupGeoPoint"]),
+            destinationCoordinate: coordinate(from: data["destinationCoordinate"] ?? data["dropoffCoordinate"] ?? data["dropoffLocation"] ?? data["dropoffGeoPoint"])
         )
     }
 
@@ -344,6 +416,24 @@ private final class DriverCashRydrHubVM: ObservableObject {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Cash Hub Driver" : trimmed
     }
+
+    private static func coordinate(from value: Any?) -> CLLocationCoordinate2D? {
+        if let point = value as? GeoPoint {
+            return CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
+        }
+        guard let data = value as? [String: Any] else { return nil }
+        let lat = doubleValue(data["lat"] ?? data["latitude"])
+        let lng = doubleValue(data["lng"] ?? data["longitude"])
+        guard let lat, let lng else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    }
+
+    private static func doubleValue(_ value: Any?) -> Double? {
+        if let double = value as? Double { return double }
+        if let int = value as? Int { return Double(int) }
+        if let number = value as? NSNumber { return number.doubleValue }
+        return nil
+    }
 }
 
 struct DriverCashRydrHubView: View {
@@ -353,6 +443,8 @@ struct DriverCashRydrHubView: View {
     @State private var messagingRequest: DriverCashRideRequest?
     @State private var offeringRequest: DriverCashRideRequest?
     @State private var acceptingRequest: DriverCashRideRequest?
+    @State private var navigatingRequest: DriverCashRideRequest?
+    @State private var releasingRequest: DriverCashRideRequest?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -405,6 +497,9 @@ struct DriverCashRydrHubView: View {
                 }
             }
         }
+        .fullScreenCover(item: $navigatingRequest) { request in
+            DriverCashRydrNavigationView(request: request)
+        }
         .confirmationDialog(
             "Accept this cash ride?",
             isPresented: Binding(
@@ -423,6 +518,28 @@ struct DriverCashRydrHubView: View {
             Button("Cancel", role: .cancel) { acceptingRequest = nil }
         } message: {
             Text("Cash Hub rides are managed by the driver. Rydr can help you track the request, but getting to pickup on time is your responsibility.")
+        }
+        .confirmationDialog(
+            "Release this scheduled ride?",
+            isPresented: Binding(
+                get: { releasingRequest != nil },
+                set: { if !$0 { releasingRequest = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Release Ride", role: .destructive) {
+                if let releasingRequest {
+                    vm.releaseScheduledRide(releasingRequest, driverName: session.driverName)
+                }
+                releasingRequest = nil
+            }
+            Button("Keep Ride", role: .cancel) { releasingRequest = nil }
+        } message: {
+            if let releasingRequest, releasingRequest.scheduledTime.timeIntervalSince(Date()) <= 3600 {
+                Text("This ride is within 1 hour of pickup. Releasing it now will add a late-release marker to your Cash Hub record. Continued late releases could remove your Cash Rydr Hub access.")
+            } else {
+                Text("The rider will need another driver. Release only if you can no longer complete this scheduled ride.")
+            }
         }
         .alert("Cash Rydr Hub", isPresented: Binding(
             get: { vm.errorMessage != nil || vm.confirmationMessage != nil },
@@ -483,9 +600,11 @@ struct DriverCashRydrHubView: View {
                     request: request,
                     responses: vm.responsesByRequest[request.id] ?? [],
                     onMessage: { messagingRequest = request },
+                    onNavigate: { navigatingRequest = request },
                     onConfirm: { vm.updateQueueStatus(request, status: "confirmed") },
                     onComplete: { vm.updateQueueStatus(request, status: "completed") },
-                    onMissed: { vm.updateQueueStatus(request, status: "missed") }
+                    onMissed: { vm.updateQueueStatus(request, status: "missed") },
+                    onRelease: { releasingRequest = request }
                 )
             }
         }
@@ -545,9 +664,11 @@ private struct DriverCashScheduledCard: View {
     let request: DriverCashRideRequest
     let responses: [DriverCashHubResponse]
     let onMessage: () -> Void
+    let onNavigate: () -> Void
     let onConfirm: () -> Void
     let onComplete: () -> Void
     let onMissed: () -> Void
+    let onRelease: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -562,9 +683,7 @@ private struct DriverCashScheduledCard: View {
                     .buttonStyle(.bordered)
                 Button("Confirm", action: onConfirm)
                     .buttonStyle(.bordered)
-                Button("Navigate") {
-                    openMaps(to: request.pickup)
-                }
+                Button("Navigate with Rydr Map", action: onNavigate)
                 .buttonStyle(.bordered)
             }
 
@@ -574,6 +693,14 @@ private struct DriverCashScheduledCard: View {
                     .tint(.green)
                 Button("Missed", role: .destructive, action: onMissed)
                     .buttonStyle(.bordered)
+                Button("Release Ride", role: .destructive, action: onRelease)
+                    .buttonStyle(.bordered)
+            }
+
+            if request.scheduledTime.timeIntervalSince(Date()) <= 3600 {
+                Label("Releasing now will add a late-release marker.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
             }
 
             if responses.contains(where: { $0.kind == "directMessage" }) {
@@ -583,13 +710,6 @@ private struct DriverCashScheduledCard: View {
             }
         }
         .driverCashCard()
-    }
-
-    private func openMaps(to address: String) {
-        let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? address
-        if let url = URL(string: "maps://?daddr=\(encoded)&dirflg=d") {
-            UIApplication.shared.open(url)
-        }
     }
 }
 
@@ -636,6 +756,259 @@ private struct DriverCashRideSummary: View {
     private var budgetText: String {
         if request.budgetRange.hasPrefix("$") { return request.budgetRange }
         return "$\(request.budgetRange)"
+    }
+}
+
+private struct DriverCashRydrNavigationView: View {
+    let request: DriverCashRideRequest
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var camera: MapCameraPosition = .region(DriverMapDefaults.pilotRegion)
+    @State private var driverCoordinate = DriverMapDefaults.pilotCoordinate
+    @State private var pickupCoordinate: CLLocationCoordinate2D?
+    @State private var destinationCoordinate: CLLocationCoordinate2D?
+    @State private var routeCoordinates: [CLLocationCoordinate2D] = []
+    @State private var routeSteps: [String] = []
+    @State private var routeDistanceMeters: CLLocationDistance?
+    @State private var routeTravelTime: TimeInterval?
+    @State private var isPickupStage = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            RydrDriverNavigationMapView(
+                position: $camera,
+                driverCoordinate: driverCoordinate,
+                pickupCoordinate: pickupCoordinate,
+                dropoffCoordinate: destinationCoordinate,
+                routeCoordinates: routeCoordinates,
+                isPickupStage: isPickupStage,
+                onRecenter: { camera = .region(region) }
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(isPickupStage ? "Navigate to pickup" : "Navigate to drop-off")
+                            .font(.headline.weight(.black))
+                        Text(request.riderName)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.headline.weight(.bold))
+                            .frame(width: 42, height: 42)
+                            .background(Circle().fill(Color(.systemGray5)))
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    DriverCashNavigationSummaryRow(
+                        title: isPickupStage ? "Pickup" : "Drop-off",
+                        address: isPickupStage ? request.pickup : request.destination,
+                        systemImage: isPickupStage ? "mappin.circle.fill" : "flag.checkered.circle.fill",
+                        label: isPickupStage ? "En route to pickup" : "En route to drop-off"
+                    )
+
+                    Label(navigationInstruction, systemImage: "location.north.line.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    if let routeSummary {
+                        Text(routeSummary)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    HStack {
+                        Button {
+                            isPickupStage = false
+                            if let pickupCoordinate {
+                                driverCoordinate = pickupCoordinate
+                            }
+                            Task { await calculateRoute() }
+                        } label: {
+                            Text("Start Drop-off Route")
+                                .font(.headline.weight(.bold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        .disabled(!isPickupStage || destinationCoordinate == nil)
+
+                        Button("Close") {
+                            dismiss()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(.regularMaterial)
+                    .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.22), lineWidth: 1))
+            )
+            .padding(.horizontal, 16)
+            .padding(.bottom, 18)
+        }
+        .task {
+            await resolveCoordinates()
+            await calculateRoute()
+        }
+    }
+
+    private var activeDestination: CLLocationCoordinate2D? {
+        isPickupStage ? pickupCoordinate : destinationCoordinate
+    }
+
+    private var navigationInstruction: String {
+        if let first = routeSteps.first, !first.isEmpty {
+            return first
+        }
+        return "Calculating Rydr route."
+    }
+
+    private var routeSummary: String? {
+        guard let routeDistanceMeters, let routeTravelTime else { return nil }
+        let miles = routeDistanceMeters / 1609.344
+        let minutes = max(1, Int((routeTravelTime / 60).rounded()))
+        return String(format: "%.1f mi • %d min", miles, minutes)
+    }
+
+    private var region: MKCoordinateRegion {
+        let coordinates = [driverCoordinate, pickupCoordinate, destinationCoordinate].compactMap { $0 }
+        guard !coordinates.isEmpty else { return DriverMapDefaults.pilotRegion }
+        let minLat = coordinates.map(\.latitude).min() ?? DriverMapDefaults.pilotCoordinate.latitude
+        let maxLat = coordinates.map(\.latitude).max() ?? DriverMapDefaults.pilotCoordinate.latitude
+        let minLng = coordinates.map(\.longitude).min() ?? DriverMapDefaults.pilotCoordinate.longitude
+        let maxLng = coordinates.map(\.longitude).max() ?? DriverMapDefaults.pilotCoordinate.longitude
+        return MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2, longitude: (minLng + maxLng) / 2),
+            span: MKCoordinateSpan(
+                latitudeDelta: max(0.025, (maxLat - minLat) * 1.8),
+                longitudeDelta: max(0.025, (maxLng - minLng) * 1.8)
+            )
+        )
+    }
+
+    @MainActor
+    private func resolveCoordinates() async {
+        if let requestPickupCoordinate = request.pickupCoordinate {
+            pickupCoordinate = requestPickupCoordinate
+        } else {
+            pickupCoordinate = await geocode(request.pickup)
+        }
+
+        if let requestDestinationCoordinate = request.destinationCoordinate {
+            destinationCoordinate = requestDestinationCoordinate
+        } else {
+            destinationCoordinate = await geocode(request.destination)
+        }
+        camera = .region(region)
+    }
+
+    @MainActor
+    private func calculateRoute() async {
+        guard let destination = activeDestination else {
+            routeCoordinates = []
+            routeSteps = []
+            routeDistanceMeters = nil
+            routeTravelTime = nil
+            errorMessage = "Could not resolve this route yet."
+            return
+        }
+
+        let routeRequest = MKDirections.Request()
+        routeRequest.source = MKMapItem(location: CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude), address: nil)
+        routeRequest.destination = MKMapItem(location: CLLocation(latitude: destination.latitude, longitude: destination.longitude), address: nil)
+        routeRequest.transportType = .automobile
+
+        do {
+            let response = try await MKDirections(request: routeRequest).calculate()
+            guard let route = response.routes.first else {
+                errorMessage = "No route found."
+                return
+            }
+            routeCoordinates = route.polyline.cashHubCoordinates
+            routeSteps = route.steps
+                .map(\.instructions)
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            routeDistanceMeters = route.distance
+            routeTravelTime = route.expectedTravelTime
+            errorMessage = nil
+            camera = .region(region)
+        } catch {
+            routeCoordinates = [driverCoordinate, destination]
+            routeSteps = []
+            routeDistanceMeters = nil
+            routeTravelTime = nil
+            errorMessage = "Rydr route preview is using a direct line until routing is available."
+        }
+    }
+
+    private func geocode(_ address: String) async -> CLLocationCoordinate2D? {
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        do {
+            let request = MKLocalSearch.Request()
+            request.naturalLanguageQuery = trimmed
+            request.region = DriverMapDefaults.pilotRegion
+            let response = try await MKLocalSearch(request: request).start()
+            return response.mapItems.first?.location.coordinate
+        } catch {
+            return nil
+        }
+    }
+}
+
+private extension MKPolyline {
+    var cashHubCoordinates: [CLLocationCoordinate2D] {
+        var coordinates = Array(repeating: kCLLocationCoordinate2DInvalid, count: pointCount)
+        getCoordinates(&coordinates, range: NSRange(location: 0, length: pointCount))
+        return coordinates
+    }
+}
+
+private struct DriverCashNavigationSummaryRow: View {
+    let title: String
+    let address: String
+    let systemImage: String
+    let label: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: systemImage)
+                .foregroundStyle(Styles.rydrGradient)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(title)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Label(label, systemImage: "location.fill")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                Text(address)
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 

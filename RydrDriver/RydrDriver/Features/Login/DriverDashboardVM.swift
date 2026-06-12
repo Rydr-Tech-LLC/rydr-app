@@ -881,7 +881,55 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         let driverLocation = CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
         let pickupLocation = CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)
         let pickupMiles = driverLocation.distance(from: pickupLocation) / 1609.344
-        return pickupMiles <= rideFilterPreferences.pickupRadius.miles
+        if rideFilterPreferences.workZoneEnabled {
+            guard pickupMiles <= rideFilterPreferences.effectivePickupMiles else { return false }
+        }
+
+        guard rideFilterPreferences.hasDestinationFilter,
+              let destinationCoordinate = rideFilterPreferences.destinationCoordinate else {
+            return true
+        }
+
+        guard let dropoffCoordinate = request.dropoffCoordinate else { return false }
+        let dropoffLocation = CLLocation(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)
+        let destinationLocation = CLLocation(latitude: destinationCoordinate.latitude, longitude: destinationCoordinate.longitude)
+        let pickupToDestinationMiles = pickupLocation.distance(from: destinationLocation) / 1609.344
+        let dropoffToDestinationMiles = dropoffLocation.distance(from: destinationLocation) / 1609.344
+        let corridorMiles = distanceFromPointToSegmentMiles(
+            point: dropoffCoordinate,
+            start: driverCoordinate,
+            end: destinationCoordinate
+        )
+
+        return dropoffToDestinationMiles <= pickupToDestinationMiles
+            && corridorMiles <= rideFilterPreferences.destinationCorridor.miles
+    }
+
+    private func distanceFromPointToSegmentMiles(
+        point: CLLocationCoordinate2D,
+        start: CLLocationCoordinate2D,
+        end: CLLocationCoordinate2D
+    ) -> Double {
+        let centerLatitude = start.latitude * .pi / 180
+        func xy(_ coordinate: CLLocationCoordinate2D) -> CGPoint {
+            CGPoint(
+                x: coordinate.longitude * 69.0 * cos(centerLatitude),
+                y: coordinate.latitude * 69.0
+            )
+        }
+
+        let p = xy(point)
+        let a = xy(start)
+        let b = xy(end)
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        guard dx != 0 || dy != 0 else {
+            return hypot(p.x - a.x, p.y - a.y)
+        }
+
+        let t = max(0, min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)))
+        let projected = CGPoint(x: a.x + t * dx, y: a.y + t * dy)
+        return hypot(p.x - projected.x, p.y - projected.y)
     }
 
     private func fuzzedRadarCoordinate(for id: String, pickupCoordinate: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
@@ -1125,27 +1173,16 @@ struct DriverDashboardView: View {
 
     var body: some View {
         ZStack {
-            Group {
-                if #available(iOS 17.0, *) {
-                    RydrDriverMapView(
-                        position: $mapPosition,
-                        driverCoordinate: vm.lastLocation?.coordinate,
-                        isOnline: vm.isOnline,
-                        pendingRequests: vm.mapRideRequestBlips,
-                        onRecenter: recenterDriverMap
-                    )
-                    .onReceive(vm.$mapRegion) { newRegion in
-                        mapPosition = .region(newRegion)
-                    }
-                } else {
-                    Map(
-                        coordinateRegion: $vm.mapRegion,
-                        interactionModes: [.all],
-                        showsUserLocation: true,
-                        userTrackingMode: .constant(.follow)
-                    )
-                    .ignoresSafeArea()
-                }
+            RydrDriverMapView(
+                position: $mapPosition,
+                filterPreferences: $vm.rideFilterPreferences,
+                driverCoordinate: vm.lastLocation?.coordinate,
+                isOnline: vm.isOnline,
+                pendingRequests: vm.mapRideRequestBlips,
+                onRecenter: recenterDriverMap
+            )
+            .onReceive(vm.$mapRegion) { newRegion in
+                mapPosition = .region(newRegion)
             }
             .onReceive(session.$canGoOnline) { allowed in
                 vm.canGoOnline = allowed
