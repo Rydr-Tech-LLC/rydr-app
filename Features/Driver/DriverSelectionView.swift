@@ -366,7 +366,7 @@ private struct EmptyDriverState: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Image(systemName: "car.2.slash")
+            Image(systemName: "car.2")
                 .font(.system(size: 42, weight: .semibold))
                 .foregroundStyle(.secondary)
             Text(message)
@@ -392,5 +392,4 @@ private extension Double {
         return (self * p).rounded() / p
     }
 }
-
 

@@ -1,0 +1,842 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		8B2459232E98190C00931537 /* FirebaseAI in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459222E98190C00931537 /* FirebaseAI */; };
+		8B2459252E98190C00931537 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459242E98190C00931537 /* FirebaseAnalytics */; };
+		8B2459272E98190C00931537 /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459262E98190C00931537 /* FirebaseAnalyticsCore */; };
+		8B2459292E98190C00931537 /* FirebaseAnalyticsIdentitySupport in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459282E98190C00931537 /* FirebaseAnalyticsIdentitySupport */; };
+		8B24592B2E98190C00931537 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = 8B24592A2E98190C00931537 /* FirebaseAppCheck */; };
+		8B24592D2E98190C00931537 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 8B24592C2E98190C00931537 /* FirebaseAuth */; };
+		8B24592F2E98190C00931537 /* FirebaseAuthCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 8B24592E2E98190C00931537 /* FirebaseAuthCombine-Community */; };
+		8B2459312E98190C00931537 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459302E98190C00931537 /* FirebaseCore */; };
+		8B2459332E98190C00931537 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459322E98190C00931537 /* FirebaseCrashlytics */; };
+		8B2459352E98190C00931537 /* FirebaseDatabase in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459342E98190C00931537 /* FirebaseDatabase */; };
+		8B2459372E98190C00931537 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459362E98190C00931537 /* FirebaseFirestore */; };
+		8B2459392E98190C00931537 /* FirebaseFirestoreCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459382E98190C00931537 /* FirebaseFirestoreCombine-Community */; };
+		8B24593B2E98190C00931537 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 8B24593A2E98190C00931537 /* FirebaseFunctions */; };
+		8B24593D2E98190C00931537 /* FirebaseFunctionsCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 8B24593C2E98190C00931537 /* FirebaseFunctionsCombine-Community */; };
+		8B24593F2E98190C00931537 /* FirebaseInAppMessaging-Beta in Frameworks */ = {isa = PBXBuildFile; productRef = 8B24593E2E98190C00931537 /* FirebaseInAppMessaging-Beta */; };
+		8B2459412E98190C00931537 /* FirebaseInstallations in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459402E98190C00931537 /* FirebaseInstallations */; };
+		8B2459432E98190C00931537 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459422E98190C00931537 /* FirebaseMessaging */; };
+		8B2459452E98190C00931537 /* FirebasePerformance in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459442E98190C00931537 /* FirebasePerformance */; };
+		8B2459472E98190C00931537 /* FirebaseRemoteConfig in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459462E98190C00931537 /* FirebaseRemoteConfig */; };
+		8B2459492E98190C00931537 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459482E98190C00931537 /* FirebaseStorage */; };
+		8B24594B2E98190C00931537 /* FirebaseStorageCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 8B24594A2E98190C00931537 /* FirebaseStorageCombine-Community */; };
+		8BDB1CDF2E980E860049E21E /* Stripe in Frameworks */ = {isa = PBXBuildFile; productRef = 8BDB1CDE2E980E860049E21E /* Stripe */; };
+		8BDB1CE12E980E860049E21E /* StripeConnect in Frameworks */ = {isa = PBXBuildFile; productRef = 8BDB1CE02E980E860049E21E /* StripeConnect */; };
+		8BDB1CE32E980E860049E21E /* StripeFinancialConnections in Frameworks */ = {isa = PBXBuildFile; productRef = 8BDB1CE22E980E860049E21E /* StripeFinancialConnections */; };
+		8BDB1CE52E980E860049E21E /* StripeIdentity in Frameworks */ = {isa = PBXBuildFile; productRef = 8BDB1CE42E980E860049E21E /* StripeIdentity */; };
+		8BDB1CE72E980E860049E21E /* StripePaymentSheet in Frameworks */ = {isa = PBXBuildFile; productRef = 8BDB1CE62E980E860049E21E /* StripePaymentSheet */; };
+		8BDB1CE92E980E860049E21E /* StripePayments in Frameworks */ = {isa = PBXBuildFile; productRef = 8BDB1CE82E980E860049E21E /* StripePayments */; };
+		8BDB1CEB2E980E860049E21E /* StripePaymentsUI in Frameworks */ = {isa = PBXBuildFile; productRef = 8BDB1CEA2E980E860049E21E /* StripePaymentsUI */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		8B2D1F002E98039C00229527 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8B2D1EEA2E98039B00229527 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8B2D1EF12E98039B00229527;
+			remoteInfo = "Rydr Driver";
+		};
+		8B2D1F0A2E98039C00229527 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8B2D1EEA2E98039B00229527 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8B2D1EF12E98039B00229527;
+			remoteInfo = "Rydr Driver";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		8B2D1EF22E98039B00229527 /* RydrDriver.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RydrDriver.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8B2D1EFF2E98039C00229527 /* RydrDriverTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RydrDriverTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8B2D1F092E98039C00229527 /* RydrDriverUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RydrDriverUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		8B2D1EF42E98039B00229527 /* RydrDriver */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = RydrDriver;
+			sourceTree = "<group>";
+		};
+		8B2D1F022E98039C00229527 /* RydrDriverTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = RydrDriverTests;
+			sourceTree = "<group>";
+		};
+		8B2D1F0C2E98039C00229527 /* RydrDriverUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = RydrDriverUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		8B2D1EEF2E98039B00229527 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8B2459432E98190C00931537 /* FirebaseMessaging in Frameworks */,
+				8B2459392E98190C00931537 /* FirebaseFirestoreCombine-Community in Frameworks */,
+				8BDB1CE12E980E860049E21E /* StripeConnect in Frameworks */,
+				8B2459312E98190C00931537 /* FirebaseCore in Frameworks */,
+				8BDB1CEB2E980E860049E21E /* StripePaymentsUI in Frameworks */,
+				8BDB1CE52E980E860049E21E /* StripeIdentity in Frameworks */,
+				8B2459412E98190C00931537 /* FirebaseInstallations in Frameworks */,
+				8BDB1CDF2E980E860049E21E /* Stripe in Frameworks */,
+				8B2459372E98190C00931537 /* FirebaseFirestore in Frameworks */,
+				8B24593B2E98190C00931537 /* FirebaseFunctions in Frameworks */,
+				8B24592B2E98190C00931537 /* FirebaseAppCheck in Frameworks */,
+				8B24592F2E98190C00931537 /* FirebaseAuthCombine-Community in Frameworks */,
+				8B2459352E98190C00931537 /* FirebaseDatabase in Frameworks */,
+				8BDB1CE32E980E860049E21E /* StripeFinancialConnections in Frameworks */,
+				8B2459232E98190C00931537 /* FirebaseAI in Frameworks */,
+				8BDB1CE92E980E860049E21E /* StripePayments in Frameworks */,
+				8B24593D2E98190C00931537 /* FirebaseFunctionsCombine-Community in Frameworks */,
+				8B2459452E98190C00931537 /* FirebasePerformance in Frameworks */,
+				8B2459272E98190C00931537 /* FirebaseAnalyticsCore in Frameworks */,
+				8B2459292E98190C00931537 /* FirebaseAnalyticsIdentitySupport in Frameworks */,
+				8B2459492E98190C00931537 /* FirebaseStorage in Frameworks */,
+				8B24593F2E98190C00931537 /* FirebaseInAppMessaging-Beta in Frameworks */,
+				8B24594B2E98190C00931537 /* FirebaseStorageCombine-Community in Frameworks */,
+				8B24592D2E98190C00931537 /* FirebaseAuth in Frameworks */,
+				8B2459332E98190C00931537 /* FirebaseCrashlytics in Frameworks */,
+				8B2459472E98190C00931537 /* FirebaseRemoteConfig in Frameworks */,
+				8BDB1CE72E980E860049E21E /* StripePaymentSheet in Frameworks */,
+				8B2459252E98190C00931537 /* FirebaseAnalytics in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8B2D1EFC2E98039C00229527 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8B2D1F062E98039C00229527 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		8B2D1EE92E98039B00229527 = {
+			isa = PBXGroup;
+			children = (
+				8B2D1EF42E98039B00229527 /* RydrDriver */,
+				8B2D1F022E98039C00229527 /* RydrDriverTests */,
+				8B2D1F0C2E98039C00229527 /* RydrDriverUITests */,
+				8B2D1EF32E98039B00229527 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		8B2D1EF32E98039B00229527 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				8B2D1EF22E98039B00229527 /* RydrDriver.app */,
+				8B2D1EFF2E98039C00229527 /* RydrDriverTests.xctest */,
+				8B2D1F092E98039C00229527 /* RydrDriverUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		8B2D1EF12E98039B00229527 /* RydrDriver */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8B2D1F132E98039C00229527 /* Build configuration list for PBXNativeTarget "RydrDriver" */;
+			buildPhases = (
+				8B2D1EEE2E98039B00229527 /* Sources */,
+				8B2D1EEF2E98039B00229527 /* Frameworks */,
+				8B2D1EF02E98039B00229527 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				8B2D1EF42E98039B00229527 /* RydrDriver */,
+			);
+			name = RydrDriver;
+			packageProductDependencies = (
+				8BDB1CDE2E980E860049E21E /* Stripe */,
+				8BDB1CE02E980E860049E21E /* StripeConnect */,
+				8BDB1CE22E980E860049E21E /* StripeFinancialConnections */,
+				8BDB1CE42E980E860049E21E /* StripeIdentity */,
+				8BDB1CE62E980E860049E21E /* StripePaymentSheet */,
+				8BDB1CE82E980E860049E21E /* StripePayments */,
+				8BDB1CEA2E980E860049E21E /* StripePaymentsUI */,
+				8B2459222E98190C00931537 /* FirebaseAI */,
+				8B2459242E98190C00931537 /* FirebaseAnalytics */,
+				8B2459262E98190C00931537 /* FirebaseAnalyticsCore */,
+				8B2459282E98190C00931537 /* FirebaseAnalyticsIdentitySupport */,
+				8B24592A2E98190C00931537 /* FirebaseAppCheck */,
+				8B24592C2E98190C00931537 /* FirebaseAuth */,
+				8B24592E2E98190C00931537 /* FirebaseAuthCombine-Community */,
+				8B2459302E98190C00931537 /* FirebaseCore */,
+				8B2459322E98190C00931537 /* FirebaseCrashlytics */,
+				8B2459342E98190C00931537 /* FirebaseDatabase */,
+				8B2459362E98190C00931537 /* FirebaseFirestore */,
+				8B2459382E98190C00931537 /* FirebaseFirestoreCombine-Community */,
+				8B24593A2E98190C00931537 /* FirebaseFunctions */,
+				8B24593C2E98190C00931537 /* FirebaseFunctionsCombine-Community */,
+				8B24593E2E98190C00931537 /* FirebaseInAppMessaging-Beta */,
+				8B2459402E98190C00931537 /* FirebaseInstallations */,
+				8B2459422E98190C00931537 /* FirebaseMessaging */,
+				8B2459442E98190C00931537 /* FirebasePerformance */,
+				8B2459462E98190C00931537 /* FirebaseRemoteConfig */,
+				8B2459482E98190C00931537 /* FirebaseStorage */,
+				8B24594A2E98190C00931537 /* FirebaseStorageCombine-Community */,
+			);
+			productName = "Rydr Driver";
+			productReference = 8B2D1EF22E98039B00229527 /* RydrDriver.app */;
+			productType = "com.apple.product-type.application";
+		};
+		8B2D1EFE2E98039C00229527 /* RydrDriverTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8B2D1F162E98039C00229527 /* Build configuration list for PBXNativeTarget "RydrDriverTests" */;
+			buildPhases = (
+				8B2D1EFB2E98039C00229527 /* Sources */,
+				8B2D1EFC2E98039C00229527 /* Frameworks */,
+				8B2D1EFD2E98039C00229527 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8B2D1F012E98039C00229527 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				8B2D1F022E98039C00229527 /* RydrDriverTests */,
+			);
+			name = RydrDriverTests;
+			packageProductDependencies = (
+			);
+			productName = "Rydr DriverTests";
+			productReference = 8B2D1EFF2E98039C00229527 /* RydrDriverTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		8B2D1F082E98039C00229527 /* RydrDriverUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8B2D1F192E98039C00229527 /* Build configuration list for PBXNativeTarget "RydrDriverUITests" */;
+			buildPhases = (
+				8B2D1F052E98039C00229527 /* Sources */,
+				8B2D1F062E98039C00229527 /* Frameworks */,
+				8B2D1F072E98039C00229527 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8B2D1F0B2E98039C00229527 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				8B2D1F0C2E98039C00229527 /* RydrDriverUITests */,
+			);
+			name = RydrDriverUITests;
+			packageProductDependencies = (
+			);
+			productName = "Rydr DriverUITests";
+			productReference = 8B2D1F092E98039C00229527 /* RydrDriverUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		8B2D1EEA2E98039B00229527 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					8B2D1EF12E98039B00229527 = {
+						CreatedOnToolsVersion = 26.0.1;
+					};
+					8B2D1EFE2E98039C00229527 = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = 8B2D1EF12E98039B00229527;
+					};
+					8B2D1F082E98039C00229527 = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = 8B2D1EF12E98039B00229527;
+					};
+				};
+			};
+			buildConfigurationList = 8B2D1EED2E98039B00229527 /* Build configuration list for PBXProject "RydrDriver" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 8B2D1EE92E98039B00229527;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				8BDB1CDD2E980E860049E21E /* XCRemoteSwiftPackageReference "stripe-ios" */,
+				8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 8B2D1EF32E98039B00229527 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8B2D1EF12E98039B00229527 /* RydrDriver */,
+				8B2D1EFE2E98039C00229527 /* RydrDriverTests */,
+				8B2D1F082E98039C00229527 /* RydrDriverUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8B2D1EF02E98039B00229527 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8B2D1EFD2E98039C00229527 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8B2D1F072E98039C00229527 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		8B2D1EEE2E98039B00229527 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8B2D1EFB2E98039C00229527 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8B2D1F052E98039C00229527 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		8B2D1F012E98039C00229527 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8B2D1EF12E98039B00229527 /* RydrDriver */;
+			targetProxy = 8B2D1F002E98039C00229527 /* PBXContainerItemProxy */;
+		};
+		8B2D1F0B2E98039C00229527 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8B2D1EF12E98039B00229527 /* RydrDriver */;
+			targetProxy = 8B2D1F0A2E98039C00229527 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		8B2D1F112E98039C00229527 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = DTD5H7A5FS;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		8B2D1F122E98039C00229527 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = DTD5H7A5FS;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		8B2D1F142E98039C00229527 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = JMYJTGCAYG;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Rydr Driver";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Rydr Driver uses your location to show nearby ride requests and share trip progress with riders while you are online.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Rydr-Tech-LLC.Rydr-Drivers";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		8B2D1F152E98039C00229527 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = JMYJTGCAYG;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Rydr Driver";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Rydr Driver uses your location to show nearby ride requests and share trip progress with riders while you are online.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Rydr-Tech-LLC.Rydr-Drivers";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		8B2D1F172E98039C00229527 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DTD5H7A5FS;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Rydr-Tech-LLC.Rydr-DriverTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/RydrDriver.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/RydrDriver";
+			};
+			name = Debug;
+		};
+		8B2D1F182E98039C00229527 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DTD5H7A5FS;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Rydr-Tech-LLC.Rydr-DriverTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/RydrDriver.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/RydrDriver";
+			};
+			name = Release;
+		};
+		8B2D1F1A2E98039C00229527 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DTD5H7A5FS;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Rydr-Tech-LLC.Rydr-DriverUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "Rydr Driver";
+			};
+			name = Debug;
+		};
+		8B2D1F1B2E98039C00229527 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = DTD5H7A5FS;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Rydr-Tech-LLC.Rydr-DriverUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "Rydr Driver";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8B2D1EED2E98039B00229527 /* Build configuration list for PBXProject "RydrDriver" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8B2D1F112E98039C00229527 /* Debug */,
+				8B2D1F122E98039C00229527 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8B2D1F132E98039C00229527 /* Build configuration list for PBXNativeTarget "RydrDriver" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8B2D1F142E98039C00229527 /* Debug */,
+				8B2D1F152E98039C00229527 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8B2D1F162E98039C00229527 /* Build configuration list for PBXNativeTarget "RydrDriverTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8B2D1F172E98039C00229527 /* Debug */,
+				8B2D1F182E98039C00229527 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8B2D1F192E98039C00229527 /* Build configuration list for PBXNativeTarget "RydrDriverUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8B2D1F1A2E98039C00229527 /* Debug */,
+				8B2D1F1B2E98039C00229527 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.4.0;
+			};
+		};
+		8BDB1CDD2E980E860049E21E /* XCRemoteSwiftPackageReference "stripe-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stripe/stripe-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 24.24.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		8B2459222E98190C00931537 /* FirebaseAI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAI;
+		};
+		8B2459242E98190C00931537 /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
+		};
+		8B2459262E98190C00931537 /* FirebaseAnalyticsCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalyticsCore;
+		};
+		8B2459282E98190C00931537 /* FirebaseAnalyticsIdentitySupport */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalyticsIdentitySupport;
+		};
+		8B24592A2E98190C00931537 /* FirebaseAppCheck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAppCheck;
+		};
+		8B24592C2E98190C00931537 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		8B24592E2E98190C00931537 /* FirebaseAuthCombine-Community */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = "FirebaseAuthCombine-Community";
+		};
+		8B2459302E98190C00931537 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		8B2459322E98190C00931537 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
+		};
+		8B2459342E98190C00931537 /* FirebaseDatabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseDatabase;
+		};
+		8B2459362E98190C00931537 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		8B2459382E98190C00931537 /* FirebaseFirestoreCombine-Community */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = "FirebaseFirestoreCombine-Community";
+		};
+		8B24593A2E98190C00931537 /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
+		};
+		8B24593C2E98190C00931537 /* FirebaseFunctionsCombine-Community */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = "FirebaseFunctionsCombine-Community";
+		};
+		8B24593E2E98190C00931537 /* FirebaseInAppMessaging-Beta */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = "FirebaseInAppMessaging-Beta";
+		};
+		8B2459402E98190C00931537 /* FirebaseInstallations */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseInstallations;
+		};
+		8B2459422E98190C00931537 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
+		8B2459442E98190C00931537 /* FirebasePerformance */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebasePerformance;
+		};
+		8B2459462E98190C00931537 /* FirebaseRemoteConfig */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseRemoteConfig;
+		};
+		8B2459482E98190C00931537 /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
+		};
+		8B24594A2E98190C00931537 /* FirebaseStorageCombine-Community */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = "FirebaseStorageCombine-Community";
+		};
+		8BDB1CDE2E980E860049E21E /* Stripe */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8BDB1CDD2E980E860049E21E /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = Stripe;
+		};
+		8BDB1CE02E980E860049E21E /* StripeConnect */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8BDB1CDD2E980E860049E21E /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripeConnect;
+		};
+		8BDB1CE22E980E860049E21E /* StripeFinancialConnections */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8BDB1CDD2E980E860049E21E /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripeFinancialConnections;
+		};
+		8BDB1CE42E980E860049E21E /* StripeIdentity */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8BDB1CDD2E980E860049E21E /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripeIdentity;
+		};
+		8BDB1CE62E980E860049E21E /* StripePaymentSheet */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8BDB1CDD2E980E860049E21E /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripePaymentSheet;
+		};
+		8BDB1CE82E980E860049E21E /* StripePayments */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8BDB1CDD2E980E860049E21E /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripePayments;
+		};
+		8BDB1CEA2E980E860049E21E /* StripePaymentsUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8BDB1CDD2E980E860049E21E /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripePaymentsUI;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 8B2D1EEA2E98039B00229527 /* Project object */;
+}

@@ -3,42 +3,9 @@ import MapKit
 import _MapKit_SwiftUI
 import CoreLocation
 
-// MARK: - Async location fetcher (non-blocking; avoids analyzer warning)
-final class LocationFetcher: NSObject, ObservableObject, CLLocationManagerDelegate {
-    private let manager = CLLocationManager()
-    var onUpdate: ((CLLocationCoordinate2D) -> Void)?
-
-    override init() {
-        super.init()
-        manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
-    }
-
-    func start() {
-        Task.detached {
-            let enabled = CLLocationManager.locationServicesEnabled()
-            await MainActor.run {
-                guard enabled else { return }
-                switch self.manager.authorizationStatus {
-                case .notDetermined: self.manager.requestWhenInUseAuthorization()
-                case .authorizedWhenInUse, .authorizedAlways: self.manager.requestLocation()
-                default: break
-                }
-            }
-        }
-    }
-
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        if manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways {
-            manager.requestLocation()
-        }
-    }
-
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        if let coord = locations.first?.coordinate { onUpdate?(coord) }
-    }
-
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
+private struct RoutePreview {
+    let estimate: RideEstimate
+    let polyline: MKPolyline
 }
 
 struct BookingView: View {
@@ -52,16 +19,16 @@ struct BookingView: View {
     @State private var showInProgress = false
 
     // Map / region
-    @State private var region = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 33.7490, longitude: -84.3880),
-        span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
-    )
-    @StateObject private var locationFetcher = LocationFetcher()
+    @State private var region = RydrMapDefaults.atlantaRegion
+    @State private var mapPosition: MapCameraPosition = .region(RydrMapDefaults.atlantaRegion)
+    @StateObject private var locationManager = LocationManager()
     @State private var pickupCoordinate: CLLocationCoordinate2D?
     @State private var dropoffCoordinate: CLLocationCoordinate2D?
     @State private var pickupResolvedAddress = ""
     @State private var dropoffResolvedAddress = ""
     @State private var routeEstimate: RideEstimate?
+    @State private var routePolyline: MKPolyline?
+    @State private var routeErrorMessage: String?
     @State private var routeRequestID = UUID()
     @State private var isResolvingLocations = false
 
@@ -105,6 +72,21 @@ struct BookingView: View {
         if let routeEstimate { return routeEstimate }
         return fallbackEstimate
     }
+    private var canRequestRide: Bool {
+        pickupCoordinate != nil && dropoffCoordinate != nil && !isResolvingLocations
+    }
+    private var hasBookingDraft: Bool {
+        pickupCoordinate != nil
+        || dropoffCoordinate != nil
+        || !pickupText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        || !dropoffText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    private var isCompactSheet: Bool {
+        hasBookingDraft
+        && focusedField == nil
+        && editingShortcutID == nil
+        && sliderOffset > sliderMaxY * 0.42
+    }
     private var fallbackEstimate: RideEstimate {
         let base: Double = 5.0
         let pm = abs(pickupText.hashValue % 7)
@@ -145,29 +127,17 @@ struct BookingView: View {
         GeometryReader { geo in
             ZStack {
                 // Map as background
-                Map(initialPosition: .region(region)) {
-                    UserAnnotation()
-                    if let pickupCoordinate {
-                        Marker("Pickup", coordinate: pickupCoordinate).tint(.red)
-                    }
-                    if let dropoffCoordinate {
-                        Marker("Drop-off", coordinate: dropoffCoordinate).tint(.blue)
-                    }
-                }
-                    .ignoresSafeArea()
+                RydrMapView(
+                    position: $mapPosition,
+                    pickupCoordinate: pickupCoordinate,
+                    dropoffCoordinate: dropoffCoordinate,
+                    routePolyline: routePolyline,
+                    showsUserLocation: locationManager.authorization == .authorizedWhenInUse || locationManager.authorization == .authorizedAlways,
+                    onRecenter: recenterMap
+                )
                     .onAppear {
-                        // async location update
-                        locationFetcher.onUpdate = { coord in
-                            let start = MKCoordinateRegion(
-                                center: coord,
-                                span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
-                            )
-                            region = start
-                            pickupCompleter.setRegion(start)
-                            dropoffCompleter.setRegion(start)
-                            shortcutCompleter.setRegion(start)
-                        }
-                        locationFetcher.start()
+                        locationManager.requestIfNeeded()
+                        updateSearchRegion(region)
 
                         // slider snap points & initial position
                         sliderMinY = 0
@@ -179,6 +149,18 @@ struct BookingView: View {
 
                         // load recents
                         recentDropoffs = decodeRecents(from: recentDropoffsData)
+                    }
+                    .onReceive(locationManager.$lastLocation.compactMap { $0 }) { location in
+                        guard pickupCoordinate == nil && dropoffCoordinate == nil else { return }
+                        let start = MKCoordinateRegion(
+                            center: location.coordinate,
+                            span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
+                        )
+                        region = start
+                        updateSearchRegion(start)
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            mapPosition = .region(start)
+                        }
                     }
 
                 // Slider panel
@@ -251,80 +233,89 @@ struct BookingView: View {
                     .foregroundColor(.secondary)
                     .padding(.top, 8)
 
-                // Search card (extracted to keep type-checker happy)
-                searchCard
+                if isCompactSheet {
+                    compactBookingSummary
+                        .onTapGesture {
+                            withAnimation(.spring()) { sliderOffset = sliderMinY }
+                        }
+                    requestRideSection
+                } else {
+                    // Search card (extracted to keep type-checker happy)
+                    searchCard
+                    routeDetailsCard
 
-                // ── Library (Work / Home / Add) ────────────────────────────────
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Shortcuts").font(.headline)
-                    HStack(spacing: 14) {
-                        ForEach(shortcuts) { sc in
-                            VStack(spacing: 6) {
-                                Button {
-                                    if sc.address.isEmpty {
-                                        editingShortcutID = sc.id
-                                        newShortcutAddress = ""
-                                        shortcutFocused = true
-                                    } else {
-                                        if pickupText.isEmpty { pickupText = sc.address } else { dropoffText = sc.address }
-                                        clearRouteResolution()
-                                        focusedField = nil
+                    // ── Library (Work / Home / Add) ────────────────────────────────
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Shortcuts").font(.headline)
+                        HStack(spacing: 14) {
+                            ForEach(shortcuts) { sc in
+                                VStack(spacing: 6) {
+                                    Button {
+                                        if sc.address.isEmpty {
+                                            editingShortcutID = sc.id
+                                            newShortcutAddress = ""
+                                            shortcutFocused = true
+                                        } else {
+                                            if pickupText.isEmpty { pickupText = sc.address } else { dropoffText = sc.address }
+                                            clearRouteResolution()
+                                            focusedField = nil
+                                        }
+                                    } label: {
+                                        ZStack {
+                                            Circle().fill(sc.tint.opacity(0.18)).frame(width: 58, height: 58)
+                                            Image(systemName: sc.icon)
+                                                .font(.title2.weight(.semibold))
+                                                .foregroundStyle(sc.tint)
+                                        }
                                     }
-                                } label: {
-                                    ZStack {
-                                        Circle().fill(sc.tint.opacity(0.18)).frame(width: 58, height: 58)
-                                        Image(systemName: sc.icon)
-                                            .font(.title2.weight(.semibold))
-                                            .foregroundStyle(sc.tint)
-                                    }
+                                    .buttonStyle(.plain)
+                                    .simultaneousGesture(
+                                        LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+                                            editingShortcutID = sc.id
+                                            newShortcutAddress = sc.address
+                                            shortcutFocused = true
+                                            shortcutCompleter.setQuery(newShortcutAddress)
+                                        }
+                                    )
+
+                                    Text(sc.label).font(.subheadline).foregroundColor(.primary.opacity(0.95))
                                 }
-                                .buttonStyle(.plain)
-                                .simultaneousGesture(
-                                    LongPressGesture(minimumDuration: 0.4).onEnded { _ in
-                                        editingShortcutID = sc.id
-                                        newShortcutAddress = sc.address
-                                        shortcutFocused = true
-                                        shortcutCompleter.setQuery(newShortcutAddress)
-                                    }
-                                )
-
-                                Text(sc.label).font(.subheadline).foregroundColor(.primary.opacity(0.95))
                             }
                         }
-                    }
 
-                    if let editingID = editingShortcutID {
-                        if let editingShortcut = shortcuts.first(where: { $0.id == editingID }) {
-                            shortcutEditor(for: editingShortcut)
-                        }
-                    }
-                }
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
-
-                // ── Recents ────────────────────────────────────────────────────
-                if !recentDropoffs.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack { Text("Recents").font(.headline); Spacer() }
-                        VStack(spacing: 8) {
-                            ForEach(recentDropoffs.prefix(5), id: \.self) { addr in
-                                Button {
-                                    handleRecentSelection(addr)
-                                } label: {
-                                    recentsRow(addr: addr, city: cityText(for: addr))
-                                }
+                        if let editingID = editingShortcutID {
+                            if let editingShortcut = shortcuts.first(where: { $0.id == editingID }) {
+                                shortcutEditor(for: editingShortcut)
                             }
                         }
                     }
                     .padding(12)
                     .background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
-                }
 
-                // ── Promo + Request button ─────────────────────────────────────
-                promoView
-                requestRideSection
+                    // ── Recents ────────────────────────────────────────────────────
+                    if !recentDropoffs.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack { Text("Recents").font(.headline); Spacer() }
+                            VStack(spacing: 8) {
+                                ForEach(recentDropoffs.prefix(5), id: \.self) { addr in
+                                    Button {
+                                        handleRecentSelection(addr)
+                                    } label: {
+                                        recentsRow(addr: addr, city: cityText(for: addr))
+                                    }
+                                }
+                            }
+                        }
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
+                    }
+
+                    // ── Promo + Request button ─────────────────────────────────────
+                    promoView
+                    requestRideSection
+                }
             }
             .padding(.horizontal)
             .padding(.bottom, 8)
@@ -338,6 +329,73 @@ struct BookingView: View {
             if newValue == .pickup || newValue == .dropoff {
                 withAnimation(.spring()) { sliderOffset = sliderMinY }
             }
+        }
+    }
+
+    private var compactBookingSummary: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Ride Preview")
+                        .font(.headline)
+                    Text(compactSummaryText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+
+            if let routeEstimate {
+                HStack(spacing: 12) {
+                    Label("\(routeEstimate.distanceMiles, specifier: "%.1f") mi", systemImage: "road.lanes")
+                    Label("\(Int(routeEstimate.durationMinutes)) min", systemImage: "clock.fill")
+                    Spacer()
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
+    }
+
+    private var compactSummaryText: String {
+        let pickup = pickupText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dropoff = dropoffText.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch (pickup.isEmpty, dropoff.isEmpty) {
+        case (false, false): return "\(pickup) to \(dropoff)"
+        case (false, true): return "Pickup set. Add a drop-off."
+        case (true, false): return "Drop-off set. Add a pickup."
+        case (true, true): return "Choose pickup and drop-off."
+        }
+    }
+
+    @ViewBuilder
+    private var routeDetailsCard: some View {
+        if let routeEstimate {
+            HStack(spacing: 12) {
+                Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.red)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Route Preview")
+                        .font(.headline)
+                    Text("\(routeEstimate.distanceMiles, specifier: "%.1f") miles · \(Int(routeEstimate.durationMinutes)) min")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
+        } else if let routeErrorMessage {
+            validationBanner(text: routeErrorMessage)
         }
     }
 
@@ -463,10 +521,24 @@ struct BookingView: View {
                     if new != pickupResolvedAddress {
                         pickupCoordinate = nil
                         pickupResolvedAddress = ""
-                        routeEstimate = nil
+                        clearRoutePreview()
                     }
                     pickupCompleter.setRegion(region); pickupCompleter.setQuery(new)
                 }
+            Button {
+                useCurrentLocationForPickup()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "location.fill")
+                    Text("Use Current Location")
+                    Spacer()
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.red)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
             if showPickupSuggestions {
                 suggestionsList(for: pickupCompleter) { completion in
                     Task { await selectPickup(completion) }
@@ -480,7 +552,7 @@ struct BookingView: View {
                     if new != dropoffResolvedAddress {
                         dropoffCoordinate = nil
                         dropoffResolvedAddress = ""
-                        routeEstimate = nil
+                        clearRoutePreview()
                     }
                     dropoffCompleter.setRegion(region); dropoffCompleter.setQuery(new)
                 }
@@ -490,7 +562,7 @@ struct BookingView: View {
                             dropoffText = ""
                             dropoffCoordinate = nil
                             dropoffResolvedAddress = ""
-                            routeEstimate = nil
+                            clearRoutePreview()
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 16, weight: .semibold))
@@ -567,6 +639,18 @@ struct BookingView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(maxHeight: 240)
+            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06), lineWidth: 1))
+        } else {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                Text("No suggestions yet")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(10)
             .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06), lineWidth: 1))
         }
@@ -701,7 +785,8 @@ struct BookingView: View {
                 }
             }
             .buttonStyle(GradientButtonStyle())
-            .disabled(isResolvingLocations)
+            .disabled(!canRequestRide)
+            .opacity(canRequestRide ? 1 : 0.45)
 
             if let message = requestValidationMessage {
                 validationBanner(text: message)
@@ -877,8 +962,32 @@ struct BookingView: View {
         dropoffCoordinate = nil
         pickupResolvedAddress = ""
         dropoffResolvedAddress = ""
-        routeEstimate = nil
+        clearRoutePreview()
         routeRequestID = UUID()
+    }
+
+    private func clearRoutePreview() {
+        routeEstimate = nil
+        routePolyline = nil
+        routeErrorMessage = nil
+        routeRequestID = UUID()
+    }
+
+    private func updateSearchRegion(_ newRegion: MKCoordinateRegion) {
+        pickupCompleter.setRegion(newRegion)
+        dropoffCompleter.setRegion(newRegion)
+        shortcutCompleter.setRegion(newRegion)
+    }
+
+    private func useCurrentLocationForPickup() {
+        let coordinate = locationManager.lastLocation?.coordinate ?? region.center
+        pickupCoordinate = coordinate
+        pickupResolvedAddress = locationManager.lastLocation == nil ? "Atlanta, GA" : "Current Location"
+        pickupText = pickupResolvedAddress
+        focusedField = nil
+        clearRoutePreview()
+        updateRouteEstimateIfPossible()
+        recenterOnResolvedLocations()
     }
 
     @MainActor
@@ -890,6 +999,7 @@ struct BookingView: View {
             pickupCoordinate = item.placemark.coordinate
             pickupText = address
             focusedField = nil
+            clearRoutePreview()
             recenterOnResolvedLocations()
             updateRouteEstimateIfPossible()
         } catch {
@@ -906,6 +1016,7 @@ struct BookingView: View {
             dropoffCoordinate = item.placemark.coordinate
             dropoffText = address
             focusedField = nil
+            clearRoutePreview()
             recenterOnResolvedLocations()
             updateRouteEstimateIfPossible()
         } catch {
@@ -934,10 +1045,16 @@ struct BookingView: View {
             }
 
             guard let pickupCoordinate, let dropoffCoordinate else { return false }
-            routeEstimate = try await calculateRouteEstimate(from: pickupCoordinate, to: dropoffCoordinate)
+            let preview = try await calculateRoutePreview(from: pickupCoordinate, to: dropoffCoordinate)
+            routeEstimate = preview.estimate
+            routePolyline = preview.polyline
+            routeErrorMessage = nil
             recenterOnResolvedLocations()
             return true
         } catch {
+            routeEstimate = nil
+            routePolyline = nil
+            routeErrorMessage = "We could not calculate a route for those locations."
             return false
         }
     }
@@ -948,15 +1065,20 @@ struct BookingView: View {
         routeRequestID = requestID
         Task {
             do {
-                let estimate = try await calculateRouteEstimate(from: pickupCoordinate, to: dropoffCoordinate)
+                let preview = try await calculateRoutePreview(from: pickupCoordinate, to: dropoffCoordinate)
                 await MainActor.run {
                     guard routeRequestID == requestID else { return }
-                    routeEstimate = estimate
+                    routeEstimate = preview.estimate
+                    routePolyline = preview.polyline
+                    routeErrorMessage = nil
+                    recenterOnResolvedLocations()
                 }
             } catch {
                 await MainActor.run {
                     guard routeRequestID == requestID else { return }
                     routeEstimate = nil
+                    routePolyline = nil
+                    routeErrorMessage = "We could not calculate a route for those locations."
                 }
             }
         }
@@ -975,6 +1097,28 @@ struct BookingView: View {
             longitudeDelta: max(0.03, (maxLon - minLon) * 1.8)
         )
         region = MKCoordinateRegion(center: center, span: span)
+        updateSearchRegion(region)
+        withAnimation(.easeInOut(duration: 0.35)) {
+            mapPosition = .region(region)
+        }
+    }
+
+    private func recenterMap() {
+        if ![pickupCoordinate, dropoffCoordinate].compactMap({ $0 }).isEmpty {
+            recenterOnResolvedLocations()
+            return
+        }
+
+        let center = locationManager.lastLocation?.coordinate ?? RydrMapDefaults.atlantaCoordinate
+        let nextRegion = MKCoordinateRegion(
+            center: center,
+            span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
+        )
+        region = nextRegion
+        updateSearchRegion(nextRegion)
+        withAnimation(.easeInOut(duration: 0.35)) {
+            mapPosition = .region(nextRegion)
+        }
     }
 
     private func searchMapItem(for completion: MKLocalSearchCompletion) async throws -> MKMapItem {
@@ -1006,10 +1150,10 @@ struct BookingView: View {
         }
     }
 
-    private func calculateRouteEstimate(from pickup: CLLocationCoordinate2D, to dropoff: CLLocationCoordinate2D) async throws -> RideEstimate {
+    private func calculateRoutePreview(from pickup: CLLocationCoordinate2D, to dropoff: CLLocationCoordinate2D) async throws -> RoutePreview {
         let request = MKDirections.Request()
-        request.source = MKMapItem(placemark: MKPlacemark(coordinate: pickup))
-        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: dropoff))
+        request.source = routeMapItem(for: pickup)
+        request.destination = routeMapItem(for: dropoff)
         request.transportType = .automobile
 
         let route: MKRoute = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MKRoute, Error>) in
@@ -1026,10 +1170,24 @@ struct BookingView: View {
             }
         }
 
-        return RideEstimate(
-            distanceMiles: ((route.distance / 1609.344) * 10).rounded() / 10,
-            durationMinutes: max(1, (route.expectedTravelTime / 60).rounded())
+        return RoutePreview(
+            estimate: RideEstimate(
+                distanceMiles: ((route.distance / 1609.344) * 10).rounded() / 10,
+                durationMinutes: max(1, (route.expectedTravelTime / 60).rounded())
+            ),
+            polyline: route.polyline
         )
+    }
+
+    private func routeMapItem(for coordinate: CLLocationCoordinate2D) -> MKMapItem {
+        if #available(iOS 26.0, *) {
+            return MKMapItem(
+                location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
+                address: nil
+            )
+        } else {
+            return MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
+        }
     }
 
     private func formattedAddress(for item: MKMapItem, fallback: String) -> String {

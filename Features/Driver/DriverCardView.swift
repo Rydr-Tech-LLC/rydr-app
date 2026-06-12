@@ -18,9 +18,9 @@ struct DriverCardView: View {
         RideManager.pricingConfig(for: rideType)
     }
 
-    // Capped rates for this tier
-    private var perMile: Double { min(driver.perMile, pricingConfig.maxPerMile) }
-    private var perMinute: Double { min(driver.perMinute, pricingConfig.maxPerMinute) }
+    // Validated rates for this tier
+    private var perMile: Double { pricingConfig.clampedPerMile(driver.perMile) }
+    private var perMinute: Double { pricingConfig.clampedPerMinute(driver.perMinute) }
 
     // Estimated fare (booking fee + time + distance)
     private var fareBreakdown: RideFareBreakdown {

@@ -85,6 +85,11 @@
             value = "6B0F1666-9B57-4043-A7F5-9B98351983C4"
             isEnabled = "YES">
          </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "RYDR_USE_MOCK_RIDES"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction

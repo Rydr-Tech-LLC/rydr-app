@@ -59,7 +59,10 @@ class UserSessionManager: ObservableObject {
 
     /// Load rider info from Firestore and compute a display name.
     func loadUserProfile() {
-        guard let user = Auth.auth().currentUser else { return }
+        guard let user = Auth.auth().currentUser else {
+            logout()
+            return
+        }
         let uid = user.uid
         let displayName = user.displayName
         let authEmail = user.email

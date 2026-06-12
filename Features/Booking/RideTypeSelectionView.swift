@@ -8,6 +8,7 @@ import SwiftUI
 
 struct RideTypeSelectionView: View {
     var userName: String = "Rydr User" // Replace with actual user data in future
+    private let rideTypes = ["Rydr Go", "Rydr Eco", "Rydr XL", "Rydr Prestine", "Rydr Executive"]
 
     var body: some View {
         ZStack {
@@ -28,29 +29,16 @@ struct RideTypeSelectionView: View {
                         ))
                         .padding(.top)
 
-                    // Rydr Go
-                    NavigationLink(destination: BookingView(rideType: "Rydr Go", userName: userName)) {
-                        RideOptionCard(title: "Rydr Go", subtitle: "Affordable everyday rides", icon: "car.fill")
-                    }
-
-                    // Rydr Eco
-                    NavigationLink(destination: BookingView(rideType: "Rydr Eco", userName: userName)) {
-                        RideOptionCard(title: "Rydr Eco", subtitle: "Electric vehicles like Tesla and Mach-E", icon: "leaf.fill")
-                    }
-
-                    // Rydr XL
-                    NavigationLink(destination: BookingView(rideType: "Rydr XL", userName: userName)) {
-                        RideOptionCard(title: "Rydr XL", subtitle: "More space for extra passengers", icon: "bus.fill")
-                    }
-
-                    // Rydr Prestine
-                    NavigationLink(destination: BookingView(rideType: "Rydr Prestine", userName: userName)) {
-                        RideOptionCard(title: "Rydr Prestine", subtitle: "Premium vehicles and top-rated drivers", icon: "sparkles")
-                    }
-
-                    // Rydr Executive
-                    NavigationLink(destination: BookingView(rideType: "Rydr Executive", userName: userName)) {
-                        RideOptionCard(title: "Rydr Executive", subtitle: "Professional black-car service", icon: "briefcase.fill")
+                    ForEach(rideTypes, id: \.self) { rideType in
+                        let pricing = RideManager.pricingConfig(for: rideType)
+                        NavigationLink(destination: BookingView(rideType: pricing.title, userName: userName)) {
+                            RideOptionCard(
+                                title: pricing.title,
+                                subtitle: pricing.purpose,
+                                detail: pricing.vehicleExpectations,
+                                icon: icon(for: pricing.title)
+                            )
+                        }
                     }
 
                     // Cash Rydr Hub
@@ -62,11 +50,22 @@ struct RideTypeSelectionView: View {
             }
         }
     }
+
+    private func icon(for rideType: String) -> String {
+        switch rideType {
+        case "Rydr Eco": return "leaf.fill"
+        case "Rydr XL": return "bus.fill"
+        case "Rydr Prestine": return "sparkles"
+        case "Rydr Executive": return "briefcase.fill"
+        default: return "car.fill"
+        }
+    }
 }
 
 struct RideOptionCard: View {
     var title: String
     var subtitle: String
+    var detail: String? = nil
     var icon: String
 
     var body: some View {
@@ -84,6 +83,12 @@ struct RideOptionCard: View {
                 Text(subtitle)
                     .font(.caption)
                     .foregroundColor(.gray)
+                if let detail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundColor(.gray)
+                        .lineLimit(2)
+                }
             }
 
             Spacer()

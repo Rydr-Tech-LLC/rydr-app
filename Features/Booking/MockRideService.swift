@@ -53,7 +53,15 @@ final class MockRideService: RideService, @unchecked Sendable {
 
     // MARK: - Ride lifecycle
 
-    func requestRide(driverId: String, pickup: String, dropoff: String, rideType: String) async throws -> String {
+    func requestRide(
+        driverId: String,
+        pickup: String,
+        dropoff: String,
+        rideType: String,
+        pickupCoordinate: CLLocationCoordinate2D?,
+        dropoffCoordinate: CLLocationCoordinate2D?,
+        estimate: RideEstimate?
+    ) async throws -> String {
         let id = UUID().uuidString
         queue.sync {
             sessions[id] = RideSession(id: id, driverId: driverId)

@@ -35,21 +35,42 @@ enum RydrRideTier {
     case eco
     case go
     case xl
-    case pristine
+    case prestine
     case executive
 }
 
 struct RideTierPricing {
     let tier: RydrRideTier
     let title: String
+    let purpose: String
+    let serviceLevel: String
+    let vehicleExpectations: String
     let minimumRideSubtotal: Double
     let bookingFeeUnderFiveMiles: Double
     let bookingFeeFiveMilesOrMore: Double
+    let minPerMile: Double
     let maxPerMile: Double
+    let minPerMinute: Double
     let maxPerMinute: Double
 
     func bookingFee(for distanceMiles: Double) -> Double {
         distanceMiles < 5 ? bookingFeeUnderFiveMiles : bookingFeeFiveMilesOrMore
+    }
+
+    var perMileRangeText: String {
+        "$\(minPerMile.formattedRate) - $\(maxPerMile.formattedRate)/mi"
+    }
+
+    var perMinuteRangeText: String {
+        "$\(minPerMinute.formattedRate) - $\(maxPerMinute.formattedRate)/min"
+    }
+
+    func clampedPerMile(_ value: Double) -> Double {
+        min(max(value, minPerMile), maxPerMile)
+    }
+
+    func clampedPerMinute(_ value: Double) -> Double {
+        min(max(value, minPerMinute), maxPerMinute)
     }
 }
 
@@ -62,51 +83,76 @@ enum RydrPricing {
             return .init(
                 tier: .eco,
                 title: "Rydr Eco",
+                purpose: "Electric and environmentally conscious transportation.",
+                serviceLevel: "Practical, efficient, and lower-impact.",
+                vehicleExpectations: "Electric vehicles approved for Rydr Eco.",
                 minimumRideSubtotal: 7.00,
                 bookingFeeUnderFiveMiles: 3.00,
                 bookingFeeFiveMilesOrMore: 5.00,
-                maxPerMile: 1.00,
-                maxPerMinute: 0.50
+                minPerMile: 0.50,
+                maxPerMile: 1.10,
+                minPerMinute: 0.15,
+                maxPerMinute: 0.25
             )
         case .go:
             return .init(
                 tier: .go,
                 title: "Rydr Go",
+                purpose: "Affordable everyday transportation.",
+                serviceLevel: "Accessible standard rides for daily trips.",
+                vehicleExpectations: "Compact, mid-size, and full-size sedans or mid-size SUVs in good condition.",
                 minimumRideSubtotal: 7.00,
                 bookingFeeUnderFiveMiles: 3.00,
                 bookingFeeFiveMilesOrMore: 6.00,
+                minPerMile: 0.50,
                 maxPerMile: 1.00,
-                maxPerMinute: 0.50
+                minPerMinute: 0.15,
+                maxPerMinute: 0.25
             )
         case .xl:
             return .init(
                 tier: .xl,
                 title: "Rydr XL",
+                purpose: "Groups, larger parties, and luggage.",
+                serviceLevel: "More room while staying practical.",
+                vehicleExpectations: "Large SUVs or qualifying high-capacity vehicles.",
                 minimumRideSubtotal: 9.00,
                 bookingFeeUnderFiveMiles: 4.00,
                 bookingFeeFiveMilesOrMore: 8.00,
-                maxPerMile: 2.00,
-                maxPerMinute: 0.50
+                minPerMile: 0.50,
+                maxPerMile: 1.25,
+                minPerMinute: 0.15,
+                maxPerMinute: 0.25
             )
-        case .pristine:
+        case .prestine:
             return .init(
-                tier: .pristine,
-                title: "Rydr Pristine",
+                tier: .prestine,
+                title: "Rydr Prestine",
+                purpose: "Premium transportation with elevated vehicle standards.",
+                serviceLevel: "Premium, clean, well-maintained, and highly rated.",
+                vehicleExpectations: "Vehicle less than 7 years old with clean interior, clean exterior, no visible damage, and well-maintained condition.",
                 minimumRideSubtotal: 12.00,
                 bookingFeeUnderFiveMiles: 5.00,
                 bookingFeeFiveMilesOrMore: 10.00,
-                maxPerMile: 4.00,
-                maxPerMinute: 1.00
+                minPerMile: 0.75,
+                maxPerMile: 1.50,
+                minPerMinute: 0.15,
+                maxPerMinute: 0.35
             )
         case .executive:
             return .init(
                 tier: .executive,
                 title: "Rydr Executive",
+                purpose: "Exclusive executive transportation experience.",
+                serviceLevel: "More Than A Ride. An Arrival.",
+                vehicleExpectations: "Luxury sedan or luxury SUV less than 5 years old with leather interior, premium appearance, exceptional cleanliness, and premium amenities.",
                 minimumRideSubtotal: 18.00,
                 bookingFeeUnderFiveMiles: 8.00,
                 bookingFeeFiveMilesOrMore: 15.00,
-                maxPerMile: 4.00,
-                maxPerMinute: 1.00
+                minPerMile: 1.00,
+                maxPerMile: 2.00,
+                minPerMinute: 0.25,
+                maxPerMinute: 0.50
             )
         }
     }
@@ -115,9 +161,15 @@ enum RydrPricing {
         let key = rideType.lowercased()
         if key.contains("eco") { return .eco }
         if key.contains("xl") { return .xl }
-        if key.contains("prestine") || key.contains("pristine") { return .pristine }
+        if key.contains("prestine") || key.contains("pristine") { return .prestine }
         if key.contains("executive") { return .executive }
         return .go
+    }
+}
+
+private extension Double {
+    var formattedRate: String {
+        String(format: "%.2f", self)
     }
 }
 
@@ -310,9 +362,17 @@ enum RideRequestError: LocalizedError {
     }
 }
 
-protocol RideService: Sendable {
+protocol RideService: AnyObject, Sendable {
     func fetchNearbyDrivers(pickup: String, dropoff: String, rideType: String, near: CLLocationCoordinate2D) async throws -> [Driver]
-    func requestRide(driverId: String, pickup: String, dropoff: String, rideType: String) async throws -> String // returns rideId
+    func requestRide(
+        driverId: String,
+        pickup: String,
+        dropoff: String,
+        rideType: String,
+        pickupCoordinate: CLLocationCoordinate2D?,
+        dropoffCoordinate: CLLocationCoordinate2D?,
+        estimate: RideEstimate?
+    ) async throws -> String // returns rideId
     func awaitDriverDecision(rideId: String) async throws -> DriverDecision
     func driverLocationStream(rideId: String) -> AsyncStream<CLLocationCoordinate2D>
     func cancelRide(rideId: String) async throws
@@ -375,7 +435,7 @@ final class RideManager: ObservableObject {
     private let activeRideSnapshotKey = "rydr.activeRideSnapshot.v1"
     private let driverDecisionTimeoutSeconds: UInt64 = 12
 
-    init(rideService: RideService = MockRideService()) {
+    init(rideService: RideService = DebugFallbackRideService(primary: FirestoreRideService(), fallback: MockRideService())) {
         self.rideService = rideService
         restoreActiveRideIfNeeded()
     }
@@ -483,7 +543,10 @@ final class RideManager: ObservableObject {
                     driverId: driver.id,
                     pickup: cachedPickup,
                     dropoff: cachedDropoff,
-                    rideType: cachedRideType
+                    rideType: cachedRideType,
+                    pickupCoordinate: cachedPickupCoordinate,
+                    dropoffCoordinate: cachedDropoffCoordinate,
+                    estimate: cachedEstimate
                 )
                 self.currentServiceRideId = rideId
                 let code = self.normalizedSavedPromoCode()
@@ -733,8 +796,8 @@ final class RideManager: ObservableObject {
 
     static func fareBreakdown(estimate: RideEstimate, with driver: Driver, rideType: String) -> RideFareBreakdown {
         let pricing = RydrPricing.config(for: rideType)
-        let perMile = min(driver.perMile, pricing.maxPerMile)
-        let perMinute = min(driver.perMinute, pricing.maxPerMinute)
+        let perMile = pricing.clampedPerMile(driver.perMile)
+        let perMinute = pricing.clampedPerMinute(driver.perMinute)
         let distanceCost = estimate.distanceMiles * perMile
         let timeCost = estimate.durationMinutes * perMinute
         let calculatedSubtotal = distanceCost + timeCost
@@ -916,7 +979,7 @@ final class RideManager: ObservableObject {
     }
 
     private func cappedWaitRate(for driver: Driver, rideType: String) -> Double {
-        min(driver.perMinute, Self.pricingConfig(for: rideType).maxPerMinute)
+        Self.pricingConfig(for: rideType).clampedPerMinute(driver.perMinute)
     }
 
     private func awaitDriverDecisionWithTimeout(rideId: String) async throws -> DriverDecision {

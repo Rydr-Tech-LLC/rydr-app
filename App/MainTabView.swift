@@ -10,6 +10,7 @@ struct MainTabView: View {
     @EnvironmentObject private var session: UserSessionManager
     @StateObject private var rideManager = RideManager()   // ✅ provide once here
     @State private var showRecoveredRide = false
+    @State private var didRequestProfileLoad = false
 
     var body: some View {
         Group {
@@ -20,7 +21,8 @@ struct MainTabView: View {
             }
         }
         .task {
-            if session.accountAccess == nil {
+            if session.accountAccess == nil && !didRequestProfileLoad {
+                didRequestProfileLoad = true
                 session.loadUserProfile()
             }
             showRecoveredRide = rideManager.hasRecoveredActiveRide
