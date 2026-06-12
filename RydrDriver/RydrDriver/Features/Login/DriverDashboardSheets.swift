@@ -384,30 +384,34 @@ struct DrawerDestinationView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    ForEach(rows, id: \.self) { row in
-                        HStack {
-                            Image(systemName: rowIcon)
-                                .foregroundStyle(Styles.rydrGradient)
-                                .frame(width: 26)
-                            Text(row)
-                                .font(.body.weight(.medium))
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+            if item == .community {
+                DriverCashRydrHubView()
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text(subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        ForEach(rows, id: \.self) { row in
+                            HStack {
+                                Image(systemName: rowIcon)
+                                    .foregroundStyle(Styles.rydrGradient)
+                                    .frame(width: 26)
+                                Text(row)
+                                    .font(.body.weight(.medium))
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(14)
+                            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
                         }
-                        .padding(14)
-                        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
                     }
+                    .padding()
                 }
-                .padding()
+                .navigationTitle(item.rawValue)
             }
-            .navigationTitle(item.rawValue)
         }
     }
 

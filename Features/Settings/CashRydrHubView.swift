@@ -42,6 +42,7 @@ struct CashRydrRequest: Identifiable, Equatable {
     var rideType: String
     var visibility: String
     var status: String
+    var driverQueueStatus: String?
     var connectedDriverUid: String?
     var connectedDriverName: String?
     var selectedOfferId: String?
@@ -269,8 +270,13 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func startMarketplace() {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            errorMessage = "Please log in to use Cash Rydr Hub."
+            return
+        }
         requestListener?.remove()
         requestListener = db.collection("cashRydrRequests")
+            .whereField("riderUid", isEqualTo: uid)
             .addSnapshotListener { [weak self] snap, error in
                 Task { @MainActor in
                     guard let self else { return }
@@ -737,6 +743,7 @@ private final class CashRydrHubVM: ObservableObject {
             rideType: data["rideType"] as? String ?? "Scheduled",
             visibility: CashHubVisibility.normalized(data["visibility"] as? String).rawValue,
             status: data["status"] as? String ?? "open",
+            driverQueueStatus: data["driverQueueStatus"] as? String,
             connectedDriverUid: data["connectedDriverUid"] as? String ?? data["acceptedByUid"] as? String,
             connectedDriverName: data["connectedDriverName"] as? String ?? data["acceptedByName"] as? String,
             selectedOfferId: data["selectedOfferId"] as? String,
@@ -1018,9 +1025,9 @@ private struct CashHubTermsView: View {
 private struct CashHubHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Post a ride request and connect directly with independent drivers.")
+            Text("Post a ride request and manage driver replies.")
                 .font(.headline)
-            Text("Cash Rydr Hub does not dispatch rides or set prices. Final details are handled between you and the driver.")
+            Text("Riders only see their own Cash Hub posts, driver offers, messages, and accepted cash ride connections.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -1590,6 +1597,9 @@ private struct CashHubAcceptedRequestView: View {
                     LabeledContent("Pickup", value: request.pickup)
                     LabeledContent("Destination", value: request.destination)
                     LabeledContent("Scheduled time", value: request.scheduledTime.formatted(date: .abbreviated, time: .shortened))
+                    if let driverQueueStatus = request.driverQueueStatus, !driverQueueStatus.isEmpty {
+                        LabeledContent("Driver status", value: driverQueueStatus.capitalized)
+                    }
                     if let amount = request.agreedPrice {
                         LabeledContent("Agreed price", value: amount.formatted(.currency(code: "USD")))
                     }
