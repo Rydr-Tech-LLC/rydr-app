@@ -15,9 +15,14 @@ struct FloatingCircleButton: View {
         Button(action: action) {
             Circle().fill(.ultraThinMaterial)
                 .frame(width: 44, height: 44)
-                .overlay(Image(systemName: systemName))
+                .overlay(
+                    Image(systemName: systemName)
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(Color.primary)
+                )
                 .shadow(radius: 2)
         }
+        .buttonStyle(.plain)
         .padding(.trailing, 8)
     }
 }

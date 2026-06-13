@@ -9,11 +9,34 @@ import SwiftUI
 import UIKit
 import FirebaseCore
 import FirebaseAuth
+import FirebaseAppCheck
+
+private final class RydrDriverAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
+  func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
+    if #available(iOS 14.0, *) {
+      return AppAttestProvider(app: app)
+    }
+    return DeviceCheckProvider(app: app)
+  }
+}
 
 class AppDelegate: NSObject, UIApplicationDelegate {
   func application(_ application: UIApplication,
                    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+    #if targetEnvironment(simulator)
+    AppCheck.setAppCheckProviderFactory(AppCheckDebugProviderFactory())
+    print("AppCheck: Driver debug provider (simulator)")
+    #else
+    AppCheck.setAppCheckProviderFactory(RydrDriverAppCheckProviderFactory())
+    print("AppCheck: Driver App Attest / DeviceCheck provider")
+    #endif
+
     FirebaseApp.configure()
+
+    #if DEBUG
+    Auth.auth().settings?.isAppVerificationDisabledForTesting = true
+    #endif
+
     return true
   }
 }

@@ -107,7 +107,7 @@ struct DriverRideFiltersView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            Color.black.opacity(0.92).ignoresSafeArea()
+            Color(.systemGroupedBackground).ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 14) {
@@ -142,7 +142,7 @@ struct DriverRideFiltersView: View {
 
     private var grabber: some View {
         Capsule()
-            .fill(Color.white.opacity(0.32))
+            .fill(Color.secondary.opacity(0.32))
             .frame(width: 46, height: 5)
             .frame(maxWidth: .infinity)
             .padding(.bottom, 4)
@@ -153,10 +153,10 @@ struct DriverRideFiltersView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Ride Filters")
                     .font(.title3.weight(.black))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Text("Your zone. Your route. Your rules.")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .foregroundStyle(Color.secondary.opacity(0.58))
             }
 
             Spacer()
@@ -184,7 +184,7 @@ struct DriverRideFiltersView: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(.ultraThinMaterial)
+        .background(Color(.systemBackground))
     }
 }
 
@@ -200,7 +200,7 @@ private struct WorkZoneRadiusControl: View {
             Toggle(isOn: $preferences.workZoneEnabled) {
                 Text("Limit rides to this zone")
                     .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
             .tint(.red)
 
@@ -208,10 +208,10 @@ private struct WorkZoneRadiusControl: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(preferences.workZoneEnabled ? "\(Int(preferences.effectivePickupMiles.rounded())) miles" : "Off")
                         .font(.title3.weight(.black))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                     Text("Current radius")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Color.secondary.opacity(0.55))
                 }
 
                 Spacer()
@@ -219,8 +219,8 @@ private struct WorkZoneRadiusControl: View {
                 WorkZonePulseBadge()
             }
             .padding(14)
-            .background(RoundedRectangle(cornerRadius: 17, style: .continuous).fill(Color.white.opacity(0.06)))
-            .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 17, style: .continuous).fill(Color(.secondarySystemBackground)))
+            .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(Color.black.opacity(0.08), lineWidth: 1))
 
             RadiusChipGrid(selection: $preferences.pickupRadius)
                 .onChange(of: preferences.pickupRadius) { _, radius in
@@ -239,7 +239,7 @@ private struct WorkZoneRadiusControl: View {
                     Text("\(Int(preferences.effectivePickupMiles.rounded())) mi")
                 }
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.white.opacity(0.78))
+                .foregroundStyle(Color.secondary.opacity(0.78))
 
                 HStack(spacing: 10) {
                     Text("5 mi")
@@ -255,16 +255,16 @@ private struct WorkZoneRadiusControl: View {
                     Text("20 mi")
                 }
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.62))
+                .foregroundStyle(Color.secondary.opacity(0.62))
             }
             .padding(14)
-            .background(RoundedRectangle(cornerRadius: 17, style: .continuous).fill(Color.white.opacity(0.045)))
+            .background(RoundedRectangle(cornerRadius: 17, style: .continuous).fill(Color(.tertiarySystemBackground)))
 
             Text(preferences.workZoneEnabled
                  ? "Showing ride requests within \(Int(preferences.effectivePickupMiles.rounded())) miles."
                  : "Showing ride requests from all nearby service areas.")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.62))
+                .foregroundStyle(Color.secondary.opacity(0.62))
         }
     }
 }
@@ -282,7 +282,7 @@ private struct DestinationModeControl: View {
             Toggle(isOn: $preferences.destinationModeEnabled) {
                 Text("Head your way")
                     .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
             .tint(.red)
 
@@ -300,21 +300,21 @@ private struct DestinationModeControl: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(completion.title)
                                         .font(.caption.weight(.bold))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(.primary)
                                     Text(completion.subtitle)
                                         .font(.caption2)
-                                        .foregroundStyle(.white.opacity(0.55))
+                                        .foregroundStyle(Color.secondary.opacity(0.55))
                                 }
                                 Spacer()
                             }
                             .padding(.vertical, 10)
                         }
                         .buttonStyle(.plain)
-                        Divider().overlay(Color.white.opacity(0.08))
+                        Divider().overlay(Color.black.opacity(0.08))
                     }
                 }
                 .padding(.horizontal, 12)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.045)))
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.tertiarySystemBackground)))
             }
 
             if preferences.hasDestinationFilter {
@@ -328,11 +328,11 @@ private struct DestinationModeControl: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Destination")
                             .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white.opacity(0.48))
+                            .foregroundStyle(Color.secondary.opacity(0.48))
                         Text(preferences.destinationText)
                             .font(.subheadline.weight(.bold))
                             .lineLimit(2)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                     }
 
                     Spacer()
@@ -342,21 +342,21 @@ private struct DestinationModeControl: View {
                     } label: {
                         Image(systemName: "xmark")
                             .font(.caption.weight(.black))
-                            .foregroundStyle(.white.opacity(0.8))
+                            .foregroundStyle(Color.secondary.opacity(0.8))
                             .frame(width: 32, height: 32)
-                            .background(Circle().fill(Color.white.opacity(0.08)))
+                            .background(Circle().fill(Color.black.opacity(0.08)))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Clear destination")
                 }
                 .padding(12)
-                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.white.opacity(0.06)))
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color(.secondarySystemBackground)))
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("Route Corridor")
                     .font(.caption.weight(.black))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 CorridorChipRow(selection: $preferences.destinationCorridor)
             }
 
@@ -370,33 +370,33 @@ private struct DestinationModeControl: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(Color.red)
-            .background(RoundedRectangle(cornerRadius: 15, style: .continuous).fill(Color.white.opacity(0.045)))
+            .background(RoundedRectangle(cornerRadius: 15, style: .continuous).fill(Color(.tertiarySystemBackground)))
         }
     }
 
     private var destinationSearchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(Color.white.opacity(0.62))
+                .foregroundStyle(Color.secondary.opacity(0.62))
 
             TextField("Set destination", text: $preferences.destinationText)
                 .textInputAutocapitalization(.words)
                 .disableAutocorrection(true)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
 
             if !preferences.destinationText.isEmpty {
                 Button {
                     clearDestination(keepMode: true)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Color.white.opacity(0.48))
+                        .foregroundStyle(Color.secondary.opacity(0.48))
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.06)))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.black.opacity(0.08), lineWidth: 1))
     }
 
     @MainActor
@@ -471,10 +471,10 @@ private struct RydrFilterSection<Content: View>: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                         .font(.headline.weight(.black))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                     Text(subtitle)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Color.secondary.opacity(0.55))
                 }
 
                 Spacer()
@@ -485,10 +485,10 @@ private struct RydrFilterSection<Content: View>: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.black.opacity(0.22)))
-                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
+                .fill(Color(.systemBackground))
+                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.black.opacity(0.08), lineWidth: 1))
         )
+        .shadow(color: Color.black.opacity(0.06), radius: 12, y: 6)
     }
 }
 
@@ -513,9 +513,9 @@ private struct RadiusChipGrid: View {
                     .padding(.vertical, 11)
                     .background(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(selection == radius ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.white.opacity(0.07)))
+                            .fill(selection == radius ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.secondarySystemBackground)))
                     )
-                    .foregroundStyle(selection == radius ? .white : .white.opacity(0.78))
+                    .foregroundStyle(selection == radius ? .white : .primary)
                 }
                 .buttonStyle(.plain)
             }
@@ -544,9 +544,9 @@ private struct CorridorChipRow: View {
                     .padding(.vertical, 12)
                     .background(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(selection == corridor ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.white.opacity(0.07)))
+                            .fill(selection == corridor ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.secondarySystemBackground)))
                     )
-                    .foregroundStyle(selection == corridor ? .white : .white.opacity(0.78))
+                    .foregroundStyle(selection == corridor ? .white : .primary)
                 }
                 .buttonStyle(.plain)
             }
@@ -564,15 +564,15 @@ private struct PreferenceToggleRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Text(subtitle)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.52))
+                    .foregroundStyle(Color.secondary.opacity(0.52))
             }
         }
         .tint(.red)
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.055)))
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
     }
 }
 

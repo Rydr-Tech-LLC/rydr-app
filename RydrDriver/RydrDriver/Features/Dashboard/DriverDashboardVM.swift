@@ -751,7 +751,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private func startMapRequestBlipListener() {
         mapRequestBlipListener?.remove()
         #if DEBUG && targetEnvironment(simulator)
-        mapRideRequestBlips = privacySafeRadarBlips(from: simulatorTestRideRequests())
+        mapRideRequestBlips = simulatorRadarBlips()
         #endif
         mapRequestBlipListener = db.collection("rideRequests")
             .whereField("status", isEqualTo: "pending")
@@ -762,7 +762,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                     if let error {
                         self.statusMessage = "Map request listener error: \(error.localizedDescription)"
                         #if DEBUG && targetEnvironment(simulator)
-                        self.mapRideRequestBlips = self.privacySafeRadarBlips(from: self.simulatorTestRideRequests())
+                        self.mapRideRequestBlips = self.simulatorRadarBlips()
                         #endif
                         return
                     }
@@ -774,7 +774,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                         } ?? []
                     #if DEBUG && targetEnvironment(simulator)
                     self.mapRideRequestBlips = self.mergedMapBlips(
-                        self.privacySafeRadarBlips(from: liveRequests + self.simulatorTestRideRequests())
+                        self.privacySafeRadarBlips(from: liveRequests) + self.simulatorRadarBlips()
                     )
                     #else
                     self.mapRideRequestBlips = self.privacySafeRadarBlips(from: liveRequests)
@@ -839,6 +839,17 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             guard !seen.contains(blip.id), !blip.isExpired else { return false }
             seen.insert(blip.id)
             return true
+        }
+    }
+
+    private func simulatorRadarBlips() -> [DriverRideRadarBlip] {
+        simulatorTestRideRequests().compactMap { request in
+            guard let pickupCoordinate = request.pickupCoordinate else { return nil }
+            return DriverRideRadarBlip(
+                id: request.id,
+                coordinate: fuzzedRadarCoordinate(for: request.id, pickupCoordinate: pickupCoordinate),
+                expiresAt: Date().addingTimeInterval(60 * 60)
+            )
         }
     }
     #endif
@@ -1165,6 +1176,24 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
 // MARK: - Main Dashboard
 
+private struct DashboardLayoutMetrics {
+    let size: CGSize
+
+    var compactHeight: Bool { size.height < 760 }
+    var narrowWidth: Bool { size.width < 380 }
+
+    var horizontalPadding: CGFloat { narrowWidth ? 12 : 16 }
+    var bottomDockHeight: CGFloat { compactHeight ? 72 : 78 }
+    var bottomDockLift: CGFloat { compactHeight ? 58 : 72 }
+    var bottomDockClearance: CGFloat { bottomDockHeight + bottomDockLift + 18 }
+    var floatingPanelBottomPadding: CGFloat { bottomDockClearance + (compactHeight ? 8 : 12) }
+    var sideButtonSpacing: CGFloat { compactHeight ? 10 : 14 }
+    var sideControlsBottomPadding: CGFloat { bottomDockClearance + (compactHeight ? 100 : 124) }
+    var recenterButtonBottomPadding: CGFloat { bottomDockClearance + (compactHeight ? 126 : 150) }
+    var workZoneControlBottomPadding: CGFloat { bottomDockClearance + 10 }
+    var contentBottomPadding: CGFloat { compactHeight ? 8 : 12 }
+}
+
 struct DriverDashboardView: View {
     @EnvironmentObject var session: DriverSessionManager
     @StateObject private var vm = DriverDashboardVM()
@@ -1172,54 +1201,79 @@ struct DriverDashboardView: View {
     @State private var activeSheet: DriverDashboardSheet?
 
     var body: some View {
-        ZStack {
-            RydrDriverMapView(
-                position: $mapPosition,
-                filterPreferences: $vm.rideFilterPreferences,
-                driverCoordinate: vm.lastLocation?.coordinate,
-                isOnline: vm.isOnline,
-                pendingRequests: vm.mapRideRequestBlips,
-                onRecenter: recenterDriverMap
-            )
-            .onReceive(vm.$mapRegion) { newRegion in
-                mapPosition = .region(newRegion)
-            }
-            .onReceive(session.$canGoOnline) { allowed in
-                vm.canGoOnline = allowed
-            }
+        GeometryReader { proxy in
+            let metrics = DashboardLayoutMetrics(size: proxy.size)
 
-            VStack(spacing: 12) {
+            ZStack {
+                RydrDriverMapView(
+                    position: $mapPosition,
+                    filterPreferences: $vm.rideFilterPreferences,
+                    driverCoordinate: vm.lastLocation?.coordinate,
+                    isOnline: vm.isOnline,
+                    pendingRequests: vm.mapRideRequestBlips,
+                    recenterButtonBottomPadding: metrics.recenterButtonBottomPadding,
+                    workZoneControlBottomPadding: metrics.workZoneControlBottomPadding,
+                    onRecenter: recenterDriverMap
+                )
+                .onReceive(vm.$mapRegion) { newRegion in
+                    mapPosition = .region(newRegion)
+                }
+                .onReceive(session.$canGoOnline) { allowed in
+                    vm.canGoOnline = allowed
+                }
+
                 DriverTopBar(
                     vm: vm,
+                    buttonSize: metrics.compactHeight ? 40 : 42,
+                    isCompact: metrics.compactHeight,
                     onFareInsights: { activeSheet = .fareInsights },
                     onNotifications: { activeSheet = .menu(.notifications) }
                 )
-                Spacer()
-                DriverRideWorkPanel(vm: vm) { rideType in
-                    activeSheet = .rideType(rideType)
-                }
-                if vm.isSearchingForRides {
-                    OnlineSearchIndicator()
-                }
-                DriverGoOnlineButton(vm: vm) {
-                    activeSheet = .rideFilters
-                }
-                DriverBottomStatusBar(vm: vm)
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 16)
+                .padding(.horizontal, metrics.horizontalPadding)
+                .padding(.top, metrics.compactHeight ? 6 : 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-            VStack(spacing: 14) {
-                Spacer()
-                FloatingCircleButton(systemName: "chart.bar.fill") { activeSheet = .fareInsights }
-                FloatingCircleButton(systemName: "shield.fill") { activeSheet = .menu(.safety) }
-            }
-            .padding(.trailing, 10)
-            .padding(.bottom, 360)
-            .frame(maxWidth: .infinity, alignment: .trailing)
+                VStack(spacing: metrics.compactHeight ? 8 : 12) {
+                    DriverRideWorkPanel(vm: vm) { rideType in
+                        activeSheet = .rideType(rideType)
+                    }
 
-            SideMenuView(vm: vm, isOpen: $vm.showMenu, onSelect: handleMenu(_:))
+                    if vm.isSearchingForRides {
+                        OnlineSearchIndicator()
+                            .padding(.bottom, metrics.contentBottomPadding)
+                    }
+                }
+                .padding(.horizontal, metrics.horizontalPadding)
+                .padding(.bottom, metrics.floatingPanelBottomPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+
+                VStack(spacing: metrics.sideButtonSpacing) {
+                    FloatingCircleButton(systemName: "chart.bar.fill") { activeSheet = .fareInsights }
+                    FloatingCircleButton(systemName: "shield.fill") { activeSheet = .menu(.safety) }
+                }
+                .padding(.trailing, metrics.horizontalPadding - 6)
+                .padding(.bottom, metrics.sideControlsBottomPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+
+                SideMenuView(vm: vm, isOpen: $vm.showMenu, onSelect: handleMenu(_:))
+
+                DriverDashboardActionDock(
+                    vm: vm,
+                    isCompact: metrics.compactHeight || metrics.narrowWidth,
+                    onFiltersTapped: { activeSheet = .rideFilters },
+                    onRateCardTapped: { openPrimaryRateCard() },
+                    onCashHubTapped: { activeSheet = .menu(.community) },
+                    onProfileTapped: { activeSheet = .menu(.profile) }
+                )
+                .padding(.horizontal, metrics.horizontalPadding)
+                .padding(.top, 4)
+                .padding(.bottom, metrics.bottomDockLift)
+                .background(Color.clear)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
         }
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
         .onAppear {
             vm.startDashboard()
         }
@@ -1327,8 +1381,39 @@ struct DriverDashboardView: View {
             mapPosition = .region(nextRegion)
         }
     }
+
+    private func openPrimaryRateCard() {
+        let selected = vm.selectedRideTypes.sorted(by: tierSort).first
+        let eligible = vm.eligibleRideTypes.sorted(by: tierSort).first
+        activeSheet = .rideType(selected ?? eligible ?? "Rydr Go")
+    }
+
+    private func tierSort(_ lhs: String, _ rhs: String) -> Bool {
+        let ordered = DriverDashboardVM.availableRideTypes
+        return (ordered.firstIndex(of: lhs) ?? ordered.endIndex) < (ordered.firstIndex(of: rhs) ?? ordered.endIndex)
+    }
 }
 
-#Preview {
+#Preview("Driver Dashboard - SE") {
     DriverDashboardView()
+        .environmentObject(DriverSessionManager())
+        .previewDevice("iPhone SE (3rd generation)")
+}
+
+#Preview("Driver Dashboard - Standard") {
+    DriverDashboardView()
+        .environmentObject(DriverSessionManager())
+        .previewDevice("iPhone 15")
+}
+
+#Preview("Driver Dashboard - Pro") {
+    DriverDashboardView()
+        .environmentObject(DriverSessionManager())
+        .previewDevice("iPhone 17 Pro")
+}
+
+#Preview("Driver Dashboard - Pro Max") {
+    DriverDashboardView()
+        .environmentObject(DriverSessionManager())
+        .previewDevice("iPhone 15 Pro Max")
 }

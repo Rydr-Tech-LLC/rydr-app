@@ -27,19 +27,23 @@ private struct DriverCashRideRequest: Identifiable, Equatable {
     var driverQueueStatus: String
     var connectedDriverUid: String?
     var connectedDriverName: String?
+    var releasedByUid: String?
     var agreedPrice: Double?
     var createdAt: Date?
     var pickupCoordinate: CLLocationCoordinate2D?
     var destinationCoordinate: CLLocationCoordinate2D?
 
-    var isOpen: Bool { status == "open" }
+    var isOpenForCurrentDriver: Bool {
+        guard status == "open", connectedDriverUid == nil else { return false }
+        if releasedByUid == Auth.auth().currentUser?.uid { return false }
+        return !["scheduled", "confirmed", "arrived", "started"].contains(driverQueueStatus)
+    }
+
     var isScheduledForCurrentDriver: Bool {
         guard let uid = Auth.auth().currentUser?.uid else { return false }
         return connectedDriverUid == uid
             && (status == "connected" || status == "accepted")
-            && driverQueueStatus != "completed"
-            && driverQueueStatus != "missed"
-            && driverQueueStatus != "cancelled"
+            && ["scheduled", "confirmed", "arrived", "started"].contains(driverQueueStatus)
     }
 
     static func == (lhs: DriverCashRideRequest, rhs: DriverCashRideRequest) -> Bool {
@@ -102,7 +106,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
                         .compactMap(Self.makeRequest)
                         .sorted { $0.scheduledTime < $1.scheduledTime }
 
-                    self.openRequests = requests.filter(\.isOpen)
+                    self.openRequests = requests.filter(\.isOpenForCurrentDriver)
                     self.scheduledRequests = requests.filter(\.isScheduledForCurrentDriver)
                     self.syncResponseListeners(for: self.openRequests + self.scheduledRequests)
                 }
@@ -130,7 +134,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
             "authorUid": uid,
             "authorName": displayName(driverName),
             "authorRole": "driver",
-            "kind": request.isOpen ? "message" : "directMessage",
+            "kind": request.status == "open" ? "message" : "directMessage",
             "message": trimmed,
             "createdAt": FieldValue.serverTimestamp()
         ], to: request)
@@ -139,11 +143,11 @@ private final class DriverCashRydrHubVM: ObservableObject {
 
     func sendOffer(to request: DriverCashRideRequest, draft: DriverCashOfferDraft, driverName: String) -> Bool {
         guard let uid = Auth.auth().currentUser?.uid else {
-            errorMessage = "Sign in before sending an offer."
+            errorMessage = "Sign in before starting a negotiation."
             return false
         }
-        guard request.isOpen else {
-            errorMessage = "This request is no longer accepting offers."
+        guard request.isOpenForCurrentDriver else {
+            errorMessage = "This request is no longer accepting negotiations."
             return false
         }
 
@@ -169,7 +173,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
             payload["offerAmount"] = amount
         }
         addResponse(payload, to: request)
-        confirmationMessage = "Offer sent to \(request.riderName)."
+        confirmationMessage = "Negotiation sent to \(request.riderName)."
         return true
     }
 
@@ -178,7 +182,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
             errorMessage = "Sign in before accepting a cash ride."
             return
         }
-        guard request.isOpen else {
+        guard request.isOpenForCurrentDriver else {
             errorMessage = "This request has already been accepted."
             return
         }
@@ -232,6 +236,10 @@ private final class DriverCashRydrHubVM: ObservableObject {
         switch status {
         case "confirmed":
             payload["driverConfirmedAt"] = FieldValue.serverTimestamp()
+        case "arrived":
+            payload["driverArrivedAt"] = FieldValue.serverTimestamp()
+        case "started":
+            payload["cashRideStartedAt"] = FieldValue.serverTimestamp()
         case "completed":
             payload["cashCompletedAt"] = FieldValue.serverTimestamp()
         case "missed":
@@ -373,9 +381,10 @@ private final class DriverCashRydrHubVM: ObservableObject {
             budgetRange: budgetRange,
             rideType: data["rideType"] as? String ?? "Scheduled",
             status: data["status"] as? String ?? "open",
-            driverQueueStatus: data["driverQueueStatus"] as? String ?? "scheduled",
+            driverQueueStatus: data["driverQueueStatus"] as? String ?? "open",
             connectedDriverUid: data["connectedDriverUid"] as? String ?? data["acceptedByUid"] as? String,
             connectedDriverName: data["connectedDriverName"] as? String ?? data["acceptedByName"] as? String,
+            releasedByUid: data["releasedByUid"] as? String,
             agreedPrice: data["agreedPrice"] as? Double,
             createdAt: (data["createdAt"] as? Timestamp)?.dateValue(),
             pickupCoordinate: coordinate(from: data["pickupCoordinate"] ?? data["pickupLocation"] ?? data["pickupGeoPoint"]),
@@ -437,25 +446,22 @@ private final class DriverCashRydrHubVM: ObservableObject {
 }
 
 struct DriverCashRydrHubView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var session: DriverSessionManager
     @StateObject private var vm = DriverCashRydrHubVM()
-    @State private var selectedTab: DriverCashHubTab = .requests
+    @State private var selectedTab: DriverCashHubTab = .newPosts
     @State private var messagingRequest: DriverCashRideRequest?
     @State private var offeringRequest: DriverCashRideRequest?
     @State private var acceptingRequest: DriverCashRideRequest?
-    @State private var navigatingRequest: DriverCashRideRequest?
+    @State private var activeRideRequest: DriverCashRideRequest?
+    @State private var acceptedRideRequest: DriverCashRideRequest?
+    @State private var selectedScheduledRide: DriverCashRideRequest?
     @State private var releasingRequest: DriverCashRideRequest?
+    @State private var hiddenRequestIDs: Set<String> = []
+    @State private var showsSafetyNotice = true
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Cash Hub", selection: $selectedTab) {
-                ForEach(DriverCashHubTab.allCases) { tab in
-                    Text(tab.title).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding()
-
             if vm.isLoading {
                 Spacer()
                 ProgressView("Loading Cash Hub...")
@@ -463,21 +469,48 @@ struct DriverCashRydrHubView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 14) {
+                        DriverCashHubGrabber(onClose: { dismiss() })
                         header
+                        DriverCashHubSegmentedTabs(selectedTab: $selectedTab)
                         switch selectedTab {
-                        case .requests:
-                            requestList
+                        case .newPosts:
+                            requestList(vm.openRequests.filter { !hiddenRequestIDs.contains($0.id) })
+                        case .nearby:
+                            requestList(vm.openRequests.filter { !hiddenRequestIDs.contains($0.id) })
                         case .scheduled:
                             scheduledList
+                        case .myOffers:
+                            requestList(
+                                vm.openRequests.filter { !hiddenRequestIDs.contains($0.id) && hasPendingNegotiation(for: $0) },
+                                emptyTitle: "No pending negotiations",
+                                emptyMessage: "Posts you negotiate on will live here until the rider accepts or the request closes."
+                            )
+                        }
+                        if showsSafetyNotice {
+                            DriverCashSafetyNotice {
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                    showsSafetyNotice = false
+                                }
+                            }
                         }
                     }
-                    .padding()
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .padding(.bottom, 28)
                 }
             }
         }
-        .navigationTitle("Cash Rydr Hub")
-        .navigationBarTitleDisplayMode(.inline)
-        .background(Color(.systemGroupedBackground))
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationBarBackButtonHidden(true)
+        .background(
+            LinearGradient(
+                colors: [Color(.systemGroupedBackground), Color(.systemBackground)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .presentationDragIndicator(.visible)
+        .presentationDetents([.large])
         .onAppear { vm.start() }
         .onDisappear { vm.stop() }
         .sheet(item: $messagingRequest) { request in
@@ -491,14 +524,59 @@ struct DriverCashRydrHubView: View {
             }
         }
         .sheet(item: $offeringRequest) { request in
-            DriverCashOfferSheet(request: request) { draft in
+            DriverCashOfferSheet(
+                request: request,
+                messages: vm.responsesByRequest[request.id] ?? []
+            ) { draft in
                 if vm.sendOffer(to: request, draft: draft, driverName: session.driverName) {
                     offeringRequest = nil
                 }
             }
         }
-        .fullScreenCover(item: $navigatingRequest) { request in
-            DriverCashRydrNavigationView(request: request)
+        .fullScreenCover(item: $activeRideRequest) { request in
+            DriverCashRydrNavigationView(
+                request: request,
+                onMessage: { messagingRequest = request },
+                onArrived: { vm.updateQueueStatus(request, status: "arrived") },
+                onStartRide: { vm.updateQueueStatus(request, status: "started") },
+                onComplete: {
+                    vm.updateQueueStatus(request, status: "completed")
+                    activeRideRequest = nil
+                }
+            )
+        }
+        .fullScreenCover(item: $acceptedRideRequest) { request in
+            DriverCashAcceptedRideView(
+                request: request,
+                onViewDetails: {
+                    acceptedRideRequest = nil
+                    selectedTab = .scheduled
+                },
+                onMessage: {
+                    acceptedRideRequest = nil
+                    messagingRequest = request
+                }
+            )
+        }
+        .fullScreenCover(item: $selectedScheduledRide) { request in
+            DriverCashScheduledDetailView(
+                request: request,
+                onBack: { selectedScheduledRide = nil },
+                onMessage: { messagingRequest = request },
+                onStartRide: {
+                    selectedScheduledRide = nil
+                    activeRideRequest = request
+                },
+                onArrived: { vm.updateQueueStatus(request, status: "arrived") },
+                onComplete: {
+                    vm.updateQueueStatus(request, status: "completed")
+                    selectedScheduledRide = nil
+                },
+                onCancel: {
+                    selectedScheduledRide = nil
+                    releasingRequest = request
+                }
+            )
         }
         .confirmationDialog(
             "Accept this cash ride?",
@@ -511,6 +589,7 @@ struct DriverCashRydrHubView: View {
             Button("Accept and Schedule") {
                 if let acceptingRequest {
                     vm.accept(acceptingRequest, driverName: session.driverName)
+                    acceptedRideRequest = acceptingRequest
                 }
                 acceptingRequest = nil
                 selectedTab = .scheduled
@@ -557,31 +636,36 @@ struct DriverCashRydrHubView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Independent cash ride marketplace", systemImage: "person.3.fill")
-                .font(.headline)
-            Text("Browse rider requests, message or negotiate price, then manage accepted cash rides from your scheduled queue.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 14) {
+            DriverCashHeroCard()
+            DriverCashStatsCard(
+                openCount: vm.openRequests.count,
+                scheduledCount: vm.scheduledRequests.count,
+                negotiatingCount: pendingNegotiationCount
+            )
         }
-        .driverCashCard()
     }
 
     @ViewBuilder
-    private var requestList: some View {
-        if vm.openRequests.isEmpty {
+    private func requestList(
+        _ requests: [DriverCashRideRequest],
+        emptyTitle: String = "No open requests",
+        emptyMessage: String = "New Cash Hub rider posts will appear here when riders request independent scheduled rides."
+    ) -> some View {
+        if requests.isEmpty {
             DriverCashEmptyState(
-                title: "No open requests",
-                message: "New Cash Hub rider posts will appear here when riders request independent scheduled rides."
+                title: emptyTitle,
+                message: emptyMessage,
+                onRefresh: { vm.start() }
             )
         } else {
-            ForEach(vm.openRequests) { request in
+            ForEach(requests) { request in
                 DriverCashRequestCard(
                     request: request,
                     responses: vm.responsesByRequest[request.id] ?? [],
-                    onMessage: { messagingRequest = request },
                     onOffer: { offeringRequest = request },
-                    onAccept: { acceptingRequest = request }
+                    onAccept: { acceptingRequest = request },
+                    onHide: { hiddenRequestIDs.insert(request.id) }
                 )
             }
         }
@@ -592,82 +676,249 @@ struct DriverCashRydrHubView: View {
         if vm.scheduledRequests.isEmpty {
             DriverCashEmptyState(
                 title: "No scheduled cash rides",
-                message: "Accepted Cash Hub rides will live here so you can confirm, navigate, and manage reminders."
+                message: "Accepted Cash Hub rides will live here so you can confirm, navigate, and manage reminders.",
+                onRefresh: { vm.start() }
             )
         } else {
             ForEach(vm.scheduledRequests) { request in
                 DriverCashScheduledCard(
                     request: request,
                     responses: vm.responsesByRequest[request.id] ?? [],
-                    onMessage: { messagingRequest = request },
-                    onNavigate: { navigatingRequest = request },
-                    onConfirm: { vm.updateQueueStatus(request, status: "confirmed") },
-                    onComplete: { vm.updateQueueStatus(request, status: "completed") },
-                    onMissed: { vm.updateQueueStatus(request, status: "missed") },
+                    onViewDetails: { selectedScheduledRide = request },
                     onRelease: { releasingRequest = request }
                 )
             }
         }
     }
+
+    private var pendingNegotiationCount: Int {
+        vm.openRequests.filter { hasPendingNegotiation(for: $0) }.count
+    }
+
+    private func hasPendingNegotiation(for request: DriverCashRideRequest) -> Bool {
+        (vm.responsesByRequest[request.id] ?? []).contains {
+            $0.isDriverAuthored
+                && $0.kind == "offer"
+                && ["pending", "countered"].contains($0.status)
+        }
+    }
 }
 
 private enum DriverCashHubTab: String, CaseIterable, Identifiable {
-    case requests
+    case newPosts
+    case nearby
     case scheduled
+    case myOffers
 
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .requests: return "Requests"
+        case .newPosts: return "New Posts"
+        case .nearby: return "Nearby"
         case .scheduled: return "Scheduled"
+        case .myOffers: return "My Offers"
         }
+    }
+}
+
+private struct DriverCashHubGrabber: View {
+    var onClose: () -> Void
+
+    var body: some View {
+        ZStack {
+            Capsule()
+                .fill(Color.secondary.opacity(0.28))
+                .frame(width: 42, height: 5)
+
+            HStack {
+                Spacer()
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(Color(.secondarySystemGroupedBackground)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close Cash Rydr Hub")
+            }
+        }
+        .frame(height: 36)
+    }
+}
+
+private struct DriverCashHeroCard: View {
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Styles.rydrGradient)
+
+            HStack(spacing: 5) {
+                ForEach(0..<7, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Color.white.opacity(0.08))
+                        .frame(width: CGFloat(10 + index * 2), height: CGFloat(36 + (index % 3) * 16))
+                }
+            }
+            .offset(x: -72, y: -2)
+
+            Image(systemName: "car.side.fill")
+                .font(.system(size: 60, weight: .black))
+                .foregroundStyle(Color.white.opacity(0.28))
+                .rotationEffect(.degrees(-2))
+                .offset(x: -18, y: 12)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Cash Rydr Hub")
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(.white)
+                Text("See posts. Connect. Negotiate.\nGet paid.")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.white.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(18)
+        }
+        .frame(minHeight: 122)
+        .shadow(color: Color.red.opacity(0.24), radius: 18, y: 9)
+    }
+}
+
+private struct DriverCashStatsCard: View {
+    let openCount: Int
+    let scheduledCount: Int
+    let negotiatingCount: Int
+
+    var body: some View {
+        HStack(spacing: 0) {
+            DriverCashStatColumn(value: openCount, title: "Open", systemImage: "calendar.badge.plus")
+            Divider().frame(height: 54)
+            DriverCashStatColumn(value: scheduledCount, title: "Scheduled", systemImage: "calendar")
+            Divider().frame(height: 54)
+            DriverCashStatColumn(value: negotiatingCount, title: "Negotiating", systemImage: "message.badge")
+        }
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.06), radius: 18, y: 8)
+        )
+    }
+}
+
+private struct DriverCashStatColumn: View {
+    let value: Int
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        VStack(spacing: 7) {
+            Text("\(value)")
+                .font(.title3.weight(.black))
+                .foregroundStyle(value > 0 ? Color.red : Color.primary)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Image(systemName: systemImage)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(value > 0 ? Color.red : Color.secondary.opacity(0.6))
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(value > 0 ? Color.red.opacity(0.10) : Color(.secondarySystemGroupedBackground)))
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct DriverCashHubSegmentedTabs: View {
+    @Binding var selectedTab: DriverCashHubTab
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(DriverCashHubTab.allCases) { tab in
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                        selectedTab = tab
+                    }
+                } label: {
+                    Text(tab.title)
+                        .font(.caption.weight(.black))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .foregroundStyle(selectedTab == tab ? Color.white : Color.primary)
+                        .background(
+                            Capsule()
+                                .fill(selectedTab == tab ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.clear))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(5)
+        .background(Capsule().fill(Color(.secondarySystemGroupedBackground)))
     }
 }
 
 private struct DriverCashRequestCard: View {
     let request: DriverCashRideRequest
     let responses: [DriverCashHubResponse]
-    let onMessage: () -> Void
     let onOffer: () -> Void
     let onAccept: () -> Void
-
-    private var driverResponses: [DriverCashHubResponse] {
-        responses.filter(\.isDriverAuthored)
-    }
+    let onHide: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             DriverCashRideSummary(request: request)
 
-            if !driverResponses.isEmpty {
-                Text("You have \(driverResponses.count) reply\(driverResponses.count == 1 ? "" : "ies") on this request.")
-                    .font(.caption.weight(.semibold))
+            Text(cardDetailLine)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !request.notes.isEmpty {
+                Text(request.notes)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemGroupedBackground)))
             }
 
-            HStack {
-                Button("Message", action: onMessage)
-                    .buttonStyle(.bordered)
-                Button("Send Offer", action: onOffer)
-                    .buttonStyle(.bordered)
-                Spacer()
+            HStack(spacing: 10) {
                 Button("Accept", action: onAccept)
+                    .buttonStyle(.bordered)
+                Button("Negotiate", action: onOffer)
                     .buttonStyle(.borderedProminent)
-                    .tint(.green)
+                    .tint(.red)
+                Menu {
+                    Button("Hide", role: .destructive, action: onHide)
+                    Button("Report Post", role: .destructive) {}
+                } label: {
+                    Image(systemName: "ellipsis.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.red)
+                }
             }
         }
-        .driverCashCard()
+        .driverCashPremiumCard()
     }
+
+    private var cardDetailLine: String {
+        let offerCount = responses.filter { $0.kind == "offer" }.count
+        let offerText = "\(offerCount) Offer\(offerCount == 1 ? "" : "s")"
+        let passengerText = "\(request.passengers) Passenger\(request.passengers == 1 ? "" : "s")"
+        return "\(offerText) -> No Luggage, \(request.rideType) -> \(passengerText)"
+    }
+
 }
 
 private struct DriverCashScheduledCard: View {
     let request: DriverCashRideRequest
     let responses: [DriverCashHubResponse]
-    let onMessage: () -> Void
-    let onNavigate: () -> Void
-    let onConfirm: () -> Void
-    let onComplete: () -> Void
-    let onMissed: () -> Void
+    let onViewDetails: () -> Void
     let onRelease: () -> Void
 
     var body: some View {
@@ -679,21 +930,10 @@ private struct DriverCashScheduledCard: View {
                 .foregroundStyle(.secondary)
 
             HStack {
-                Button("Message", action: onMessage)
-                    .buttonStyle(.bordered)
-                Button("Confirm", action: onConfirm)
-                    .buttonStyle(.bordered)
-                Button("Navigate with Rydr Map", action: onNavigate)
-                .buttonStyle(.bordered)
-            }
-
-            HStack {
-                Button("Complete", action: onComplete)
+                Button("View Details", action: onViewDetails)
                     .buttonStyle(.borderedProminent)
-                    .tint(.green)
-                Button("Missed", role: .destructive, action: onMissed)
-                    .buttonStyle(.bordered)
-                Button("Release Ride", role: .destructive, action: onRelease)
+                    .tint(.red)
+                Button("Release/Cancel", role: .destructive, action: onRelease)
                     .buttonStyle(.bordered)
             }
 
@@ -709,7 +949,7 @@ private struct DriverCashScheduledCard: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .driverCashCard()
+        .driverCashPremiumCard()
     }
 }
 
@@ -740,11 +980,6 @@ private struct DriverCashRideSummary: View {
             }
             .font(.subheadline)
 
-            HStack(spacing: 8) {
-                DriverCashBadge(text: request.rideType)
-                DriverCashBadge(text: "\(request.passengers) passenger\(request.passengers == 1 ? "" : "s")")
-            }
-
             if !request.notes.isEmpty {
                 Text(request.notes)
                     .font(.footnote)
@@ -759,8 +994,288 @@ private struct DriverCashRideSummary: View {
     }
 }
 
+private struct DriverCashAcceptedRideView: View {
+    let request: DriverCashRideRequest
+    var onViewDetails: () -> Void
+    var onMessage: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var animate = false
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(.systemBackground), Color.red.opacity(0.08)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            ForEach(0..<18, id: \.self) { index in
+                Capsule()
+                    .fill(Color.red.opacity(0.65))
+                    .frame(width: 4, height: 14)
+                    .offset(y: animate ? -CGFloat(120 + (index % 6) * 28) : -20)
+                    .rotationEffect(.degrees(Double(index * 21)))
+                    .opacity(animate ? 0 : 1)
+                    .animation(.easeOut(duration: 1.15).delay(Double(index) * 0.025), value: animate)
+            }
+
+            VStack(spacing: 22) {
+                Spacer()
+
+                ZStack {
+                    Circle()
+                        .fill(Styles.rydrGradient)
+                        .frame(width: 104, height: 104)
+                        .shadow(color: Color.red.opacity(0.35), radius: 28, y: 12)
+                        .scaleEffect(animate ? 1.04 : 0.84)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 46, weight: .black))
+                        .foregroundStyle(.white)
+                }
+                .animation(.spring(response: 0.45, dampingFraction: 0.72), value: animate)
+
+                VStack(spacing: 8) {
+                    Text("Ride Accepted")
+                        .font(.largeTitle.weight(.black))
+                    Text("You'll pick up \(request.riderName).")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 16) {
+                    DriverCashNavigationSummaryRow(
+                        title: "Pickup",
+                        address: request.pickup,
+                        systemImage: "mappin.circle.fill",
+                        label: request.scheduledTime.formatted(date: .omitted, time: .shortened)
+                    )
+                    DriverCashNavigationSummaryRow(
+                        title: "Drop-off",
+                        address: request.destination,
+                        systemImage: "flag.checkered.circle.fill",
+                        label: "Cash"
+                    )
+                    Divider()
+                    HStack {
+                        Text("Agreed Price")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(agreedPriceText)
+                            .font(.title3.weight(.black))
+                            .foregroundStyle(.primary)
+                    }
+                }
+                .padding(18)
+                .background(RoundedRectangle(cornerRadius: 22).fill(Color(.secondarySystemGroupedBackground)))
+
+                Button("View Details") {
+                    onViewDetails()
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+
+                Button("Message \(request.riderName)") {
+                    onMessage()
+                    dismiss()
+                }
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.red)
+
+                Spacer()
+            }
+            .padding(24)
+        }
+        .onAppear { animate = true }
+    }
+
+    private var agreedPriceText: String {
+        if let agreedPrice = request.agreedPrice {
+            return agreedPrice.formatted(.currency(code: "USD"))
+        }
+        guard !request.budgetRange.isEmpty else { return "Cash" }
+        return request.budgetRange.hasPrefix("$") ? request.budgetRange : "$\(request.budgetRange)"
+    }
+}
+
+private struct DriverCashScheduledDetailView: View {
+    let request: DriverCashRideRequest
+    var onBack: () -> Void
+    var onMessage: () -> Void
+    var onStartRide: () -> Void
+    var onArrived: () -> Void
+    var onComplete: () -> Void
+    var onCancel: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 18) {
+                    riderHeader
+                    routeCard
+                    actionCard
+
+                    Button("Cancel Ride", role: .destructive) {
+                        onCancel()
+                        dismiss()
+                    }
+                    .font(.headline.weight(.bold))
+                    .padding(.top, 4)
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Scheduled Ride")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        onBack()
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.headline.weight(.bold))
+                    }
+                }
+            }
+        }
+    }
+
+    private var riderHeader: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(Styles.rydrGradient)
+                .frame(width: 54, height: 54)
+                .overlay(
+                    Text(initials)
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(.white)
+                )
+            VStack(alignment: .leading, spacing: 3) {
+                Text(request.riderName)
+                    .font(.title3.weight(.black))
+                Text("Cash ride • \(request.scheduledTime.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                onMessage()
+            } label: {
+                Image(systemName: "message.fill")
+                    .font(.headline)
+                    .frame(width: 42, height: 42)
+                    .background(Circle().fill(Color(.secondarySystemGroupedBackground)))
+                    .foregroundStyle(.red)
+            }
+        }
+        .driverCashPremiumCard()
+    }
+
+    private var routeCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            DriverCashNavigationSummaryRow(
+                title: "Pickup",
+                address: request.pickup,
+                systemImage: "mappin.circle.fill",
+                label: "Pickup"
+            )
+            DriverCashNavigationSummaryRow(
+                title: "Drop-off",
+                address: request.destination,
+                systemImage: "flag.checkered.circle.fill",
+                label: "Drop-off"
+            )
+            if !request.notes.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Rider Note")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Text(request.notes)
+                        .font(.subheadline)
+                }
+            }
+            Divider()
+            HStack {
+                Text("Agreed Price")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(agreedPriceText)
+                    .font(.title3.weight(.black))
+                    .foregroundStyle(.primary)
+            }
+        }
+        .driverCashPremiumCard()
+    }
+
+    private var actionCard: some View {
+        VStack(spacing: 12) {
+            Button {
+                onStartRide()
+                dismiss()
+            } label: {
+                Text("Start Ride")
+                    .font(.headline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+
+            Button {
+                onArrived()
+            } label: {
+                Text("I've Arrived")
+                    .font(.headline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.bordered)
+
+            Button {
+                onComplete()
+                dismiss()
+            } label: {
+                Text("Complete Ride")
+                    .font(.headline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.bordered)
+            .tint(.black)
+        }
+        .driverCashPremiumCard()
+    }
+
+    private var initials: String {
+        request.riderName
+            .split(separator: " ")
+            .prefix(2)
+            .compactMap(\.first)
+            .map(String.init)
+            .joined()
+            .uppercased()
+    }
+
+    private var agreedPriceText: String {
+        if let agreedPrice = request.agreedPrice {
+            return agreedPrice.formatted(.currency(code: "USD"))
+        }
+        guard !request.budgetRange.isEmpty else { return "Cash" }
+        return request.budgetRange.hasPrefix("$") ? request.budgetRange : "$\(request.budgetRange)"
+    }
+}
+
 private struct DriverCashRydrNavigationView: View {
     let request: DriverCashRideRequest
+    var onMessage: () -> Void
+    var onArrived: () -> Void
+    var onStartRide: () -> Void
+    var onComplete: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var camera: MapCameraPosition = .region(DriverMapDefaults.pilotRegion)
@@ -772,6 +1287,7 @@ private struct DriverCashRydrNavigationView: View {
     @State private var routeDistanceMeters: CLLocationDistance?
     @State private var routeTravelTime: TimeInterval?
     @State private var isPickupStage = true
+    @State private var didArrive = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -797,6 +1313,15 @@ private struct DriverCashRydrNavigationView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    Button {
+                        onMessage()
+                    } label: {
+                        Image(systemName: "message.fill")
+                            .font(.headline.weight(.bold))
+                            .frame(width: 42, height: 42)
+                            .background(Circle().fill(Color(.systemGray5)))
+                            .foregroundStyle(.red)
+                    }
                     Button {
                         dismiss()
                     } label: {
@@ -832,28 +1357,14 @@ private struct DriverCashRydrNavigationView: View {
                             .foregroundStyle(.red)
                     }
 
-                    HStack {
-                        Button {
-                            isPickupStage = false
-                            if let pickupCoordinate {
-                                driverCoordinate = pickupCoordinate
-                            }
-                            Task { await calculateRoute() }
-                        } label: {
-                            Text("Start Drop-off Route")
-                                .font(.headline.weight(.bold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 13)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
-                        .disabled(!isPickupStage || destinationCoordinate == nil)
+                    primaryAction
 
-                        Button("Close") {
-                            dismiss()
-                        }
-                        .buttonStyle(.bordered)
+                    Button("Ride Completed") {
+                        onComplete()
+                        dismiss()
                     }
+                    .buttonStyle(.bordered)
+                    .disabled(isPickupStage)
                 }
             }
             .padding(14)
@@ -868,6 +1379,53 @@ private struct DriverCashRydrNavigationView: View {
         .task {
             await resolveCoordinates()
             await calculateRoute()
+        }
+    }
+
+    @ViewBuilder
+    private var primaryAction: some View {
+        if isPickupStage && !didArrive {
+            Button {
+                didArrive = true
+                if let pickupCoordinate {
+                    driverCoordinate = pickupCoordinate
+                }
+                onArrived()
+            } label: {
+                Text("I've Arrived")
+                    .font(.headline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .disabled(pickupCoordinate == nil)
+        } else if isPickupStage {
+            Button {
+                isPickupStage = false
+                onStartRide()
+                Task { await calculateRoute() }
+            } label: {
+                Text("Start Ride")
+                    .font(.headline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .disabled(destinationCoordinate == nil)
+        } else {
+            Button {
+                onComplete()
+                dismiss()
+            } label: {
+                Text("Complete Ride")
+                    .font(.headline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.black)
         }
     }
 
@@ -1071,35 +1629,74 @@ private struct DriverCashMessageSheet: View {
 
 private struct DriverCashOfferSheet: View {
     let request: DriverCashRideRequest
+    let messages: [DriverCashHubResponse]
     var onSend: (DriverCashOfferDraft) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var draft = DriverCashOfferDraft()
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Request") {
-                    LabeledContent("Pickup", value: request.pickup)
-                    LabeledContent("Destination", value: request.destination)
-                    LabeledContent("Scheduled", value: request.scheduledTime.formatted(date: .abbreviated, time: .shortened))
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("\(request.pickup) -> \(request.destination)")
+                            .font(.headline.weight(.black))
+                        Text(request.scheduledTime.formatted(date: .abbreviated, time: .shortened))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text("Budget \(budgetText)")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Styles.rydrGradient)
+                    }
+                    .padding(16)
+                    .background(RoundedRectangle(cornerRadius: 18).fill(Color(.secondarySystemGroupedBackground)))
 
-                Section("Your Offer") {
-                    TextField("Offer amount", text: $draft.amount)
-                        .keyboardType(.decimalPad)
-                    TextField("Availability", text: $draft.availability)
-                    TextField("Vehicle", text: $draft.vehicleInfo)
-                    TextField("Message", text: $draft.message, axis: .vertical)
-                        .lineLimit(3, reservesSpace: true)
-                }
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Thread")
+                            .font(.headline.weight(.black))
+                        if messages.isEmpty {
+                            Text("Start the negotiation with your price, availability, and pickup details.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(messages.sorted(by: messageSort)) { message in
+                                DriverCashThreadBubble(message: message)
+                            }
+                        }
+                    }
 
-                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Your Negotiation")
+                            .font(.headline.weight(.black))
+                        TextField("Your price", text: $draft.amount)
+                            .keyboardType(.decimalPad)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Availability", text: $draft.availability)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Vehicle", text: $draft.vehicleInfo)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Message", text: $draft.message, axis: .vertical)
+                            .lineLimit(3, reservesSpace: true)
+                            .textFieldStyle(.roundedBorder)
+
+                        HStack {
+                            Button("I can do that") { draft.message = "I can do that." }
+                            Button("On my way") { draft.message = "On my way." }
+                            Button("Meet outside?") { draft.message = "Can you meet outside?" }
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(16)
+                    .background(RoundedRectangle(cornerRadius: 18).fill(Color(.secondarySystemGroupedBackground)))
+
                     Text("Cash Hub prices and pickup coordination are handled directly between you and the rider.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                .padding()
             }
-            .navigationTitle("Send Offer")
+            .navigationTitle("Negotiate")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -1111,33 +1708,181 @@ private struct DriverCashOfferSheet: View {
             }
         }
     }
+
+    private var budgetText: String {
+        guard !request.budgetRange.isEmpty else { return "open" }
+        return request.budgetRange.hasPrefix("$") ? request.budgetRange : "$\(request.budgetRange)"
+    }
+
+    private func messageSort(_ lhs: DriverCashHubResponse, _ rhs: DriverCashHubResponse) -> Bool {
+        (lhs.createdAt ?? .distantPast) < (rhs.createdAt ?? .distantPast)
+    }
 }
 
-private struct DriverCashBadge: View {
-    let text: String
+private struct DriverCashThreadBubble: View {
+    let message: DriverCashHubResponse
 
     var body: some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(Color.red.opacity(0.1)))
+        HStack {
+            if message.isDriverAuthored { Spacer(minLength: 32) }
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text(message.isDriverAuthored ? "You" : message.authorName)
+                        .font(.caption.weight(.bold))
+                    if let amount = message.offerAmount {
+                        Text(amount, format: .currency(code: "USD"))
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(message.isDriverAuthored ? .white : .red)
+                    }
+                }
+                if !message.message.isEmpty {
+                    Text(message.message)
+                        .font(.subheadline)
+                } else if message.kind == "offer" {
+                    Text("Sent a negotiation.")
+                        .font(.subheadline)
+                }
+            }
+            .padding(12)
+            .foregroundStyle(message.isDriverAuthored ? .white : .primary)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(message.isDriverAuthored ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.secondarySystemGroupedBackground)))
+            )
+            if !message.isDriverAuthored { Spacer(minLength: 32) }
+        }
+    }
+}
+
+private struct DriverCashStatChip: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.headline.weight(.black))
+            Text(subtitle)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemGroupedBackground)))
+    }
+}
+
+private struct DriverCashSafetyNotice: View {
+    var onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.red.opacity(0.08))
+                    .frame(width: 90, height: 90)
+                Image(systemName: "shield.checkered")
+                    .font(.system(size: 38, weight: .black))
+                    .foregroundStyle(Styles.rydrGradient)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top) {
+                    Text("Safety First")
+                        .font(.headline.weight(.black))
+                    Spacer()
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss safety notice")
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Cash rides are arranged directly between rider and driver.")
+                    Text("Confirm pickup, drop-off, price, and timing before meeting.")
+                    Text("Report suspicious activity or unsafe behavior.")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                Button(action: onDismiss) {
+                    Text("Got it")
+                        .font(.subheadline.weight(.black))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Capsule().fill(Styles.rydrGradient))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(.systemBackground), Color.red.opacity(0.04)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: Color.black.opacity(0.06), radius: 18, y: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.red.opacity(0.08), lineWidth: 1)
+        )
     }
 }
 
 private struct DriverCashEmptyState: View {
     let title: String
     let message: String
+    var onRefresh: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(spacing: 18) {
+            ZStack {
+                Circle()
+                    .fill(Color.red.opacity(0.08))
+                    .frame(width: 74, height: 74)
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 31, weight: .bold))
+                    .foregroundStyle(Color.red)
+            }
+
             Text(title)
-                .font(.headline)
+                .font(.headline.weight(.black))
+                .multilineTextAlignment(.center)
             Text(message)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button(action: onRefresh) {
+                Label("Refresh", systemImage: "arrow.clockwise")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: 220)
+                    .padding(.vertical, 13)
+                    .background(Capsule().fill(Styles.rydrGradient))
+            }
+            .buttonStyle(.plain)
         }
-        .driverCashCard()
+        .padding(.horizontal, 22)
+        .padding(.vertical, 34)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.06), radius: 18, y: 8)
+        )
     }
 }
 
@@ -1146,5 +1891,19 @@ private extension View {
         padding()
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 14).fill(Color(.systemBackground)))
+    }
+
+    func driverCashPremiumCard() -> some View {
+        padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(.systemBackground))
+                    .shadow(color: Color.black.opacity(0.06), radius: 18, y: 8)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
+            )
     }
 }

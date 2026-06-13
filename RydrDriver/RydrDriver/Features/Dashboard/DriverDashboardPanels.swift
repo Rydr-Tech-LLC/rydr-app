@@ -32,6 +32,8 @@ enum RideTypePillStatus {
 
 struct DriverTopBar: View {
     @ObservedObject var vm: DriverDashboardVM
+    var buttonSize: CGFloat = 42
+    var isCompact: Bool = false
     var onFareInsights: () -> Void
     var onNotifications: () -> Void
 
@@ -39,25 +41,30 @@ struct DriverTopBar: View {
         HStack(alignment: .center) {
             Button { withAnimation(.spring) { vm.showMenu.toggle() } } label: {
                 Circle().fill(.regularMaterial)
-                    .frame(width: 42, height: 42)
-                    .overlay(Image(systemName: "line.3.horizontal").font(.title3.weight(.semibold)))
+                    .frame(width: buttonSize, height: buttonSize)
+                    .overlay(
+                        Image(systemName: "line.3.horizontal")
+                            .font((isCompact ? Font.body : Font.title3).weight(.semibold))
+                            .foregroundStyle(Color.primary)
+                    )
                     .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
             }
+            .buttonStyle(.plain)
 
             Spacer()
 
             Button(action: onFareInsights) {
                 VStack(spacing: 2) {
                     Text(currencyFormatter.string(from: vm.earningsToday as NSDecimalNumber) ?? "$0.00")
-                        .font(.headline.monospacedDigit().weight(.black))
+                        .font((isCompact ? Font.subheadline : Font.headline).monospacedDigit().weight(.black))
                     Text(statusText)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(vm.isOnline ? Color.green : Color.white.opacity(0.68))
                         .lineLimit(1)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 8)
-                .frame(minWidth: 128)
+                .padding(.horizontal, isCompact ? 16 : 20)
+                .padding(.vertical, isCompact ? 7 : 8)
+                .frame(minWidth: isCompact ? 116 : 128)
                 .background(
                     Capsule()
                         .fill(Color.black.opacity(0.88))
@@ -72,12 +79,12 @@ struct DriverTopBar: View {
 
             Button(action: onNotifications) {
                 Circle().fill(.regularMaterial)
-                    .frame(width: 42, height: 42)
+                    .frame(width: buttonSize, height: buttonSize)
                     .overlay {
                         ZStack(alignment: .topTrailing) {
                             Image(systemName: "bell.fill")
                                 .font(.footnote)
-                                .foregroundStyle(Color.blue)
+                                .foregroundStyle(Color.primary)
                             Circle()
                                 .fill(Color.red)
                                 .frame(width: 9, height: 9)
@@ -86,8 +93,8 @@ struct DriverTopBar: View {
                     }
                     .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
             }
+            .buttonStyle(.plain)
         }
-        .padding(.top, 8)
     }
 
     private var statusText: String {
@@ -98,12 +105,51 @@ struct DriverTopBar: View {
     }
 }
 
+struct DriverBoostedAreaBanner: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "shield.lefthalf.filled.badge.checkmark")
+                .font(.headline.weight(.black))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(Styles.rydrGradient))
+                .shadow(color: Color.red.opacity(0.24), radius: 10, y: 5)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("You're in a boosted area")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(.primary)
+                Text("1.4x until 10:00 AM")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.red)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.black))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(.regularMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(Color.white.opacity(0.26), lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(0.10), radius: 14, y: 7)
+    }
+}
+
 struct DriverRideWorkPanel: View {
     @ObservedObject var vm: DriverDashboardVM
     var onRideTypeSelected: (String) -> Void
 
     var body: some View {
-        VStack(spacing: 12) {
+        Group {
             if let request = vm.pendingRequests.first, vm.activeRide == nil {
                 IncomingRideRequestCard(
                     request: request,
@@ -114,7 +160,7 @@ struct DriverRideWorkPanel: View {
                     onTimeout: { vm.miss(request) }
                 )
             } else {
-                DriverRideTypeCommandPanel(vm: vm, onRideTypeSelected: onRideTypeSelected)
+                EmptyView()
             }
         }
         .frame(maxWidth: .infinity)
@@ -259,23 +305,33 @@ struct RideTypeFilterPill: View {
     }
 }
 
-struct DriverGoOnlineButton: View {
+struct DriverDashboardActionDock: View {
     @ObservedObject var vm: DriverDashboardVM
+    var isCompact: Bool = false
     var onFiltersTapped: () -> Void
+    var onRateCardTapped: () -> Void
+    var onCashHubTapped: () -> Void
+    var onProfileTapped: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Button(action: onFiltersTapped) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(Color.red)
-                    .frame(width: 54, height: 54)
-                    .background(.regularMaterial, in: Circle())
-                    .overlay(Circle().stroke(Color.white.opacity(0.28), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.12), radius: 12, y: 6)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Ride filters")
+        HStack(alignment: .center, spacing: isCompact ? 6 : 10) {
+            DriverDockIcon(
+                title: "Filters",
+                systemName: "slider.horizontal.3",
+                isSelected: vm.rideFilterPreferences.workZoneEnabled || vm.rideFilterPreferences.hasDestinationFilter,
+                isCompact: isCompact,
+                badge: nil,
+                action: onFiltersTapped
+            )
+
+            DriverDockIcon(
+                title: "Rate Card",
+                systemName: "dollarsign.circle",
+                isSelected: vm.hasSavedRateSettings,
+                isCompact: isCompact,
+                badge: nil,
+                action: onRateCardTapped
+            )
 
             Button {
                 if vm.isReadyToGoOnline || vm.isOnline {
@@ -284,28 +340,104 @@ struct DriverGoOnlineButton: View {
                     vm.statusMessage = reason
                 }
             } label: {
-                HStack(spacing: 10) {
+                VStack(spacing: 5) {
                     Image(systemName: vm.isOnline ? "pause.fill" : "power")
-                        .font(.headline)
-                    Text(vm.isOnline ? "GO OFFLINE" : "GO ONLINE")
-                        .font(.headline.weight(.bold))
-                        .tracking(0.4)
+                        .font(.title3.weight(.black))
+                    Text(vm.isOnline ? "Offline" : "Online")
+                        .font(.caption2.weight(.black))
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .background(goButtonBackground)
                 .foregroundStyle(.white)
-                .shadow(color: vm.hasSavedRateSettings || vm.isOnline ? Color.red.opacity(0.32) : Color.black.opacity(0.10), radius: 18, y: 8)
+                .frame(width: isCompact ? 54 : 58, height: isCompact ? 54 : 58)
+                .background(Circle().fill(goButtonBackground))
+                .overlay(Circle().stroke(Color.white.opacity(0.28), lineWidth: 1))
+                .shadow(color: vm.hasSavedRateSettings || vm.isOnline ? Color.red.opacity(0.40) : Color.black.opacity(0.14), radius: 18, y: 8)
             }
+            .buttonStyle(.plain)
             .accessibilityHint(vm.goOnlineBlockReason ?? (vm.isOnline ? "Tap to go offline" : "Tap to go online"))
+
+            DriverDockIcon(
+                title: "Cash Hub",
+                systemName: "building.columns",
+                isSelected: false,
+                isCompact: isCompact,
+                badge: nil,
+                action: onCashHubTapped
+            )
+
+            DriverDockIcon(
+                title: "Profile",
+                systemName: "person.crop.circle.fill",
+                isSelected: false,
+                isCompact: isCompact,
+                badge: nil,
+                action: onProfileTapped
+            )
         }
+        .padding(.horizontal, isCompact ? 9 : 10)
+        .padding(.vertical, isCompact ? 6 : 8)
+        .frame(maxHeight: isCompact ? 72 : 78)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(.regularMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .stroke(Color.white.opacity(0.30), lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(0.16), radius: 18, y: 10)
     }
 
-    private var goButtonBackground: some View {
-        Capsule()
-            .fill(vm.hasSavedRateSettings || vm.isOnline ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.systemGray3)))
-            .overlay(Capsule().fill(Color.white.opacity(vm.hasSavedRateSettings || vm.isOnline ? 0.10 : 0.02)))
-            .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
+    private var goButtonBackground: AnyShapeStyle {
+        vm.hasSavedRateSettings || vm.isOnline
+            ? AnyShapeStyle(Styles.rydrGradient)
+            : AnyShapeStyle(Color(.systemGray3))
+    }
+}
+
+private struct DriverDockIcon: View {
+    let title: String
+    let systemName: String
+    let isSelected: Bool
+    let isCompact: Bool
+    let badge: String?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: systemName)
+                        .font((isCompact ? Font.subheadline : Font.headline).weight(.black))
+                        .foregroundStyle(isSelected ? Color.red : Color.primary)
+                        .frame(width: isCompact ? 36 : 40, height: isCompact ? 32 : 34)
+                        .background(
+                            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                .fill(isSelected ? Color.red.opacity(0.10) : Color(.systemBackground).opacity(0.76))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                .stroke(isSelected ? Color.red.opacity(0.28) : Color.black.opacity(0.06), lineWidth: 1)
+                        )
+
+                    if let badge {
+                        Text(badge)
+                            .font(.system(size: 9, weight: .black))
+                            .foregroundStyle(.white)
+                            .frame(width: 16, height: 16)
+                            .background(Circle().fill(Color.red))
+                            .offset(x: 5, y: -5)
+                    }
+                }
+
+                Text(title)
+                    .font(.system(size: isCompact ? 8 : 9, weight: .bold))
+                    .foregroundStyle(isSelected ? Color.red : Color.primary.opacity(0.78))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
     }
 }
 
