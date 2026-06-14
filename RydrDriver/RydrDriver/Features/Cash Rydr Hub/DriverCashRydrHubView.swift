@@ -1288,10 +1288,12 @@ private struct DriverCashRydrNavigationView: View {
     @State private var routeTravelTime: TimeInterval?
     @State private var isPickupStage = true
     @State private var didArrive = false
+    @State private var isNavigationStarted = false
+    @State private var isRouteTrayExpanded = false
     @State private var errorMessage: String?
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             RydrDriverNavigationMapView(
                 position: $camera,
                 driverCoordinate: driverCoordinate,
@@ -1299,86 +1301,203 @@ private struct DriverCashRydrNavigationView: View {
                 dropoffCoordinate: destinationCoordinate,
                 routeCoordinates: routeCoordinates,
                 isPickupStage: isPickupStage,
-                onRecenter: { camera = .region(region) }
+                heading: routeHeading,
+                onRecenter: { startNavigation() }
             )
             .ignoresSafeArea()
 
-            VStack(spacing: 12) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(isPickupStage ? "Navigate to pickup" : "Navigate to drop-off")
-                            .font(.headline.weight(.black))
-                        Text(request.riderName)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button {
-                        onMessage()
-                    } label: {
-                        Image(systemName: "message.fill")
-                            .font(.headline.weight(.bold))
-                            .frame(width: 42, height: 42)
-                            .background(Circle().fill(Color(.systemGray5)))
-                            .foregroundStyle(.red)
-                    }
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.headline.weight(.bold))
-                            .frame(width: 42, height: 42)
-                            .background(Circle().fill(Color(.systemGray5)))
-                            .foregroundStyle(.red)
-                    }
-                }
+            cashInstructionCard
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    DriverCashNavigationSummaryRow(
-                        title: isPickupStage ? "Pickup" : "Drop-off",
-                        address: isPickupStage ? request.pickup : request.destination,
-                        systemImage: isPickupStage ? "mappin.circle.fill" : "flag.checkered.circle.fill",
-                        label: isPickupStage ? "En route to pickup" : "En route to drop-off"
-                    )
-
-                    Label(navigationInstruction, systemImage: "location.north.line.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    if let routeSummary {
-                        Text(routeSummary)
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-
-                    primaryAction
-
-                    Button("Ride Completed") {
-                        onComplete()
-                        dismiss()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(isPickupStage)
-                }
-            }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(.regularMaterial)
-                    .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.22), lineWidth: 1))
-            )
+            cashRouteTray
             .padding(.horizontal, 16)
-            .padding(.bottom, 18)
+                .padding(.bottom, 14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .task {
             await resolveCoordinates()
             await calculateRoute()
+        }
+    }
+
+    private var cashInstructionCard: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                Image(systemName: instructionIcon)
+                    .font(.system(size: 34, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(width: 54, height: 54)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(navigationInstruction)
+                        .font(.system(size: 28, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.70)
+
+                    Text("Cash Rydr Hub navigation")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(1)
+
+                    if !isNavigationStarted {
+                        Button {
+                            startNavigation()
+                        } label: {
+                            Label("Start Navigation", systemImage: "location.north.line.fill")
+                                .font(.caption.weight(.black))
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 7)
+                                .background(Capsule().fill(Styles.rydrGradient))
+                                .foregroundStyle(.white)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 5)
+                    }
+                }
+
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 18)
+            .background(
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(Color.black.opacity(0.66))
+            )
+
+            HStack(spacing: 16) {
+                Image(systemName: "arrow.turn.up.right")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.70))
+                    .frame(width: 54)
+
+                Text(upcomingInstruction)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.70)
+
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(Color.black.opacity(0.48))
+            )
+            .offset(y: -1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.28), radius: 24, y: 12)
+    }
+
+    private var cashRouteTray: some View {
+        VStack(spacing: 16) {
+            Capsule()
+                .fill(Color.black.opacity(0.28))
+                .frame(width: 54, height: 5)
+                .padding(.top, 8)
+
+            HStack(spacing: 8) {
+                DriverCashNavigationMetric(value: arrivalTimeText, label: "arrival")
+                DriverCashNavigationMetric(value: travelTimeText, label: "min")
+                DriverCashNavigationMetric(value: distanceText, label: "mi")
+            }
+
+            if isRouteTrayExpanded {
+                expandedCashRouteActions
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.bottom, isRouteTrayExpanded ? 18 : 14)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 36, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(RoundedRectangle(cornerRadius: 36, style: .continuous).fill(Color.white.opacity(0.76)))
+                .overlay(RoundedRectangle(cornerRadius: 36, style: .continuous).stroke(Color.white.opacity(0.80), lineWidth: 1))
+        )
+        .shadow(color: Color.black.opacity(0.22), radius: 22, y: 10)
+        .gesture(
+            DragGesture(minimumDistance: 12)
+                .onEnded { value in
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                        if value.translation.height < -24 {
+                            isRouteTrayExpanded = true
+                        } else if value.translation.height > 24 {
+                            isRouteTrayExpanded = false
+                        } else {
+                            isRouteTrayExpanded.toggle()
+                        }
+                    }
+                }
+        )
+        .onTapGesture {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                isRouteTrayExpanded.toggle()
+            }
+        }
+    }
+
+    private var expandedCashRouteActions: some View {
+        VStack(spacing: 12) {
+            DriverCashNavigationSummaryRow(
+                title: isPickupStage ? "Pickup" : "Drop-off",
+                address: activeAddress,
+                systemImage: isPickupStage ? "mappin.circle.fill" : "flag.checkered.circle.fill",
+                label: isPickupStage ? "Cash pickup" : "Cash drop-off"
+            )
+
+            DriverCashNavigationDetailRow(icon: "person.crop.circle.fill", title: request.riderName, subtitle: request.rideType)
+            DriverCashNavigationDetailRow(icon: "banknote.fill", title: agreedPriceText, subtitle: "Cash Hub agreed price")
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(Color.orange.opacity(0.10)))
+            }
+
+            VStack(spacing: 0) {
+                cashNavigationOption("Message Rider", icon: "message.fill", action: onMessage)
+                Divider().padding(.leading, 58)
+                cashNavigationOption("Recenter Navigation", icon: "location.fill") {
+                    startNavigation()
+                }
+                Divider().padding(.leading, 58)
+                cashNavigationOption("Close Cash Navigation", icon: "xmark.circle.fill", color: .red) {
+                    dismiss()
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.black.opacity(0.05)))
+
+            primaryAction
+
+            Button {
+                onComplete()
+                dismiss()
+            } label: {
+                Text("Cash Ride Completed")
+                    .font(.headline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 15)
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.black.opacity(0.08)))
+                    .foregroundStyle(isPickupStage ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.red))
+            }
+            .disabled(isPickupStage)
+
+            Text("Cash Rydr Hub is a driver-managed cash ride flow. Rydr Map is provided for navigation support.")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1396,23 +1515,28 @@ private struct DriverCashRydrNavigationView: View {
                     .font(.headline.weight(.bold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 13)
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Styles.rydrGradient))
+                    .foregroundStyle(.white)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.red)
+            .buttonStyle(.plain)
             .disabled(pickupCoordinate == nil)
         } else if isPickupStage {
             Button {
                 isPickupStage = false
                 onStartRide()
-                Task { await calculateRoute() }
+                Task {
+                    await calculateRoute()
+                    startNavigation()
+                }
             } label: {
                 Text("Start Ride")
                     .font(.headline.weight(.bold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 13)
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Styles.rydrGradient))
+                    .foregroundStyle(.white)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.red)
+            .buttonStyle(.plain)
             .disabled(destinationCoordinate == nil)
         } else {
             Button {
@@ -1423,9 +1547,10 @@ private struct DriverCashRydrNavigationView: View {
                     .font(.headline.weight(.bold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 13)
+                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Styles.rydrGradient))
+                    .foregroundStyle(.white)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.black)
+            .buttonStyle(.plain)
         }
     }
 
@@ -1434,17 +1559,55 @@ private struct DriverCashRydrNavigationView: View {
     }
 
     private var navigationInstruction: String {
+        if !isNavigationStarted {
+            return "Tap Start Navigation for Rydr Map guidance."
+        }
         if let first = routeSteps.first, !first.isEmpty {
             return first
         }
         return "Calculating Rydr route."
     }
 
-    private var routeSummary: String? {
-        guard let routeDistanceMeters, let routeTravelTime else { return nil }
-        let miles = routeDistanceMeters / 1609.344
+    private var upcomingInstruction: String {
+        routeSteps.dropFirst().first ?? activeAddress
+    }
+
+    private var activeAddress: String {
+        isPickupStage ? request.pickup : request.destination
+    }
+
+    private var agreedPriceText: String {
+        if let agreedPrice = request.agreedPrice {
+            return agreedPrice.formatted(.currency(code: "USD"))
+        }
+        guard !request.budgetRange.isEmpty else { return "Cash" }
+        return request.budgetRange.hasPrefix("$") ? request.budgetRange : "$\(request.budgetRange)"
+    }
+
+    private var instructionIcon: String {
+        let instruction = navigationInstruction.lowercased()
+        if instruction.contains("left") { return "arrow.turn.up.left" }
+        if instruction.contains("right") { return "arrow.turn.up.right" }
+        if instruction.contains("pickup") || instruction.contains("arrived") {
+            return isPickupStage ? "mappin.circle.fill" : "flag.checkered.circle.fill"
+        }
+        return "arrow.up"
+    }
+
+    private var arrivalTimeText: String {
+        guard let routeTravelTime else { return "--" }
+        return Date.now.addingTimeInterval(routeTravelTime).formatted(date: .omitted, time: .shortened)
+    }
+
+    private var travelTimeText: String {
+        guard let routeTravelTime else { return "--" }
         let minutes = max(1, Int((routeTravelTime / 60).rounded()))
-        return String(format: "%.1f mi • %d min", miles, minutes)
+        return "\(minutes)"
+    }
+
+    private var distanceText: String {
+        guard let routeDistanceMeters else { return "--" }
+        return String(format: "%.1f", routeDistanceMeters / 1609.344)
     }
 
     private var region: MKCoordinateRegion {
@@ -1463,6 +1626,30 @@ private struct DriverCashRydrNavigationView: View {
         )
     }
 
+    private var navigationCamera: MapCamera {
+        MapCamera(
+            centerCoordinate: driverCoordinate,
+            distance: 720,
+            heading: routeHeading,
+            pitch: 68
+        )
+    }
+
+    private var routeHeading: CLLocationDirection {
+        let coordinates = routeCoordinates
+        guard coordinates.count >= 2 else { return 0 }
+        let origin = driverCoordinate
+        let target = coordinates.dropFirst().first ?? coordinates[1]
+        return bearing(from: origin, to: target)
+    }
+
+    private func startNavigation() {
+        isNavigationStarted = true
+        withAnimation(.easeInOut(duration: 0.28)) {
+            camera = .camera(navigationCamera)
+        }
+    }
+
     @MainActor
     private func resolveCoordinates() async {
         if let requestPickupCoordinate = request.pickupCoordinate {
@@ -1476,7 +1663,11 @@ private struct DriverCashRydrNavigationView: View {
         } else {
             destinationCoordinate = await geocode(request.destination)
         }
-        camera = .region(region)
+        if isNavigationStarted {
+            camera = .camera(navigationCamera)
+        } else {
+            camera = .region(region)
+        }
     }
 
     @MainActor
@@ -1508,13 +1699,14 @@ private struct DriverCashRydrNavigationView: View {
             routeDistanceMeters = route.distance
             routeTravelTime = route.expectedTravelTime
             errorMessage = nil
-            camera = .region(region)
+            camera = isNavigationStarted ? .camera(navigationCamera) : .region(region)
         } catch {
             routeCoordinates = [driverCoordinate, destination]
             routeSteps = []
             routeDistanceMeters = nil
             routeTravelTime = nil
             errorMessage = "Rydr route preview is using a direct line until routing is available."
+            camera = isNavigationStarted ? .camera(navigationCamera) : .region(region)
         }
     }
 
@@ -1530,6 +1722,42 @@ private struct DriverCashRydrNavigationView: View {
         } catch {
             return nil
         }
+    }
+
+    private func cashNavigationOption(
+        _ title: String,
+        icon: String,
+        color: Color = .primary,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(color == .primary ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(color))
+                    .frame(width: 34, height: 34)
+                Text(title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(color)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func bearing(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> CLLocationDirection {
+        let lat1 = start.latitude * .pi / 180
+        let lat2 = end.latitude * .pi / 180
+        let deltaLongitude = (end.longitude - start.longitude) * .pi / 180
+        let y = sin(deltaLongitude) * cos(lat2)
+        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(deltaLongitude)
+        let degrees = atan2(y, x) * 180 / .pi
+        return (degrees + 360).truncatingRemainder(dividingBy: 360)
     }
 }
 
@@ -1567,6 +1795,57 @@ private struct DriverCashNavigationSummaryRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+}
+
+private struct DriverCashNavigationMetric: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 31, weight: .black, design: .rounded).monospacedDigit())
+                .foregroundStyle(.black)
+                .lineLimit(1)
+                .minimumScaleFactor(0.70)
+            Text(label)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct DriverCashNavigationDetailRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background(Circle().fill(Styles.rydrGradient))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                Text(subtitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.black.opacity(0.05)))
     }
 }
 

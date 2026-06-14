@@ -10,6 +10,23 @@ import Combine
 import FirebaseAuth
 import FirebaseFirestore
 
+enum DriverApprovalPolicy {
+    private static let approvedStatuses = ["passed", "clear", "approved", "complete", "completed"]
+
+    static func isApproved(data: [String: Any]) -> Bool {
+        let status = (data["backgroundCheckStatus"] as? String)?.lowercased() ?? "pending"
+        let passed = (data["backgroundCheckPassed"] as? Bool) ?? false
+        let allowedByString = approvedStatuses.contains(status)
+        return passed || allowedByString || isBetaBypassed(data: data)
+    }
+
+    static func isBetaBypassed(data: [String: Any]) -> Bool {
+        let isBetaTester = data["betaTester"] as? Bool ?? false
+        let bypassEnabled = data["betaBackgroundCheckBypassEnabled"] as? Bool ?? false
+        return isBetaTester && bypassEnabled
+    }
+}
+
 #if DEBUG
 enum DriverApprovalDebugBypass {
     static let defaultsKey = "debugDriverApprovalBypassEnabled"
@@ -24,10 +41,7 @@ enum DriverApprovalDebugBypass {
 
     static func isApproved(data: [String: Any]) -> Bool {
         if isEnabled { return true }
-        let status = (data["backgroundCheckStatus"] as? String)?.lowercased() ?? "pending"
-        let passed = (data["backgroundCheckPassed"] as? Bool) ?? false
-        let allowedByString = ["passed", "clear", "approved", "complete", "completed"].contains(status)
-        return passed || allowedByString
+        return DriverApprovalPolicy.isApproved(data: data)
     }
 }
 #endif
@@ -51,11 +65,7 @@ final class DriverSessionManager: ObservableObject {
         driverName = name
         driverEmail = email
         isLoggedIn = true
-        #if DEBUG
-        canGoOnline = DriverApprovalDebugBypass.isEnabled
-        #else
-        canGoOnline = false // default until background check passes
-        #endif
+        canGoOnline = false // default until Firestore confirms approval or beta test bypass.
         startDriverStatusListener()
     }
 
@@ -71,10 +81,7 @@ final class DriverSessionManager: ObservableObject {
                 #if DEBUG
                 self.canGoOnline = DriverApprovalDebugBypass.isApproved(data: data)
                 #else
-                let status = (data["backgroundCheckStatus"] as? String)?.lowercased() ?? "pending"
-                let passed = (data["backgroundCheckPassed"] as? Bool) ?? false
-                let allowedByString = ["passed", "clear", "approved", "complete", "completed"].contains(status)
-                self.canGoOnline = passed || allowedByString
+                self.canGoOnline = DriverApprovalPolicy.isApproved(data: data)
                 #endif
             }
         }

@@ -15,6 +15,8 @@ struct DriverRideRequest: Identifiable, Equatable {
     let estimatedDistanceMiles: Double?
     let estimatedDurationMinutes: Double?
     let pickupCoordinate: CLLocationCoordinate2D?
+    let stop: String?
+    let stopCoordinate: CLLocationCoordinate2D?
     let dropoffCoordinate: CLLocationCoordinate2D?
     let createdAt: Date?
 
@@ -31,6 +33,8 @@ struct DriverRideRequest: Identifiable, Equatable {
         estimatedDistanceMiles: Double? = nil,
         estimatedDurationMinutes: Double? = nil,
         pickupCoordinate: CLLocationCoordinate2D? = nil,
+        stop: String? = nil,
+        stopCoordinate: CLLocationCoordinate2D? = nil,
         dropoffCoordinate: CLLocationCoordinate2D? = nil,
         createdAt: Date? = nil
     ) {
@@ -46,6 +50,8 @@ struct DriverRideRequest: Identifiable, Equatable {
         self.estimatedDistanceMiles = estimatedDistanceMiles
         self.estimatedDurationMinutes = estimatedDurationMinutes
         self.pickupCoordinate = pickupCoordinate
+        self.stop = stop
+        self.stopCoordinate = stopCoordinate
         self.dropoffCoordinate = dropoffCoordinate
         self.createdAt = createdAt
     }
@@ -64,6 +70,8 @@ struct DriverRideRequest: Identifiable, Equatable {
         estimatedDistanceMiles = Self.doubleValue(data["estimatedDistanceMiles"] ?? data["distanceMiles"])
         estimatedDurationMinutes = Self.doubleValue(data["estimatedDurationMinutes"] ?? data["durationMinutes"])
         pickupCoordinate = Self.coordinate(from: data["pickupCoordinate"] ?? data["pickupLocation"] ?? data["pickupGeoPoint"])
+        stop = data["stop"] as? String ?? data["addedStop"] as? String ?? data["stopAddress"] as? String
+        stopCoordinate = Self.coordinate(from: data["stopCoordinate"] ?? data["addedStopCoordinate"] ?? data["stopLocation"] ?? data["stopGeoPoint"])
         dropoffCoordinate = Self.coordinate(from: data["dropoffCoordinate"] ?? data["dropoffLocation"] ?? data["dropoffGeoPoint"])
         createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
     }
@@ -105,16 +113,64 @@ struct DriverRideRadarBlip: Identifiable, Equatable {
     }
 }
 
+enum DriverDemandLevel {
+    case low
+    case moderate
+    case high
+}
+
+struct DriverDemandSnapshot {
+    var level: DriverDemandLevel = .low
+    var paceText: String = "5+ min since last request"
+    var nearbyRequestCount: Int = 0
+    var radiusMiles: Double = 5
+
+    var title: String {
+        switch level {
+        case .low: return "Low demand nearby"
+        case .moderate: return "Moderate demand nearby"
+        case .high: return "High demand nearby"
+        }
+    }
+}
+
 struct DriverActiveRide: Identifiable, Equatable {
+    static let pickupComplimentaryWaitSeconds = DriverRideLifecyclePolicy.pickupComplimentaryWaitSeconds
+
     let id: String
     let riderId: String
     let riderName: String
+    let riderRating: Double?
     let pickup: String
     let dropoff: String
     let rideType: String
     let status: String
+    let estimatedFare: Double?
+    let estimatedDistanceMiles: Double?
+    let estimatedDurationMinutes: Double?
     let pickupCoordinate: CLLocationCoordinate2D?
+    let stop: String?
+    let stopCoordinate: CLLocationCoordinate2D?
     let dropoffCoordinate: CLLocationCoordinate2D?
+    let arrivedAtPickupAt: Date?
+    let pickupWaitStartedAt: Date?
+    let pickupPaidWaitStartedAt: Date?
+    let rideStartedAt: Date?
+    let arrivedAtStopAt: Date?
+    let stopWaitStartedAt: Date?
+    let headedToDropoffAt: Date?
+
+    var normalizedStatus: String {
+        DriverRideLifecyclePolicy.normalizedStatus(status)
+    }
+
+    var isPickupStage: Bool {
+        ["accepted", "enRouteToPickup", "navigatingToPickup", "arrived", "arrivedAtPickup", "waitingForRider"].contains(status)
+    }
+
+    var hasAddedStop: Bool {
+        stop?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false || stopCoordinate != nil
+    }
 
     static func == (lhs: DriverActiveRide, rhs: DriverActiveRide) -> Bool {
         lhs.id == rhs.id && lhs.status == rhs.status
@@ -124,12 +180,25 @@ struct DriverActiveRide: Identifiable, Equatable {
         self.id = id
         riderId = data["riderId"] as? String ?? ""
         riderName = data["riderName"] as? String ?? "Rydr rider"
+        riderRating = Self.doubleValue(data["riderRating"] ?? data["riderAverageRating"])
         pickup = data["pickup"] as? String ?? "Pickup location"
         dropoff = data["dropoff"] as? String ?? "Drop-off location"
         rideType = data["rideType"] as? String ?? "Rydr"
         status = data["status"] as? String ?? "accepted"
+        estimatedFare = Self.doubleValue(data["estimatedFare"] ?? data["upfrontFare"] ?? data["fare"])
+        estimatedDistanceMiles = Self.doubleValue(data["estimatedDistanceMiles"] ?? data["distanceMiles"])
+        estimatedDurationMinutes = Self.doubleValue(data["estimatedDurationMinutes"] ?? data["durationMinutes"])
         pickupCoordinate = Self.coordinate(from: data["pickupCoordinate"] ?? data["pickupLocation"] ?? data["pickupGeoPoint"])
+        stop = data["stop"] as? String ?? data["addedStop"] as? String ?? data["stopAddress"] as? String
+        stopCoordinate = Self.coordinate(from: data["stopCoordinate"] ?? data["addedStopCoordinate"] ?? data["stopLocation"] ?? data["stopGeoPoint"])
         dropoffCoordinate = Self.coordinate(from: data["dropoffCoordinate"] ?? data["dropoffLocation"] ?? data["dropoffGeoPoint"])
+        arrivedAtPickupAt = Self.dateValue(data["arrivedAtPickupAt"])
+        pickupWaitStartedAt = Self.dateValue(data["pickupWaitStartedAt"])
+        pickupPaidWaitStartedAt = Self.dateValue(data["pickupPaidWaitStartedAt"])
+        rideStartedAt = Self.dateValue(data["rideStartedAt"] ?? data["startedAt"])
+        arrivedAtStopAt = Self.dateValue(data["arrivedAtStopAt"])
+        stopWaitStartedAt = Self.dateValue(data["stopWaitStartedAt"])
+        headedToDropoffAt = Self.dateValue(data["headedToDropoffAt"])
     }
 
     nonisolated private static func coordinate(from value: Any?) -> CLLocationCoordinate2D? {
@@ -147,6 +216,12 @@ struct DriverActiveRide: Identifiable, Equatable {
         if let double = value as? Double { return double }
         if let int = value as? Int { return Double(int) }
         if let number = value as? NSNumber { return number.doubleValue }
+        return nil
+    }
+
+    nonisolated private static func dateValue(_ value: Any?) -> Date? {
+        if let timestamp = value as? Timestamp { return timestamp.dateValue() }
+        if let date = value as? Date { return date }
         return nil
     }
 }

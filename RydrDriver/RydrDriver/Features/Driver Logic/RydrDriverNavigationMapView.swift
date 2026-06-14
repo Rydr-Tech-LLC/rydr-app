@@ -10,18 +10,22 @@ struct RydrDriverNavigationMapView: View {
     let dropoffCoordinate: CLLocationCoordinate2D?
     let routeCoordinates: [CLLocationCoordinate2D]
     let isPickupStage: Bool
+    let heading: CLLocationDirection
     let onRecenter: () -> Void
 
     var body: some View {
         Map(position: $position, interactionModes: [.all]) {
             if !routeCoordinates.isEmpty {
                 MapPolyline(coordinates: routeCoordinates)
-                    .stroke(Styles.rydrGradient, lineWidth: 7)
+                    .stroke(Color.black.opacity(0.16), lineWidth: 12)
+
+                MapPolyline(coordinates: routeCoordinates)
+                    .stroke(Color.black.opacity(0.32), lineWidth: 7)
             }
 
             if let driverCoordinate {
                 Annotation("", coordinate: driverCoordinate, anchor: .center) {
-                    DriverLocationDot(isOnline: true)
+                    RydrNavigationDriverMarker(heading: heading)
                 }
             }
 
@@ -41,12 +45,46 @@ struct RydrDriverNavigationMapView: View {
             MapCompass()
             MapScaleView()
         }
+        .mapStyle(.standard(elevation: .realistic))
         .overlay(alignment: .trailing) {
             FloatingCircleButton(systemName: "location.fill", action: onRecenter)
                 .padding(.trailing, 18)
                 .padding(.bottom, 300)
                 .frame(maxHeight: .infinity, alignment: .bottom)
         }
+    }
+}
+
+private struct RydrNavigationDriverMarker: View {
+    let heading: CLLocationDirection
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Styles.rydrGradient.opacity(0.34), lineWidth: 2)
+                .frame(width: 64, height: 64)
+
+            Circle()
+                .fill(Color.white.opacity(0.94))
+                .frame(width: 46, height: 46)
+                .shadow(color: Color.black.opacity(0.18), radius: 10, y: 5)
+
+            Circle()
+                .fill(Styles.rydrGradient)
+                .frame(width: 32, height: 32)
+
+            Image(systemName: "car.fill")
+                .font(.system(size: 14, weight: .black))
+                .foregroundStyle(.white)
+
+            Image(systemName: "location.north.fill")
+                .font(.system(size: 17, weight: .black))
+                .foregroundStyle(.white)
+                .shadow(color: Color.black.opacity(0.18), radius: 2, y: 1)
+                .offset(y: -30)
+                .rotationEffect(.degrees(heading))
+        }
+        .accessibilityLabel("Current driver location")
     }
 }
 

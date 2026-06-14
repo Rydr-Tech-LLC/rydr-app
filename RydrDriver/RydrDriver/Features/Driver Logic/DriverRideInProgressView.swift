@@ -8,12 +8,35 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import Combine
+
+enum NavigationProvider {
+    case rydr
+    case appleMaps
+    case googleMaps
+}
+
+private enum DriverRideLifecyclePhase {
+    case accepted
+    case navigatingToPickup
+    case waitingForRider
+    case navigatingToStop
+    case waitingAtStop
+    case navigatingToDropoff
+    case completed
+}
 
 struct DriverRideInProgressView: View {
     let ride: DriverActiveRide
     let driverCoordinate: CLLocationCoordinate2D?
-    let onPickup: () -> Void
-    let onDropoff: () -> Void
+    let isUpdatingRide: Bool
+    let onStartNavigation: () -> Void
+    let onArrivedAtPickup: () -> Void
+    let onStartRide: () -> Void
+    let onArrivedAtStop: () -> Void
+    let onHeadToDropoff: () -> Void
+    let onCompleteRide: () -> Void
+    let onPickupPaidWaitStarted: () -> Void
     let onCancel: () -> Void
     let onReportIncident: () -> Void
     let onSendMessage: (_ text: String) async throws -> Void
@@ -36,32 +59,55 @@ struct DriverRideInProgressView: View {
     @State private var routeSteps: [String] = []
     @State private var routeDistanceMeters: CLLocationDistance?
     @State private var routeTravelTime: TimeInterval?
-    #if DEBUG
+    @State private var isRouteTrayExpanded = false
+    @State private var isNavigationStarted = false
     @State private var isMockDrivingRoute = false
-    #endif
+    @State private var now = Date()
+    @State private var didPublishPickupPaidWait = false
 
     private let arrivalThresholdMeters: CLLocationDistance = 250
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             map
                 .ignoresSafeArea()
 
-            VStack(spacing: 12) {
-                header
-                actionPanel
-            }
+            topInstructionCard
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            routeControlTray
             .padding(.horizontal, 16)
-            .padding(.bottom, 18)
+                .padding(.bottom, 14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .onAppear {
             camera = .region(region)
         }
         .onChange(of: ride.id) { _, _ in
+            isNavigationStarted = false
             camera = .region(region)
         }
+        .onChange(of: ride.normalizedStatus) { _, newStatus in
+            if ["inProgress", "navigatingToStop"].contains(newStatus) {
+                startNavigation()
+            }
+        }
+        .onReceive(timer) { value in
+            now = value
+            if lifecyclePhase == .waitingForRider,
+               ride.pickupPaidWaitStartedAt == nil,
+               pickupPaidWaitActive,
+               !didPublishPickupPaidWait {
+                didPublishPickupPaidWait = true
+                onPickupPaidWaitStarted()
+            }
+        }
         .onChange(of: routeCameraKey) { _, _ in
-            camera = .region(region)
+            guard isNavigationStarted || isMockDrivingRoute else { return }
+            camera = .camera(navigationCamera)
         }
         .task(id: routeCalculationKey) {
             await calculateRoute()
@@ -104,61 +150,152 @@ struct DriverRideInProgressView: View {
             position: $camera,
             driverCoordinate: driverCoordinate,
             pickupCoordinate: ride.pickupCoordinate,
-            dropoffCoordinate: ride.dropoffCoordinate,
+            dropoffCoordinate: primaryDestinationCoordinate,
             routeCoordinates: displayedRouteCoordinates,
             isPickupStage: isPickupStage,
-            onRecenter: { camera = .region(region) }
+            heading: routeHeading,
+            onRecenter: { camera = .camera(navigationCamera) }
         )
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(stageTitle)
-                    .font(.headline.weight(.black))
-                Text(ride.riderName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+    private var topInstructionCard: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                Image(systemName: instructionIcon)
+                    .font(.system(size: 34, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(width: 54, height: 54)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(navigationInstruction)
+                        .font(.system(size: 28, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.70)
+
+                    Text(stageTitle)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(1)
+
+                    if !isNavigationStarted {
+                        Button {
+                            if lifecyclePhase == .accepted {
+                                handlePrimaryAction()
+                            } else {
+                                startNavigation()
+                            }
+                        } label: {
+                            Label("Start Navigation", systemImage: "location.north.line.fill")
+                                .font(.caption.weight(.black))
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 7)
+                                .background(Capsule().fill(Styles.rydrGradient))
+                                .foregroundStyle(.white)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 5)
+                        .accessibilityLabel("Start Rydr Map navigation")
+                        .accessibilityHint("Switches the map into ground-level in-app navigation.")
+                    }
+                }
+
+                Spacer(minLength: 8)
             }
-            Spacer()
-            Button {
-                showMessageSheet = true
-            } label: {
-                Image(systemName: "message.fill")
-                    .font(.headline)
-                    .frame(width: 42, height: 42)
-                    .background(Circle().fill(Color(.systemGray5)))
-                    .foregroundStyle(Styles.rydrGradient)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 18)
+            .background(
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(Color.black.opacity(0.66))
+            )
+
+            HStack(spacing: 16) {
+                Image(systemName: "arrow.turn.up.right")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.70))
+                    .frame(width: 54)
+
+                Text(upcomingInstruction)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.70)
+
+                Spacer()
             }
-            Button {
-                showIncidentConfirm = true
-            } label: {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.headline)
-                    .frame(width: 42, height: 42)
-                    .background(Circle().fill(Color.orange.opacity(0.16)))
-                    .foregroundStyle(.orange)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(Color.black.opacity(0.48))
+            )
+            .offset(y: -1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.28), radius: 24, y: 12)
+    }
+
+    private var routeControlTray: some View {
+        VStack(spacing: 16) {
+            Capsule()
+                .fill(Color.black.opacity(0.28))
+                .frame(width: 54, height: 5)
+                .padding(.top, 8)
+
+            HStack(spacing: 8) {
+                NavigationMetric(value: arrivalTimeText, label: "arrival")
+                NavigationMetric(value: travelTimeText, label: "min")
+                NavigationMetric(value: distanceText, label: "mi")
             }
-            Button {
-                showCancelConfirm = true
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.headline.weight(.bold))
-                    .frame(width: 42, height: 42)
-                    .background(Circle().fill(Color(.systemGray5)))
-                    .foregroundStyle(.red)
+
+            if isRouteTrayExpanded {
+                expandedRouteActions
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .padding(14)
+        .padding(.horizontal, 18)
+        .padding(.bottom, isRouteTrayExpanded ? 18 : 14)
+        .frame(maxWidth: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(.regularMaterial)
-                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.22), lineWidth: 1))
+            RoundedRectangle(cornerRadius: 36, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 36, style: .continuous)
+                        .fill(Color.white.opacity(0.76))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 36, style: .continuous)
+                        .stroke(Color.white.opacity(0.80), lineWidth: 1)
+                )
         )
+        .shadow(color: Color.black.opacity(0.22), radius: 22, y: 10)
+        .gesture(
+            DragGesture(minimumDistance: 12)
+                .onEnded { value in
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                        if value.translation.height < -24 {
+                            isRouteTrayExpanded = true
+                        } else if value.translation.height > 24 {
+                            isRouteTrayExpanded = false
+                        } else {
+                            isRouteTrayExpanded.toggle()
+                        }
+                    }
+                }
+        )
+        .onTapGesture {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                isRouteTrayExpanded.toggle()
+            }
+        }
     }
 
-    private var actionPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private var expandedRouteActions: some View {
+        VStack(spacing: 12) {
             RouteSummaryRow(
                 title: primaryDestinationTitle,
                 address: primaryDestinationAddress,
@@ -166,174 +303,422 @@ struct DriverRideInProgressView: View {
                 isNearby: canTapPrimaryAction
             )
 
-            navigationStatus
+            NavigationDetailRow(icon: "person.crop.circle.fill", title: ride.riderName, subtitle: ride.rideType)
 
-            Button {
-                if isPickupStage {
-                    onPickup()
-                } else {
-                    onDropoff()
+            if let fareText {
+                NavigationDetailRow(icon: "dollarsign.circle.fill", title: fareText, subtitle: "Upfront fare")
+            }
+
+            if shouldShowWaitingState {
+                waitStateCard
+            }
+
+            VStack(spacing: 0) {
+                navigationOption("Message Rider", icon: "message.fill") {
+                    showMessageSheet = true
                 }
-            } label: {
-                Text(primaryActionTitle)
-                    .font(.headline.weight(.bold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(canTapPrimaryAction ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.systemGray4)))
-                    )
-                    .foregroundStyle(.white)
+                Divider().padding(.leading, 58)
+                navigationOption("Open in Apple Maps", icon: "map.fill") {
+                    openNavigation(provider: .appleMaps)
+                }
+                Divider().padding(.leading, 58)
+                navigationOption("Report an Incident", icon: "exclamationmark.bubble.fill", color: .red) {
+                    showIncidentConfirm = true
+                }
+                Divider().padding(.leading, 58)
+                navigationOption("Recenter Navigation", icon: "location.fill") {
+                    startNavigation()
+                }
             }
-            .disabled(!canTapPrimaryAction)
-
-            #if DEBUG
-            Button {
-                Task { await mockDriveRoute() }
-            } label: {
-                Label(isMockDrivingRoute ? "Mock Driving..." : "Mock Drive Route", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                    .font(.subheadline.weight(.bold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(Styles.rydrGradient.opacity(displayedRouteCoordinates.count > 1 && !isMockDrivingRoute ? 1 : 0.35))
-                    )
-                    .foregroundStyle(.white)
-            }
-            .disabled(displayedRouteCoordinates.count < 2 || isMockDrivingRoute)
+            .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.black.opacity(0.05)))
 
             Button {
-                onDebugMoveToDestination()
+                handlePrimaryAction()
             } label: {
-                Label(debugArrivalTitle, systemImage: "scope")
-                    .font(.subheadline.weight(.bold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(Color(.systemGray6))
-                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.red.opacity(0.35), lineWidth: 1))
-                    )
-                    .foregroundStyle(.red)
+                HStack(spacing: 8) {
+                    if isUpdatingRide {
+                        ProgressView()
+                            .tint(.white)
+                    }
+                    Text(primaryActionTitle)
+                }
+                .font(.headline.weight(.black))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(canTapPrimaryAction ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.systemGray4)))
+                )
+                .foregroundStyle(.white)
             }
-            #endif
+            .disabled(!canTapPrimaryAction || isUpdatingRide)
+            .accessibilityLabel(primaryActionTitle)
+            .accessibilityHint(canTapPrimaryAction ? "Updates the ride to the next phase." : disabledActionMessage)
+
+            if shouldShowCancelRideButton {
+                Button(role: .destructive) {
+                    showCancelConfirm = true
+                } label: {
+                    Text("Cancel Ride")
+                        .font(.headline.weight(.bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 15)
+                        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.black.opacity(0.08)))
+                        .foregroundStyle(.red)
+                }
+                .accessibilityLabel("Cancel ride")
+                .accessibilityHint("Cancels this ride after paid wait time has started.")
+            }
 
             if !canTapPrimaryAction {
-                Text("This action unlocks when you are near the \(isPickupStage ? "pickup" : "drop-off") location.")
+                Text(disabledActionMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.regularMaterial)
-                .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.22), lineWidth: 1))
-        )
-    }
 
-    private var navigationStatus: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "location.north.line.fill")
-                .font(.subheadline.weight(.black))
-                .frame(width: 30, height: 30)
-                .background(Circle().fill(Styles.rydrGradient))
-                .foregroundStyle(.white)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Rydr Nav")
-                    .font(.caption.weight(.black))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(navigationInstruction)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let routeSummary {
-                        Text(routeSummary)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
+            #if DEBUG
+            DisclosureGroup("Alpha Testing") {
+                VStack(spacing: 10) {
+                    Button {
+                        Task { await mockDriveRoute() }
+                    } label: {
+                        Label(isMockDrivingRoute ? "Mock Driving..." : "Mock Drive Route", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                            .font(.subheadline.weight(.bold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(Styles.rydrGradient.opacity(displayedRouteCoordinates.count > 1 && !isMockDrivingRoute ? 1 : 0.35))
+                            )
+                            .foregroundStyle(.white)
                     }
+                    .disabled(displayedRouteCoordinates.count < 2 || isMockDrivingRoute)
+                    .accessibilityLabel(isMockDrivingRoute ? "Mock driving route in progress" : "Mock drive route")
+
+                    Button {
+                        onDebugMoveToDestination()
+                    } label: {
+                        Label(debugArrivalTitle, systemImage: "scope")
+                            .font(.subheadline.weight(.bold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(Color(.systemGray6))
+                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.red.opacity(0.35), lineWidth: 1))
+                            )
+                            .foregroundStyle(.red)
+                    }
+                    .accessibilityLabel(debugArrivalTitle)
+
+                    if lifecyclePhase == .waitingForRider {
+                        Button {
+                            didPublishPickupPaidWait = true
+                            onPickupPaidWaitStarted()
+                        } label: {
+                            Label("Mock Pickup Wait Expired", systemImage: "timer")
+                                .font(.subheadline.weight(.bold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(RoundedRectangle(cornerRadius: 14).fill(Color(.systemGray6)))
+                                .foregroundStyle(.red)
+                        }
+                        .accessibilityLabel("Mock pickup wait expired")
+                    }
+
+                    Button {
+                        handlePrimaryAction()
+                    } label: {
+                        Label("Mock \(primaryActionTitle)", systemImage: "bolt.fill")
+                            .font(.subheadline.weight(.bold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(RoundedRectangle(cornerRadius: 14).fill(Color(.systemGray6)))
+                            .foregroundStyle(.primary)
+                    }
+                    .disabled(isUpdatingRide)
+                    .accessibilityLabel("Mock \(primaryActionTitle)")
                 }
             }
-
-            Spacer()
+            .font(.caption.weight(.bold))
+            .tint(.secondary)
+            #endif
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.systemGray6).opacity(0.92))
-        )
+    }
+
+    private var lifecyclePhase: DriverRideLifecyclePhase {
+        switch ride.normalizedStatus {
+        case "accepted":
+            return .accepted
+        case "enRouteToPickup", "navigatingToPickup":
+            return .navigatingToPickup
+        case "arrivedAtPickup", "waitingForRider":
+            return .waitingForRider
+        case "navigatingToStop":
+            return .navigatingToStop
+        case "arrivedAtStop", "waitingAtStop":
+            return .waitingAtStop
+        case "completed":
+            return .completed
+        default:
+            return .navigatingToDropoff
+        }
+    }
+
+    private var shouldShowWaitingState: Bool {
+        lifecyclePhase == .waitingForRider || lifecyclePhase == .waitingAtStop
+    }
+
+    private var pickupWaitStartedAt: Date {
+        ride.pickupWaitStartedAt ?? ride.arrivedAtPickupAt ?? now
+    }
+
+    private var pickupWaitElapsed: TimeInterval {
+        max(0, now.timeIntervalSince(pickupWaitStartedAt))
+    }
+
+    private var pickupComplimentaryRemaining: TimeInterval {
+        max(0, DriverActiveRide.pickupComplimentaryWaitSeconds - pickupWaitElapsed)
+    }
+
+    private var pickupPaidWaitActive: Bool {
+        ride.pickupPaidWaitStartedAt != nil || pickupWaitElapsed >= DriverActiveRide.pickupComplimentaryWaitSeconds
+    }
+
+    private var stopWaitStartedAt: Date {
+        ride.stopWaitStartedAt ?? ride.arrivedAtStopAt ?? now
+    }
+
+    private var stopWaitElapsed: TimeInterval {
+        max(0, now.timeIntervalSince(stopWaitStartedAt))
+    }
+
+    private var waitStateCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(waitStateTitle)
+                .font(.headline.weight(.black))
+                .foregroundStyle(.primary)
+
+            Text(waitStateSubtitle)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Text(waitStateMetricLabel)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(waitStateMetricValue)
+                    .font(.title2.weight(.black).monospacedDigit())
+                    .foregroundStyle(pickupPaidWaitActive || lifecyclePhase == .waitingAtStop ? Color.green : Color.primary)
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.black.opacity(0.05)))
+    }
+
+    private var waitStateTitle: String {
+        if lifecyclePhase == .waitingAtStop { return "Waiting at stop" }
+        return pickupPaidWaitActive ? "Paid wait time active" : "Waiting for rider"
+    }
+
+    private var waitStateSubtitle: String {
+        if lifecyclePhase == .waitingAtStop {
+            return "Paid wait time is active. You're earning your per-minute rate while waiting."
+        }
+        if pickupPaidWaitActive {
+            return "You're earning your per-minute rate while waiting."
+        }
+        return "\(ride.riderName) has been notified that you've arrived."
+    }
+
+    private var waitStateMetricLabel: String {
+        if lifecyclePhase == .waitingAtStop { return "Paid stop wait" }
+        return pickupPaidWaitActive ? "Paid wait active" : "Complimentary wait time"
+    }
+
+    private var waitStateMetricValue: String {
+        if lifecyclePhase == .waitingAtStop {
+            return formattedDuration(stopWaitElapsed)
+        }
+        return pickupPaidWaitActive ? formattedDuration(pickupWaitElapsed - DriverActiveRide.pickupComplimentaryWaitSeconds) : formattedDuration(pickupComplimentaryRemaining)
+    }
+
+    private var shouldShowCancelRideButton: Bool {
+        lifecyclePhase == .waitingForRider && pickupPaidWaitActive
+    }
+
+    private var disabledActionMessage: String {
+        switch lifecyclePhase {
+        case .navigatingToPickup:
+            return "I've Arrived unlocks when you are near the pickup location."
+        case .navigatingToStop:
+            return "Arrived at Stop unlocks when you are near the added stop."
+        case .navigatingToDropoff:
+            return "Complete Ride unlocks when you are near the final drop-off."
+        default:
+            return "This action is unavailable right now."
+        }
     }
 
     private var stageTitle: String {
-        isPickupStage ? "Navigate to pickup" : "Ride in progress"
+        switch lifecyclePhase {
+        case .accepted: return "Ride accepted"
+        case .navigatingToPickup: return "Navigate to pickup"
+        case .waitingForRider: return pickupPaidWaitActive ? "Paid wait time active" : "Waiting for rider"
+        case .navigatingToStop: return "Navigate to stop"
+        case .waitingAtStop: return "Waiting at stop"
+        case .navigatingToDropoff: return "Navigate to drop-off"
+        case .completed: return "Completed"
+        }
     }
 
     private var isPickupStage: Bool {
-        ride.status != "inProgress"
+        [.accepted, .navigatingToPickup, .waitingForRider].contains(lifecyclePhase)
     }
 
     private var primaryDestinationTitle: String {
-        isPickupStage ? "Pickup" : "Drop-off"
+        switch lifecyclePhase {
+        case .accepted, .navigatingToPickup, .waitingForRider:
+            return "Pickup"
+        case .navigatingToStop, .waitingAtStop:
+            return "Stop"
+        case .navigatingToDropoff, .completed:
+            return "Drop-off"
+        }
     }
 
     private var primaryDestinationAddress: String {
-        isPickupStage ? ride.pickup : ride.dropoff
+        switch lifecyclePhase {
+        case .accepted, .navigatingToPickup, .waitingForRider:
+            return ride.pickup
+        case .navigatingToStop, .waitingAtStop:
+            return ride.stop ?? "Added stop"
+        case .navigatingToDropoff, .completed:
+            return ride.dropoff
+        }
     }
 
     private var primaryDestinationIcon: String {
-        isPickupStage ? "mappin.circle.fill" : "flag.checkered.circle.fill"
+        switch lifecyclePhase {
+        case .accepted, .navigatingToPickup, .waitingForRider:
+            return "mappin.circle.fill"
+        case .navigatingToStop, .waitingAtStop:
+            return "pause.circle.fill"
+        case .navigatingToDropoff, .completed:
+            return "flag.checkered.circle.fill"
+        }
     }
 
     private var primaryActionTitle: String {
-        isPickupStage ? "Tap to Pick Up" : "Tap to Drop Off"
+        switch lifecyclePhase {
+        case .accepted: return "Start Navigation"
+        case .navigatingToPickup: return "I've Arrived"
+        case .waitingForRider: return "Start Ride"
+        case .navigatingToStop: return "Arrived at Stop"
+        case .waitingAtStop: return "Head to Drop-off"
+        case .navigatingToDropoff: return "Complete Ride"
+        case .completed: return "Back to Dashboard"
+        }
     }
 
     private var navigationInstruction: String {
-        if canTapPrimaryAction {
-            return isPickupStage
-                ? "You are at pickup. Confirm when the rider is in the vehicle."
-                : "You are at drop-off. Confirm once the rider exits safely."
+        if lifecyclePhase == .accepted {
+            return "Start Rydr Map navigation to pickup."
+        }
+        if lifecyclePhase == .waitingForRider {
+            return pickupPaidWaitActive ? "Paid wait time active." : "Waiting for rider."
+        }
+        if lifecyclePhase == .waitingAtStop {
+            return "Paid wait time is active."
+        }
+        if lifecyclePhase == .navigatingToDropoff && canTapPrimaryAction {
+            return "You are near drop-off. Complete the ride when safe."
+        }
+        if lifecyclePhase == .navigatingToPickup && canTapPrimaryAction {
+            return "You are at pickup. Mark arrival for the rider."
+        }
+        if lifecyclePhase == .navigatingToStop && canTapPrimaryAction {
+            return "You are at the added stop."
         }
 
         if let nextStep = routeSteps.first, !nextStep.isEmpty {
             return nextStep
         }
 
-        return isPickupStage
-            ? "Calculating Rydr route to the pickup location."
-            : "Calculating Rydr route to the drop-off location."
+        return "Calculating Rydr route to \(primaryDestinationTitle.lowercased())."
     }
 
-    private var routeSummary: String? {
-        guard let routeDistanceMeters, let routeTravelTime else { return nil }
-        let miles = routeDistanceMeters / 1609.344
+    private var upcomingInstruction: String {
+        routeSteps.dropFirst().first ?? primaryDestinationAddress
+    }
+
+    private var instructionIcon: String {
+        let instruction = navigationInstruction.lowercased()
+        if instruction.contains("left") { return "arrow.turn.up.left" }
+        if instruction.contains("right") { return "arrow.turn.up.right" }
+        if instruction.contains("arrived") || instruction.contains("pickup") || instruction.contains("drop-off") || instruction.contains("stop") {
+            return isPickupStage ? "mappin.circle.fill" : "flag.checkered.circle.fill"
+        }
+        return "arrow.up"
+    }
+
+    private var arrivalTimeText: String {
+        guard let routeTravelTime else { return "--" }
+        return Date.now.addingTimeInterval(routeTravelTime).formatted(date: .omitted, time: .shortened)
+    }
+
+    private var travelTimeText: String {
+        guard let routeTravelTime else { return "--" }
         let minutes = max(1, Int((routeTravelTime / 60).rounded()))
-        return String(format: "%.1f mi • %d min", miles, minutes)
+        return "\(minutes)"
+    }
+
+    private var distanceText: String {
+        guard let routeDistanceMeters else { return "--" }
+        return String(format: "%.1f", routeDistanceMeters / 1609.344)
+    }
+
+    private var fareText: String? {
+        ride.estimatedFare?.formatted(.currency(code: "USD"))
     }
 
     #if DEBUG
     private var debugArrivalTitle: String {
-        isPickupStage ? "Mock Arrival at Pickup" : "Mock Arrival at Drop-off"
+        switch lifecyclePhase {
+        case .accepted, .navigatingToPickup, .waitingForRider:
+            return "Mock Arrival at Pickup"
+        case .navigatingToStop, .waitingAtStop:
+            return "Mock Arrival at Stop"
+        case .navigatingToDropoff, .completed:
+            return "Mock Arrival Near Drop-off"
+        }
     }
     #endif
 
     private var primaryDestinationCoordinate: CLLocationCoordinate2D? {
-        isPickupStage ? ride.pickupCoordinate : ride.dropoffCoordinate
+        switch lifecyclePhase {
+        case .accepted, .navigatingToPickup, .waitingForRider:
+            return ride.pickupCoordinate
+        case .navigatingToStop, .waitingAtStop:
+            return ride.stopCoordinate
+        case .navigatingToDropoff, .completed:
+            return ride.dropoffCoordinate
+        }
     }
 
     private var canTapPrimaryAction: Bool {
+        if [.accepted, .waitingForRider, .waitingAtStop, .completed].contains(lifecyclePhase) {
+            return true
+        }
         guard let driverCoordinate, let destination = primaryDestinationCoordinate else { return false }
         return CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
             .distance(from: CLLocation(latitude: destination.latitude, longitude: destination.longitude)) <= arrivalThresholdMeters
     }
 
     private var routeCoordinates: [CLLocationCoordinate2D] {
-        if isPickupStage {
-            return [driverCoordinate, ride.pickupCoordinate].compactMap { $0 }
-        }
-        return [driverCoordinate, ride.dropoffCoordinate].compactMap { $0 }
+        [driverCoordinate, primaryDestinationCoordinate].compactMap { $0 }
     }
 
     private var displayedRouteCoordinates: [CLLocationCoordinate2D] {
@@ -373,6 +758,77 @@ struct DriverRideInProgressView: View {
         )
     }
 
+    private var navigationCamera: MapCamera {
+        let center = driverCoordinate ?? displayedRouteCoordinates.first ?? primaryDestinationCoordinate ?? DriverMapDefaults.pilotCoordinate
+        return MapCamera(
+            centerCoordinate: center,
+            distance: 720,
+            heading: routeHeading,
+            pitch: 68
+        )
+    }
+
+    private func startNavigation() {
+        isNavigationStarted = true
+        withAnimation(.easeInOut(duration: 0.28)) {
+            camera = .camera(navigationCamera)
+        }
+    }
+
+    private func handlePrimaryAction() {
+        switch lifecyclePhase {
+        case .accepted:
+            startNavigation()
+            onStartNavigation()
+        case .navigatingToPickup:
+            onArrivedAtPickup()
+        case .waitingForRider:
+            onStartRide()
+            startNavigation()
+        case .navigatingToStop:
+            onArrivedAtStop()
+        case .waitingAtStop:
+            onHeadToDropoff()
+            startNavigation()
+        case .navigatingToDropoff:
+            onCompleteRide()
+        case .completed:
+            onCompleteRide()
+        }
+    }
+
+    private func openNavigation(provider: NavigationProvider) {
+        switch provider {
+        case .rydr:
+            startNavigation()
+        case .appleMaps:
+            guard let destination = primaryDestinationCoordinate else { return }
+            let item = MKMapItem(location: CLLocation(latitude: destination.latitude, longitude: destination.longitude), address: nil)
+            item.name = primaryDestinationAddress
+            item.openInMaps(launchOptions: [
+                MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
+            ])
+        case .googleMaps:
+            // TODO: Add Google Maps URL hand-off when the app has a configured Google Maps provider.
+            break
+        }
+    }
+
+    private func formattedDuration(_ interval: TimeInterval) -> String {
+        let totalSeconds = max(0, Int(interval.rounded()))
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private var routeHeading: CLLocationDirection {
+        let coordinates = displayedRouteCoordinates
+        guard coordinates.count >= 2 else { return 0 }
+        let origin = driverCoordinate ?? coordinates[0]
+        let target = coordinates.dropFirst().first ?? coordinates[1]
+        return bearing(from: origin, to: target)
+    }
+
     @MainActor
     private func calculateRoute() async {
         guard let driverCoordinate, let destination = primaryDestinationCoordinate else {
@@ -397,7 +853,9 @@ struct DriverRideInProgressView: View {
                 .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             routeDistanceMeters = route.distance
             routeTravelTime = route.expectedTravelTime
-            camera = .region(region(for: calculatedRouteCoordinates))
+            camera = isNavigationStarted || isMockDrivingRoute
+                ? .camera(navigationCamera)
+                : .region(region(for: calculatedRouteCoordinates))
         } catch {
             calculatedRouteCoordinates = []
             routeSteps = []
@@ -411,12 +869,14 @@ struct DriverRideInProgressView: View {
     private func mockDriveRoute() async {
         let coordinates = sampledRouteCoordinates(from: displayedRouteCoordinates)
         guard !coordinates.isEmpty else { return }
+        isNavigationStarted = true
         isMockDrivingRoute = true
         defer { isMockDrivingRoute = false }
 
         for coordinate in coordinates {
             if Task.isCancelled { return }
             onDebugMoveDriver(coordinate)
+            camera = .camera(navigationCamera)
             try? await Task.sleep(nanoseconds: 260_000_000)
         }
     }
@@ -446,6 +906,45 @@ struct DriverRideInProgressView: View {
             )
         )
     }
+
+    private func navigationOption(
+        _ title: String,
+        icon: String,
+        color: Color = .primary,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(color == .primary ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(color))
+                    .frame(width: 34, height: 34)
+
+                Text(title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(color)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func bearing(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> CLLocationDirection {
+        let lat1 = start.latitude * .pi / 180
+        let lat2 = end.latitude * .pi / 180
+        let deltaLongitude = (end.longitude - start.longitude) * .pi / 180
+        let y = sin(deltaLongitude) * cos(lat2)
+        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(deltaLongitude)
+        let degrees = atan2(y, x) * 180 / .pi
+        return (degrees + 360).truncatingRemainder(dividingBy: 360)
+    }
 }
 
 private extension MKPolyline {
@@ -453,6 +952,58 @@ private extension MKPolyline {
         var coordinates = Array(repeating: kCLLocationCoordinate2DInvalid, count: pointCount)
         getCoordinates(&coordinates, range: NSRange(location: 0, length: pointCount))
         return coordinates
+    }
+}
+
+private struct NavigationMetric: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 31, weight: .black, design: .rounded).monospacedDigit())
+                .foregroundStyle(.black)
+                .lineLimit(1)
+                .minimumScaleFactor(0.70)
+            Text(label)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct NavigationDetailRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background(Circle().fill(Styles.rydrGradient))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                Text(subtitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.black.opacity(0.05)))
     }
 }
 

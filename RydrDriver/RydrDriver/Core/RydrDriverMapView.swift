@@ -699,32 +699,69 @@ private struct SignalArc: Shape {
 }
 
 struct OnlineSearchIndicator: View {
+    let demand: DriverDemandSnapshot
+
     @State private var sweepDegrees: Double = -35
     @State private var ping = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            SonarBlipView(sweepDegrees: sweepDegrees, ping: ping)
+        HStack(spacing: 16) {
+            SonarBlipView(sweepDegrees: sweepDegrees, ping: ping, diameter: 86)
+                .shadow(color: Color.red.opacity(0.55), radius: 22)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("Standby")
-                    .font(.caption.weight(.black))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 32, weight: .heavy, design: .rounded).italic())
+                    .foregroundStyle(Styles.rydrGradient)
+                    .shadow(color: Color.red.opacity(0.24), radius: 8, x: 0, y: 3)
                 Text("Scanning for nearby rides")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.black.opacity(0.76))
+
+                HStack(spacing: 6) {
+                    Image(systemName: demandIcon)
+                        .font(.caption.weight(.black))
+                    Text(demand.title)
+                    Text("•")
+                        .foregroundStyle(demandColor.opacity(0.5))
+                    Text(demand.paceText)
+                }
+                .font(.caption.weight(.bold))
+                .foregroundStyle(demandColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.76)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(demandColor.opacity(0.11))
+                )
             }
 
             Spacer()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+        .padding(.leading, 14)
+        .padding(.trailing, 20)
+        .padding(.vertical, 12)
+        .frame(maxWidth: 520, minHeight: 118)
         .background(
             Capsule()
-                .fill(.regularMaterial)
-                .overlay(Capsule().stroke(Styles.rydrGradient.opacity(0.42), lineWidth: 1))
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.97),
+                            Color.white.opacity(0.90),
+                            Color.red.opacity(0.07)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(Capsule().stroke(Color.white.opacity(0.86), lineWidth: 1))
+                .overlay(Capsule().stroke(Color.red.opacity(0.20), lineWidth: 1))
         )
-        .shadow(color: Color.red.opacity(0.16), radius: 14, y: 6)
+        .shadow(color: Color.red.opacity(0.24), radius: 24, y: 12)
+        .shadow(color: Color.black.opacity(0.12), radius: 18, y: 8)
         .onAppear {
             withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) {
                 sweepDegrees = 325
@@ -734,22 +771,39 @@ struct OnlineSearchIndicator: View {
             }
         }
     }
+
+    private var demandColor: Color {
+        switch demand.level {
+        case .low: return Color.green
+        case .moderate: return Color.orange
+        case .high: return Color.red
+        }
+    }
+
+    private var demandIcon: String {
+        switch demand.level {
+        case .low: return "chart.bar"
+        case .moderate: return "chart.bar.fill"
+        case .high: return "chart.bar.xaxis"
+        }
+    }
 }
 
 struct SonarBlipView: View {
     let sweepDegrees: Double
     let ping: Bool
+    var diameter: CGFloat = 48
 
     var body: some View {
         ZStack {
             Circle()
                 .fill(Color.black.opacity(0.82))
-                .frame(width: 44, height: 44)
+                .frame(width: diameter * 0.92, height: diameter * 0.92)
 
-            ForEach([18.0, 30.0, 42.0], id: \.self) { size in
+            ForEach([0.38, 0.63, 0.88], id: \.self) { scale in
                 Circle()
-                    .stroke(Styles.rydrGradient.opacity(size == 42 ? 0.38 : 0.24), lineWidth: 1)
-                    .frame(width: size, height: size)
+                    .stroke(Styles.rydrGradient.opacity(scale > 0.8 ? 0.38 : 0.24), lineWidth: 1.2)
+                    .frame(width: diameter * scale, height: diameter * scale)
             }
 
             Rectangle()
@@ -760,26 +814,38 @@ struct SonarBlipView: View {
                         endPoint: .trailing
                     )
                 )
-                .frame(width: 20, height: 2)
-                .offset(x: 10)
+                .frame(width: diameter * 0.42, height: 2.4)
+                .offset(x: diameter * 0.21)
                 .rotationEffect(.degrees(sweepDegrees))
 
             Circle()
                 .fill(Styles.rydrGradient)
-                .frame(width: 7, height: 7)
+                .frame(width: diameter * 0.14, height: diameter * 0.14)
                 .shadow(color: Color.red.opacity(0.5), radius: 6)
 
             Circle()
                 .fill(Color.red.opacity(ping ? 0.95 : 0.26))
-                .frame(width: 5, height: 5)
-                .offset(x: 10, y: -8)
+                .frame(width: diameter * 0.10, height: diameter * 0.10)
+                .offset(x: diameter * 0.20, y: -diameter * 0.17)
 
             Circle()
                 .fill(Color.red.opacity(ping ? 0.32 : 0.86))
-                .frame(width: 4, height: 4)
-                .offset(x: -12, y: 7)
+                .frame(width: diameter * 0.08, height: diameter * 0.08)
+                .offset(x: -diameter * 0.25, y: diameter * 0.15)
         }
-        .frame(width: 48, height: 48)
+        .frame(width: diameter, height: diameter)
+        .padding(5)
+        .background(
+            Circle()
+                .fill(Color.red.opacity(0.08))
+                .overlay(Circle().stroke(Color.red.opacity(0.20), lineWidth: 1))
+        )
+        .overlay(
+            Circle()
+                .stroke(Color.white.opacity(0.70), lineWidth: 1)
+                .scaleEffect(ping ? 1.18 : 1)
+                .opacity(ping ? 0.18 : 0.55)
+        )
         .accessibilityHidden(true)
     }
 }

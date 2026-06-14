@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreLocation
+import UIKit
 
 enum RideTypePillStatus {
     case approved(String)
@@ -155,6 +156,7 @@ struct DriverRideWorkPanel: View {
                     request: request,
                     driverCoordinate: vm.lastLocation?.coordinate,
                     rate: vm.rate(for: request.rideType),
+                    isResponding: vm.respondingRequestIDs.contains(request.id),
                     onAccept: { vm.accept(request) },
                     onDecline: { vm.decline(request) },
                     onTimeout: { vm.miss(request) }
@@ -494,5 +496,48 @@ struct DriverBottomStatusBar: View {
     private func tierSort(_ lhs: String, _ rhs: String) -> Bool {
         let ordered = DriverDashboardVM.availableRideTypes
         return (ordered.firstIndex(of: lhs) ?? ordered.endIndex) < (ordered.firstIndex(of: rhs) ?? ordered.endIndex)
+    }
+}
+
+struct DriverLocationPermissionBanner: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "location.slash.fill")
+                .font(.headline.weight(.black))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(Circle().fill(Color.orange))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Location needed")
+                    .font(.subheadline.weight(.black))
+                Text("Enable location to receive and complete rides. Alpha mock controls remain available.")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                UIApplication.shared.open(url)
+            } label: {
+                Text("Settings")
+                    .font(.caption.weight(.black))
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Color.orange.opacity(0.16)))
+                    .foregroundStyle(.orange)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(.regularMaterial)
+                .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.28), lineWidth: 1))
+        )
+        .shadow(color: Color.black.opacity(0.12), radius: 16, y: 8)
     }
 }

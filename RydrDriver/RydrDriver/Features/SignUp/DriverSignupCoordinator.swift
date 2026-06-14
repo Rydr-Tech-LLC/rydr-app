@@ -514,6 +514,7 @@ struct IdentityVerificationView: View {
 
     @State private var isPresenting = false
     @State private var url: URL?
+    @State private var message: String?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -523,13 +524,23 @@ struct IdentityVerificationView: View {
 
             Button("Start Identity Verification") {
                 // TODO: Call backend to create Stripe Identity verification session and return hosted link URL
-                // Example placeholder
+                #if DEBUG
                 url = URL(string: "https://verify.stripe.com/demo")
                 isPresenting = true
+                #else
+                message = "Stripe Identity is waiting on backend configuration. For beta testing, an admin can mark this account as manually reviewed."
+                #endif
             }
             .buttonStyle(.borderedProminent).tint(.red)
             .sheet(isPresented: $isPresenting) {
                 if let url { SafariView(url: url) }
+            }
+
+            if let message {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
 
             Toggle("I completed verification", isOn: $isVerified)
@@ -559,6 +570,7 @@ struct BackgroundCheckView: View {
     @State private var showConsent = false
     @State private var presentingApply = false
     @State private var applyURL: URL?
+    @State private var message: String?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -572,14 +584,25 @@ struct BackgroundCheckView: View {
             Button("Start Background Check") {
                 guard showConsent else { return }
                 // TODO: Call backend to create Checkr Candidate + Invitation, return hosted Apply URL.
+                #if DEBUG
                 applyURL = URL(string: "https://apply.checkr.com/apply/demo")
                 presentingApply = true
+                #else
+                message = "Background checks are manually bypassed only for approved beta testers. No production Checkr invitation was created."
+                #endif
                 started = true
             }
             .buttonStyle(.borderedProminent).tint(.red)
             .disabled(!showConsent)
             .sheet(isPresented: $presentingApply) {
                 if let url = applyURL { SafariView(url: url) }
+            }
+
+            if let message {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
 
             Button("Continue") { onNext() }
@@ -598,6 +621,7 @@ struct PayoutsSetupView: View {
 
     @State private var isPresenting = false
     @State private var onboardingURL: URL?
+    @State private var message: String?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -607,12 +631,23 @@ struct PayoutsSetupView: View {
 
             Button("Open Stripe Onboarding") {
                 // TODO: Call backend to create or fetch Express account then create Account Link URL
+                #if DEBUG
                 onboardingURL = URL(string: "https://connect.stripe.com/express/onboarding")
                 isPresenting = true
+                #else
+                message = "Stripe Connect onboarding needs the Stripe backend account-link route configured before live payouts. For beta testing, payouts should remain alpha-only."
+                #endif
             }
             .buttonStyle(.borderedProminent).tint(.red)
             .sheet(isPresented: $isPresenting) {
                 if let onboardingURL { SafariView(url: onboardingURL) }
+            }
+
+            if let message {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
 
             Toggle("I completed payout setup", isOn: $connectOnboarded)

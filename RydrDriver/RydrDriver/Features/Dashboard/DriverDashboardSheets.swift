@@ -738,6 +738,11 @@ struct DrawerDestinationView: View {
                             }
                             .padding(14)
                             .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+                            .accessibilityElement(children: .combine)
+                        }
+
+                        if item == .settings {
+                            accountDeletionCard
                         }
                     }
                     .padding()
@@ -782,4 +787,36 @@ struct DrawerDestinationView: View {
     }
 
     private var rowIcon: String { item.icon }
+
+    private var accountDeletionCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Account deletion")
+                .font(.headline.weight(.bold))
+            Text("Submit a beta deletion request. This creates an audit record and lets support finish backend cleanup that requires admin access.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            if let message = vm.accountDeletionMessage {
+                Text(message)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(message.localizedCaseInsensitiveContains("could not") ? .red : .secondary)
+            }
+            Button(role: .destructive) {
+                vm.requestAccountDeletion()
+            } label: {
+                HStack {
+                    if vm.isRequestingAccountDeletion {
+                        ProgressView()
+                    }
+                    Text(vm.isRequestingAccountDeletion ? "Submitting..." : "Request Account Deletion")
+                        .font(.subheadline.weight(.bold))
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(vm.isRequestingAccountDeletion)
+            .accessibilityLabel("Request account deletion")
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
+    }
 }

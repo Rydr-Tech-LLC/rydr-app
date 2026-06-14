@@ -13,6 +13,7 @@ struct IncomingRideRequestCard: View {
     let request: DriverRideRequest
     let driverCoordinate: CLLocationCoordinate2D?
     let rate: DriverRateSetting
+    let isResponding: Bool
     let onAccept: () -> Void
     let onDecline: () -> Void
     let onTimeout: () -> Void
@@ -61,23 +62,32 @@ struct IncomingRideRequestCard: View {
 
             HStack(spacing: 10) {
                 Button {
+                    guard !isResponding else { return }
                     didRespond = true
                     onDecline()
                 } label: {
-                    Text("Decline")
+                    Label("Decline", systemImage: "xmark")
                         .frame(maxWidth: .infinity)
                 }
                 .font(.headline.weight(.bold))
                 .padding(.vertical, 15)
                 .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color(.systemGray5)))
                 .foregroundStyle(Color.black)
+                .disabled(isResponding)
+                .accessibilityLabel("Decline ride request")
+                .accessibilityHint("Dismisses this ride request and returns to standby.")
 
                 Button {
+                    guard !isResponding else { return }
                     didRespond = true
                     onAccept()
                 } label: {
                     HStack {
-                        Text("Accept")
+                        if isResponding {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                        Text(isResponding ? "Accepting" : "Accept")
                         Image(systemName: "arrow.right")
                     }
                     .frame(maxWidth: .infinity)
@@ -87,6 +97,9 @@ struct IncomingRideRequestCard: View {
                 .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Styles.rydrGradient))
                 .foregroundStyle(.white)
                 .shadow(color: Color.red.opacity(0.26), radius: 14, y: 8)
+                .disabled(isResponding)
+                .accessibilityLabel(isResponding ? "Accepting ride request" : "Accept ride request")
+                .accessibilityHint("Accepts this ride and opens the active ride flow.")
             }
         }
         .padding(18)
@@ -125,10 +138,10 @@ struct IncomingRideRequestCard: View {
     private var upfrontFare: Double {
         if let leg = fareBaseLeg {
             let gross = (leg.distanceMiles * rate.perMile) + (leg.durationMinutes * rate.perMinute)
-            return ((gross * 0.60) * 100).rounded() / 100
+            return (gross * 100).rounded() / 100
         }
         if let fare = request.estimatedFare {
-            return ((fare * 0.60) * 100).rounded() / 100
+            return (fare * 100).rounded() / 100
         }
         return 0
     }
@@ -470,9 +483,6 @@ private struct UpfrontFareHero: View {
                 Text("Upfront fare")
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.92))
-                Text("Driver payout after 60/40 split")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.78))
             }
             Spacer()
             Text(fare, format: .currency(code: "USD"))

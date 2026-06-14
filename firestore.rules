@@ -1,0 +1,112 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function rideParticipant(data) {
+      return signedIn() && (
+        data.driverId == request.auth.uid ||
+        data.riderId == request.auth.uid ||
+        data.acceptedDriverId == request.auth.uid
+      );
+    }
+
+    function validDriverRideUpdate() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+        "status",
+        "driverId",
+        "acceptedDriverId",
+        "acceptedAt",
+        "navigationProvider",
+        "navigationStartedAt",
+        "enRouteToPickupAt",
+        "arrivedAtPickupAt",
+        "pickupWaitStartedAt",
+        "pickupPaidWaitStartedAt",
+        "pickupComplimentaryWaitSeconds",
+        "rideStartedAt",
+        "startedAt",
+        "navigatingToStopAt",
+        "arrivedAtStopAt",
+        "stopWaitStartedAt",
+        "headedToDropoffAt",
+        "navigatingToDropoffAt",
+        "completedAt",
+        "cancelledAt",
+        "cancelledBy",
+        "riderRideState",
+        "riderStatusMessage",
+        "driverLocation",
+        "driverLocationUpdatedAt",
+        "driverRiderRating",
+        "updatedAt"
+      ]);
+    }
+
+    match /drivers/{uid} {
+      allow read: if isSelf(uid);
+      allow create, update: if isSelf(uid);
+    }
+
+    match /driver_status/{uid} {
+      allow read: if signedIn();
+      allow create, update: if isSelf(uid);
+    }
+
+    match /rideRequests/{rideId} {
+      allow read: if rideParticipant(resource.data);
+      allow create: if signedIn();
+      allow update: if rideParticipant(resource.data) && validDriverRideUpdate();
+    }
+
+    match /rides/{rideId} {
+      allow read: if rideParticipant(resource.data);
+      allow create: if signedIn();
+      allow update: if rideParticipant(resource.data) && validDriverRideUpdate();
+    }
+
+    match /rideChats/{rideId} {
+      allow read, update: if signedIn();
+      allow create: if signedIn();
+
+      match /messages/{messageId} {
+        allow read, create: if signedIn();
+      }
+    }
+
+    match /riderRatings/{ratingId} {
+      allow create: if signedIn() && request.resource.data.driverId == request.auth.uid;
+      allow read: if signedIn() && resource.data.driverId == request.auth.uid;
+    }
+
+    match /cashRydrRequests/{requestId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update: if signedIn();
+
+      match /responses/{responseId} {
+        allow read, create, update: if signedIn();
+      }
+    }
+
+    match /accountDeletionRequests/{uid} {
+      allow create, update, read: if isSelf(uid);
+    }
+
+    match /stripeLedger/{ledgerId} {
+      allow read: if signedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        resource.data.riderId == request.auth.uid ||
+        resource.data.uid == request.auth.uid
+      );
+      allow write: if false;
+    }
+  }
+}

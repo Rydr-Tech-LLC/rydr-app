@@ -6,7 +6,7 @@
 //
 
 import Testing
-@testable import Rydr_Driver
+@testable import RydrDriver
 
 struct Rydr_DriverTests {
 

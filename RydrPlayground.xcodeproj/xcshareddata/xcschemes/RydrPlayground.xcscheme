@@ -30,28 +30,6 @@
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
       <Testables>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "D9A571F12DF9C6AB00C04006"
-               BuildableName = "RydrPlaygroundTests.xctest"
-               BlueprintName = "RydrPlaygroundTests"
-               ReferencedContainer = "container:RydrPlayground.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "D9A571FB2DF9C6AB00C04006"
-               BuildableName = "RydrPlaygroundUITests.xctest"
-               BlueprintName = "RydrPlaygroundUITests"
-               ReferencedContainer = "container:RydrPlayground.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

@@ -2,7 +2,7 @@
 "use strict";
 
 /**
- * Rydr Backend (Rider + Driver)
+ * Rydr Stripe Backend (Rider + Driver)
  * - Rider payments (PaymentSheet): /customers, /ephemeral-keys, /payment-intents
  * - Driver payouts (Stripe Connect Express): /connect/*
  * - Driver identity (Stripe Identity): /identity/*
@@ -13,6 +13,7 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const Stripe = require("stripe");
+const admin = require("firebase-admin");
 
 dotenv.config();
 
@@ -26,6 +27,56 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 });
 
 const app = express();
+let firestore = null;
+
+try {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    admin.initializeApp({
+      credential: admin.credential.cert(
+        JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)
+      ),
+    });
+  } else {
+    admin.initializeApp();
+  }
+  firestore = admin.firestore();
+  console.log("Firestore ledger persistence enabled.");
+} catch (err) {
+  console.warn(
+    "Firestore ledger persistence disabled:",
+    err.message
+  );
+}
+
+function appBaseURL() {
+  const base = process.env.APP_BASE_URL;
+  if (!base) {
+    throw new Error("APP_BASE_URL is required for hosted Stripe return URLs");
+  }
+  return base.replace(/\/+$/, "");
+}
+
+async function persistStripeLedger(id, payload) {
+  if (!firestore) return;
+  await firestore.collection("stripeLedger").doc(id).set(
+    {
+      ...payload,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+async function updateDriver(uid, payload) {
+  if (!firestore || !uid) return;
+  await firestore.collection("drivers").doc(uid).set(
+    {
+      ...payload,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
 
 // --- CORS (adjust origin if you want to lock it down) ---
 app.use(cors());
@@ -55,7 +106,18 @@ app.post(
         case "payment_intent.succeeded": {
           const pi = event.data.object;
           console.log("✅ payment_intent.succeeded", pi.id);
-          // TODO: update your DB (trip paid, driver earnings, etc.)
+          await persistStripeLedger(pi.id, {
+            type: event.type,
+            paymentIntentId: pi.id,
+            rideId: pi.metadata?.rideId || null,
+            driverId: pi.metadata?.driverId || null,
+            riderId: pi.metadata?.riderId || null,
+            amount: pi.amount,
+            currency: pi.currency,
+            status: pi.status,
+            livemode: pi.livemode,
+            created: pi.created,
+          });
           break;
         }
         case "account.updated": {
@@ -64,13 +126,37 @@ app.post(
             charges_enabled: acct.charges_enabled,
             payouts_enabled: acct.payouts_enabled,
           });
-          // TODO: persist latest status to your DB (drivers/{uid})
+          await persistStripeLedger(`account_${acct.id}`, {
+            type: event.type,
+            accountId: acct.id,
+            uid: acct.metadata?.uid || null,
+            charges_enabled: acct.charges_enabled,
+            payouts_enabled: acct.payouts_enabled,
+            requirements_due: acct.requirements?.currently_due || [],
+          });
+          await updateDriver(acct.metadata?.uid, {
+            stripeAccountId: acct.id,
+            stripeChargesEnabled: acct.charges_enabled,
+            stripePayoutsEnabled: acct.payouts_enabled,
+            stripeRequirementsDue: acct.requirements?.currently_due || [],
+          });
           break;
         }
         case "identity.verification_session.verified": {
           const vs = event.data.object;
           console.log("✅ identity verified", vs.id);
-          // TODO: mark driver identityStatus = "verified" using vs.metadata.uid if set
+          await persistStripeLedger(`identity_${vs.id}`, {
+            type: event.type,
+            verificationSessionId: vs.id,
+            uid: vs.metadata?.uid || null,
+            email: vs.metadata?.email || null,
+            status: vs.status,
+          });
+          await updateDriver(vs.metadata?.uid, {
+            identityStatus: "verified",
+            identityVerificationSessionId: vs.id,
+            identityVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
           break;
         }
         default:
@@ -90,7 +176,7 @@ app.use(express.json());
 
 // ===== Misc =====
 app.get("/", (_req, res) => {
-  res.json({ ok: true, service: "Rydr backend", version: "1.0.0" });
+  res.json({ ok: true, service: "Rydr Stripe backend", version: "1.0.0" });
 });
 
 // ============================================================================
@@ -237,7 +323,7 @@ app.post("/connect/account-link", async (req, res) => {
     const { accountId } = req.body || {};
     if (!accountId) return res.status(400).json({ error: "missing_accountId" });
 
-    const base = process.env.APP_BASE_URL || "https://example.com";
+    const base = appBaseURL();
     const link = await stripe.accountLinks.create({
       account: accountId,
       type: "account_onboarding",
@@ -281,7 +367,7 @@ app.post("/identity/session", async (req, res) => {
       return res.status(400).json({ error: "missing_params" });
     }
 
-    const base = process.env.APP_BASE_URL || "https://example.com";
+    const base = appBaseURL();
 
     const session = await stripe.identity.verificationSessions.create({
       type: "document",
@@ -339,8 +425,6 @@ app.post("/payment-methods/detach", async (req, res) => {
 // --- Listen ---
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-
-
 
 
 
