@@ -9,7 +9,7 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Rydr Driver may save driver account or support images when you choose to export them.</string>
 	<key>RYDR_BACKEND_BASE_URL</key>
-	<string></string>
+	<string>https://rydr-backend-2c19.onrender.com</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

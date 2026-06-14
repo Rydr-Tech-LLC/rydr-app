@@ -6,7 +6,7 @@ These routes belong in the main Rydr Backend, not the Stripe backend and not the
 
 `POST /driver/wait-time-events`
 
-The iOS driver app calls this route when paid wait time starts or is recorded. If the route is unavailable, the app continues locally and keeps Firestore ride state updated.
+The iOS driver app calls this route when pickup grace wait starts, paid wait starts, or waiting ends. If the route is unavailable, the app continues locally and keeps Firestore ride state updated.
 
 Request body:
 
@@ -15,17 +15,23 @@ Request body:
   "rideId": "ride_123",
   "driverId": "driver_uid",
   "riderId": "rider_uid",
-  "stage": "pickup",
+  "waitStage": "pickup_grace_started",
+  "complimentarySeconds": 180,
   "paidWaitSeconds": 0,
-  "complimentaryWaitSeconds": 180,
-  "recordedAtISO8601": "2026-06-13T23:00:00Z"
+  "timestamp": "2026-06-13T23:00:00Z"
 }
 ```
 
-Allowed `stage` values:
+Allowed `waitStage` values:
 
-- `pickup`
-- `stop`
+- `pickup_grace_started`
+- `pickup_paid_started`
+- `stop_paid_started`
+- `wait_ended`
+
+Current beta write target:
+
+- `waitTimeEvents/{eventId}`
 
 Backend responsibilities:
 
@@ -38,18 +44,23 @@ Backend responsibilities:
 
 `POST /driver/account-deletion-requests`
 
-The iOS driver app calls this route when a driver requests account deletion. If the route is unavailable, the app writes `accountDeletionRequests/{uid}` in Firestore as an alpha/beta fallback.
+The iOS driver app calls this route when a driver requests account deletion. For beta, the backend records the request and does not delete the Firebase Auth user yet.
 
 Request body:
 
 ```json
 {
   "uid": "driver_uid",
+  "role": "driver",
   "email": "driver@example.com",
-  "requestedAtISO8601": "2026-06-13T23:00:00Z",
-  "source": "ios-driver"
+  "reason": "optional user reason",
+  "requestedAt": "2026-06-13T23:00:00Z"
 }
 ```
+
+Current beta write target:
+
+- `accountDeletionRequests/{requestId}`
 
 Backend responsibilities:
 

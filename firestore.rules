@@ -18,6 +18,13 @@ service cloud.firestore {
       );
     }
 
+    function isUnclaimedRideRequest(data) {
+      return signedIn()
+        && data.status in ["pending", "available"]
+        && (!("acceptedDriverId" in data) || data.acceptedDriverId == null || data.acceptedDriverId == "")
+        && (!("driverId" in data) || data.driverId == null || data.driverId == "" || data.driverId == request.auth.uid);
+    }
+
     function validDriverRideUpdate() {
       return request.resource.data.diff(resource.data).changedKeys().hasOnly([
         "status",
@@ -61,7 +68,7 @@ service cloud.firestore {
     }
 
     match /rideRequests/{rideId} {
-      allow read: if rideParticipant(resource.data);
+      allow read: if rideParticipant(resource.data) || isUnclaimedRideRequest(resource.data);
       allow create: if signedIn();
       allow update: if rideParticipant(resource.data) && validDriverRideUpdate();
     }

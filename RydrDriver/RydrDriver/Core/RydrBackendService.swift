@@ -45,16 +45,17 @@ enum RydrBackendService {
         let rideId: String
         let driverId: String
         let riderId: String
-        let stage: String
+        let waitStage: String
+        let complimentarySeconds: Int
         let paidWaitSeconds: Int
-        let complimentaryWaitSeconds: Int
-        let recordedAtISO8601: String
+        let timestamp: String
     }
 
     struct AccountDeletionRequest: Encodable {
         let uid: String
+        let role: String
         let email: String?
-        let requestedAtISO8601: String
-        let source: String
+        let reason: String?
+        let requestedAt: String
     }
 }

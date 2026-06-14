@@ -10,12 +10,17 @@ const eventRoutes = require("./routes/events");
 const communityRoutes = require("./routes/community");
 const chatRoutes = require("./routes/chat");
 const notificationRoutes = require("./routes/notifications");
+const driverRoutes = require("./routes/driver");
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(helmet());
-app.use(cors());
+const corsOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
+  : true;
+
+app.use(cors({ origin: corsOrigins }));
 app.use(express.json());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
@@ -24,6 +29,7 @@ app.use("/events", eventRoutes);
 app.use("/community", communityRoutes);
 app.use("/chat", chatRoutes);
 app.use("/notifications", notificationRoutes);
+app.use("/driver", driverRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

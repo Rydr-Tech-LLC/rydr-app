@@ -523,6 +523,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func markArrivedAtPickup() {
+        guard let ride = activeRide else { return }
         let riderState = DriverRideLifecyclePolicy.riderState(forDriverStatus: "arrivedAtPickup")
         updateActiveRideStatus(
             status: "arrivedAtPickup",
@@ -533,6 +534,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 "riderStatusMessage": "Your driver has arrived at pickup."
             ]
         )
+        recordWaitTimeEvent(ride: ride, waitStage: "pickup_grace_started")
         // TODO: trigger rider push notification when notification service is available.
     }
 
@@ -547,7 +549,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 "riderStatusMessage": "Paid wait time is active."
             ]
         )
-        recordWaitTimeEvent(ride: ride, stage: "pickup")
+        recordWaitTimeEvent(ride: ride, waitStage: "pickup_paid_started")
     }
 
     func startPassengerRide() {
@@ -566,6 +568,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             fields["navigatingToDropoffAt"] = FieldValue.serverTimestamp()
         }
         updateActiveRideStatus(status: nextStatus, fields: fields)
+        recordWaitTimeEvent(ride: ride, waitStage: "wait_ended")
         // TODO: trigger rider push notification when notification service is available.
     }
 
@@ -580,10 +583,11 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 "riderStatusMessage": "Your driver is waiting at the added stop."
             ]
         )
-        recordWaitTimeEvent(ride: ride, stage: "stop")
+        recordWaitTimeEvent(ride: ride, waitStage: "stop_paid_started")
     }
 
     func headToDropoffFromStop() {
+        guard let ride = activeRide else { return }
         updateActiveRideStatus(
             status: "inProgress",
             fields: [
@@ -594,6 +598,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 "riderStatusMessage": "Your ride is headed to drop-off."
             ]
         )
+        recordWaitTimeEvent(ride: ride, waitStage: "wait_ended")
     }
 
     #if DEBUG
@@ -696,32 +701,47 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         resumeStandbyIfWaiting(statusMessage: "Ride completed. You are ready for the next request.")
     }
 
-    private func recordWaitTimeEvent(ride: DriverActiveRide, stage: String) {
+    private func recordWaitTimeEvent(ride: DriverActiveRide, waitStage: String) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let now = Date()
         let paidWaitSeconds: Int
         let complimentaryWaitSeconds: Int
 
-        if stage == "pickup" {
+        if waitStage == "pickup_grace_started" {
+            paidWaitSeconds = 0
+            complimentaryWaitSeconds = Int(DriverRideLifecyclePolicy.pickupComplimentaryWaitSeconds)
+        } else if waitStage == "pickup_paid_started" {
             paidWaitSeconds = DriverRideLifecyclePolicy.pickupPaidWaitSeconds(
                 waitStartedAt: ride.pickupWaitStartedAt,
                 paidWaitStartedAt: ride.pickupPaidWaitStartedAt,
                 now: now
             )
             complimentaryWaitSeconds = Int(DriverRideLifecyclePolicy.pickupComplimentaryWaitSeconds)
-        } else {
+        } else if waitStage == "stop_paid_started" {
             paidWaitSeconds = DriverRideLifecyclePolicy.stopPaidWaitSeconds(stopWaitStartedAt: ride.stopWaitStartedAt, now: now)
             complimentaryWaitSeconds = 0
+        } else {
+            if ride.normalizedStatus == "arrivedAtStop" {
+                paidWaitSeconds = DriverRideLifecyclePolicy.stopPaidWaitSeconds(stopWaitStartedAt: ride.stopWaitStartedAt, now: now)
+                complimentaryWaitSeconds = 0
+            } else {
+                paidWaitSeconds = DriverRideLifecyclePolicy.pickupPaidWaitSeconds(
+                    waitStartedAt: ride.pickupWaitStartedAt,
+                    paidWaitStartedAt: ride.pickupPaidWaitStartedAt,
+                    now: now
+                )
+                complimentaryWaitSeconds = Int(DriverRideLifecyclePolicy.pickupComplimentaryWaitSeconds)
+            }
         }
 
         let event = RydrBackendService.WaitTimeEvent(
             rideId: ride.id,
             driverId: uid,
             riderId: ride.riderId,
-            stage: stage,
+            waitStage: waitStage,
+            complimentarySeconds: complimentaryWaitSeconds,
             paidWaitSeconds: paidWaitSeconds,
-            complimentaryWaitSeconds: complimentaryWaitSeconds,
-            recordedAtISO8601: ISO8601DateFormatter().string(from: now)
+            timestamp: ISO8601DateFormatter().string(from: now)
         )
 
         Task {
@@ -741,9 +761,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
         let request = RydrBackendService.AccountDeletionRequest(
             uid: user.uid,
+            role: "driver",
             email: user.email,
-            requestedAtISO8601: ISO8601DateFormatter().string(from: Date()),
-            source: "ios-driver"
+            reason: nil,
+            requestedAt: ISO8601DateFormatter().string(from: Date())
         )
 
         Task { [weak self] in
@@ -763,13 +784,13 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
                 await MainActor.run {
                     self?.isRequestingAccountDeletion = false
-                    self?.accountDeletionMessage = "Account deletion request submitted. Support will follow up for beta testing."
+                    self?.accountDeletionMessage = "Your account deletion request has been submitted."
                 }
             } catch {
                 RydrCrashReporter.record(error, context: "request_account_deletion")
                 await MainActor.run {
                     self?.isRequestingAccountDeletion = false
-                    self?.accountDeletionMessage = "Could not submit deletion request: \(error.localizedDescription)"
+                    self?.accountDeletionMessage = "We could not submit your request right now. Please try again."
                 }
             }
         }
