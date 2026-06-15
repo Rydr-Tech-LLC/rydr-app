@@ -8,101 +8,413 @@ import SwiftUI
 
 struct RideTypeSelectionView: View {
     var userName: String = "Rydr User" // Replace with actual user data in future
-    private let rideTypes = ["Rydr Go", "Rydr Eco", "Rydr XL", "Rydr Prestine", "Rydr Executive"]
+
+    private let options: [RideTypeOption] = [
+        .standard(
+            title: "Rydr Go",
+            badge: "Everyday",
+            subtitle: "Affordable everyday transportation.",
+            detail: "Compact, mid-size, and full-size sedans or mid-size SUVs in good condition.",
+            icon: "car.fill",
+            vehicle: .sedan
+        ),
+        .standard(
+            title: "Rydr Eco",
+            badge: "Eco-Friendly",
+            subtitle: "Electric and environmentally conscious transportation.",
+            detail: "Electric vehicles approved for Rydr Eco.",
+            icon: "leaf.fill",
+            vehicle: .eco
+        ),
+        .standard(
+            title: "Rydr XL",
+            badge: "Spacious",
+            subtitle: "Groups, larger parties, and luggage.",
+            detail: "Large SUVs or qualifying high-capacity vehicles.",
+            icon: "bus.fill",
+            vehicle: .suv
+        ),
+        .prestine(
+            title: "Rydr Prestine",
+            badge: "Premium",
+            subtitle: "Premium transportation with elevated vehicle standards.",
+            detail: "Vehicles less than 7 years old with clean interior, clean exterior, and no visible damage.",
+            icon: "sparkles",
+            vehicle: .prestine
+        ),
+        .executive(
+            title: "Rydr Executive",
+            badge: "Luxury",
+            subtitle: "Exclusive executive transportation experience.",
+            detail: "Luxury sedan or luxury SUV less than 5 years old with leather interior and premium appearance.",
+            icon: "briefcase.fill",
+            vehicle: .executive
+        ),
+        .cashHub(
+            title: "Cash Rydr Hub",
+            badge: "Cash Rides",
+            subtitle: "Post or browse upcoming cash ride requests.",
+            detail: "A separate community marketplace, not standard Rydr dispatch.",
+            icon: "banknote.fill",
+            vehicle: .cash
+        )
+    ]
 
     var body: some View {
         ZStack {
-            LinearGradient(gradient: Gradient(colors: [Color.red, Color(red: 0.5, green: 0.0, blue: 0.13).opacity(0.7)]),
-                           startPoint: .topLeading,
-                           endPoint: .bottomTrailing)
-                .edgesIgnoringSafeArea(.all)
+            LinearGradient(
+                colors: [
+                    Color.white,
+                    Color(red: 0.995, green: 0.985, blue: 0.988),
+                    Color(red: 1.0, green: 0.95, blue: 0.955)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: 20) {
-                    Text("Choose Your Ride")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                        .foregroundStyle(LinearGradient(
-                            gradient: Gradient(colors: [Color.white, Color.white]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ))
-                        .padding(.top)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 18) {
+                    header
 
-                    ForEach(rideTypes, id: \.self) { rideType in
-                        let pricing = RideManager.pricingConfig(for: rideType)
-                        NavigationLink(destination: BookingView(rideType: pricing.title, userName: userName)) {
-                            RideOptionCard(
-                                title: pricing.title,
-                                subtitle: pricing.purpose,
-                                detail: pricing.vehicleExpectations,
-                                icon: icon(for: pricing.title)
-                            )
+                    VStack(spacing: 14) {
+                        ForEach(options) { option in
+                            if option.kind == .cashHub {
+                                NavigationLink(destination: CashRydrHubView()) {
+                                    RideOptionCard(option: option)
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                let pricing = RideManager.pricingConfig(for: option.title)
+                                NavigationLink(destination: BookingView(rideType: pricing.title, userName: userName)) {
+                                    RideOptionCard(option: option)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
-
-                    // Cash Rydr Hub
-                    NavigationLink(destination: CashRydrHubView()) {
-                        RideOptionCard(title: "Cash Rydr Hub", subtitle: "Post or browse upcoming cash ride requests", icon: "rectangle.on.rectangle.angled")
-                    }
                 }
-                .padding()
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+                .padding(.bottom, 28)
             }
         }
+        .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func icon(for rideType: String) -> String {
-        switch rideType {
-        case "Rydr Eco": return "leaf.fill"
-        case "Rydr XL": return "bus.fill"
-        case "Rydr Prestine": return "sparkles"
-        case "Rydr Executive": return "briefcase.fill"
-        default: return "car.fill"
-        }
-    }
-}
-
-struct RideOptionCard: View {
-    var title: String
-    var subtitle: String
-    var detail: String? = nil
-    var icon: String
-
-    var body: some View {
-        HStack {
-            Image(systemName: icon)
-                .font(.system(size: 40))
-                .foregroundColor(.red)
-                .frame(width: 50)
-
-            VStack(alignment: .leading) {
-                Text(title)
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.black)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundColor(.gray)
-                if let detail {
-                    Text(detail)
-                        .font(.caption2)
-                        .foregroundColor(.gray)
-                        .lineLimit(2)
+    private var header: some View {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("Choose Your")
+                        .foregroundColor(Color(red: 0.05, green: 0.08, blue: 0.14))
+                    Text("Ride")
+                        .foregroundStyle(Styles.rydrGradient)
                 }
+                .font(.system(size: 30, weight: .heavy, design: .rounded))
+                .minimumScaleFactor(0.82)
+
+                Text("Find the perfect ride for your needs.")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.secondary)
             }
 
             Spacer()
 
-            Image(systemName: "chevron.right")
-                .foregroundColor(.gray)
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            } label: {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "bell")
+                        .font(.headline.weight(.bold))
+                        .foregroundColor(Color(red: 0.05, green: 0.08, blue: 0.14))
+                        .frame(width: 48, height: 48)
+                        .background(Color.white.opacity(0.94))
+                        .clipShape(Circle())
+                        .shadow(color: Color.red.opacity(0.10), radius: 16, x: 0, y: 8)
+
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 7, height: 7)
+                        .offset(x: -9, y: 9)
+                }
+            }
+            .accessibilityLabel("Notifications")
         }
-        .padding()
-        .background(Color.white.opacity(0.9))
-        .cornerRadius(15)
-        .shadow(radius: 3)
+        .padding(.top, 4)
+    }
+}
+
+private struct RideTypeOption: Identifiable {
+    enum Kind {
+        case standard
+        case prestine
+        case executive
+        case cashHub
+    }
+
+    let id = UUID()
+    let title: String
+    let badge: String
+    let subtitle: String
+    let detail: String
+    let icon: String
+    let vehicle: RideVehicleStyle
+    let kind: Kind
+
+    static func standard(title: String, badge: String, subtitle: String, detail: String, icon: String, vehicle: RideVehicleStyle) -> RideTypeOption {
+        RideTypeOption(title: title, badge: badge, subtitle: subtitle, detail: detail, icon: icon, vehicle: vehicle, kind: .standard)
+    }
+
+    static func prestine(title: String, badge: String, subtitle: String, detail: String, icon: String, vehicle: RideVehicleStyle) -> RideTypeOption {
+        RideTypeOption(title: title, badge: badge, subtitle: subtitle, detail: detail, icon: icon, vehicle: vehicle, kind: .prestine)
+    }
+
+    static func executive(title: String, badge: String, subtitle: String, detail: String, icon: String, vehicle: RideVehicleStyle) -> RideTypeOption {
+        RideTypeOption(title: title, badge: badge, subtitle: subtitle, detail: detail, icon: icon, vehicle: vehicle, kind: .executive)
+    }
+
+    static func cashHub(title: String, badge: String, subtitle: String, detail: String, icon: String, vehicle: RideVehicleStyle) -> RideTypeOption {
+        RideTypeOption(title: title, badge: badge, subtitle: subtitle, detail: detail, icon: icon, vehicle: vehicle, kind: .cashHub)
+    }
+}
+
+private struct RideOptionCard: View {
+    let option: RideTypeOption
+
+    private var isExecutive: Bool { option.kind == .executive }
+    private var isPrestine: Bool { option.kind == .prestine }
+
+    var body: some View {
+        HStack(spacing: 15) {
+            RideVehicleArt(style: option.vehicle, kind: option.kind)
+                .frame(width: 96, height: 96)
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(option.title)
+                        .font(.title3.weight(.heavy))
+                        .foregroundColor(isExecutive ? .white : Color(red: 0.05, green: 0.08, blue: 0.14))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+
+                    Text(option.badge)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(badgeForeground)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(badgeBackground)
+                        .clipShape(Capsule())
+                }
+
+                Text(option.subtitle)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(isExecutive ? Color.white.opacity(0.86) : Color(red: 0.33, green: 0.35, blue: 0.43))
+                    .lineLimit(2)
+
+                Text(option.detail)
+                    .font(.caption)
+                    .foregroundColor(isExecutive ? Color.white.opacity(0.68) : .secondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 4)
+
+            Image(systemName: "chevron.right")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(chevronForeground)
+                .frame(width: 38, height: 38)
+                .background(chevronBackground)
+                .clipShape(Circle())
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(cardBorder)
+        .shadow(color: shadowColor, radius: 16, x: 0, y: 9)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(option.title), \(option.badge). \(option.subtitle)")
+    }
+
+    private var cardBackground: some View {
+        Group {
+            if isExecutive {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.02, green: 0.02, blue: 0.025),
+                        Color(red: 0.10, green: 0.085, blue: 0.045),
+                        Color.black
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            } else {
+                Color.white.opacity(0.96)
+            }
+        }
+    }
+
+    private var cardBorder: some View {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .stroke(
+                isExecutive
+                ? LinearGradient(colors: [Color(red: 0.95, green: 0.73, blue: 0.35), Color.white.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                : LinearGradient(colors: [Color.white.opacity(0.9), Color.red.opacity(isPrestine ? 0.18 : 0.08)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                lineWidth: isExecutive ? 1.2 : 1
+            )
+    }
+
+    private var badgeForeground: some ShapeStyle {
+        if isExecutive {
+            return AnyShapeStyle(Color(red: 0.98, green: 0.80, blue: 0.42))
+        }
+        if isPrestine {
+            return AnyShapeStyle(LinearGradient(colors: [Color.red, Color(red: 0.93, green: 0.68, blue: 0.22)], startPoint: .leading, endPoint: .trailing))
+        }
+        return AnyShapeStyle(Styles.rydrGradient)
+    }
+
+    private var badgeBackground: some ShapeStyle {
+        if isExecutive {
+            return AnyShapeStyle(Color(red: 0.98, green: 0.80, blue: 0.42).opacity(0.16))
+        }
+        if isPrestine {
+            return AnyShapeStyle(Color(red: 0.96, green: 0.72, blue: 0.28).opacity(0.16))
+        }
+        return AnyShapeStyle(Color.red.opacity(0.09))
+    }
+
+    private var chevronForeground: some ShapeStyle {
+        if isExecutive {
+            return AnyShapeStyle(Color(red: 0.98, green: 0.80, blue: 0.42))
+        }
+        if isPrestine {
+            return AnyShapeStyle(LinearGradient(colors: [Color.red, Color(red: 0.93, green: 0.68, blue: 0.22)], startPoint: .leading, endPoint: .trailing))
+        }
+        return AnyShapeStyle(Styles.rydrGradient)
+    }
+
+    private var chevronBackground: some ShapeStyle {
+        if isExecutive {
+            return AnyShapeStyle(Color(red: 0.98, green: 0.80, blue: 0.42).opacity(0.14))
+        }
+        return AnyShapeStyle(Color.red.opacity(0.08))
+    }
+
+    private var shadowColor: Color {
+        isExecutive ? Color.black.opacity(0.20) : Color.red.opacity(0.08)
+    }
+}
+
+private enum RideVehicleStyle {
+    case sedan
+    case eco
+    case suv
+    case prestine
+    case executive
+    case cash
+}
+
+private struct RideVehicleArt: View {
+    let style: RideVehicleStyle
+    let kind: RideTypeOption.Kind
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(tileBackground)
+
+            decorativeBackdrop
+
+            Image(assetName)
+                .resizable()
+                .scaledToFit()
+                .padding(.horizontal, style == .cash ? 3 : 1)
+                .padding(.vertical, style == .executive ? 3 : 6)
+                .offset(y: style == .cash ? 4 : 6)
+
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(iconStyle)
+                .frame(width: 32, height: 32)
+                .background(Color.white.opacity(kind == .executive ? 0.16 : 0.82))
+                .clipShape(Circle())
+                .offset(x: -29, y: -29)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var tileBackground: some ShapeStyle {
+        switch kind {
+        case .executive:
+            return AnyShapeStyle(LinearGradient(colors: [Color.black, Color(red: 0.23, green: 0.18, blue: 0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
+        case .prestine:
+            return AnyShapeStyle(LinearGradient(colors: [Color.red.opacity(0.10), Color(red: 0.98, green: 0.78, blue: 0.36).opacity(0.20)], startPoint: .topLeading, endPoint: .bottomTrailing))
+        case .cashHub:
+            return AnyShapeStyle(LinearGradient(colors: [Color.red.opacity(0.12), Color.white], startPoint: .topLeading, endPoint: .bottomTrailing))
+        default:
+            return AnyShapeStyle(LinearGradient(colors: [Color.red.opacity(0.09), Color.white], startPoint: .topLeading, endPoint: .bottomTrailing))
+        }
+    }
+
+    private var icon: String {
+        switch style {
+        case .sedan: return "car.fill"
+        case .eco: return "leaf.fill"
+        case .suv: return "bus.fill"
+        case .prestine: return "sparkles"
+        case .executive: return "briefcase.fill"
+        case .cash: return "banknote.fill"
+        }
+    }
+
+    private var assetName: String {
+        switch style {
+        case .sedan: return "RydrGoVehicle"
+        case .eco: return "RydrEcoVehicle"
+        case .suv: return "RydrXLVehicle"
+        case .prestine: return "RydrPrestineVehicle"
+        case .executive: return "RydrExecutiveVehicle"
+        case .cash: return "CashRydrFleet"
+        }
+    }
+
+    private var iconStyle: some ShapeStyle {
+        if kind == .executive {
+            return AnyShapeStyle(Color(red: 0.98, green: 0.80, blue: 0.42))
+        }
+        if kind == .prestine {
+            return AnyShapeStyle(LinearGradient(colors: [Color.red, Color(red: 0.93, green: 0.68, blue: 0.22)], startPoint: .topLeading, endPoint: .bottomTrailing))
+        }
+        return AnyShapeStyle(Styles.rydrGradient)
+    }
+
+    private var decorativeBackdrop: some View {
+        ZStack {
+            Circle()
+                .fill(backdropColor.opacity(0.20))
+                .frame(width: 72, height: 72)
+                .offset(x: 20, y: -18)
+            Circle()
+                .fill(backdropColor.opacity(0.10))
+                .frame(width: 54, height: 54)
+                .offset(x: -24, y: 22)
+        }
+    }
+
+    private var backdropColor: Color {
+        switch kind {
+        case .executive: return Color(red: 0.98, green: 0.80, blue: 0.42)
+        case .prestine: return Color(red: 0.95, green: 0.66, blue: 0.20)
+        default: return .red
+        }
     }
 }
 
 #Preview {
-    RideTypeSelectionView()
+    NavigationStack {
+        RideTypeSelectionView()
+    }
 }

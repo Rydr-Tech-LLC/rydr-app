@@ -31,15 +31,19 @@ struct BookingView: View {
     @State private var routeErrorMessage: String?
     @State private var routeRequestID = UUID()
     @State private var isResolvingLocations = false
+    @State private var showRoutePreview = false
 
     // Fields
     @State private var pickupText = ""
+    @State private var stopText = ""
     @State private var dropoffText = ""
     @FocusState private var focusedField: Field?
-    private enum Field { case pickup, dropoff, shortcut }
+    @State private var showStopField = false
+    private enum Field { case pickup, stop, dropoff, shortcut }
 
     // Search completers
     @StateObject private var pickupCompleter  = SearchCompleter()
+    @StateObject private var stopCompleter = SearchCompleter()
     @StateObject private var dropoffCompleter = SearchCompleter()
     @StateObject private var shortcutCompleter = SearchCompleter()
 
@@ -206,6 +210,33 @@ struct BookingView: View {
         }) {
             RideInProgressView(rideManager: rideManager)
         }
+        .sheet(isPresented: $showRoutePreview) {
+            RoutePreviewSheet(
+                rideType: rideType,
+                pickup: pickupText,
+                stop: stopText,
+                dropoff: dropoffText,
+                estimate: currentEstimate,
+                routePolyline: routePolyline,
+                pickupCoordinate: pickupCoordinate,
+                dropoffCoordinate: dropoffCoordinate,
+                showsUserLocation: locationManager.authorization == .authorizedWhenInUse || locationManager.authorization == .authorizedAlways,
+                canRequestRide: canRequestRide,
+                isResolving: isResolvingLocations,
+                onAddStop: {
+                    showRoutePreview = false
+                    withAnimation(.spring()) {
+                        showStopField = true
+                        sliderOffset = sliderMinY
+                    }
+                    focusedField = .stop
+                },
+                onRequest: {
+                    Task { await requestRide() }
+                }
+            )
+            .presentationDetents([.large])
+        }
         .navigationBarBackButtonHidden(false)
     }
 
@@ -326,7 +357,7 @@ struct BookingView: View {
         .frame(maxHeight: .infinity, alignment: .bottom)
         .scrollDismissesKeyboard(.immediately)
         .onChange(of: focusedField) { _, newValue in
-            if newValue == .pickup || newValue == .dropoff {
+            if newValue == .pickup || newValue == .stop || newValue == .dropoff {
                 withAnimation(.spring()) { sliderOffset = sliderMinY }
             }
         }
@@ -366,9 +397,14 @@ struct BookingView: View {
 
     private var compactSummaryText: String {
         let pickup = pickupText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let stop = stopText.trimmingCharacters(in: .whitespacesAndNewlines)
         let dropoff = dropoffText.trimmingCharacters(in: .whitespacesAndNewlines)
         switch (pickup.isEmpty, dropoff.isEmpty) {
-        case (false, false): return "\(pickup) to \(dropoff)"
+        case (false, false):
+            if stop.isEmpty {
+                return "\(pickup) to \(dropoff)"
+            }
+            return "\(pickup) to \(stop) to \(dropoff)"
         case (false, true): return "Pickup set. Add a drop-off."
         case (true, false): return "Drop-off set. Add a pickup."
         case (true, true): return "Choose pickup and drop-off."
@@ -378,25 +414,53 @@ struct BookingView: View {
     @ViewBuilder
     private var routeDetailsCard: some View {
         if let routeEstimate {
-            HStack(spacing: 12) {
-                Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(Color.red)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Route Preview")
-                        .font(.headline)
-                    Text("\(routeEstimate.distanceMiles, specifier: "%.1f") miles · \(Int(routeEstimate.durationMinutes)) min")
-                        .font(.subheadline)
+            Button {
+                showRoutePreview = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Styles.rydrGradient)
+                        .frame(width: 54, height: 54)
+                        .background(Styles.rydrGradient.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Route Preview")
+                            .font(.headline.weight(.bold))
+                            .foregroundColor(.primary)
+                        HStack(spacing: 7) {
+                            Text("\(routeEstimate.distanceMiles, specifier: "%.1f") miles")
+                            Text("•")
+                            Text("\(Int(routeEstimate.durationMinutes)) min")
+                        }
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
+                        Text(routeViaText)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(Styles.rydrGradient)
                 }
-                Spacer()
             }
+            .buttonStyle(.plain)
             .padding(12)
-            .background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
+            .background(RoundedRectangle(cornerRadius: 16).fill(.white.opacity(0.92)))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
         } else if let routeErrorMessage {
             validationBanner(text: routeErrorMessage)
         }
+    }
+
+    private var routeViaText: String {
+        if !stopText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Includes 1 stop"
+        }
+        return "Tap to preview route"
     }
 
     @ViewBuilder
@@ -511,6 +575,7 @@ struct BookingView: View {
     @ViewBuilder
     private var searchCard: some View {
         let showPickupSuggestions = (focusedField == .pickup && !pickupText.isEmpty)
+        let showStopSuggestions = (focusedField == .stop && !stopText.isEmpty)
         let showDropoffSuggestions = (focusedField == .dropoff && !dropoffText.isEmpty)
 
         VStack(spacing: 8) {
@@ -545,6 +610,34 @@ struct BookingView: View {
                 }
             }
 
+            if showStopField {
+                bookingField(title: "Add stop", text: $stopText, icon: "plus.circle")
+                    .focused($focusedField, equals: .stop)
+                    .onChange(of: stopText) { _, new in
+                        stopCompleter.setRegion(region)
+                        stopCompleter.setQuery(new)
+                    }
+                    .overlay(alignment: .trailing) {
+                        Button {
+                            stopText = ""
+                            showStopField = false
+                            focusedField = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.trailing, 10)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                if showStopSuggestions {
+                    suggestionsList(for: stopCompleter) { completion in
+                        stopText = completion.title + (completion.subtitle.isEmpty ? "" : ", " + completion.subtitle)
+                        focusedField = nil
+                    }
+                }
+            }
+
             // Dropoff
             bookingField(title: "Dropoff", text: $dropoffText, icon: "flag.checkered")
                 .focused($focusedField, equals: .dropoff)
@@ -576,6 +669,26 @@ struct BookingView: View {
                 suggestionsList(for: dropoffCompleter) { completion in
                     Task { await selectDropoff(completion) }
                 }
+            }
+
+            if !showStopField {
+                Button {
+                    withAnimation(.spring()) {
+                        showStopField = true
+                    }
+                    focusedField = .stop
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus.circle")
+                        Text("Add stop")
+                        Spacer()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Styles.rydrGradient)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(10)
@@ -975,6 +1088,7 @@ struct BookingView: View {
 
     private func updateSearchRegion(_ newRegion: MKCoordinateRegion) {
         pickupCompleter.setRegion(newRegion)
+        stopCompleter.setRegion(newRegion)
         dropoffCompleter.setRegion(newRegion)
         shortcutCompleter.setRegion(newRegion)
     }
@@ -1218,6 +1332,310 @@ struct BookingView: View {
 
         Task {
             try? await RydrBankAPI.release(code: code)
+        }
+    }
+}
+
+private struct RoutePreviewSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let rideType: String
+    let pickup: String
+    let stop: String
+    let dropoff: String
+    let estimate: RideEstimate
+    let routePolyline: MKPolyline?
+    let pickupCoordinate: CLLocationCoordinate2D?
+    let dropoffCoordinate: CLLocationCoordinate2D?
+    let showsUserLocation: Bool
+    let canRequestRide: Bool
+    let isResolving: Bool
+    let onAddStop: () -> Void
+    let onRequest: () -> Void
+
+    @State private var position: MapCameraPosition = .region(RydrMapDefaults.atlantaRegion)
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            RydrMapView(
+                position: $position,
+                pickupCoordinate: pickupCoordinate,
+                dropoffCoordinate: dropoffCoordinate,
+                routePolyline: routePolyline,
+                showsUserLocation: showsUserLocation,
+                onRecenter: fitRoute
+            )
+
+            VStack(spacing: 0) {
+                topControls
+                    .padding(.horizontal, 18)
+                    .padding(.top, 18)
+                Spacer()
+                previewPanel
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+            }
+        }
+        .ignoresSafeArea()
+        .onAppear(perform: fitRoute)
+    }
+
+    private var topControls: some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(Color.black)
+                    .frame(width: 50, height: 50)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .shadow(color: .black.opacity(0.12), radius: 12, x: 0, y: 6)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back to booking")
+
+            Spacer()
+
+            Button(action: fitRoute) {
+                Image(systemName: "scope")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(Color.black)
+                    .frame(width: 50, height: 50)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .shadow(color: .black.opacity(0.12), radius: 12, x: 0, y: 6)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Center route")
+        }
+    }
+
+    private var previewPanel: some View {
+        VStack(spacing: 14) {
+            Capsule()
+                .fill(Color.black.opacity(0.22))
+                .frame(width: 42, height: 5)
+                .padding(.top, 10)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Route Preview")
+                        .font(.headline.weight(.bold))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(routeSummaryText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                HStack(spacing: 10) {
+                    metricPill(icon: "road.lanes", value: String(format: "%.1f mi", estimate.distanceMiles))
+                    metricPill(icon: "clock.fill", value: "\(Int(estimate.durationMinutes)) min")
+                    Spacer()
+                }
+            }
+
+            bestRouteCard
+
+            Button {
+                dismiss()
+                onRequest()
+            } label: {
+                HStack {
+                    Image(systemName: rideIcon)
+                        .font(.title3.weight(.semibold))
+                    Spacer()
+                    if isResolving {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Text("Request \(rideType)")
+                            .font(.headline.weight(.bold))
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.headline.weight(.bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .frame(height: 58)
+                .background(Styles.rydrGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: Color.red.opacity(0.25), radius: 16, x: 0, y: 8)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canRequestRide || isResolving)
+            .opacity(canRequestRide ? 1 : 0.45)
+            .accessibilityLabel("Request \(rideType)")
+
+            Button {
+                dismiss()
+                onAddStop()
+            } label: {
+                HStack {
+                    Spacer()
+                    Text(stop.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add stop" : "Edit stop")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Image(systemName: "plus.circle")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Styles.rydrGradient)
+                }
+                .foregroundStyle(.primary)
+                .frame(height: 50)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(stop.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add stop" : "Edit stop")
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.white.opacity(0.55), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.16), radius: 24, x: 0, y: 10)
+    }
+
+    private var bestRouteCard: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.green.opacity(0.16))
+                    .frame(width: 42, height: 42)
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.green)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Best route")
+                    .font(.subheadline.weight(.bold))
+                Text(routeDescriptor)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Image(routeVehicleAssetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 116, height: 58)
+                .padding(.trailing, -8)
+        }
+        .padding(12)
+        .background(
+            LinearGradient(
+                colors: [Color.white, Color.red.opacity(0.08)],
+                startPoint: .leading,
+                endPoint: .trailing
+            ),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private func metricPill(icon: String, value: String) -> some View {
+        Label(value, systemImage: icon)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color.black.opacity(0.78))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.red.opacity(0.08), in: Capsule())
+            .accessibilityLabel(value)
+    }
+
+    private var routeSummaryText: String {
+        let pickup = clean(pickup, fallback: "Pickup")
+        let stop = clean(stop, fallback: "")
+        let dropoff = clean(dropoff, fallback: "Drop-off")
+        if stop.isEmpty {
+            return "\(pickup) -> \(dropoff)"
+        }
+        return "\(pickup) -> \(stop) -> \(dropoff)"
+    }
+
+    private var routeDescriptor: String {
+        if clean(stop, fallback: "").isEmpty {
+            return "Fastest available route"
+        }
+        return "Includes 1 stop • Fastest available"
+    }
+
+    private var rideIcon: String {
+        switch rideType.lowercased() {
+        case let value where value.contains("eco"):
+            return "leaf.fill"
+        case let value where value.contains("xl"):
+            return "car.2.fill"
+        case let value where value.contains("executive"):
+            return "briefcase.fill"
+        case let value where value.contains("prestine"):
+            return "sparkles"
+        default:
+            return "car.fill"
+        }
+    }
+
+    private var routeVehicleAssetName: String {
+        switch rideType.lowercased() {
+        case let value where value.contains("eco"):
+            return "RydrEcoVehicle"
+        case let value where value.contains("xl"):
+            return "RydrXLVehicle"
+        case let value where value.contains("executive"):
+            return "RydrExecutiveVehicle"
+        case let value where value.contains("prestine"):
+            return "RydrPrestineVehicle"
+        case let value where value.contains("cash"):
+            return "CashRydrFleet"
+        default:
+            return "RydrGoVehicle"
+        }
+    }
+
+    private func clean(_ text: String, fallback: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    private func fitRoute() {
+        let coords = [pickupCoordinate, dropoffCoordinate].compactMap { $0 }
+        guard !coords.isEmpty else {
+            position = .region(RydrMapDefaults.atlantaRegion)
+            return
+        }
+
+        let minLat = coords.map(\.latitude).min() ?? RydrMapDefaults.atlantaCoordinate.latitude
+        let maxLat = coords.map(\.latitude).max() ?? RydrMapDefaults.atlantaCoordinate.latitude
+        let minLon = coords.map(\.longitude).min() ?? RydrMapDefaults.atlantaCoordinate.longitude
+        let maxLon = coords.map(\.longitude).max() ?? RydrMapDefaults.atlantaCoordinate.longitude
+        let center = CLLocationCoordinate2D(
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLon + maxLon) / 2
+        )
+        let region = MKCoordinateRegion(
+            center: center,
+            span: MKCoordinateSpan(
+                latitudeDelta: max(0.06, (maxLat - minLat) * 1.95),
+                longitudeDelta: max(0.06, (maxLon - minLon) * 1.95)
+            )
+        )
+
+        withAnimation(.easeInOut(duration: 0.3)) {
+            position = .region(region)
         }
     }
 }

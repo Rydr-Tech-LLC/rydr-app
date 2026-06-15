@@ -97,13 +97,13 @@ struct RydrBankAPI {
     }
 
     /// Optional helper to mint a batch in dev:
-    static func mintTenDevRides() async throws -> String? {
+    static func mintTenDevRides(rideType: String = "Rydr Go") async throws -> String? {
         var minted: String?
         let stamp = Int(Date().timeIntervalSince1970)
 
         for i in 1...10 {
             let id = "ios_dev_ride_\(stamp)_\(i)"   // always unique
-            let resp = try await rideComplete(rideId: id, distanceMi: 6.0, rideType: "Rydr Go")
+            let resp = try await rideComplete(rideId: id, distanceMi: 6.0, rideType: rideType)
             if let m = resp["minted"] as? String { minted = m }
         }
         return minted

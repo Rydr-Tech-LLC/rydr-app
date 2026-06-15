@@ -8,7 +8,6 @@
 
 import SwiftUI
 import MapKit
-import _MapKit_SwiftUI
 
 struct RideHistoryView: View {
     @EnvironmentObject var rideManager: RideManager
@@ -69,9 +68,8 @@ private struct RideTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Mini map line from pickup → dropoff
-            MiniRouteMap(pickup: pseudoCoord(from: receipt.pickup),
-                         dropoff: pseudoCoord(from: receipt.dropoff))
+            RydrReceiptRouteMap(pickup: pseudoCoord(from: receipt.pickup),
+                                dropoff: pseudoCoord(from: receipt.dropoff))
                 .frame(height: 120)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
@@ -107,9 +105,8 @@ struct RideReceiptDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // Larger map
-                MiniRouteMap(pickup: pseudoCoord(from: receipt.pickup),
-                             dropoff: pseudoCoord(from: receipt.dropoff))
+                RydrReceiptRouteMap(pickup: pseudoCoord(from: receipt.pickup),
+                                    dropoff: pseudoCoord(from: receipt.dropoff))
                     .frame(height: 220)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
@@ -185,23 +182,40 @@ struct RideReceiptDetailView: View {
     }
 }
 
-// MARK: - Mini route map (straight line with pins)
-private struct MiniRouteMap: View {
+// MARK: - Rydr receipt route map
+private struct RydrReceiptRouteMap: View {
     let pickup: CLLocationCoordinate2D
     let dropoff: CLLocationCoordinate2D
 
     var body: some View {
         Map(initialPosition: .region(fitRegion)) {
-            Annotation("Pickup", coordinate: pickup) {
-                Image(systemName: "mappin.circle.fill").foregroundStyle(.red)
-            }
-            Annotation("Dropoff", coordinate: dropoff) {
-                Image(systemName: "mappin.circle.fill").foregroundStyle(.blue)
-            }
             MapPolyline(coordinates: [pickup, dropoff])
-                .stroke(.blue, lineWidth: 3)
+                .stroke(Styles.rydrGradient, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+
+            Annotation("Pickup", coordinate: pickup, anchor: .bottom) {
+                RydrReceiptRoutePin(kind: .pickup)
+            }
+
+            Annotation("Drop-off", coordinate: dropoff, anchor: .bottom) {
+                RydrReceiptRoutePin(kind: .dropoff)
+            }
         }
+        .mapStyle(.standard(elevation: .realistic, pointsOfInterest: .excludingAll))
+        .mapControlVisibility(.hidden)
         .allowsHitTesting(false)
+        .overlay(alignment: .topLeading) {
+            Label("Rydr Map", systemImage: "location.north.line.fill")
+                .font(.caption2.weight(.black))
+                .foregroundStyle(Styles.rydrGradient)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(10)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.55), lineWidth: 1)
+        }
     }
 
     private var fitRegion: MKCoordinateRegion {
@@ -219,6 +233,53 @@ private struct MiniRouteMap: View {
             longitudeDelta: max(0.02, (maxLon - minLon) * 1.6)
         )
         return MKCoordinateRegion(center: center, span: span)
+    }
+}
+
+private enum RydrReceiptRoutePinKind {
+    case pickup
+    case dropoff
+
+    var title: String {
+        switch self {
+        case .pickup: return "Pickup"
+        case .dropoff: return "Drop-off"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .pickup: return "figure.wave"
+        case .dropoff: return "flag.checkered"
+        }
+    }
+}
+
+private struct RydrReceiptRoutePin: View {
+    let kind: RydrReceiptRoutePinKind
+
+    var body: some View {
+        VStack(spacing: 3) {
+            ZStack {
+                Circle()
+                    .fill(kind == .pickup ? AnyShapeStyle(Color(.systemBackground)) : AnyShapeStyle(Styles.rydrGradient))
+                    .frame(width: 34, height: 34)
+                    .overlay(Circle().stroke(Color.white, lineWidth: 3))
+                    .shadow(color: Color.black.opacity(0.16), radius: 8, y: 4)
+
+                Image(systemName: kind.icon)
+                    .font(.system(size: 14, weight: .black))
+                    .foregroundStyle(kind == .pickup ? Color.red : Color.white)
+            }
+
+            Text(kind.title)
+                .font(.caption2.weight(.black))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .accessibilityLabel(kind.title)
     }
 }
 

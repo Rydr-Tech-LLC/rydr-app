@@ -22,6 +22,7 @@ struct VerificationCodeView: View {
     var onCredentialSuccess: ((AuthCredential, User) -> Void)? = nil
     var onResendCode: () -> Void
 
+    @Environment(\.dismiss) private var dismiss
     @State private var verificationCode = ""
     @State private var isVerifying = false
     @State private var errorMessage = ""
@@ -29,84 +30,290 @@ struct VerificationCodeView: View {
 
     @State private var canResend = false
     @State private var countdown = 30
-    @State private var progress: CGFloat = 1.0
     @State private var timer: Timer?
 
     var body: some View {
-        VStack(spacing: 30) {
-            VStack(spacing: 10) {
-                Text("Verify Your Phone")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .multilineTextAlignment(.center)
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color.white,
+                    Color(red: 0.99, green: 0.98, blue: 0.99),
+                    Color(red: 1.0, green: 0.95, blue: 0.96)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
 
-                Text("We sent a code to:")
-                    .foregroundColor(.gray)
-
-                Text(phoneNumber)
-                    .font(.headline)
-            }
-
-            TextField("Enter 6-digit code", text: $verificationCode)
-                .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
-                .focused($isFocused)
-                .onAppear {
-                    isFocused = true
-                    startCountdown()
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 30) {
+                    topBar
+                    verificationHeader
+                    codeEntry
+                    countdownCard
+                    errorText
+                    continueButton
+                    securityDivider
+                    resendSection
                 }
-
-            // 🔵 Animated Countdown Bar
-            if !canResend {
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(height: 6)
-
-                    Capsule()
-                        .fill(Color.red)
-                        .frame(width: progress * UIScreen.main.bounds.width * 0.8, height: 6)
-                        .animation(.linear(duration: 1), value: progress)
-                }
+                .padding(.horizontal, 24)
+                .padding(.top, 18)
+                .padding(.bottom, 36)
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
             }
-
-            if !errorMessage.isEmpty {
-                Text(errorMessage)
-                    .foregroundColor(.red)
-                    .font(.caption)
-                    .multilineTextAlignment(.center)
-            }
-
-            Button(action: verifyCode) {
-                Text(isVerifying ? "Verifying..." : "Continue")
-                    .bold()
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(verificationCode.count == 6 ? Color.red : Color.gray)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-            }
-            .disabled(isVerifying || verificationCode.count != 6)
-
-            if canResend {
-                Button("Resend Code") {
-                    onResendCode()
-                    startCountdown()
-                }
-                .foregroundColor(.blue)
-            } else {
-                Text("You can resend in \(countdown)s")
-                    .foregroundColor(.gray)
-                    .font(.footnote)
-            }
-
-            Spacer()
         }
-        .padding()
         .navigationBarBackButtonHidden(isVerifying)
+        .hideKeyboardOnTap()
+        .onAppear {
+            isFocused = true
+            startCountdown()
+        }
         .onDisappear {
             timer?.invalidate()
         }
+    }
+
+    private var topBar: some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.title3.weight(.bold))
+                    .foregroundColor(Color(red: 0.06, green: 0.09, blue: 0.14))
+                    .frame(width: 50, height: 50)
+                    .background(Color.white.opacity(0.86))
+                    .clipShape(Circle())
+                    .shadow(color: Color.black.opacity(0.06), radius: 14, x: 0, y: 8)
+            }
+            .disabled(isVerifying)
+            .accessibilityLabel("Back")
+
+            Spacer()
+        }
+    }
+
+    private var verificationHeader: some View {
+        VStack(spacing: 24) {
+            ZStack {
+                ForEach(0..<4, id: \.self) { index in
+                    Circle()
+                        .stroke(
+                            Color.red.opacity(0.12 - Double(index) * 0.02),
+                            style: StrokeStyle(lineWidth: 1, dash: [1.2, 4.5])
+                        )
+                        .frame(width: CGFloat(72 + index * 38), height: CGFloat(72 + index * 38))
+                }
+
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 84, height: 84)
+                    .shadow(color: Color.red.opacity(0.08), radius: 22, x: 0, y: 12)
+
+                ZStack {
+                    Image(systemName: "message")
+                        .font(.system(size: 44, weight: .regular))
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .offset(y: -1)
+                }
+                .foregroundStyle(Styles.rydrGradient)
+            }
+            .frame(height: 174)
+            .accessibilityHidden(true)
+
+            VStack(spacing: 10) {
+                HStack(spacing: 7) {
+                    Text("Verify")
+                        .foregroundColor(Color(red: 0.06, green: 0.09, blue: 0.14))
+                    Text("Your Phone")
+                        .foregroundStyle(Styles.rydrGradient)
+                }
+                .font(.system(size: 32, weight: .heavy, design: .rounded))
+                .minimumScaleFactor(0.78)
+
+                Text("We sent a 6-digit code to:")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.secondary)
+
+                Text(formattedPhoneNumber)
+                    .font(.headline.weight(.bold))
+                    .foregroundColor(Color(red: 0.06, green: 0.09, blue: 0.14))
+            }
+            .multilineTextAlignment(.center)
+        }
+    }
+
+    private var codeEntry: some View {
+        ZStack {
+            HStack(spacing: 11) {
+                ForEach(0..<6, id: \.self) { index in
+                    codeBox(at: index)
+                }
+            }
+
+            TextField("", text: $verificationCode)
+                .keyboardType(.numberPad)
+                .textContentType(.oneTimeCode)
+                .focused($isFocused)
+                .foregroundColor(.clear)
+                .accentColor(.clear)
+                .frame(height: 64)
+                .opacity(0.02)
+                .onChange(of: verificationCode) { _, newValue in
+                    let sanitized = String(newValue.filter { $0.isNumber }.prefix(6))
+                    if sanitized != newValue {
+                        verificationCode = sanitized
+                    }
+                }
+                .accessibilityLabel("Six digit verification code")
+        }
+        .onTapGesture { isFocused = true }
+    }
+
+    private func codeBox(at index: Int) -> some View {
+        let characters = Array(verificationCode)
+        let hasCharacter = index < characters.count
+        let isActive = isFocused && index == min(verificationCode.count, 5)
+
+        return ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.96))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(
+                            isActive || hasCharacter ? Color.red.opacity(0.72) : Color.black.opacity(0.09),
+                            lineWidth: isActive || hasCharacter ? 1.5 : 1
+                        )
+                )
+                .shadow(color: Color.black.opacity(0.035), radius: 10, x: 0, y: 6)
+
+            if hasCharacter {
+                Text(String(characters[index]))
+                    .font(.title2.weight(.bold))
+                    .foregroundColor(Color(red: 0.06, green: 0.09, blue: 0.14))
+            } else if isActive {
+                Capsule()
+                    .fill(Color(red: 0.06, green: 0.09, blue: 0.14))
+                    .frame(width: 3, height: 26)
+            }
+        }
+        .frame(height: 64)
+    }
+
+    private var countdownCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(Styles.rydrGradient)
+
+            Text(canResend ? "You can request a new code" : "Resend available in")
+                .font(.footnote.weight(.semibold))
+                .foregroundColor(Color(red: 0.18, green: 0.19, blue: 0.23))
+
+            Spacer()
+
+            Text(canResend ? "Now" : formattedCountdown)
+                .font(.footnote.weight(.heavy))
+                .foregroundStyle(Styles.rydrGradient)
+        }
+        .padding(.horizontal, 18)
+        .frame(height: 62)
+        .background(Color.white.opacity(0.9))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: Color.black.opacity(0.07), radius: 18, x: 0, y: 10)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(canResend ? "You can request a new code now" : "Resend available in \(formattedCountdown)")
+    }
+
+    @ViewBuilder
+    private var errorText: some View {
+        if !errorMessage.isEmpty {
+            Text(errorMessage)
+                .font(.footnote.weight(.semibold))
+                .foregroundColor(.red)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+                .accessibilityLabel(errorMessage)
+        }
+    }
+
+    private var continueButton: some View {
+        Button(action: verifyCode) {
+            HStack {
+                Spacer()
+                Text(isVerifying ? "Verifying..." : "Continue")
+                    .font(.headline.weight(.bold))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.headline.weight(.bold))
+            }
+            .frame(height: 64)
+            .padding(.horizontal, 24)
+        }
+        .background(Styles.rydrGradient.opacity(verificationCode.count == 6 ? 1 : 0.45))
+        .foregroundColor(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: Color.red.opacity(verificationCode.count == 6 ? 0.22 : 0.04), radius: 18, x: 0, y: 12)
+        .disabled(isVerifying || verificationCode.count != 6)
+        .accessibilityLabel(isVerifying ? "Verifying code" : "Continue")
+    }
+
+    private var securityDivider: some View {
+        HStack(spacing: 14) {
+            Rectangle()
+                .fill(Color.black.opacity(0.08))
+                .frame(height: 1)
+
+            Image(systemName: "lock.fill")
+                .font(.caption.weight(.bold))
+                .foregroundColor(.secondary.opacity(0.7))
+                .frame(width: 32, height: 32)
+                .background(Color(.systemGray6))
+                .clipShape(Circle())
+
+            Rectangle()
+                .fill(Color.black.opacity(0.08))
+                .frame(height: 1)
+        }
+        .padding(.top, 8)
+        .accessibilityHidden(true)
+    }
+
+    private var resendSection: some View {
+        VStack(spacing: 10) {
+            Text("Didn't receive the code?")
+                .font(.footnote.weight(.semibold))
+                .foregroundColor(.secondary)
+
+            Button {
+                onResendCode()
+                startCountdown()
+            } label: {
+                Text(canResend ? "Resend Code" : "Resend Code (\(countdown)s)")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(canResend ? Styles.rydrGradient : LinearGradient(colors: [.secondary], startPoint: .leading, endPoint: .trailing))
+            }
+            .disabled(!canResend)
+            .accessibilityLabel(canResend ? "Resend code" : "Resend code available in \(countdown) seconds")
+        }
+    }
+
+    private var formattedCountdown: String {
+        String(format: "00:%02d", countdown)
+    }
+
+    private var formattedPhoneNumber: String {
+        let digits = phoneNumber.filter { $0.isNumber }
+        guard digits.count == 11, digits.first == "1" else {
+            return phoneNumber
+        }
+
+        let area = digits.dropFirst().prefix(3)
+        let prefix = digits.dropFirst(4).prefix(3)
+        let line = digits.suffix(4)
+        return "+1 (\(area)) \(prefix)-\(line)"
     }
 
     private func verifyCode() {
@@ -156,16 +363,13 @@ struct VerificationCodeView: View {
     private func startCountdown() {
         canResend = false
         countdown = 30
-        progress = 1.0
         timer?.invalidate()
 
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { t in
             if countdown > 0 {
                 countdown -= 1
-                progress = CGFloat(countdown) / 30.0
             } else {
                 canResend = true
-                progress = 0.0
                 t.invalidate()
             }
         }

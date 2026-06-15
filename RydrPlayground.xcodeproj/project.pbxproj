@@ -16,6 +16,7 @@
 		8B2D68FC2E4160F20043BDBE /* FirebaseInAppMessaging-Beta in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2D68FB2E4160F20043BDBE /* FirebaseInAppMessaging-Beta */; };
 		8B2D68FE2E4160F20043BDBE /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2D68FD2E4160F20043BDBE /* FirebaseStorage */; };
 		8BC309E52E59E81D00CCD3E0 /* StripeIdentity in Frameworks */ = {isa = PBXBuildFile; productRef = 8BC309E42E59E81D00CCD3E0 /* StripeIdentity */; };
+		8BFA10022E98A00100C0DEX1 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 8BFA10012E98A00100C0DEX1 /* FirebaseCrashlytics */; };
 		D917BFB62E04AEB900F44272 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = D917BFB52E04AEB900F44272 /* GoogleSignIn */; };
 		D917BFB82E04AEB900F44272 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = D917BFB72E04AEB900F44272 /* GoogleSignInSwift */; };
 		D9723BF62DFDB2BA0075DBC1 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = D9723BF52DFDB2BA0075DBC1 /* FirebaseAnalytics */; };
@@ -183,6 +184,7 @@
 				D9935A302E077A9800056DB7 /* StripeConnect in Frameworks */,
 				8B2D68F82E4160F20043BDBE /* FirebaseDatabase in Frameworks */,
 				D9723BFC2DFDB2BA0075DBC1 /* FirebaseCore in Frameworks */,
+				8BFA10022E98A00100C0DEX1 /* FirebaseCrashlytics in Frameworks */,
 				D9935A342E077A9800056DB7 /* StripePayments in Frameworks */,
 				8B2D68F42E4160F20043BDBE /* FirebaseAppDistribution-Beta in Frameworks */,
 				8B2D68FA2E4160F20043BDBE /* FirebaseFunctions in Frameworks */,
@@ -281,6 +283,7 @@
 				8B2D68F12E4160F20043BDBE /* FirebaseAnalyticsCore */,
 				8B2D68F32E4160F20043BDBE /* FirebaseAppDistribution-Beta */,
 				8B2D68F52E4160F20043BDBE /* FirebaseAuthCombine-Community */,
+				8BFA10012E98A00100C0DEX1 /* FirebaseCrashlytics */,
 				8B2D68F72E4160F20043BDBE /* FirebaseDatabase */,
 				8B2D68F92E4160F20043BDBE /* FirebaseFunctions */,
 				8B2D68FB2E4160F20043BDBE /* FirebaseInAppMessaging-Beta */,
@@ -855,6 +858,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D9935A2A2E077A9800056DB7 /* XCRemoteSwiftPackageReference "stripe-ios" */;
 			productName = StripeIdentity;
+		};
+		8BFA10012E98A00100C0DEX1 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D9723BF42DFDB2BA0075DBC1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
 		};
 		D917BFB52E04AEB900F44272 /* GoogleSignIn */ = {
 			isa = XCSwiftPackageProductDependency;

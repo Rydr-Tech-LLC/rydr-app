@@ -32,9 +32,19 @@ struct DriverSelectionView: View {
         NavigationStack {
             ZStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 12) {
+                    Capsule()
+                        .fill(Color.black.opacity(0.12))
+                        .frame(width: 44, height: 5)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 8)
+
                     HStack(spacing: 8) {
-                        Image(systemName: "hand.point.left.fill").foregroundStyle(.secondary)
-                        Text("Swipe to view nearby drivers")
+                        Image(systemName: "hand.draw.fill")
+                            .foregroundStyle(Styles.rydrGradient)
+                        Text("Swipe")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Styles.rydrGradient)
+                        Text("to view nearby drivers")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -88,9 +98,13 @@ struct DriverSelectionView: View {
                 }
             }
             .navigationTitle("Nearby Drivers")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Close", action: onClose)
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.headline.weight(.bold))
+                    }
                 }
             }
         }
@@ -140,12 +154,18 @@ private struct DriverCard: View {
     let promoAppliedDevFree: Bool
     let onConfirm: () -> Void
 
+    @State private var isFavorite = false
+
     private var fareBreakdown: RideFareBreakdown {
         RideManager.fareBreakdown(estimate: estimate, with: driver, rideType: rideType)
     }
 
     private var baseFare: Double {
         fareBreakdown.finalRiderTotal
+    }
+
+    private var distanceText: String {
+        String(format: "%.1f mi", estimate.distanceMiles)
     }
 
     private var finalFare: Double {
@@ -156,75 +176,51 @@ private struct DriverCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                // avatar
-                Circle()
-                    .fill(Color.gray.opacity(0.15))
-                    .overlay(Text(String(driver.name.prefix(1))).font(.headline))
-                    .frame(width: 46, height: 46)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(driver.name).font(.headline)
-                    HStack(spacing: 6) {
-                        Image(systemName: "star.fill").foregroundStyle(.yellow)
-                        Text(String(format: "%.1f", driver.rating))
-                        Text("· \(driver.carMakeModel)")
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.subheadline)
-                }
-
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                rideBadge
                 Spacer()
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    if finalFare < baseFare - 0.009 {
-                        // Strikethrough original, show discounted (or FREE)
-                        Text("$\(baseFare, specifier: "%.2f")")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .strikethrough()
-                        Text(finalFare == 0 ? "FREE" : "$\(finalFare, specifier: "%.2f")")
-                            .font(.headline).bold()
-                    } else {
-                        Text("$\(baseFare, specifier: "%.2f")")
-                            .font(.headline).bold()
+                Button {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
+                        isFavorite.toggle()
                     }
-                    Text(rideTypeDisplay)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                } label: {
+                    Image(systemName: isFavorite ? "heart.fill" : "heart")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(isFavorite ? Color.red : .primary)
+                        .frame(width: 42, height: 42)
+                        .background(Color(.systemBackground), in: Circle())
+                        .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isFavorite ? "Remove favorite driver" : "Favorite driver")
             }
 
-            // Car block – fixed height to avoid distortion
-            ZStack {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(.ultraThinMaterial)
-                VStack(spacing: 10) {
-                    Image(systemName: "car.fill")
-                        .font(.system(size: 42, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text(driver.carMakeModel)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+            driverHeader
+
+            vehicleHero
+
+            HStack(spacing: 0) {
+                driverMetric(systemName: "mappin.circle.fill", value: distanceText, label: "away")
+                Divider().frame(height: 30)
+                driverMetric(systemName: "timer", value: "\(Int(estimate.durationMinutes)) min", label: "arrival")
+                Divider().frame(height: 30)
+                driverMetric(systemName: "person.badge.shield.checkmark.fill", value: "\(acceptanceRate)%", label: "accept rate")
+            }
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(displayCompliments, id: \.self) { c in
+                        complimentChip(c)
+                    }
                 }
             }
-            .frame(height: 180)
-
-            // Distance + ETA (from estimate to keep stable)
-            HStack(spacing: 14) {
-                Image(systemName: "figure.walk.motion")
-                Text("\(estimate.distanceMiles, specifier: "%.1f") mi")
-                Text("·")
-                Text("\(Int(estimate.durationMinutes)) min")
-                Spacer()
-            }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
 
             if fareBreakdown.minimumFareAdjustment > 0 {
                 HStack {
-                    Text("Minimum Fare Adjustment")
+                    Text("Minimum fare adjustment")
                     Spacer()
                     Text("$\(fareBreakdown.minimumFareAdjustment, specifier: "%.2f")")
                         .monospacedDigit()
@@ -233,35 +229,182 @@ private struct DriverCard: View {
                 .foregroundStyle(.secondary)
             }
 
-            // Compliments (chips)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(driver.compliments, id: \.self) { c in
-                        Text(c)
-                            .font(.footnote)
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.12)))
-                    }
-                }
-            }
-
-            Button {
-                onConfirm()
-            } label: {
+            Button(action: onConfirm) {
                 Text("Confirm \(rideTypeDisplay) with \(driver.name)")
+                    .font(.headline.weight(.bold))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(RydrGradientButton())
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 18)
-                .fill(.ultraThinMaterial)
-        )
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(Color.black.opacity(0.06), lineWidth: 1)
         )
+        .shadow(color: Color.black.opacity(0.08), radius: 20, y: 10)
+    }
+
+    private var driverAvatar: some View {
+        Group {
+            if let imgName = driver.profileImage, !imgName.isEmpty, UIImage(named: imgName) != nil {
+                Image(imgName)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Circle()
+                    .fill(Color(.secondarySystemGroupedBackground))
+                    .overlay(Text(String(driver.name.prefix(1))).font(.title3.weight(.black)))
+            }
+        }
+        .frame(width: 64, height: 64)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Styles.rydrGradient, lineWidth: 3))
+    }
+
+    private var driverHeader: some View {
+        HStack(alignment: .center, spacing: 12) {
+            driverAvatar
+            driverIdentity
+            Spacer()
+            fareBadge
+        }
+    }
+
+    private var driverIdentity: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Text(driver.name)
+                    .font(.title3.weight(.black))
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.blue)
+            }
+            HStack(spacing: 5) {
+                Image(systemName: "star.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.orange)
+                Text(String(format: "%.1f", driver.rating))
+                    .font(.subheadline.weight(.semibold))
+                Text("(\(tripCountText) trips)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(driver.carMakeModel)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    private var fareBadge: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            fareText
+            Text(rideTypeDisplay)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(Styles.rydrGradient)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Color.red.opacity(0.08)))
+        }
+    }
+
+    @ViewBuilder
+    private var fareText: some View {
+        if finalFare < baseFare - 0.009 {
+            Text("$\(baseFare, specifier: "%.2f")")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .strikethrough()
+            Text(finalFare == 0 ? "FREE" : "$\(finalFare, specifier: "%.2f")")
+                .font(.headline.weight(.black))
+        } else {
+            Text("$\(baseFare, specifier: "%.2f")")
+                .font(.headline.weight(.black))
+        }
+    }
+
+    private var vehicleHero: some View {
+        ZStack(alignment: .bottomLeading) {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(vehicleBackground)
+
+            vehicleImage
+                .frame(maxWidth: .infinity)
+                .frame(height: 176)
+
+            HStack(spacing: 6) {
+                Image(systemName: vehicleFeatureIcon)
+                Text(vehicleFeatureText)
+            }
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.black.opacity(0.72)))
+            .padding(10)
+
+            Button {} label: {
+                Image(systemName: "chevron.right")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 38, height: 38)
+                    .background(Color(.systemBackground), in: Circle())
+                    .shadow(color: .black.opacity(0.10), radius: 8, y: 3)
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            .padding(10)
+        }
+        .frame(height: 190)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var vehicleImage: some View {
+        if let imgName = driver.carImage, !imgName.isEmpty, UIImage(named: imgName) != nil {
+            Image(imgName)
+                .resizable()
+                .scaledToFit()
+                .padding(.horizontal, 12)
+        } else {
+            Image(defaultVehicleAssetName)
+                .resizable()
+                .scaledToFit()
+                .padding(.horizontal, 12)
+        }
+    }
+
+    private var rideBadge: some View {
+        Label(rideTypeDisplay, systemImage: rideBadgeIcon)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(rideAccent)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Capsule().fill(rideAccent.opacity(0.12)))
+    }
+
+    private func driverMetric(systemName: String, value: String, label: String) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: systemName)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Styles.rydrGradient)
+            Text(value)
+                .font(.subheadline.weight(.black))
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func complimentChip(_ text: String) -> some View {
+        Label(text, systemImage: complimentIcon(for: text))
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(complimentTint(for: text))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(complimentTint(for: text).opacity(0.10)))
     }
 
     private var rideTypeDisplay: String {
@@ -272,6 +415,90 @@ private struct DriverCard: View {
         case "prestine":  return "Rydr Prestine"
         default:          return rideType
         }
+    }
+
+    private var defaultVehicleAssetName: String {
+        let lower = rideTypeDisplay.lowercased()
+        if lower.contains("eco") { return "RydrEcoVehicle" }
+        if lower.contains("xl") { return "RydrXLVehicle" }
+        if lower.contains("executive") { return "RydrExecutiveVehicle" }
+        if lower.contains("prestine") { return "RydrPrestineVehicle" }
+        return "RydrGoVehicle"
+    }
+
+    private var rideAccent: Color {
+        let lower = rideTypeDisplay.lowercased()
+        if lower.contains("xl") { return .purple }
+        if lower.contains("eco") { return .green }
+        if lower.contains("executive") { return .black }
+        return .red
+    }
+
+    private var vehicleBackground: LinearGradient {
+        let lower = rideTypeDisplay.lowercased()
+        if lower.contains("xl") {
+            return LinearGradient(colors: [Color.purple.opacity(0.12), Color.white], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        if lower.contains("eco") {
+            return LinearGradient(colors: [Color.green.opacity(0.12), Color.white], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        if lower.contains("executive") {
+            return LinearGradient(colors: [Color.black.opacity(0.16), Color.yellow.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        return LinearGradient(colors: [Color.red.opacity(0.12), Color.white], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    private var rideBadgeIcon: String {
+        let lower = rideTypeDisplay.lowercased()
+        if lower.contains("eco") { return "leaf.fill" }
+        if lower.contains("xl") { return "car.2.fill" }
+        if lower.contains("executive") { return "briefcase.fill" }
+        if lower.contains("prestine") { return "sparkles" }
+        return "car.fill"
+    }
+
+    private var vehicleFeatureIcon: String {
+        rideTypeDisplay.lowercased().contains("eco") ? "bolt.fill" : "sparkles"
+    }
+
+    private var vehicleFeatureText: String {
+        let lower = rideTypeDisplay.lowercased()
+        if lower.contains("eco") { return "100% Electric" }
+        if lower.contains("xl") { return "Spacious" }
+        if lower.contains("executive") { return "Premium SUV" }
+        if lower.contains("prestine") { return "Premium" }
+        return "Verified Vehicle"
+    }
+
+    private var displayCompliments: [String] {
+        let base = driver.compliments.isEmpty ? ["Great Navigation", "Clean Car", "Friendly"] : driver.compliments
+        return Array(base.prefix(4))
+    }
+
+    private var tripCountText: String {
+        let seed = abs(driver.id.hashValue % 900) + 100
+        return "\(seed)"
+    }
+
+    private var acceptanceRate: Int {
+        92 + abs(driver.id.hashValue % 8)
+    }
+
+    private func complimentIcon(for text: String) -> String {
+        let lower = text.lowercased()
+        if lower.contains("clean") { return "sparkles" }
+        if lower.contains("navigation") { return "location.north.fill" }
+        if lower.contains("friendly") { return "face.smiling" }
+        if lower.contains("review") { return "star.fill" }
+        return "checkmark.seal.fill"
+    }
+
+    private func complimentTint(for text: String) -> Color {
+        let lower = text.lowercased()
+        if lower.contains("clean") { return .green }
+        if lower.contains("friendly") { return .orange }
+        if lower.contains("navigation") { return .blue }
+        return .purple
     }
 }
 
@@ -392,4 +619,3 @@ private extension Double {
         return (self * p).rounded() / p
     }
 }
-

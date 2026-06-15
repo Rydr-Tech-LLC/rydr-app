@@ -10,6 +10,18 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == uid;
     }
 
+    function hasVerifiedPhone() {
+      return signedIn()
+        && ("phone_number" in request.auth.token)
+        && request.auth.token.phone_number is string;
+    }
+
+    function isVerifiedPhoneProfile(data) {
+      return hasVerifiedPhone()
+        && ("phoneNumber" in data)
+        && data.phoneNumber == request.auth.token.phone_number;
+    }
+
     function rideParticipant(data) {
       return signedIn() && (
         data.driverId == request.auth.uid ||
@@ -60,6 +72,26 @@ service cloud.firestore {
     match /drivers/{uid} {
       allow read: if isSelf(uid);
       allow create, update: if isSelf(uid);
+    }
+
+    match /riders/{uid} {
+      allow read: if isSelf(uid) || isVerifiedPhoneProfile(resource.data);
+      allow create, update: if isSelf(uid);
+    }
+
+    match /users/{uid} {
+      allow read: if isSelf(uid);
+      allow write: if false;
+
+      match /rydrBankCodes/{codeId} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
+
+      match /rydrContrib/{contribId} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
     }
 
     match /driver_status/{uid} {

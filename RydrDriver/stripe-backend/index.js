@@ -238,7 +238,8 @@ app.post("/ephemeral-keys", async (req, res) => {
 // Body: {
 //   amount, currency, customerId,
 //   driverAccountId?,            // if present -> destination charge
-//   applicationFeeAmount?        // in cents (your platform fee)
+//   applicationFeeAmount?,       // in cents (your platform fee)
+//   rideId?, driverId?, riderId?, source?
 // }
 app.post("/payment-intents", async (req, res) => {
   try {
@@ -248,6 +249,10 @@ app.post("/payment-intents", async (req, res) => {
       customerId,
       driverAccountId,
       applicationFeeAmount,
+      rideId,
+      driverId,
+      riderId,
+      source,
     } = req.body || {};
 
     if (!amount || !customerId) {
@@ -260,6 +265,15 @@ app.post("/payment-intents", async (req, res) => {
       customer: customerId,
       automatic_payment_methods: { enabled: true },
     };
+
+    const metadata = {};
+    if (rideId) metadata.rideId = String(rideId);
+    if (driverId) metadata.driverId = String(driverId);
+    if (riderId) metadata.riderId = String(riderId);
+    if (source) metadata.source = String(source);
+    if (Object.keys(metadata).length > 0) {
+      base.metadata = metadata;
+    }
 
     // Destination charge to driver (Connect)
     if (driverAccountId) {
@@ -425,7 +439,6 @@ app.post("/payment-methods/detach", async (req, res) => {
 // --- Listen ---
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-
 
 
 

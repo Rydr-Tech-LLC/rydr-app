@@ -39,180 +39,66 @@ struct LoginView: View {
         let digits = phoneNumber.filter { $0.isNumber }.prefix(10)
         return "+1" + digits
     }
+
+    private var canSubmitEmail: Bool {
+        !email.isEmpty && !password.isEmpty
+    }
+
+    private var canSendPhoneCode: Bool {
+        phoneNumber.filter { $0.isNumber }.count == 10
+    }
     
     var body: some View {
-        VStack(spacing: 25) {
-            Image("RydrLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 200, height: 200)
-                .opacity(showLogo ? 1 : 0)
-                .animation(.easeIn(duration: 1.0), value: showLogo)
-                .onAppear { showLogo = true }
-                .padding(.top)
-                .accessibilityLabel("Rydr logo")
-            
-            Text("Hello There!")
-                .font(.title)
-                .foregroundStyle(Styles.rydrGradient)
-            
-            // MARK: - Phone Login
-            if !isUsingEmail {
-                HStack {
-                    Text("🇺🇸 +1")
-                        .font(.headline)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 10)
-                        .background(Color(.systemGray6))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    TextField("Phone number", text: Binding(
-                        get: { phoneNumber },
-                        set: { phoneNumber = String($0.filter { $0.isNumber }.prefix(10)) }
-                    ))
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("US Phone Number Field")
-                }
-                .padding(.bottom, 4)
-                Text("US numbers only. Enter your 10-digit number.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Button("Send Code") {
-                    sendCode()
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Styles.rydrGradient)
-                .foregroundColor(.white)
-                .cornerRadius(10)
-                .accessibilityLabel("Send Verification Code")
-                
-                Button("Use email and password instead") {
-                    withAnimation { isUsingEmail = true }
-                }
-                .font(.caption)
-                .accessibilityLabel("Switch to email and password login")
-
-                if let repair = pendingPhoneLoginRepair {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Confirm your password for \(repair.profile.email) to enable phone login on this account.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
-                        SecureField("Password", text: $phoneRepairPassword)
-                            .textFieldStyle(.roundedBorder)
-                            .accessibilityLabel("Password for Phone Login Link")
-
-                        Button(isRepairingPhoneLogin ? "Linking..." : "Link Phone and Log In") {
-                            repairPhoneLogin()
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(phoneRepairPassword.isEmpty || isRepairingPhoneLogin ? Color.gray : Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
-                        .disabled(phoneRepairPassword.isEmpty || isRepairingPhoneLogin)
-                    }
-                    .padding(.top, 8)
-                }
-            }
-            
-            // MARK: - Email Login
-            if isUsingEmail {
-                TextField("Email", text: $email)
-                    .textFieldStyle(.roundedBorder)
-                    .autocapitalization(.none)
-                    .keyboardType(.emailAddress)
-                    .accessibilityLabel("Email Field")
-                
-                SecureField("Password", text: $password)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("Password Field")
-                
-                Button("Log In with Email") {
-                    guard !email.isEmpty, !password.isEmpty else {
-                        errorMessage = "Please enter both email and password."
-                        return
-                    }
-                    
-                    guard isValidEmail(email) else {
-                        errorMessage = "Please enter a valid email address."
-                        return
-                    }
-                    
-                    Auth.auth().signIn(withEmail: email, password: password) { result, error in
-                        if let error = error {
-                            errorMessage = "Login failed: \(error.localizedDescription)"
-                        } else if let user = result?.user {
-                            completeEmailLogin(for: user, fallbackEmail: email)
-                        }
-                        
-                    }
-                
-                }
-                .disabled(email.isEmpty || password.isEmpty)
-                .opacity(email.isEmpty || password.isEmpty ? 0.5 : 1.0)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Styles.rydrGradient)
-                .foregroundColor(.white)
-                .cornerRadius(10)
-                .accessibilityLabel("Login with Email")
-                
-                Button("Forgot Password?") {
-                    sendPasswordReset()
-                }
-                .font(.caption)
-                .foregroundColor(.blue)
-                .accessibilityLabel("Reset password via email")
-                
-                Button("Use phone number instead") {
-                    withAnimation { isUsingEmail = false }
-                }
-                .font(.caption)
-                .accessibilityLabel("Switch to phone login")
-            }
-            
-            Divider().padding(.vertical)
-            
-            // MARK: - Apple & Google Sign-In
-            Button(action: {
-                // TODO: Handle Apple Sign-In
-            }) {
-                Label("Sign in with Apple", systemImage: "apple.logo")
-                    .frame(maxWidth: .infinity)
-            }
-            .padding()
-            .background(Color.black)
-            .foregroundColor(.white)
-            .cornerRadius(10)
-            .accessibilityLabel("Sign in with Apple")
-            
-            Button(action: {
-                // TODO: Handle Google Sign-In
-            }) {
-                Label("Sign in with Google", systemImage: "globe")
-                    .frame(maxWidth: .infinity)
-            }
-            .padding()
-            .background(Color.white)
-            .foregroundColor(.black)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.gray.opacity(0.4), lineWidth: 1)
+        ZStack(alignment: .bottom) {
+            LinearGradient(
+                colors: [
+                    Color.white,
+                    Color(red: 0.99, green: 0.98, blue: 0.99),
+                    Color(red: 1.0, green: 0.95, blue: 0.96)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
             )
-            .accessibilityLabel("Sign in with Google")
-            
-            if !errorMessage.isEmpty {
-                Text(errorMessage)
-                    .foregroundColor(.red)
-                    .font(.caption)
+            .ignoresSafeArea()
+
+            RiderLoginCitySilhouette()
+                .frame(height: 190)
+                .opacity(0.22)
+                .ignoresSafeArea(edges: .bottom)
+                .accessibilityHidden(true)
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 24) {
+                    header
+
+                    VStack(spacing: 18) {
+                        if isUsingEmail {
+                            emailLoginSection
+                        } else {
+                            phoneLoginSection
+                        }
+
+                        if !errorMessage.isEmpty {
+                            Text(errorMessage)
+                                .font(.footnote.weight(.semibold))
+                                .foregroundColor(.red)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 8)
+                                .accessibilityLabel(errorMessage)
+                        }
+
+                        divider
+                        socialLoginSection
+                    }
+                    .padding(.top, 4)
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 54)
+                .padding(.bottom, 42)
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
             }
-            
-            Spacer()
         }
-        .padding()
         .hideKeyboardOnTap()
         .alert(isPresented: $showPasswordResetAlert) {
             Alert(
@@ -238,6 +124,241 @@ struct LoginView: View {
                     sendCode()
                 }
             )
+        }
+    }
+
+    private var header: some View {
+        VStack(spacing: 12) {
+            Image("RydrLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 92, height: 92)
+                .opacity(showLogo ? 1 : 0)
+                .scaleEffect(showLogo ? 1 : 0.94)
+                .animation(.easeOut(duration: 0.7), value: showLogo)
+                .onAppear { showLogo = true }
+                .accessibilityLabel("Rydr logo")
+
+            VStack(spacing: 6) {
+                HStack(spacing: 6) {
+                    Text("Hello")
+                        .foregroundColor(Color(red: 0.05, green: 0.09, blue: 0.16))
+                    Text("There!")
+                        .foregroundStyle(Styles.rydrGradient)
+                }
+                .font(.system(size: 39, weight: .heavy, design: .rounded))
+                .minimumScaleFactor(0.82)
+
+                Text("Let's get you started.")
+                    .font(.title3.weight(.semibold))
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private var phoneLoginSection: some View {
+        VStack(spacing: 18) {
+            HStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Text("🇺🇸")
+                        .font(.title3)
+                    Text("+1")
+                        .font(.headline.weight(.bold))
+                        .foregroundColor(Color(red: 0.06, green: 0.09, blue: 0.14))
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundColor(.secondary)
+                }
+                .frame(width: 138)
+                .frame(maxHeight: .infinity)
+                .background(Color(.systemGray6).opacity(0.75))
+
+                TextField("Phone number", text: Binding(
+                    get: { phoneNumber },
+                    set: { phoneNumber = String($0.filter { $0.isNumber }.prefix(10)) }
+                ))
+                .keyboardType(.numberPad)
+                .textContentType(.telephoneNumber)
+                .font(.title3.weight(.semibold))
+                .padding(.horizontal, 20)
+                .accessibilityLabel("US phone number field")
+            }
+            .frame(height: 66)
+            .background(Color.white.opacity(0.95))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.black.opacity(0.09), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.04), radius: 12, x: 0, y: 8)
+
+            Text("US numbers only. Enter your 10-digit number.")
+                .font(.footnote.weight(.medium))
+                .foregroundColor(.secondary)
+
+            Button {
+                sendCode()
+            } label: {
+                Label("Send Code", systemImage: "message")
+                    .font(.headline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 64)
+            }
+            .background(Styles.rydrGradient.opacity(canSendPhoneCode ? 1 : 0.45))
+            .foregroundColor(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color.red.opacity(canSendPhoneCode ? 0.24 : 0.05), radius: 18, x: 0, y: 12)
+            .disabled(!canSendPhoneCode)
+            .accessibilityLabel("Send verification code")
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { isUsingEmail = true }
+            } label: {
+                Text("Use email and password instead")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Styles.rydrGradient)
+            }
+            .accessibilityLabel("Switch to email and password login")
+
+            phoneRepairSection
+        }
+    }
+
+    @ViewBuilder
+    private var phoneRepairSection: some View {
+        if let repair = pendingPhoneLoginRepair {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Confirm your password for \(repair.profile.email) to enable phone login on this account.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+
+                SecureField("Password", text: $phoneRepairPassword)
+                    .font(.body.weight(.medium))
+                    .padding(.horizontal, 16)
+                    .frame(height: 54)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.black.opacity(0.09), lineWidth: 1)
+                    )
+                    .accessibilityLabel("Password for phone login link")
+
+                Button(isRepairingPhoneLogin ? "Linking..." : "Link Phone and Log In") {
+                    repairPhoneLogin()
+                }
+                .font(.headline.weight(.bold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 54)
+                .background(phoneRepairPassword.isEmpty || isRepairingPhoneLogin ? Color.gray.opacity(0.45) : Color.black)
+                .foregroundColor(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .disabled(phoneRepairPassword.isEmpty || isRepairingPhoneLogin)
+            }
+            .padding(16)
+            .background(.white.opacity(0.82))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            )
+        }
+    }
+
+    private var emailLoginSection: some View {
+        VStack(spacing: 14) {
+            LoginInputField(title: "Email", text: $email, systemImage: "envelope", isSecure: false, keyboard: .emailAddress)
+                .textInputAutocapitalization(.never)
+
+            LoginInputField(title: "Password", text: $password, systemImage: "lock", isSecure: true, keyboard: .default)
+
+            Button {
+                loginWithEmail()
+            } label: {
+                Label("Log In with Email", systemImage: "arrow.right.circle")
+                    .font(.headline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 62)
+            }
+            .disabled(!canSubmitEmail)
+            .background(Styles.rydrGradient.opacity(canSubmitEmail ? 1 : 0.45))
+            .foregroundColor(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color.red.opacity(canSubmitEmail ? 0.2 : 0.05), radius: 18, x: 0, y: 12)
+            .accessibilityLabel("Login with email")
+
+            HStack {
+                Button("Forgot Password?") {
+                    sendPasswordReset()
+                }
+                .font(.footnote.weight(.bold))
+                .foregroundColor(.secondary)
+                .accessibilityLabel("Reset password via email")
+
+                Spacer()
+
+                Button("Use phone number") {
+                    withAnimation(.easeInOut(duration: 0.22)) { isUsingEmail = false }
+                }
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(Styles.rydrGradient)
+                .accessibilityLabel("Switch to phone login")
+            }
+        }
+    }
+
+    private var divider: some View {
+        HStack(spacing: 14) {
+            Rectangle()
+                .fill(Color.black.opacity(0.08))
+                .frame(height: 1)
+            Text("OR")
+                .font(.footnote.weight(.bold))
+                .foregroundColor(.secondary)
+            Rectangle()
+                .fill(Color.black.opacity(0.08))
+                .frame(height: 1)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var socialLoginSection: some View {
+        VStack(spacing: 14) {
+            Button(action: {
+                // TODO: Handle Apple Sign-In
+            }) {
+                Label("Sign in with Apple", systemImage: "apple.logo")
+                    .font(.headline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 62)
+            }
+            .background(Color(red: 0.05, green: 0.06, blue: 0.08))
+            .foregroundColor(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: Color.black.opacity(0.18), radius: 14, x: 0, y: 8)
+            .accessibilityLabel("Sign in with Apple")
+
+            Button(action: {
+                // TODO: Handle Google Sign-In
+            }) {
+                HStack(spacing: 12) {
+                    GoogleGlyph()
+                        .frame(width: 24, height: 24)
+                    Text("Sign in with Google")
+                        .font(.headline.weight(.bold))
+                }
+                .foregroundColor(Color(red: 0.16, green: 0.17, blue: 0.22))
+                .frame(maxWidth: .infinity)
+                .frame(height: 62)
+            }
+            .background(Color.white.opacity(0.95))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.05), radius: 12, x: 0, y: 8)
+            .accessibilityLabel("Sign in with Google")
         }
     }
     
@@ -302,6 +423,35 @@ struct LoginView: View {
                     verificationID: verificationID,
                     phoneNumber: formattedNumber
                 )
+            }
+        }
+    }
+
+    private func loginWithEmail() {
+        guard !email.isEmpty, !password.isEmpty else {
+            errorMessage = "Please enter both email and password."
+            return
+        }
+
+        guard isValidEmail(email) else {
+            errorMessage = "Please enter a valid email address."
+            return
+        }
+
+        errorMessage = ""
+        Auth.auth().signIn(withEmail: email, password: password) { result, error in
+            Task { @MainActor in
+                if let error {
+                    errorMessage = "Login failed: \(error.localizedDescription)"
+                    return
+                }
+
+                guard let user = result?.user else {
+                    errorMessage = "Login failed. Please try again."
+                    return
+                }
+
+                completeEmailLogin(for: user, fallbackEmail: email)
             }
         }
     }
@@ -447,5 +597,122 @@ struct LoginView: View {
                 }
             }
         }
+    }
+}
+
+private struct LoginInputField: View {
+    let title: String
+    @Binding var text: String
+    let systemImage: String
+    let isSecure: Bool
+    let keyboard: UIKeyboardType
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(Styles.rydrGradient)
+                .frame(width: 24)
+
+            Group {
+                if isSecure {
+                    SecureField(title, text: $text)
+                        .textContentType(.password)
+                } else {
+                    TextField(title, text: $text)
+                        .textContentType(.emailAddress)
+                }
+            }
+            .keyboardType(keyboard)
+            .font(.body.weight(.semibold))
+            .foregroundColor(Color(red: 0.06, green: 0.09, blue: 0.14))
+        }
+        .padding(.horizontal, 18)
+        .frame(height: 62)
+        .background(Color.white.opacity(0.96))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.04), radius: 12, x: 0, y: 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+    }
+}
+
+private struct GoogleGlyph: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.white)
+
+            Text("G")
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.26, green: 0.52, blue: 0.96),
+                            Color(red: 0.92, green: 0.26, blue: 0.21),
+                            Color(red: 0.98, green: 0.74, blue: 0.18),
+                            Color(red: 0.20, green: 0.66, blue: 0.32)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct RiderLoginCitySilhouette: View {
+    private let buildingHeights: [CGFloat] = [
+        0.42, 0.64, 0.50, 0.78, 0.56, 0.70, 0.48, 0.86,
+        0.60, 0.45, 0.76, 0.54, 0.68, 0.49, 0.82, 0.58
+    ]
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let maxHeight = proxy.size.height
+            let buildingWidth = max(18, width / CGFloat(buildingHeights.count + 4))
+
+            ZStack(alignment: .bottom) {
+                Capsule()
+                    .fill(Styles.rydrGradient)
+                    .frame(width: width * 1.18, height: maxHeight * 0.34)
+                    .blur(radius: 18)
+                    .offset(y: maxHeight * 0.22)
+                    .opacity(0.42)
+
+                HStack(alignment: .bottom, spacing: 5) {
+                    ForEach(buildingHeights.indices, id: \.self) { index in
+                        VStack(spacing: 4) {
+                            if index % 4 == 1 {
+                                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                    .fill(Color.white.opacity(0.42))
+                                    .frame(width: buildingWidth * 0.48, height: 5)
+                            }
+
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(Styles.rydrGradient)
+                                .frame(
+                                    width: buildingWidth,
+                                    height: maxHeight * buildingHeights[index]
+                                )
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 14)
+
+                Rectangle()
+                    .fill(Styles.rydrGradient)
+                    .frame(height: maxHeight * 0.18)
+                    .blur(radius: 1)
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
