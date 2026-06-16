@@ -76,8 +76,12 @@ struct BookingView: View {
         if let routeEstimate { return routeEstimate }
         return fallbackEstimate
     }
+    private var hasRequiredAddressText: Bool {
+        !pickupText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        && !dropoffText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
     private var canRequestRide: Bool {
-        pickupCoordinate != nil && dropoffCoordinate != nil && !isResolvingLocations
+        hasRequiredAddressText && !isResolvingLocations
     }
     private var hasBookingDraft: Bool {
         pickupCoordinate != nil
@@ -276,41 +280,46 @@ struct BookingView: View {
                     routeDetailsCard
 
                     // ── Library (Work / Home / Add) ────────────────────────────────
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Shortcuts").font(.headline)
-                        HStack(spacing: 14) {
-                            ForEach(shortcuts) { sc in
-                                VStack(spacing: 6) {
-                                    Button {
-                                        if sc.address.isEmpty {
-                                            editingShortcutID = sc.id
-                                            newShortcutAddress = ""
-                                            shortcutFocused = true
-                                        } else {
-                                            if pickupText.isEmpty { pickupText = sc.address } else { dropoffText = sc.address }
-                                            clearRouteResolution()
-                                            focusedField = nil
-                                        }
-                                    } label: {
-                                        ZStack {
-                                            Circle().fill(sc.tint.opacity(0.18)).frame(width: 58, height: 58)
-                                            Image(systemName: sc.icon)
-                                                .font(.title2.weight(.semibold))
-                                                .foregroundStyle(sc.tint)
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                    .simultaneousGesture(
-                                        LongPressGesture(minimumDuration: 0.4).onEnded { _ in
-                                            editingShortcutID = sc.id
-                                            newShortcutAddress = sc.address
-                                            shortcutFocused = true
-                                            shortcutCompleter.setQuery(newShortcutAddress)
-                                        }
-                                    )
-
-                                    Text(sc.label).font(.subheadline).foregroundColor(.primary.opacity(0.95))
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Shortcuts")
+                                .font(.headline.weight(.bold))
+                            Spacer()
+                            Button("Manage") {
+                                if let custom = shortcuts.first(where: { $0.kind == .custom }) {
+                                    editingShortcutID = custom.id
+                                    newShortcutAddress = custom.address
+                                    shortcutFocused = true
                                 }
+                            }
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Styles.rydrGradient)
+                        }
+
+                        HStack(spacing: 12) {
+                            ForEach(shortcuts) { sc in
+                                Button {
+                                    if sc.address.isEmpty {
+                                        editingShortcutID = sc.id
+                                        newShortcutAddress = ""
+                                        shortcutFocused = true
+                                    } else {
+                                        if pickupText.isEmpty { pickupText = sc.address } else { dropoffText = sc.address }
+                                        clearRouteResolution()
+                                        focusedField = nil
+                                    }
+                                } label: {
+                                    ShortcutTile(shortcut: sc)
+                                }
+                                .buttonStyle(.plain)
+                                .simultaneousGesture(
+                                    LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+                                        editingShortcutID = sc.id
+                                        newShortcutAddress = sc.address
+                                        shortcutFocused = true
+                                        shortcutCompleter.setQuery(newShortcutAddress)
+                                    }
+                                )
                             }
                         }
 
@@ -320,16 +329,21 @@ struct BookingView: View {
                             }
                         }
                     }
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
+                    .bookingPanelCard()
 
                     // ── Recents ────────────────────────────────────────────────────
                     if !recentDropoffs.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack { Text("Recents").font(.headline); Spacer() }
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Recents")
+                                    .font(.headline.weight(.bold))
+                                Spacer()
+                                Text("See all")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(Styles.rydrGradient)
+                            }
                             VStack(spacing: 8) {
-                                ForEach(recentDropoffs.prefix(5), id: \.self) { addr in
+                                ForEach(recentDropoffs.prefix(2), id: \.self) { addr in
                                     Button {
                                         handleRecentSelection(addr)
                                     } label: {
@@ -338,9 +352,7 @@ struct BookingView: View {
                                 }
                             }
                         }
-                        .padding(12)
-                        .background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
-                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
+                        .bookingPanelCard()
                     }
 
                     // ── Promo + Request button ─────────────────────────────────────
@@ -351,9 +363,10 @@ struct BookingView: View {
             .padding(.horizontal)
             .padding(.bottom, 8)
         }
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 22))
-        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.black.opacity(0.06), lineWidth: 1))
+        .background(Color(.systemBackground).opacity(0.94))
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(Color.white.opacity(0.72), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.12), radius: 24, y: 10)
         .frame(maxHeight: .infinity, alignment: .bottom)
         .scrollDismissesKeyboard(.immediately)
         .onChange(of: focusedField) { _, newValue in
@@ -451,6 +464,45 @@ struct BookingView: View {
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 16).fill(.white.opacity(0.92)))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
+        } else if hasRequiredAddressText {
+            Button {
+                Task { await openRoutePreview() }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: isResolvingLocations ? "hourglass" : "point.topleft.down.curvedto.point.bottomright.up")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Styles.rydrGradient)
+                        .frame(width: 54, height: 54)
+                        .background(Styles.rydrGradient.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Route Preview")
+                            .font(.headline.weight(.bold))
+                            .foregroundColor(.primary)
+                        Text(isResolvingLocations ? "Calculating route..." : "Tap to calculate route")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(routeViaText)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    if isResolvingLocations {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "chevron.right")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(Styles.rydrGradient)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 16).fill(.white.opacity(0.92)))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
+            .disabled(isResolvingLocations)
         } else if let routeErrorMessage {
             validationBanner(text: routeErrorMessage)
         }
@@ -461,6 +513,21 @@ struct BookingView: View {
             return "Includes 1 stop"
         }
         return "Tap to preview route"
+    }
+
+    private var bookingRideIcon: String {
+        switch rideType.lowercased() {
+        case let value where value.contains("eco"):
+            return "leaf.fill"
+        case let value where value.contains("xl"):
+            return "car.2.fill"
+        case let value where value.contains("executive"):
+            return "briefcase.fill"
+        case let value where value.contains("prestine"):
+            return "sparkles"
+        default:
+            return "car.fill"
+        }
     }
 
     @ViewBuilder
@@ -692,8 +759,7 @@ struct BookingView: View {
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 16).fill(.ultraThinMaterial))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
+        .bookingPanelCard()
     }
 
     // MARK: - Reusable field (icon optionally tappable)
@@ -716,7 +782,7 @@ struct BookingView: View {
                 .textContentType(.fullStreetAddress)
         }
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: 14).fill(.thinMaterial))
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemGroupedBackground).opacity(0.72)))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.black.opacity(0.06), lineWidth: 1))
     }
 
@@ -752,7 +818,7 @@ struct BookingView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(maxHeight: 240)
-            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground)))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06), lineWidth: 1))
         } else {
             HStack(spacing: 8) {
@@ -764,7 +830,7 @@ struct BookingView: View {
                 Spacer()
             }
             .padding(10)
-            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground)))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06), lineWidth: 1))
         }
     }
@@ -805,12 +871,18 @@ struct BookingView: View {
                 withAnimation(.spring()) { showPromo.toggle() }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "plus.circle")
+                    Image(systemName: "ticket")
+                        .font(.subheadline.weight(.bold))
                     Text("Add promo code")
                     Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.black))
                 }
-                .font(.subheadline)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Styles.rydrGradient)
+                .padding(.vertical, 4)
             }
+            .buttonStyle(.plain)
 
             if showPromo {
                 VStack(alignment: .leading, spacing: 8) {
@@ -819,7 +891,7 @@ struct BookingView: View {
                             .textInputAutocapitalization(.never)
                             .disableAutocorrection(true)
                             .padding(12)
-                            .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemGroupedBackground)))
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06), lineWidth: 1))
                             .disabled(isApplyingPromo || isPromoApplied)
 
@@ -888,16 +960,24 @@ struct BookingView: View {
             Button {
                 Task { await requestRide() }
             } label: {
-                if isResolvingLocations {
-                    ProgressView()
-                        .tint(.white)
-                        .frame(maxWidth: .infinity)
-                } else {
-                    Text("Request \(rideType)")
-                        .frame(maxWidth: .infinity)
+                HStack {
+                    Image(systemName: bookingRideIcon)
+                        .font(.title3.weight(.semibold))
+                    Spacer()
+                    if isResolvingLocations {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Text("Request \(rideType)")
+                            .font(.headline.weight(.bold))
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.headline.weight(.bold))
                 }
+                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(GradientButtonStyle())
+            .buttonStyle(BookingGradientButtonStyle())
             .disabled(!canRequestRide)
             .opacity(canRequestRide ? 1 : 0.45)
 
@@ -905,7 +985,6 @@ struct BookingView: View {
                 validationBanner(text: message)
             }
         }
-        .padding(.horizontal)
         .padding(.bottom, 8)
     }
 
@@ -1028,6 +1107,25 @@ struct BookingView: View {
     }
 
     // MARK: - Actions
+    @MainActor
+    private func openRoutePreview() async {
+        let pickup = pickupText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dropoff = dropoffText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !pickup.isEmpty, !dropoff.isEmpty else {
+            requestValidationMessage = "Add a pickup and drop-off to preview the route."
+            return
+        }
+
+        requestValidationMessage = nil
+        guard await resolveBookingLocationsIfNeeded(pickup: pickup, dropoff: dropoff) else {
+            requestValidationMessage = "Choose a valid pickup and drop-off from the map results."
+            return
+        }
+
+        showRoutePreview = true
+    }
+
     @MainActor
     private func requestRide() async {
         let pickup = pickupText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1336,6 +1434,82 @@ struct BookingView: View {
     }
 }
 
+private struct ShortcutTile: View {
+    let shortcut: BookingView.Shortcut
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(tileBackground)
+                    .frame(height: 84)
+
+                VStack(spacing: 7) {
+                    Image(systemName: shortcut.icon)
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(shortcut.tint)
+                    Text(shortcut.label)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
+
+                if shortcut.kind == .custom {
+                    Circle()
+                        .stroke(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                        .foregroundStyle(Color.purple.opacity(0.35))
+                        .frame(width: 46, height: 46)
+                        .offset(y: -9)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var tileBackground: LinearGradient {
+        switch shortcut.kind {
+        case .work:
+            return LinearGradient(colors: [Color.blue.opacity(0.18), Color.blue.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case .home:
+            return LinearGradient(colors: [Color.teal.opacity(0.18), Color.green.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case .custom:
+            return LinearGradient(colors: [Color.purple.opacity(0.16), Color.purple.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+    }
+}
+
+private struct BookingGradientButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(.white)
+            .padding(.horizontal, 18)
+            .frame(height: 60)
+            .background(Styles.rydrGradient, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .shadow(color: Color.red.opacity(configuration.isPressed ? 0.12 : 0.24), radius: 16, x: 0, y: 9)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+    }
+}
+
+private extension View {
+    func bookingPanelCard() -> some View {
+        self
+            .padding(12)
+            .background(Color(.systemBackground).opacity(0.96), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.04), radius: 12, y: 6)
+    }
+}
+
+private extension MKPolyline {
+    var rydrCoordinates: [CLLocationCoordinate2D] {
+        var coordinates = Array(repeating: kCLLocationCoordinate2DInvalid, count: pointCount)
+        getCoordinates(&coordinates, range: NSRange(location: 0, length: pointCount))
+        return coordinates
+    }
+}
+
 private struct RoutePreviewSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -1369,11 +1543,11 @@ private struct RoutePreviewSheet: View {
             VStack(spacing: 0) {
                 topControls
                     .padding(.horizontal, 18)
-                    .padding(.top, 18)
+                    .padding(.top, 58)
                 Spacer()
                 previewPanel
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 20)
             }
         }
         .ignoresSafeArea()
@@ -1497,12 +1671,12 @@ private struct RoutePreviewSheet: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 16)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .stroke(Color.white.opacity(0.55), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.72), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.16), radius: 24, x: 0, y: 10)
+        .shadow(color: .black.opacity(0.14), radius: 22, x: 0, y: 10)
     }
 
     private var bestRouteCard: some View {
@@ -1612,7 +1786,9 @@ private struct RoutePreviewSheet: View {
     }
 
     private func fitRoute() {
-        let coords = [pickupCoordinate, dropoffCoordinate].compactMap { $0 }
+        let routeCoords = routePolyline?.rydrCoordinates ?? []
+        let endpointCoords = [pickupCoordinate, dropoffCoordinate].compactMap { $0 }
+        let coords = routeCoords.isEmpty ? endpointCoords : routeCoords + endpointCoords
         guard !coords.isEmpty else {
             position = .region(RydrMapDefaults.atlantaRegion)
             return
@@ -1629,8 +1805,8 @@ private struct RoutePreviewSheet: View {
         let region = MKCoordinateRegion(
             center: center,
             span: MKCoordinateSpan(
-                latitudeDelta: max(0.06, (maxLat - minLat) * 1.95),
-                longitudeDelta: max(0.06, (maxLon - minLon) * 1.95)
+                latitudeDelta: max(0.045, (maxLat - minLat) * 2.35),
+                longitudeDelta: max(0.045, (maxLon - minLon) * 2.35)
             )
         )
 

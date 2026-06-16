@@ -16,22 +16,37 @@ struct LocationManagerView: View {
         center: CLLocationCoordinate2D(latitude: 33.7490, longitude: -84.3880),
         span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
     )
+    @State private var position: MapCameraPosition = .region(RydrMapDefaults.atlantaRegion)
 
     var body: some View {
         VStack(spacing: 16) {
-            Map(initialPosition: .region(region)) {
+            Map(position: $position) {
                 UserAnnotation() // Shows current user location
+            }
+            .mapStyle(.standard(elevation: .realistic, pointsOfInterest: .excludingAll))
+            .overlay(alignment: .topLeading) {
+                Label("Rydr Map", systemImage: "location.north.line.fill")
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(Styles.rydrGradient)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(10)
             }
             .frame(height: 300)
             .clipShape(RoundedRectangle(cornerRadius: 12))
                 // use a Publisher instead of onChange(of:) so we don’t need Equatable
                 .onReceive(locationManager.$lastLocation.compactMap { $0 }) { loc in
                     region.center = loc.coordinate
+                    position = .region(region)
                 }
                 .onAppear { locationManager.requestIfNeeded() }
 
             HStack(spacing: 12) {
-                Button("Recenter") { locationManager.recenter(&region) }
+                Button("Recenter") {
+                    locationManager.recenter(&region)
+                    position = .region(region)
+                }
                 Spacer()
                 Text(labelFor(locationManager.authorization))
                     .font(.footnote)
@@ -53,6 +68,5 @@ struct LocationManagerView: View {
         }
     }
 }
-
 
 

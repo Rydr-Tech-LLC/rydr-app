@@ -190,6 +190,9 @@ private struct RydrReceiptRouteMap: View {
     var body: some View {
         Map(initialPosition: .region(fitRegion)) {
             MapPolyline(coordinates: [pickup, dropoff])
+                .stroke(Color.black.opacity(0.14), style: StrokeStyle(lineWidth: 10, lineCap: .round, lineJoin: .round))
+
+            MapPolyline(coordinates: [pickup, dropoff])
                 .stroke(Styles.rydrGradient, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
 
             Annotation("Pickup", coordinate: pickup, anchor: .bottom) {

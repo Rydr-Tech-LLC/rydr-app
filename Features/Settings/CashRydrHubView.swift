@@ -847,6 +847,7 @@ struct CashRydrHubView: View {
     @State private var riderPanel: CashHubRiderPanel?
     @State private var viewingFavoriteDriver: CashHubFavoriteDriver?
     @State private var driverPendingBlock: CashHubFavoriteDriver?
+    @State private var requestPendingDeletion: CashRydrRequest?
     @State private var selectedHomeTab: CashHubHomeTab = .feed
 
     private var currentUID: String { Auth.auth().currentUser?.uid ?? "" }
@@ -1024,6 +1025,28 @@ struct CashRydrHubView: View {
         } message: {
             Text("This driver will be removed from your favorites and added to your blocked drivers.")
         }
+        .confirmationDialog(
+            "Delete this request?",
+            isPresented: Binding(
+                get: { requestPendingDeletion != nil },
+                set: { if !$0 { requestPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete Request", role: .destructive) {
+                if let requestPendingDeletion {
+                    vm.removeRequest(requestPendingDeletion)
+                }
+                requestPendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) { requestPendingDeletion = nil }
+        } message: {
+            if requestPendingDeletion?.isConnected == true {
+                Text("This cancels the connected Cash Hub request and removes it from My Posts.")
+            } else {
+                Text("This cancels and removes your Cash Hub request from My Posts.")
+            }
+        }
         .alert("Cash Rydr Hub", isPresented: Binding(
             get: { vm.errorMessage != nil || vm.confirmationMessage != nil },
             set: {
@@ -1091,7 +1114,8 @@ struct CashRydrHubView: View {
                                     onEdit: { editingRequest = request },
                                     onOffers: { riderPanel = .offers },
                                     onMessage: { messagingContext = CashHubMessageContext(request: request, mode: request.isConnected ? .directConnection : .requestThread) },
-                                    onConnection: { viewingConnection = request }
+                                    onConnection: { viewingConnection = request },
+                                    onDelete: { requestPendingDeletion = request }
                                 )
                             }
                         }
@@ -1442,6 +1466,7 @@ private struct CashHubPostManagementCard: View {
     let onOffers: () -> Void
     let onMessage: () -> Void
     let onConnection: () -> Void
+    let onDelete: () -> Void
 
     private var messageCount: Int {
         responses.filter { !$0.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
@@ -1485,6 +1510,11 @@ private struct CashHubPostManagementCard: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(request.isConnected ? .green : .red)
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash.fill")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Delete request")
             }
             .font(.caption.weight(.bold))
         }

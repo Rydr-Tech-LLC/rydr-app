@@ -14,7 +14,10 @@ struct RydrRideProgressMapView: View {
         Map(position: $position, interactionModes: [.pan, .zoom, .pitch, .rotate]) {
             if !routeCoordinates.isEmpty {
                 MapPolyline(coordinates: routeCoordinates)
-                    .stroke(Styles.rydrGradient, lineWidth: 6)
+                    .stroke(Color.black.opacity(0.14), style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
+
+                MapPolyline(coordinates: routeCoordinates)
+                    .stroke(Styles.rydrGradient, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             }
 
             Annotation("", coordinate: driverCoordinate, anchor: .center) {
@@ -36,6 +39,16 @@ struct RydrRideProgressMapView: View {
         .mapControls {
             MapCompass()
             MapScaleView()
+        }
+        .mapStyle(.standard(elevation: .realistic, pointsOfInterest: .excludingAll))
+        .overlay(alignment: .topLeading) {
+            Label("Rydr Map", systemImage: "location.north.line.fill")
+                .font(.caption2.weight(.black))
+                .foregroundStyle(Styles.rydrGradient)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(12)
         }
     }
 }

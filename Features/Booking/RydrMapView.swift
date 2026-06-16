@@ -27,7 +27,10 @@ struct RydrMapView: View {
 
             if let routePolyline {
                 MapPolyline(routePolyline)
-                    .stroke(Styles.rydrGradient, lineWidth: 6)
+                    .stroke(Color.black.opacity(0.14), style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
+
+                MapPolyline(routePolyline)
+                    .stroke(Styles.rydrGradient, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             }
 
             if let pickupCoordinate {
@@ -46,7 +49,18 @@ struct RydrMapView: View {
             MapCompass()
             MapScaleView()
         }
+        .mapStyle(.standard(elevation: .realistic, pointsOfInterest: .excludingAll))
         .ignoresSafeArea()
+        .overlay(alignment: .topLeading) {
+            Label("Rydr Map", systemImage: "location.north.line.fill")
+                .font(.caption2.weight(.black))
+                .foregroundStyle(Styles.rydrGradient)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.leading, 18)
+                .padding(.top, 72)
+        }
         .overlay(alignment: .trailing) {
             recenterButton
                 .padding(.trailing, 18)

@@ -30,6 +30,10 @@ service cloud.firestore {
       );
     }
 
+    function cashHubRequestOwner(data) {
+      return signedIn() && data.riderUid == request.auth.uid;
+    }
+
     function isUnclaimedRideRequest(data) {
       return signedIn()
         && data.status in ["pending", "available"]
@@ -77,6 +81,14 @@ service cloud.firestore {
     match /riders/{uid} {
       allow read: if isSelf(uid) || isVerifiedPhoneProfile(resource.data);
       allow create, update: if isSelf(uid);
+
+      match /cashHubFavoriteDrivers/{driverUid} {
+        allow read, create, update, delete: if isSelf(uid);
+      }
+
+      match /cashHubBlockedDrivers/{driverUid} {
+        allow read, create, update, delete: if isSelf(uid);
+      }
     }
 
     match /users/{uid} {
@@ -129,10 +141,17 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if signedIn();
       allow update: if signedIn();
+      allow delete: if cashHubRequestOwner(resource.data);
 
       match /responses/{responseId} {
         allow read, create, update: if signedIn();
       }
+    }
+
+    match /cashHubDriverProfiles/{driverUid} {
+      allow read: if signedIn();
+      allow create, update: if isSelf(driverUid);
+      allow delete: if false;
     }
 
     match /accountDeletionRequests/{uid} {
