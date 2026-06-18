@@ -1,0 +1,25 @@
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# macOS
+.DS_Store
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+DerivedData/
+.build/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# Swift Package Manager
+.swiftpm/
+
+# Logs
+*.log
+npm-debug.log*
