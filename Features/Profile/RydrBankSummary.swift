@@ -293,16 +293,17 @@ struct RydrBankView: View {
                     .font(.system(size: 34, weight: .heavy, design: .rounded))
                     .foregroundColor(Color(red: 0.04, green: 0.05, blue: 0.08))
 
-                HStack(spacing: 4) {
-                    Text("Earn")
+                (
+                    Text("Earn ")
                         .foregroundStyle(.secondary)
-                    Text("free rides.")
+                    + Text("free rides. ")
                         .foregroundStyle(Styles.rydrGradient)
                         .fontWeight(.bold)
-                    Text("Unlock more possibilities.")
+                    + Text("Unlock more possibilities.")
                         .foregroundStyle(.secondary)
-                }
+                )
                 .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer()
@@ -725,82 +726,104 @@ struct RydrBankView: View {
     // MARK: - Rows
 
     private func activeCodeRow(_ code: RydrBankCode) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Styles.rydrGradient.opacity(0.10))
-                    .frame(width: 54, height: 54)
-                Image(systemName: "checkmark.seal")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(Styles.rydrGradient)
-            }
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text(code.code)
-                    .font(.headline.weight(.heavy))
-                    .foregroundColor(Color(red: 0.05, green: 0.08, blue: 0.14))
-                    .textSelection(.enabled)
-
-                Text(code.rewardLabel)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(Styles.rydrGradient)
-
-                HStack(spacing: 14) {
-                    Label("Ready to use", systemImage: "checkmark.circle")
-                    if code.transferCount == 0 && code.transferable {
-                        Label("Transferable once", systemImage: "doc.on.doc")
-                    }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Styles.rydrGradient.opacity(0.10))
+                        .frame(width: 54, height: 54)
+                    Image(systemName: "checkmark.seal")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(Styles.rydrGradient)
                 }
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            }
 
-            Spacer(minLength: 2)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(code.code)
+                        .font(.headline.weight(.heavy))
+                        .foregroundColor(Color(red: 0.05, green: 0.08, blue: 0.14))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .textSelection(.enabled)
 
-            Button {
-                UIPasteboard.general.string = code.code
-                copiedCode = code.code
-                showCopyAlert = true
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            } label: {
-                Image(systemName: "doc.on.doc")
-                    .font(.headline.weight(.bold))
-                    .foregroundColor(.secondary)
-                    .frame(width: 48, height: 48)
-                    .background(Color.red.opacity(0.08))
-                    .clipShape(Circle())
-            }
-            .accessibilityLabel("Copy \(code.code)")
+                    Text(code.rewardLabel)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Styles.rydrGradient)
+                        .lineLimit(1)
+                }
 
-            if code.transferCount == 0 && code.transferable {
+                Spacer(minLength: 2)
+
                 Button {
-                    codePendingTransfer = code
-                    transferTargetEmail = ""
-                    transferFriendName = ""
-                    transferFriendPhone = ""
-                    showTransferSheet = true
+                    UIPasteboard.general.string = code.code
+                    copiedCode = code.code
+                    showCopyAlert = true
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 } label: {
-                    VStack(spacing: 5) {
-                        Text("Transfer")
-                            .font(.caption.weight(.bold))
-                        Image(systemName: "arrow.right")
-                            .font(.caption.weight(.bold))
-                    }
-                    .foregroundColor(.white)
-                    .frame(width: 74)
-                    .frame(maxHeight: .infinity)
-                    .background(Styles.rydrGradient)
+                    Image(systemName: "doc.on.doc")
+                        .font(.headline.weight(.bold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 48, height: 48)
+                        .background(Color.red.opacity(0.08))
+                        .clipShape(Circle())
                 }
-                .accessibilityLabel("Transfer \(code.code)")
+                .accessibilityLabel("Copy \(code.code)")
+
+                if code.transferCount == 0 && code.transferable {
+                    Button {
+                        codePendingTransfer = code
+                        transferTargetEmail = ""
+                        transferFriendName = ""
+                        transferFriendPhone = ""
+                        showTransferSheet = true
+                    } label: {
+                        VStack(spacing: 5) {
+                            Text("Transfer")
+                                .font(.caption.weight(.bold))
+                            Image(systemName: "arrow.right")
+                                .font(.caption.weight(.bold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(width: 74)
+                        .frame(maxHeight: .infinity)
+                        .background(Styles.rydrGradient)
+                    }
+                    .accessibilityLabel("Transfer \(code.code)")
+                }
             }
+            .padding(14)
+            .padding(.trailing, 0)
+
+            HStack(spacing: 8) {
+                codeTag("Ready to use", icon: "checkmark.circle.fill")
+                if code.transferCount == 0 && code.transferable {
+                    codeTag("Transferable once", icon: "doc.on.doc")
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 14)
         }
-        .frame(minHeight: 104)
-        .padding(.leading, 14)
         .background(Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 6)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(code.code), \(label(for: code))")
+    }
+
+    private func codeTag(_ text: String, icon: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.caption2.weight(.semibold))
+            Text(text)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(Capsule())
     }
 
     @ViewBuilder

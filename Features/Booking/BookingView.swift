@@ -579,7 +579,8 @@ struct BookingView: View {
     }
 
     private func shortcutEditor(for shortcut: Shortcut) -> some View {
-        let titleText = shortcut.address.isEmpty ? "Add \(shortcut.label) address" : "Edit \(shortcut.label) address"
+        let shortcutNoun = shortcut.kind == .custom ? "custom" : shortcut.label
+        let titleText = shortcut.address.isEmpty ? "Add \(shortcutNoun) address" : "Edit \(shortcutNoun) address"
         let addressBinding = Binding<String>(
             get: { newShortcutAddress },
             set: { newValue in
@@ -1649,14 +1650,14 @@ private struct RoutePreviewSheet: View {
                 dismiss()
                 onAddStop()
             } label: {
-                HStack {
-                    Spacer()
-                    Text(stop.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add stop" : "Edit stop")
-                        .font(.subheadline.weight(.semibold))
+                HStack(spacing: 8) {
                     Spacer()
                     Image(systemName: "plus.circle")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(Styles.rydrGradient)
+                    Text(stop.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add stop" : "Edit stop")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
                 }
                 .foregroundStyle(.primary)
                 .frame(height: 50)

@@ -11,6 +11,7 @@ const communityRoutes = require("./routes/community");
 const chatRoutes = require("./routes/chat");
 const notificationRoutes = require("./routes/notifications");
 const driverRoutes = require("./routes/driver");
+const moderationRoutes = require("./routes/moderation");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -30,6 +31,7 @@ app.use("/community", communityRoutes);
 app.use("/chat", chatRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/driver", driverRoutes);
+app.use("/moderation", moderationRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

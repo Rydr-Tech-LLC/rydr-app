@@ -218,6 +218,13 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		8B7F67542FE391C30094C08D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		D9A571DB2DF9C6A900C04006 = {
 			isa = PBXGroup;
 			children = (
@@ -228,6 +235,7 @@
 				D9A571E62DF9C6A900C04006 /* RydrPlayground */,
 				D9A571F52DF9C6AB00C04006 /* RydrPlaygroundTests */,
 				D9A571FF2DF9C6AB00C04006 /* RydrPlaygroundUITests */,
+				8B7F67542FE391C30094C08D /* Frameworks */,
 				D9A571E52DF9C6A900C04006 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -508,6 +516,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_LDFLAGS = "-ObjC";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -564,6 +573,7 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
+				OTHER_LDFLAGS = "-ObjC";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
@@ -578,12 +588,17 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = JMYJTGCAYG;
+				DEVELOPMENT_TEAM = DTD5H7A5FS;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RydrPlayground/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Rydr uses your camera to take a profile photo and to capture your ID and selfie for identity verification during signup.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Rydr uses your location to find nearby drivers, set your pickup point, and show your trip progress on the map.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Rydr may save receipts or support images to your photo library when you choose to export them.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Rydr lets you select photos from your library for your profile picture and ID verification during signup.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -599,7 +614,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.5;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "Rydr-Tech-LLC.Rydr-Drivers";
+				PRODUCT_BUNDLE_IDENTIFIER = com.khris.rydr.RydrPlayground;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -621,12 +636,17 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = JMYJTGCAYG;
+				DEVELOPMENT_TEAM = DTD5H7A5FS;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RydrPlayground/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Rydr uses your camera to take a profile photo and to capture your ID and selfie for identity verification during signup.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Rydr uses your location to find nearby drivers, set your pickup point, and show your trip progress on the map.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Rydr may save receipts or support images to your photo library when you choose to export them.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Rydr lets you select photos from your library for your profile picture and ID verification during signup.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -642,7 +662,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.5;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "Rydr-Tech-LLC.Rydr-Drivers";
+				PRODUCT_BUNDLE_IDENTIFIER = com.khris.rydr.RydrPlayground;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;

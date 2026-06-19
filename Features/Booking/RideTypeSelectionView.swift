@@ -13,48 +13,42 @@ struct RideTypeSelectionView: View {
         .standard(
             title: "Rydr Go",
             badge: "Everyday",
-            subtitle: "Affordable everyday transportation.",
-            detail: "Compact, mid-size, and full-size sedans or mid-size SUVs in good condition.",
+            subtitle: "Standard Everyday Rides",
             icon: "car.fill",
             vehicle: .sedan
         ),
         .standard(
             title: "Rydr Eco",
             badge: "Eco-Friendly",
-            subtitle: "Electric and environmentally conscious transportation.",
-            detail: "Electric vehicles approved for Rydr Eco.",
+            subtitle: "Eco-Friendly EV Rides",
             icon: "leaf.fill",
             vehicle: .eco
         ),
         .standard(
             title: "Rydr XL",
             badge: "Spacious",
-            subtitle: "Groups, larger parties, and luggage.",
-            detail: "Large SUVs or qualifying high-capacity vehicles.",
+            subtitle: "Spacious SUV Rides",
             icon: "bus.fill",
             vehicle: .suv
         ),
         .prestine(
             title: "Rydr Prestine",
             badge: "Premium",
-            subtitle: "Premium transportation with elevated vehicle standards.",
-            detail: "Vehicles less than 7 years old with clean interior, clean exterior, and no visible damage.",
+            subtitle: "Luxury Rides",
             icon: "sparkles",
             vehicle: .prestine
         ),
         .executive(
             title: "Rydr Executive",
             badge: "Luxury",
-            subtitle: "Exclusive executive transportation experience.",
-            detail: "Luxury sedan or luxury SUV less than 5 years old with leather interior and premium appearance.",
+            subtitle: "Black Car Service Rides",
             icon: "briefcase.fill",
             vehicle: .executive
         ),
         .cashHub(
             title: "Cash Rydr Hub",
             badge: "Cash Rides",
-            subtitle: "Post or browse upcoming cash ride requests.",
-            detail: "A separate community marketplace, not standard Rydr dispatch.",
+            subtitle: "Cash Rides",
             icon: "banknote.fill",
             vehicle: .cash
         )
@@ -157,25 +151,24 @@ private struct RideTypeOption: Identifiable {
     let title: String
     let badge: String
     let subtitle: String
-    let detail: String
     let icon: String
     let vehicle: RideVehicleStyle
     let kind: Kind
 
-    static func standard(title: String, badge: String, subtitle: String, detail: String, icon: String, vehicle: RideVehicleStyle) -> RideTypeOption {
-        RideTypeOption(title: title, badge: badge, subtitle: subtitle, detail: detail, icon: icon, vehicle: vehicle, kind: .standard)
+    static func standard(title: String, badge: String, subtitle: String, icon: String, vehicle: RideVehicleStyle) -> RideTypeOption {
+        RideTypeOption(title: title, badge: badge, subtitle: subtitle, icon: icon, vehicle: vehicle, kind: .standard)
     }
 
-    static func prestine(title: String, badge: String, subtitle: String, detail: String, icon: String, vehicle: RideVehicleStyle) -> RideTypeOption {
-        RideTypeOption(title: title, badge: badge, subtitle: subtitle, detail: detail, icon: icon, vehicle: vehicle, kind: .prestine)
+    static func prestine(title: String, badge: String, subtitle: String, icon: String, vehicle: RideVehicleStyle) -> RideTypeOption {
+        RideTypeOption(title: title, badge: badge, subtitle: subtitle, icon: icon, vehicle: vehicle, kind: .prestine)
     }
 
-    static func executive(title: String, badge: String, subtitle: String, detail: String, icon: String, vehicle: RideVehicleStyle) -> RideTypeOption {
-        RideTypeOption(title: title, badge: badge, subtitle: subtitle, detail: detail, icon: icon, vehicle: vehicle, kind: .executive)
+    static func executive(title: String, badge: String, subtitle: String, icon: String, vehicle: RideVehicleStyle) -> RideTypeOption {
+        RideTypeOption(title: title, badge: badge, subtitle: subtitle, icon: icon, vehicle: vehicle, kind: .executive)
     }
 
-    static func cashHub(title: String, badge: String, subtitle: String, detail: String, icon: String, vehicle: RideVehicleStyle) -> RideTypeOption {
-        RideTypeOption(title: title, badge: badge, subtitle: subtitle, detail: detail, icon: icon, vehicle: vehicle, kind: .cashHub)
+    static func cashHub(title: String, badge: String, subtitle: String, icon: String, vehicle: RideVehicleStyle) -> RideTypeOption {
+        RideTypeOption(title: title, badge: badge, subtitle: subtitle, icon: icon, vehicle: vehicle, kind: .cashHub)
     }
 }
 
@@ -188,35 +181,27 @@ private struct RideOptionCard: View {
     var body: some View {
         HStack(spacing: 15) {
             RideVehicleArt(style: option.vehicle, kind: option.kind)
-                .frame(width: 96, height: 96)
+                .frame(width: 78, height: 78)
 
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(option.title)
-                        .font(.title3.weight(.heavy))
-                        .foregroundColor(isExecutive ? .white : Color(red: 0.05, green: 0.08, blue: 0.14))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-
-                    Text(option.badge)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(badgeForeground)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(badgeBackground)
-                        .clipShape(Capsule())
-                }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(option.title)
+                    .font(.title3.weight(.heavy))
+                    .foregroundColor(isExecutive ? .white : Color(red: 0.05, green: 0.08, blue: 0.14))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
 
                 Text(option.subtitle)
                     .font(.footnote.weight(.semibold))
                     .foregroundColor(isExecutive ? Color.white.opacity(0.86) : Color(red: 0.33, green: 0.35, blue: 0.43))
-                    .lineLimit(2)
+                    .lineLimit(1)
 
-                Text(option.detail)
-                    .font(.caption)
-                    .foregroundColor(isExecutive ? Color.white.opacity(0.68) : .secondary)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(option.badge)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(badgeForeground)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(badgeBackground)
+                    .clipShape(Capsule())
             }
 
             Spacer(minLength: 4)
@@ -228,7 +213,7 @@ private struct RideOptionCard: View {
                 .background(chevronBackground)
                 .clipShape(Circle())
         }
-        .padding(12)
+        .padding(14)
         .frame(maxWidth: .infinity)
         .background(cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))

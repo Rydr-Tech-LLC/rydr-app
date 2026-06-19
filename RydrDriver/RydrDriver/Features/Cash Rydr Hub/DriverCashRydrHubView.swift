@@ -242,6 +242,10 @@ private final class DriverCashRydrHubVM: ObservableObject {
             payload["cashRideStartedAt"] = FieldValue.serverTimestamp()
         case "completed":
             payload["cashCompletedAt"] = FieldValue.serverTimestamp()
+            // Rider-side history/activity filtering reads the top-level "status" field,
+            // not "driverQueueStatus" — both must flip to "completed" so the ride
+            // actually surfaces in the rider's Cash Hub Ride History.
+            payload["status"] = "completed"
         case "missed":
             payload["driverMarkedMissedAt"] = FieldValue.serverTimestamp()
         default:

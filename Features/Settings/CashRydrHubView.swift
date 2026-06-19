@@ -9,6 +9,7 @@ import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
 import MapKit
+import UIKit
 
 enum CashHubRole: String, CaseIterable, Identifiable {
     case rider
@@ -181,6 +182,58 @@ private enum CashHubHomeTab: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private enum CashHubActivityRange: String, CaseIterable, Identifiable {
+    case days30 = "30D"
+    case days90 = "90D"
+    case year1 = "1Y"
+
+    var id: String { rawValue }
+
+    var dayCount: Int {
+        switch self {
+        case .days30: return 30
+        case .days90: return 90
+        case .year1: return 365
+        }
+    }
+}
+
+private struct CashHubHomeTabSelector: View {
+    @Binding var selection: CashHubHomeTab
+    @Namespace private var indicatorNamespace
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(CashHubHomeTab.allCases) { tab in
+                Button {
+                    withAnimation(.snappy(duration: 0.25)) {
+                        selection = tab
+                    }
+                } label: {
+                    Text(tab.rawValue)
+                        .font(.subheadline.weight(.bold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .foregroundStyle(selection == tab ? Color.white : Color.secondary)
+                        .background {
+                            if selection == tab {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Styles.rydrGradient)
+                                    .matchedGeometryEffect(id: "selectedHomeTab", in: indicatorNamespace)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+        )
+    }
+}
+
 private enum CashHubMessageMode: String {
     case requestThread
     case directConnection
@@ -207,13 +260,34 @@ private struct CashHubMessageContext: Identifiable {
     var id: String { "\(request.id)-\(mode.rawValue)" }
 }
 
+private enum CashHubFeedCategory: String, CaseIterable, Identifiable {
+    case all = "All"
+    case posts = "Posts"
+    case offers = "Offers"
+    case messages = "Messages"
+    case favorites = "Favorites"
+    case trips = "Trips"
+
+    var id: String { rawValue }
+}
+
+private enum CashHubFeedAccessory {
+    case avatarInitial(String)
+    case badge(String, Color)
+    case none
+}
+
 private struct CashHubFeedEvent: Identifiable {
     let id: String
     let title: String
     let detail: String
+    let cta: String?
     let systemImage: String
     let date: Date
     let tint: Color
+    let category: CashHubFeedCategory
+    var accessory: CashHubFeedAccessory = .none
+    var timestampOverride: String? = nil
 }
 
 @MainActor
@@ -226,6 +300,7 @@ private final class CashRydrHubVM: ObservableObject {
     @Published var isSaving = false
     @Published var isCheckingTerms = true
     @Published var termsAccepted = false
+    @Published var onlineDriverCount = 0
 
     private let favoriteDriverLimit = 10
     private let db = Firestore.firestore()
@@ -305,6 +380,19 @@ private final class CashRydrHubVM: ObservableObject {
                         .sorted { $0.scheduledTime < $1.scheduledTime }
                     self.requests = mapped
                     self.syncResponseListeners(for: mapped)
+                }
+            }
+        refreshOnlineDriverCount()
+    }
+
+    func refreshOnlineDriverCount() {
+        db.collection("cashHubDriverProfiles")
+            .whereField("isOnline", isEqualTo: true)
+            .count
+            .getAggregation(source: .server) { [weak self] snapshot, error in
+                Task { @MainActor in
+                    guard let self, let snapshot, error == nil else { return }
+                    self.onlineDriverCount = Int(truncating: snapshot.count)
                 }
             }
     }
@@ -849,6 +937,13 @@ struct CashRydrHubView: View {
     @State private var driverPendingBlock: CashHubFavoriteDriver?
     @State private var requestPendingDeletion: CashRydrRequest?
     @State private var selectedHomeTab: CashHubHomeTab = .feed
+    @AppStorage("cashHubSafetyFooterDismissed") private var safetyFooterDismissed = false
+    private var showSafetyFooter: Bool {
+        get { !safetyFooterDismissed }
+        nonmutating set { safetyFooterDismissed = !newValue }
+    }
+    @State private var selectedFeedCategory: CashHubFeedCategory = .all
+    @State private var activityRange: CashHubActivityRange = .days30
 
     private var currentUID: String { Auth.auth().currentUser?.uid ?? "" }
     private var myRequests: [CashRydrRequest] { vm.requests.filter { $0.riderUid == currentUID } }
@@ -859,44 +954,101 @@ struct CashRydrHubView: View {
     private var cashHubFeedEvents: [CashHubFeedEvent] {
         var events: [CashHubFeedEvent] = []
 
+        for driver in vm.favoriteDrivers where driver.isOnline {
+            events.append(.init(
+                id: "online-\(driver.driverUid)",
+                title: "\(driver.name) is online",
+                detail: "Your favorite driver is online",
+                cta: "Tap to start a chat or send a request",
+                systemImage: "bolt.fill",
+                date: driver.addedAt ?? Date(),
+                tint: .green,
+                category: .favorites,
+                accessory: .avatarInitial(driver.name),
+                timestampOverride: "Online now"
+            ))
+        }
+
         for driver in vm.favoriteDrivers {
             events.append(.init(
                 id: "favorite-\(driver.driverUid)",
-                title: "You added \(driver.name) as a favorite driver.",
-                detail: driver.isOnline ? "Online now" : "Saved to your Cash Hub driver list",
-                systemImage: "star.fill",
+                title: "You added \(driver.name) as a favorite",
+                detail: "You can now easily find and request rides from \(driver.name).",
+                cta: nil,
+                systemImage: "heart.fill",
                 date: driver.addedAt ?? .distantPast,
-                tint: .yellow
+                tint: .pink,
+                category: .favorites,
+                accessory: .avatarInitial(driver.name)
             ))
         }
 
         for request in myRequests {
+            let offers = vm.offers(for: request)
+            for offer in offers where !request.isConnected {
+                events.append(.init(
+                    id: "offer-\(offer.id)",
+                    title: "You have a new offer!",
+                    detail: "\(offer.authorName) offered \(offer.offerAmount.map { $0.formatted(.currency(code: "USD")) } ?? "a price") for your ride",
+                    cta: "Tap to view offer details",
+                    systemImage: "bell.fill",
+                    date: offer.createdAt ?? request.createdAt ?? request.scheduledTime,
+                    tint: .purple,
+                    category: .offers,
+                    accessory: .badge(offer.offerAmount.map { $0.formatted(.currency(code: "USD")) } ?? "Offer", .purple)
+                ))
+            }
+
+            let messages = (vm.responsesByRequest[request.id] ?? [])
+                .filter { $0.authorUid != currentUID && !$0.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            for message in messages {
+                events.append(.init(
+                    id: "message-\(message.id)",
+                    title: "\(message.authorName) sent you a message",
+                    detail: "\u{201C}\(message.message)\u{201D}",
+                    cta: nil,
+                    systemImage: "bubble.left.and.bubble.right.fill",
+                    date: message.createdAt ?? request.createdAt ?? request.scheduledTime,
+                    tint: .orange,
+                    category: .messages,
+                    accessory: .avatarInitial(message.authorName)
+                ))
+            }
+
             if request.status == "completed" {
                 events.append(.init(
                     id: "completed-\(request.id)",
-                    title: "You completed a Cash Hub ride.",
-                    detail: cashHubTripSummary(for: request),
+                    title: "You completed a Cash Hub ride!",
+                    detail: "Great job! You completed your ride with \(request.connectedDriverName ?? "your driver").",
+                    cta: nil,
                     systemImage: "checkmark.seal.fill",
                     date: request.createdAt ?? request.scheduledTime,
-                    tint: .green
+                    tint: .green,
+                    category: .trips,
+                    accessory: .badge("Completed", .green)
                 ))
             } else if request.isConnected {
                 events.append(.init(
                     id: "connected-\(request.id)",
-                    title: "You connected with \(request.connectedDriverName ?? "a driver").",
+                    title: "You connected with \(request.connectedDriverName ?? "a driver")",
                     detail: cashHubTripSummary(for: request),
+                    cta: nil,
                     systemImage: "person.crop.circle.badge.checkmark",
                     date: request.createdAt ?? request.scheduledTime,
-                    tint: .green
+                    tint: .green,
+                    category: .trips,
+                    accessory: .badge("Connected", .green)
                 ))
             } else {
                 events.append(.init(
                     id: "post-\(request.id)",
-                    title: "You made a new Cash Hub post.",
+                    title: "You made a new ride request",
                     detail: cashHubTripSummary(for: request),
+                    cta: nil,
                     systemImage: "paperplane.fill",
                     date: request.createdAt ?? request.scheduledTime,
-                    tint: .red
+                    tint: .red,
+                    category: .posts
                 ))
             }
         }
@@ -904,20 +1056,24 @@ struct CashRydrHubView: View {
         if completedCashRideCount >= 10 {
             events.append(.init(
                 id: "milestone-10",
-                title: "You completed your 10th Cash Hub ride.",
+                title: "You completed your 10th Cash Hub ride",
                 detail: "Cash Hub milestone reached",
+                cta: nil,
                 systemImage: "10.circle.fill",
                 date: Date(),
-                tint: .red
+                tint: .red,
+                category: .trips
             ))
         } else if completedCashRideCount >= 1 {
             events.append(.init(
                 id: "milestone-1",
-                title: "You completed your first Cash Hub ride.",
+                title: "You completed your first Cash Hub ride",
                 detail: "Cash Hub milestone reached",
+                cta: nil,
                 systemImage: "1.circle.fill",
                 date: Date(),
-                tint: .red
+                tint: .red,
+                category: .trips
             ))
         }
 
@@ -1066,39 +1222,29 @@ struct CashRydrHubView: View {
         VStack(spacing: 0) {
             CashHubHeader()
 
-            Picker("Cash Rydr Hub", selection: $selectedHomeTab) {
-                ForEach(CashHubHomeTab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.top, 12)
+            CashHubHomeTabSelector(selection: $selectedHomeTab)
+                .padding(.horizontal)
+                .padding(.top, 12)
 
             ScrollView {
                 VStack(spacing: 18) {
                     switch selectedHomeTab {
                     case .feed:
-                        CashHubProfileFeedCard(
-                            riderName: session.userName,
-                            completedCashRides: completedCashRideCount,
-                            activePostCount: myRequests.filter(\.isOpen).count,
-                            favoriteDriverCount: vm.favoriteDrivers.count,
-                            onManageFavorites: { riderPanel = .favorites }
+                        CashHubDriversOnlineBanner(
+                            onlineCount: vm.onlineDriverCount,
+                            previewDrivers: vm.favoriteDrivers.filter(\.isOnline),
+                            onTap: { riderPanel = .favorites }
                         )
                         CashHubQuickPostCard(onPost: { showPostRequest = true })
-                        CashHubFavoriteDriversPreviewCard(
-                            drivers: vm.favoriteDrivers,
-                            onManage: { riderPanel = .favorites },
-                            onViewProfile: { viewingFavoriteDriver = $0 }
+                        CashHubFeedTimelineCard(
+                            events: cashHubFeedEvents,
+                            selectedCategory: $selectedFeedCategory
                         )
-                        CashHubFeedTimelineCard(events: cashHubFeedEvents)
                     case .myPosts:
                         CashHubMyPostsHeader(
                             postCount: myRequests.count,
                             openCount: myRequests.filter(\.isOpen).count,
-                            onPost: { showPostRequest = true },
-                            onOpenAll: { riderPanel = .requests }
+                            onPost: { showPostRequest = true }
                         )
                         if myRequests.isEmpty {
                             CashHubSocialEmptyState(
@@ -1120,27 +1266,51 @@ struct CashRydrHubView: View {
                             }
                         }
                     case .activity:
-                        let activityRequests = myRequests
-                            .filter { $0.isConnected || $0.status == "completed" || $0.status == "cancelled" || $0.status == "canceled" }
+                        let completedRequests = myRequests.filter { $0.status == "completed" }
+                        let rangeStart = Calendar.current.date(byAdding: .day, value: -activityRange.dayCount, to: Date()) ?? .distantPast
+                        let activityRequests = completedRequests
+                            .filter { $0.scheduledTime >= rangeStart }
                             .sorted(by: recentActivitySort)
+                        let arrangedTotal = activityRequests
+                            .compactMap(\.agreedPrice)
+                            .reduce(0, +)
+                        let driversMet = Set(activityRequests.compactMap(\.connectedDriverName)).count
+
+                        CashHubActivityHeader(
+                            rideCount: activityRequests.count,
+                            arrangedTotal: arrangedTotal,
+                            driversMet: driversMet,
+                            selectedRange: $activityRange
+                        )
+
                         if activityRequests.isEmpty {
                             CashHubSocialEmptyState(
-                                title: "No Cash Hub trips yet",
-                                message: "Accepted, completed, or canceled Cash Hub ride summaries will appear here."
+                                title: "No completed Cash Hub rides yet",
+                                message: "Ride activity appears here once a driver marks a Cash Hub ride as completed."
                             )
                         } else {
+                            HStack {
+                                Text("Recent Rides")
+                                    .font(.headline.weight(.black))
+                                Spacer()
+                            }
+
                             ForEach(activityRequests) { request in
-                                CashHubTripActivityCard(
+                                CashHubRideHistoryCard(
                                     request: request,
-                                    offer: vm.selectedOffer(for: request),
-                                    onMessage: { messagingContext = CashHubMessageContext(request: request, mode: request.isConnected ? .directConnection : .requestThread) },
-                                    onConnection: { viewingConnection = request }
+                                    offer: vm.selectedOffer(for: request)
                                 )
                             }
+
+                            Text("Cash Hub rides are settled directly between you and the driver — no in-app receipt is issued.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
 
-                    CashHubSafetyFooter()
+                    if showSafetyFooter {
+                        CashHubSafetyFooter(onDismiss: { showSafetyFooter = false })
+                    }
                 }
                 .padding()
             }
@@ -1265,151 +1435,106 @@ private struct CashHubQuickPostCard: View {
     }
 }
 
-private struct CashHubProfileFeedCard: View {
-    let riderName: String
-    let completedCashRides: Int
-    let activePostCount: Int
-    let favoriteDriverCount: Int
-    let onManageFavorites: () -> Void
+private struct CashHubDriversOnlineBanner: View {
+    let onlineCount: Int
+    let previewDrivers: [CashHubFavoriteDriver]
+    let onTap: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        Button(action: onTap) {
             HStack(spacing: 14) {
-                CashHubAvatar(name: riderName.isEmpty ? "Rydr Rider" : riderName, size: 58)
-                    .overlay(Circle().stroke(Color.white, lineWidth: 3))
-                    .shadow(color: Color.red.opacity(0.18), radius: 10, y: 5)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(riderName.isEmpty ? "Rydr Rider" : riderName)
-                        .font(.title3.weight(.black))
-                    Text("Cash Hub profile")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-
-            HStack(spacing: 10) {
-                CashHubStatPill(value: "\(completedCashRides)", label: "cash rides")
-                CashHubStatPill(value: "\(activePostCount)", label: "active posts")
-                CashHubStatPill(value: "\(favoriteDriverCount)", label: "favorites")
-            }
-
-            Button(action: onManageFavorites) {
-                HStack {
-                    Label("Manage favorite drivers", systemImage: "star.fill")
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                }
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(.primary)
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemGroupedBackground)))
-            }
-            .buttonStyle(.plain)
-        }
-        .cashHubPremiumCard()
-    }
-}
-
-private struct CashHubStatPill: View {
-    let value: String
-    let label: String
-
-    var body: some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.headline.weight(.black))
-            Text(label)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.red.opacity(0.07)))
-    }
-}
-
-private struct CashHubFavoriteDriversPreviewCard: View {
-    let drivers: [CashHubFavoriteDriver]
-    let onManage: () -> Void
-    let onViewProfile: (CashHubFavoriteDriver) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Favorite Drivers", systemImage: "star.fill")
-                    .font(.headline.weight(.black))
-                Spacer()
-                Button("Manage", action: onManage)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(Color.red)
-            }
-
-            if drivers.isEmpty {
-                Text("Favorite a driver from an accepted offer to see online status and manage your trusted Cash Hub drivers here.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(drivers.prefix(8)) { driver in
-                            Button {
-                                onViewProfile(driver)
-                            } label: {
-                                VStack(spacing: 7) {
-                                    CashHubDriverAvatar(driver: driver, size: 48)
-                                    Text(driver.name)
-                                        .font(.caption.weight(.semibold))
-                                        .lineLimit(1)
-                                        .frame(width: 76)
-                                    CashHubOnlineStatusLabel(isOnline: driver.isOnline)
-                                }
-                                .padding(10)
-                                .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemGroupedBackground)))
-                            }
-                            .buttonStyle(.plain)
+                HStack(spacing: -10) {
+                    if previewDrivers.isEmpty {
+                        ForEach(0..<min(3, max(onlineCount, 1)), id: \.self) { _ in
+                            Circle()
+                                .fill(Styles.rydrGradient)
+                                .frame(width: 38, height: 38)
+                                .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+                        }
+                    } else {
+                        ForEach(previewDrivers.prefix(3)) { driver in
+                            CashHubDriverAvatar(driver: driver, size: 38)
+                                .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
                         }
                     }
                 }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Text("\(onlineCount) drivers online now")
+                            .font(.subheadline.weight(.bold))
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 7, height: 7)
+                    }
+                    Text("Find a cash ride today")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
             }
         }
+        .buttonStyle(.plain)
         .cashHubPremiumCard()
     }
+}
+
+private func cashHubRelativeTime(_ date: Date) -> String {
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .abbreviated
+    return formatter.localizedString(for: date, relativeTo: Date())
 }
 
 private struct CashHubFeedTimelineCard: View {
     let events: [CashHubFeedEvent]
+    @Binding var selectedCategory: CashHubFeedCategory
+
+    private var filteredEvents: [CashHubFeedEvent] {
+        guard selectedCategory != .all else { return events }
+        return events.filter { $0.category == selectedCategory }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Feed")
-                .font(.headline.weight(.black))
-            if events.isEmpty {
-                Text("Your Cash Hub updates will appear here as you post rides, favorite drivers, complete trips, and update your profile.")
+            HStack {
+                Text("Feed")
+                    .font(.headline.weight(.black))
+                Spacer()
+                Menu {
+                    ForEach(CashHubFeedCategory.allCases) { category in
+                        Button {
+                            selectedCategory = category
+                        } label: {
+                            if category == selectedCategory {
+                                Label(category.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(category.rawValue)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(selectedCategory == .all ? "Filters" : selectedCategory.rawValue, systemImage: "slider.horizontal.3")
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color(.secondarySystemGroupedBackground)))
+                }
+            }
+
+            if filteredEvents.isEmpty {
+                Text(events.isEmpty
+                     ? "Your Cash Hub updates will appear here as you post rides, favorite drivers, complete trips, and update your profile."
+                     : "Nothing in this category yet.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(Array(events.prefix(10))) { event in
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: event.systemImage)
-                            .font(.subheadline.weight(.black))
-                            .foregroundStyle(event.tint)
-                            .frame(width: 34, height: 34)
-                            .background(Circle().fill(event.tint.opacity(0.12)))
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(event.title)
-                                .font(.subheadline.weight(.semibold))
-                            Text(event.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                        Spacer()
-                    }
-                    if event.id != events.prefix(10).last?.id {
+                ForEach(Array(filteredEvents.prefix(12))) { event in
+                    CashHubFeedRow(event: event)
+                    if event.id != filteredEvents.prefix(12).last?.id {
                         Divider()
                     }
                 }
@@ -1419,42 +1544,150 @@ private struct CashHubFeedTimelineCard: View {
     }
 }
 
+private struct CashHubFeedRow: View {
+    let event: CashHubFeedEvent
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: event.systemImage)
+                .font(.subheadline.weight(.black))
+                .foregroundStyle(event.tint)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(event.tint.opacity(0.12)))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(event.title)
+                    .font(.subheadline.weight(.bold))
+                Text(event.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                if let cta = event.cta {
+                    Text(cta)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 6) {
+                trailingAccessory
+                HStack(spacing: 4) {
+                    Text(event.timestampOverride ?? cashHubRelativeTime(event.date))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var trailingAccessory: some View {
+        switch event.accessory {
+        case .avatarInitial(let name):
+            Text(String(name.trimmingCharacters(in: .whitespacesAndNewlines).first ?? "R"))
+                .font(.caption.weight(.black))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(Styles.rydrGradient))
+        case .badge(let text, let color):
+            Text(text)
+                .font(.caption2.weight(.bold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(color.opacity(0.14)))
+                .foregroundStyle(color)
+        case .none:
+            EmptyView()
+        }
+    }
+}
+
 private struct CashHubMyPostsHeader: View {
     let postCount: Int
     let openCount: Int
     let onPost: () -> Void
-    let onOpenAll: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("My Posts")
-                        .font(.title3.weight(.black))
-                    Text("\(openCount) open • \(postCount) total")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button(action: onPost) {
-                    Label("New Post", systemImage: "plus.circle.fill")
-                        .font(.subheadline.weight(.bold))
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-            }
-
-            HStack {
-                Text("Manage Cash Hub ride requests, offer threads, and driver messages from here.")
-                    .font(.footnote)
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("My Posts")
+                    .font(.title2.weight(.black))
+                Text("\(openCount) Open • \(postCount) Total")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Spacer()
-                Button("All tools", action: onOpenAll)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(Color.red)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color(.secondarySystemGroupedBackground)))
+            }
+            Spacer()
+            Button(action: onPost) {
+                Label("New Post", systemImage: "plus")
+                    .font(.subheadline.weight(.bold))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+        }
+    }
+}
+
+private struct CashHubPostDetailColumn: View {
+    let icon: String
+    let title: String
+    let value: String
+    var secondaryValue: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(title)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
+            Text(value)
+                .font(.subheadline.weight(.bold))
+            if let secondaryValue {
+                Text(secondaryValue)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
-        .cashHubPremiumCard()
+    }
+}
+
+private struct CashHubPostActionButton: View {
+    let icon: String
+    var label: String? = nil
+    var tint: Color = .primary
+    var background: Color = Color(.secondarySystemGroupedBackground)
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                if let label {
+                    Text(label)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+            }
+            .font(.caption.weight(.bold))
+            .foregroundStyle(tint)
+            .frame(maxWidth: label == nil ? nil : .infinity)
+            .padding(.vertical, 10)
+            .padding(.horizontal, label == nil ? 14 : 8)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(background))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -1468,57 +1701,127 @@ private struct CashHubPostManagementCard: View {
     let onConnection: () -> Void
     let onDelete: () -> Void
 
-    private var messageCount: Int {
-        responses.filter { !$0.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("\(request.pickup) → \(request.destination)")
-                        .font(.headline.weight(.black))
+                CashHubStatusBadge(status: request.status)
+                Spacer()
+                if let postedText {
+                    Text(postedText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Menu {
+                    Button(action: onEdit) {
+                        Label("Edit Post", systemImage: "pencil")
+                    }
+                    .disabled(request.isConnected)
+                    Button(role: .destructive, action: onDelete) {
+                        Label("Delete Post", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 10)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(request.pickup)
+                    .font(.title3.weight(.bold))
+                    .lineLimit(2)
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "arrow.turn.down.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(request.destination)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                         .lineLimit(2)
-                    Text(request.scheduledTime.formatted(date: .abbreviated, time: .shortened))
+                }
+            }
+
+            HStack(alignment: .top) {
+                CashHubPostDetailColumn(icon: "calendar", title: "Date & Time", value: dateText, secondaryValue: timeText)
+                Spacer()
+                CashHubPostDetailColumn(icon: "person.fill", title: "Seats", value: seatsText)
+                Spacer()
+                CashHubPostDetailColumn(icon: "dollarsign.circle.fill", title: "Budget", value: budgetText, secondaryValue: request.budgetRange.isEmpty ? nil : "(Flexible)")
+            }
+
+            if let agreedPrice = request.agreedPrice {
+                HStack {
+                    Label("Agreed price: \(agreedPrice.formatted(.currency(code: "USD")))", systemImage: "banknote.fill")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.green)
+                    Spacer()
+                    Button("View Details") {
+                        request.isConnected ? onConnection() : onOffers()
+                    }
+                    .font(.caption.weight(.bold))
+                    .buttonStyle(.bordered)
+                    .tint(.green)
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.green.opacity(0.12)))
+            }
+
+            HStack(spacing: 14) {
+                Image(systemName: "car.side.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(Color.red)
+                    .frame(width: 40)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text("Offers")
+                            .font(.subheadline.weight(.bold))
+                        Text("\(offers.count)")
+                            .font(.caption2.weight(.black))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.red))
+                            .foregroundStyle(.white)
+                    }
+                    Text(offersSubtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                CashHubStatusBadge(status: request.status)
-            }
-
-            HStack(spacing: 8) {
-                CashHubInfoChip(systemName: "person.2.fill", text: "\(request.passengers) rider\(request.passengers == 1 ? "" : "s")")
-                CashHubInfoChip(systemName: "dollarsign.circle.fill", text: budgetText)
-                CashHubInfoChip(systemName: "bubble.left.and.bubble.right.fill", text: "\(messageCount) msg")
-            }
-
-            if let agreedPrice = request.agreedPrice {
-                Label("Agreed price: \(agreedPrice.formatted(.currency(code: "USD")))", systemImage: "banknote.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.green)
-            }
-
-            HStack(spacing: 10) {
-                Button("Edit", action: onEdit)
-                    .buttonStyle(.bordered)
-                    .disabled(request.isConnected)
-                Button("Messages", action: onMessage)
-                    .buttonStyle(.bordered)
-                Button(request.isConnected ? "Connection" : "Offers (\(offers.count))") {
+                Button(request.isConnected ? "Connection" : "View Offers") {
                     request.isConnected ? onConnection() : onOffers()
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(request.isConnected ? .green : .red)
-                Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash.fill")
-                }
+                .font(.caption.weight(.bold))
                 .buttonStyle(.bordered)
-                .accessibilityLabel("Delete request")
+                .tint(.red)
             }
-            .font(.caption.weight(.bold))
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.red.opacity(0.06)))
+
+            HStack(spacing: 10) {
+                CashHubPostActionButton(icon: "pencil", label: "Edit Post", action: onEdit)
+                CashHubPostActionButton(icon: "bubble.left.and.bubble.right", label: "Messages", action: onMessage)
+                CashHubPostActionButton(icon: "tag.fill", label: "Offers (\(offers.count))", tint: .red, action: onOffers)
+                CashHubPostActionButton(icon: "trash.fill", tint: .red, background: Color.red.opacity(0.1), action: onDelete)
+            }
         }
         .cashHubPremiumCard()
+    }
+
+    private var postedText: String? {
+        guard let createdAt = request.createdAt else { return nil }
+        return "Posted \(createdAt.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    private var dateText: String { request.scheduledTime.formatted(date: .abbreviated, time: .omitted) }
+    private var timeText: String { request.scheduledTime.formatted(date: .omitted, time: .shortened) }
+    private var seatsText: String { "\(request.passengers) rider\(request.passengers == 1 ? "" : "s")" }
+
+    private var offersSubtitle: String {
+        offers.isEmpty
+            ? "No offers yet. Drivers will see your post and send their offers soon."
+            : "\(offers.count) offer\(offers.count == 1 ? "" : "s") waiting for your review."
     }
 
     private var budgetText: String {
@@ -1527,206 +1830,311 @@ private struct CashHubPostManagementCard: View {
     }
 }
 
-private struct CashHubTripActivityCard: View {
-    let request: CashRydrRequest
-    let offer: CashHubResponse?
-    let onMessage: () -> Void
-    let onConnection: () -> Void
+private struct CashHubActivityHeader: View {
+    let rideCount: Int
+    let arrangedTotal: Double
+    let driversMet: Int
+    @Binding var selectedRange: CashHubActivityRange
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(request.status == "completed" ? "Cash ride completed" : "Cash ride overview")
-                        .font(.headline.weight(.black))
-                    Text(request.scheduledTime.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                CashHubStatusBadge(status: request.status)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                CashHubRouteRow(icon: "mappin.circle.fill", title: "Pickup", value: request.pickup)
-                CashHubRouteRow(icon: "flag.checkered.circle.fill", title: "Destination", value: request.destination)
-            }
-
-            HStack(spacing: 8) {
-                CashHubInfoChip(systemName: "person.fill", text: request.connectedDriverName ?? "Driver connected")
-                CashHubInfoChip(systemName: "banknote.fill", text: agreedPriceText)
-            }
-
-            Text("Payment was arranged directly for this Cash Hub ride. No card was charged by Rydr for this Cash Hub activity.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemGroupedBackground)))
-
-            HStack {
-                Button("Message", action: onMessage)
-                    .buttonStyle(.bordered)
-                Button("View Details", action: onConnection)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.green)
-            }
-            .font(.caption.weight(.bold))
-        }
-        .cashHubPremiumCard()
-    }
-
-    private var agreedPriceText: String {
-        if let agreedPrice = request.agreedPrice ?? offer?.offerAmount {
-            return agreedPrice.formatted(.currency(code: "USD"))
-        }
-        return "Price agreed directly"
-    }
-}
-
-private struct CashHubSocialPostCard: View {
-    let request: CashRydrRequest
-    let offers: [CashHubResponse]
-    let onOpen: () -> Void
-    let onMessage: () -> Void
-    let onConnection: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                CashHubAvatar(name: request.riderName)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(request.riderName)
-                            .font(.headline.weight(.black))
-                        Text("4.9 ★")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(Color.red)
-                    }
-                    Text(request.scheduledTime.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                CashHubStatusBadge(status: request.status)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                CashHubRouteRow(icon: "mappin.circle.fill", title: "Pickup", value: request.pickup)
-                CashHubRouteRow(icon: "flag.checkered.circle.fill", title: "Destination", value: request.destination)
-            }
-
-            HStack(spacing: 8) {
-                CashHubInfoChip(systemName: "person.2.fill", text: "\(request.passengers) rider\(request.passengers == 1 ? "" : "s")")
-                CashHubInfoChip(systemName: "bag.fill", text: request.notes.isEmpty ? "Bags optional" : "Notes added")
-                CashHubInfoChip(systemName: "dollarsign.circle.fill", text: budgetText)
-            }
-
-            if !request.notes.isEmpty {
-                Text(request.notes)
-                    .font(.footnote)
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Ride History")
+                    .font(.title2.weight(.black))
+                Text("Your completed cash rides at a glance.")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemGroupedBackground)))
             }
+
+            HStack(spacing: 6) {
+                ForEach(CashHubActivityRange.allCases) { range in
+                    Button {
+                        withAnimation(.snappy(duration: 0.25)) {
+                            selectedRange = range
+                        }
+                    } label: {
+                        Text(range.rawValue)
+                            .font(.subheadline.weight(.bold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .foregroundStyle(selectedRange == range ? Color.white : Color.secondary)
+                            .background {
+                                if selectedRange == range {
+                                    Capsule().fill(Styles.rydrGradient)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(Capsule().fill(Color(.secondarySystemGroupedBackground)))
 
             HStack(spacing: 10) {
-                CashHubOfferAvatarStack(offers: offers)
-                Text(activityText)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button(request.isConnected ? "View" : "Offers") {
-                    request.isConnected ? onConnection() : onOpen()
-                }
-                .font(.caption.weight(.bold))
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                Button("Message", action: onMessage)
-                    .font(.caption.weight(.bold))
-                    .buttonStyle(.bordered)
+                CashHubActivityStatTile(
+                    icon: "car.fill",
+                    tint: .red,
+                    value: "\(rideCount)",
+                    label: "Rides"
+                )
+                CashHubActivityStatTile(
+                    icon: "dollarsign.circle.fill",
+                    tint: .green,
+                    value: arrangedTotal.formatted(.currency(code: "USD")),
+                    label: "Arranged"
+                )
+                CashHubActivityStatTile(
+                    icon: "person.2.fill",
+                    tint: .purple,
+                    value: "\(driversMet)",
+                    label: "Drivers Met"
+                )
             }
         }
         .cashHubPremiumCard()
-    }
-
-    private var budgetText: String {
-        guard !request.budgetRange.isEmpty else { return "Budget open" }
-        return request.budgetRange.hasPrefix("$") ? request.budgetRange : "$\(request.budgetRange)"
-    }
-
-    private var activityText: String {
-        if offers.isEmpty { return "No offers yet" }
-        return "\(offers.count) offer\(offers.count == 1 ? "" : "s")"
     }
 }
 
-private struct CashHubActivityCard: View {
-    let request: CashRydrRequest
-    let responses: [CashHubResponse]
-    let onMessage: () -> Void
-    let onConnection: () -> Void
+private struct CashHubActivityStatTile: View {
+    let icon: String
+    let tint: Color
+    let value: String
+    let label: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        VStack(spacing: 8) {
+            ZStack {
+                Circle().fill(tint.opacity(0.14)).frame(width: 36, height: 36)
+                Image(systemName: icon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(tint)
+            }
+            Text(value)
+                .font(.subheadline.weight(.black))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private final class CashHubSnapshotCache {
+    static let shared = CashHubSnapshotCache()
+    private let cache = NSCache<NSString, UIImage>()
+
+    func image(for key: String) -> UIImage? { cache.object(forKey: key as NSString) }
+    func store(_ image: UIImage, for key: String) { cache.setObject(image, forKey: key as NSString) }
+}
+
+private func cashHubPseudoCoord(from text: String) -> CLLocationCoordinate2D {
+    let base = CLLocationCoordinate2D(latitude: 33.7490, longitude: -84.3880)
+    let h = abs(text.hashValue)
+    let lat = base.latitude + Double(h % 200 - 100) / 10000.0
+    let lon = base.longitude + Double((h / 200) % 200 - 100) / 10000.0
+    return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+}
+
+private struct CashHubRouteThumbnail: View {
+    let seed: String
+    let pickupText: String
+    let dropoffText: String
+
+    @State private var snapshotImage: UIImage?
+
+    private var pickup: CLLocationCoordinate2D { cashHubPseudoCoord(from: pickupText) }
+    private var dropoff: CLLocationCoordinate2D { cashHubPseudoCoord(from: dropoffText) }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+
+            if let snapshotImage {
+                Image(uiImage: snapshotImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ProgressView()
+                    .controlSize(.mini)
+            }
+        }
+        .frame(width: 84, height: 100)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .task(id: seed) {
+            await loadSnapshot()
+        }
+    }
+
+    private var fitRegion: MKCoordinateRegion {
+        let minLat = min(pickup.latitude, dropoff.latitude)
+        let maxLat = max(pickup.latitude, dropoff.latitude)
+        let minLon = min(pickup.longitude, dropoff.longitude)
+        let maxLon = max(pickup.longitude, dropoff.longitude)
+
+        let center = CLLocationCoordinate2D(
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLon + maxLon) / 2
+        )
+        let span = MKCoordinateSpan(
+            latitudeDelta: max(0.015, (maxLat - minLat) * 1.8),
+            longitudeDelta: max(0.015, (maxLon - minLon) * 1.8)
+        )
+        return MKCoordinateRegion(center: center, span: span)
+    }
+
+    @MainActor
+    private func loadSnapshot() async {
+        if let cached = CashHubSnapshotCache.shared.image(for: seed) {
+            snapshotImage = cached
+            return
+        }
+
+        let options = MKMapSnapshotter.Options()
+        options.region = fitRegion
+        options.size = CGSize(width: 168, height: 200)
+        options.scale = UIScreen.main.scale
+        options.showsBuildings = false
+        options.pointOfInterestFilter = .excludingAll
+        options.mapType = .mutedStandard
+
+        guard let snapshot = try? await MKMapSnapshotter(options: options).start() else { return }
+
+        let rendered = drawRoute(on: snapshot)
+        CashHubSnapshotCache.shared.store(rendered, for: seed)
+        snapshotImage = rendered
+    }
+
+    private func drawRoute(on snapshot: MKMapSnapshotter.Snapshot) -> UIImage {
+        let image = snapshot.image
+        let renderer = UIGraphicsImageRenderer(size: image.size)
+
+        return renderer.image { ctx in
+            image.draw(at: .zero)
+
+            let pickupPoint = snapshot.point(for: pickup)
+            let dropoffPoint = snapshot.point(for: dropoff)
+            let midPoint = CGPoint(
+                x: (pickupPoint.x + dropoffPoint.x) / 2,
+                y: min(pickupPoint.y, dropoffPoint.y) - 14
+            )
+
+            let path = UIBezierPath()
+            path.move(to: pickupPoint)
+            path.addQuadCurve(to: dropoffPoint, controlPoint: midPoint)
+
+            UIColor.white.withAlphaComponent(0.9).setStroke()
+            path.lineWidth = 6
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.stroke()
+
+            UIColor.systemRed.setStroke()
+            path.lineWidth = 3.5
+            path.stroke()
+
+            let dotRadius: CGFloat = 5
+            ctx.cgContext.setFillColor(UIColor.white.cgColor)
+            ctx.cgContext.fillEllipse(in: CGRect(x: pickupPoint.x - dotRadius - 1.5, y: pickupPoint.y - dotRadius - 1.5, width: (dotRadius + 1.5) * 2, height: (dotRadius + 1.5) * 2))
+            ctx.cgContext.fillEllipse(in: CGRect(x: dropoffPoint.x - dotRadius - 1.5, y: dropoffPoint.y - dotRadius - 1.5, width: (dotRadius + 1.5) * 2, height: (dotRadius + 1.5) * 2))
+
+            ctx.cgContext.setFillColor(UIColor.systemRed.cgColor)
+            ctx.cgContext.fillEllipse(in: CGRect(x: pickupPoint.x - dotRadius, y: pickupPoint.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
+
+            ctx.cgContext.setFillColor(UIColor.systemGreen.cgColor)
+            ctx.cgContext.fillEllipse(in: CGRect(x: dropoffPoint.x - dotRadius, y: dropoffPoint.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
+        }
+    }
+}
+
+private struct CashHubRideHistoryCard: View {
+    let request: CashRydrRequest
+    let offer: CashHubResponse?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            CashHubRouteThumbnail(seed: request.id, pickupText: request.pickup, dropoffText: request.destination)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(request.rideType)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color.red)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.red.opacity(0.1)))
+
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\(request.pickup) → \(request.destination)")
-                        .font(.headline.weight(.black))
+                    Text(request.pickup)
+                        .font(.subheadline.weight(.bold))
                         .lineLimit(1)
-                    Text(request.scheduledTime.formatted(date: .abbreviated, time: .shortened))
+                    Text(request.destination)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Spacer()
-                CashHubStatusBadge(status: request.status)
+
+                HStack(spacing: 5) {
+                    Image(systemName: "calendar")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(request.scheduledTime.formatted(date: .abbreviated, time: .omitted))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("•")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "clock")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(request.scheduledTime.formatted(date: .omitted, time: .shortened))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 6) {
+                    CashHubAvatar(name: request.connectedDriverName ?? "Driver", size: 24)
+                    Text(request.connectedDriverName ?? "Driver")
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    CashHubRatingLabel(rating: offer?.cashHubRating)
+                }
             }
 
-            ForEach(responses.suffix(3)) { response in
-                HStack(alignment: .top, spacing: 10) {
-                    CashHubAvatar(name: response.authorName, size: 30)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(response.authorName)
-                            .font(.caption.weight(.bold))
-                        Text(response.offerAmount.map { "Offered \($0.formatted(.currency(code: "USD")))" } ?? response.message)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                    Spacer()
-                }
-            }
+            Spacer(minLength: 8)
 
-            HStack {
-                Button("Message", action: onMessage)
-                    .buttonStyle(.bordered)
-                if request.isConnected {
-                    Button("View Accepted Ride", action: onConnection)
-                        .buttonStyle(.borderedProminent)
-                        .tint(.green)
-                }
-            }
-            .font(.caption.weight(.bold))
+            Text(priceText)
+                .font(.headline.weight(.black))
         }
+        .padding(14)
         .cashHubPremiumCard()
+    }
+
+    private var priceText: String {
+        if let agreedPrice = request.agreedPrice {
+            return agreedPrice.formatted(.currency(code: "USD"))
+        }
+        return "—"
     }
 }
 
 private struct CashHubSafetyFooter: View {
+    let onDismiss: () -> Void
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Cash rides are arranged directly between rider and driver.", systemImage: "shield.checkered")
+            HStack(alignment: .top) {
+                Label("Cash rides are arranged directly between rider and driver.", systemImage: "shield.checkered")
+                Spacer(minLength: 8)
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
             Label("Confirm details before meeting.", systemImage: "checkmark.seal")
             Label("Never share sensitive personal information in chat.", systemImage: "lock.shield")
-            HStack {
-                Button("Report post") {}
-                Button("Report user") {}
-                Button("Block user") {}
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(Color.red)
         }
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -2024,6 +2432,7 @@ private struct CashHubFavoriteDriverProfileView: View {
 private struct CashHubDriverAvatar: View {
     let driver: CashHubFavoriteDriver
     var size: CGFloat = 38
+    var showOnlineDot: Bool = false
 
     var body: some View {
         Group {
@@ -2039,12 +2448,35 @@ private struct CashHubDriverAvatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
+        .overlay(alignment: .bottomTrailing) {
+            if showOnlineDot && driver.isOnline {
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: size * 0.32, height: size * 0.32)
+                    .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+            }
+        }
     }
 
     private var avatarPlaceholder: some View {
         Image(systemName: "person.crop.circle.fill")
             .resizable()
             .foregroundStyle(.secondary)
+    }
+}
+
+private struct CashHubRatingLabel: View {
+    let rating: Double?
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "star.fill")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.orange)
+            Text(rating.map { String(format: "%.1f", $0) } ?? "New")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

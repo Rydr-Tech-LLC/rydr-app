@@ -36,6 +36,10 @@ function initializeFirebase() {
     options.databaseURL = process.env.FIREBASE_DATABASE_URL;
   }
 
+  if (process.env.FIREBASE_STORAGE_BUCKET) {
+    options.storageBucket = process.env.FIREBASE_STORAGE_BUCKET;
+  }
+
   app = admin.initializeApp(options);
   db = admin.firestore();
 
@@ -46,8 +50,14 @@ function getFirestore() {
   return initializeFirebase().db;
 }
 
+function getStorageBucket() {
+  initializeFirebase();
+  return admin.storage().bucket();
+}
+
 module.exports = {
   admin,
   initializeFirebase,
-  getFirestore
+  getFirestore,
+  getStorageBucket
 };

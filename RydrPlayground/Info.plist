@@ -2,14 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Rydr Driver uses your location to show nearby ride requests, navigate active trips, and share trip progress while you are online.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Rydr Driver lets you select driver profile and document photos for account review.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Rydr Driver may save driver account or support images when you choose to export them.</string>
-	<key>RYDR_BACKEND_BASE_URL</key>
-	<string>https://rydr-backend-2c19.onrender.com</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -22,5 +14,9 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSApplicationCrashOnExceptions</key>
+	<true/>
+	<key>RYDR_BACKEND_BASE_URL</key>
+	<string>https://rydr-backend-2c19.onrender.com</string>
 </dict>
 </plist>
