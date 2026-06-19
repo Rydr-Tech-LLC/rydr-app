@@ -28,10 +28,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
   ) -> Bool {
 
     // ✅ App Check provider MUST be set BEFORE FirebaseApp.configure()
-    #if targetEnvironment(simulator)
-    // Simulator: use Debug provider so Firestore works with enforcement ON
+    #if DEBUG
+    // Debug builds: use the debug provider on simulator and physical devices.
+    // The printed debug token must be registered in Firebase App Check.
     AppCheck.setAppCheckProviderFactory(AppCheckDebugProviderFactory())
-    print("🔐 AppCheck: Debug provider (simulator)")
+    print("🔐 AppCheck: Debug provider")
     #else
     // Devices: prefer App Attest (iOS 14+), fallback to DeviceCheck
     AppCheck.setAppCheckProviderFactory(RydrAppCheckProviderFactory())
@@ -86,6 +87,5 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     completionHandler(.noData)
   }
 }
-
 
 
