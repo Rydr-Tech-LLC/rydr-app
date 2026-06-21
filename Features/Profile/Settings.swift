@@ -12,7 +12,6 @@ struct SettingsView: View {
     @Environment(\.openURL) private var openURL
 
     @AppStorage("appAppearance") private var appAppearance = RydrAppAppearance.system.rawValue
-    @AppStorage("defaultMapProvider") private var defaultMapProvider = RydrMapProvider.appleMaps.rawValue
     @AppStorage("faceIDForLoginEnabled") private var faceIDForLoginEnabled = false
     @AppStorage("locationServicesEnabled") private var locationServicesEnabled = true
     @AppStorage("rideStatusPushEnabled") private var rideStatusPushEnabled = true
@@ -29,7 +28,6 @@ struct SettingsView: View {
     var body: some View {
         List {
             appearanceSection
-            mapsSection
             notificationsSection
             privacySection
             accessibilitySection
@@ -71,44 +69,6 @@ struct SettingsView: View {
             sectionHeader("Appearance")
         } footer: {
             Text("System follows your iPhone setting. Light and Dark override it inside Rydr.")
-        }
-    }
-
-    private var mapsSection: some View {
-        Section {
-            ForEach(RydrMapProvider.allCases) { provider in
-                Button {
-                    defaultMapProvider = provider.rawValue
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: provider.icon)
-                            .foregroundStyle(Styles.rydrGradient)
-                            .frame(width: 28)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(provider.title)
-                                .foregroundStyle(primaryText)
-                            Text(mapProviderSubtitle(provider))
-                                .font(.caption)
-                                .foregroundStyle(secondaryText)
-                        }
-
-                        Spacer()
-
-                        if defaultMapProvider == provider.rawValue {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(provider.title), \(defaultMapProvider == provider.rawValue ? "selected" : "not selected")")
-            }
-        } header: {
-            sectionHeader("Default Maps")
-        } footer: {
-            Text("Google Maps and Waze open when installed. If they are unavailable, Rydr falls back to Apple Maps.")
         }
     }
 
@@ -359,15 +319,6 @@ struct SettingsView: View {
         Text(title)
             .font(.caption.weight(.bold))
             .foregroundStyle(secondaryText)
-    }
-
-    private func mapProviderSubtitle(_ provider: RydrMapProvider) -> String {
-        switch provider {
-        case .appleMaps:
-            return "Built in on every iPhone."
-        case .googleMaps, .waze:
-            return RydrMapHandoff.canOpen(provider) ? "Installed and ready for handoff." : "Not installed. Apple Maps fallback will be used."
-        }
     }
 
     private func handleNotificationPreferenceChange(_ isEnabled: Bool) {

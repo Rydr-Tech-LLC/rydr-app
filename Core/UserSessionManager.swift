@@ -8,7 +8,6 @@ import Foundation
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
-import MapKit
 import UIKit
 
 enum MainAppTab: Hashable {
@@ -45,93 +44,6 @@ enum RydrAppAppearance: String, CaseIterable, Identifiable {
         case .light: return .light
         case .dark: return .dark
         }
-    }
-}
-
-enum RydrMapProvider: String, CaseIterable, Identifiable {
-    case appleMaps
-    case googleMaps
-    case waze
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .appleMaps: return "Apple Maps"
-        case .googleMaps: return "Google Maps"
-        case .waze: return "Waze"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .appleMaps: return "map.fill"
-        case .googleMaps: return "g.circle.fill"
-        case .waze: return "car.circle.fill"
-        }
-    }
-}
-
-enum RydrMapHandoff {
-    static func openDirections(
-        to coordinate: CLLocationCoordinate2D,
-        name: String? = nil,
-        provider: RydrMapProvider = currentProvider
-    ) {
-        switch provider {
-        case .appleMaps:
-            openAppleMaps(to: coordinate, name: name)
-        case .googleMaps:
-            guard openGoogleMaps(to: coordinate) else {
-                openAppleMaps(to: coordinate, name: name)
-                return
-            }
-        case .waze:
-            guard openWaze(to: coordinate) else {
-                openAppleMaps(to: coordinate, name: name)
-                return
-            }
-        }
-    }
-
-    static var currentProvider: RydrMapProvider {
-        let rawValue = UserDefaults.standard.string(forKey: "defaultMapProvider") ?? RydrMapProvider.appleMaps.rawValue
-        return RydrMapProvider(rawValue: rawValue) ?? .appleMaps
-    }
-
-    static func canOpen(_ provider: RydrMapProvider) -> Bool {
-        switch provider {
-        case .appleMaps:
-            return true
-        case .googleMaps:
-            return UIApplication.shared.canOpenURL(URL(string: "comgooglemaps://")!)
-        case .waze:
-            return UIApplication.shared.canOpenURL(URL(string: "waze://")!)
-        }
-    }
-
-    private static func openAppleMaps(to coordinate: CLLocationCoordinate2D, name: String?) {
-        let item = MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
-        item.name = name
-        item.openInMaps(launchOptions: [
-            MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
-        ])
-    }
-
-    private static func openGoogleMaps(to coordinate: CLLocationCoordinate2D) -> Bool {
-        guard let url = URL(string: "comgooglemaps://?daddr=\(coordinate.latitude),\(coordinate.longitude)&directionsmode=driving"),
-              UIApplication.shared.canOpenURL(url)
-        else { return false }
-        UIApplication.shared.open(url)
-        return true
-    }
-
-    private static func openWaze(to coordinate: CLLocationCoordinate2D) -> Bool {
-        guard let url = URL(string: "waze://?ll=\(coordinate.latitude),\(coordinate.longitude)&navigate=yes"),
-              UIApplication.shared.canOpenURL(url)
-        else { return false }
-        UIApplication.shared.open(url)
-        return true
     }
 }
 

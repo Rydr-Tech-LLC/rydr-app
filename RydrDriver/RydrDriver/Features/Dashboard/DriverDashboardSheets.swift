@@ -718,6 +718,8 @@ struct DrawerDestinationView: View {
                 DriverProfileView()
             } else if item == .community {
                 DriverCashRydrHubView()
+            } else if item == .settings {
+                DriverSettingsView()
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
@@ -741,9 +743,6 @@ struct DrawerDestinationView: View {
                             .accessibilityElement(children: .combine)
                         }
 
-                        if item == .settings {
-                            accountDeletionCard
-                        }
                     }
                     .padding()
                 }

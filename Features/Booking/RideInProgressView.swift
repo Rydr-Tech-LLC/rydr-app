@@ -875,13 +875,7 @@ struct RideInProgressView: View {
     }
 
     private func openPreferredMap() {
-        guard let destination = activeDestinationCoordinate else { return }
-        RydrMapHandoff.openDirections(
-            to: destination,
-            name: rideManager.currentRide?.status == .enRouteToDropoff
-                ? rideManager.currentRide?.dropoff
-                : rideManager.currentRide?.pickup
-        )
+        recenterCamera()
     }
 
     private func callDriver() {
@@ -906,7 +900,7 @@ struct RideInProgressView: View {
                 List {
                     Section {
                         optionRow("creditcard.fill", "Payment method", action: onPayment)
-                        optionRow("map.fill", "Open in \(RydrMapHandoff.currentProvider.title)", action: onOpenMaps)
+                        optionRow("map.fill", "Rydr Map", action: onOpenMaps)
                     }
 
                     Section {

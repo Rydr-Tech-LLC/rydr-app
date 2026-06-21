@@ -10,12 +10,6 @@ import MapKit
 import CoreLocation
 import Combine
 
-enum NavigationProvider {
-    case rydr
-    case appleMaps
-    case googleMaps
-}
-
 private enum DriverRideLifecyclePhase {
     case accepted
     case navigatingToPickup
@@ -318,8 +312,8 @@ struct DriverRideInProgressView: View {
                     showMessageSheet = true
                 }
                 Divider().padding(.leading, 58)
-                navigationOption("Open in Apple Maps", icon: "map.fill") {
-                    openNavigation(provider: .appleMaps)
+                navigationOption("Open in \(DriverNavigationHandoff.currentProvider.title)", icon: DriverNavigationHandoff.currentProvider.icon) {
+                    openNavigation(provider: DriverNavigationHandoff.currentProvider)
                 }
                 Divider().padding(.leading, 58)
                 navigationOption("Report an Incident", icon: "exclamationmark.bubble.fill", color: .red) {
@@ -797,20 +791,17 @@ struct DriverRideInProgressView: View {
         }
     }
 
-    private func openNavigation(provider: NavigationProvider) {
+    private func openNavigation(provider: DriverNavigationProvider) {
         switch provider {
         case .rydr:
             startNavigation()
-        case .appleMaps:
+        case .appleMaps, .googleMaps, .waze:
             guard let destination = primaryDestinationCoordinate else { return }
-            let item = MKMapItem(location: CLLocation(latitude: destination.latitude, longitude: destination.longitude), address: nil)
-            item.name = primaryDestinationAddress
-            item.openInMaps(launchOptions: [
-                MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
-            ])
-        case .googleMaps:
-            // TODO: Add Google Maps URL hand-off when the app has a configured Google Maps provider.
-            break
+            DriverNavigationHandoff.open(
+                provider: provider,
+                coordinate: destination,
+                name: primaryDestinationAddress
+            )
         }
     }
 

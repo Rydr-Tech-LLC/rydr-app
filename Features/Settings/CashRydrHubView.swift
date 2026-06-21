@@ -309,6 +309,18 @@ private final class CashRydrHubVM: ObservableObject {
     private var favoriteDriversListener: ListenerRegistration?
     private var favoriteProfileListeners: [String: ListenerRegistration] = [:]
 
+    nonisolated private func logFavoriteDriversPath(uid uidBeingUsedForFirestorePath: String, operation: String) {
+        if let user = Auth.auth().currentUser {
+            print("🔥 AUTH UID: \(user.uid)")
+        } else {
+            print("🔥 AUTH UID: nil")
+        }
+
+        print("🔥 QUERY UID: \(uidBeingUsedForFirestorePath)")
+        print("🔥 FULL PATH: riders/\(uidBeingUsedForFirestorePath)/cashHubFavoriteDrivers")
+        print("🔥 OPERATION: \(operation)")
+    }
+
     func loadAccess() {
         guard let uid = Auth.auth().currentUser?.uid else {
             isCheckingTerms = false
@@ -411,6 +423,7 @@ private final class CashRydrHubVM: ObservableObject {
     func startFavoriteDrivers() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         favoriteDriversListener?.remove()
+        logFavoriteDriversPath(uid: uid, operation: "listen")
         favoriteDriversListener = db.collection("riders").document(uid)
             .collection("cashHubFavoriteDrivers")
             .addSnapshotListener { [weak self] snap, error in
@@ -436,6 +449,7 @@ private final class CashRydrHubVM: ObservableObject {
             errorMessage = "Please log in to update favorite drivers."
             return
         }
+        logFavoriteDriversPath(uid: uid, operation: "delete favorite driver \(driver.id)")
         db.collection("riders").document(uid)
             .collection("cashHubFavoriteDrivers").document(driver.id)
             .delete { [weak self] error in
@@ -463,6 +477,7 @@ private final class CashRydrHubVM: ObservableObject {
                 Task { @MainActor in self?.errorMessage = error.localizedDescription }
                 return
             }
+            self?.logFavoriteDriversPath(uid: uid, operation: "delete blocked favorite driver \(driver.id)")
             riderDocument.collection("cashHubFavoriteDrivers").document(driver.id).delete { [weak self] error in
                 Task { @MainActor [weak self] in
                     self?.errorMessage = error?.localizedDescription
@@ -512,6 +527,7 @@ private final class CashRydrHubVM: ObservableObject {
                 if let rating = offer.cashHubRating {
                     data["cashHubRating"] = rating
                 }
+                self?.logFavoriteDriversPath(uid: uid, operation: "set favorite driver \(offer.authorUid)")
                 riderDocument.collection("cashHubFavoriteDrivers").document(offer.authorUid)
                     .setData(data, merge: true) { [weak self] error in
                         Task { @MainActor in
