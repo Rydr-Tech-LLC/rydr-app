@@ -397,6 +397,12 @@ private final class CommunityEventsViewModel: ObservableObject {
 
 private struct CommunityEventsService {
     private var baseURL: URL {
+        if let override = UserDefaults.standard.string(forKey: "communityBackendBaseURL"),
+           let url = URL(string: override),
+           !override.isEmpty {
+            return url
+        }
+
         if let value = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
            let url = URL(string: value),
            !value.isEmpty {
@@ -430,12 +436,12 @@ private struct CommunityEventsService {
         guard (200..<300).contains(http.statusCode) else {
             let serverError = try? JSONDecoder().decode(CommunityServerError.self, from: data)
             if let message = serverError?.message ?? serverError?.error {
-                throw CommunityEventsError.server(message)
+                throw CommunityEventsError.server(message, url)
             }
 
             let body = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            throw CommunityEventsError.httpStatus(http.statusCode, body)
+            throw CommunityEventsError.httpStatus(http.statusCode, body, url)
         }
 
         do {
@@ -450,8 +456,8 @@ private enum CommunityEventsError: LocalizedError {
     case badURL
     case badResponse
     case decoding
-    case httpStatus(Int, String?)
-    case server(String)
+    case httpStatus(Int, String?, URL)
+    case server(String, URL)
 
     var errorDescription: String? {
         switch self {
@@ -461,13 +467,13 @@ private enum CommunityEventsError: LocalizedError {
             return "The events service returned an unexpected response."
         case .decoding:
             return "The events service returned data Rydr could not read."
-        case .httpStatus(let status, let body):
+        case .httpStatus(let status, let body, let url):
             if let body, !body.isEmpty {
-                return "Events request failed with HTTP \(status): \(body)"
+                return "Events request failed with HTTP \(status): \(body) (\(url.host ?? "backend"))"
             }
-            return "Events request failed with HTTP \(status)."
-        case .server(let message):
-            return message
+            return "Events request failed with HTTP \(status) from \(url.host ?? "backend")."
+        case .server(let message, let url):
+            return "\(message) (\(url.host ?? "backend"))"
         }
     }
 }

@@ -28,6 +28,6 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Rydr uses your location to set pickup points, find nearby drivers, and track active trips.</string>
 	<key>RYDR_BACKEND_BASE_URL</key>
-	<string>https://rydr-backend-2c19.onrender.com</string>
+	<string>https://rydr-backend-2cl9.onrender.com</string>
 </dict>
 </plist>

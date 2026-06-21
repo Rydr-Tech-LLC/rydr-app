@@ -57,6 +57,16 @@ function priceSummary(event) {
   };
 }
 
+function isUsableEvent(event) {
+  const name = String(event.name || "").trim();
+  const classification = event.classifications?.[0] || {};
+  const segmentName = String(classification.segment?.name || "").trim();
+
+  return Boolean(event.id && name && event.url)
+    && !/^test\b/i.test(name)
+    && !["Undefined", "Miscellaneous"].includes(segmentName);
+}
+
 function normalizeEvent(event) {
   const venue = firstVenue(event);
   const classification = event.classifications?.[0] || {};
@@ -147,6 +157,7 @@ async function getEvents(options = {}) {
     keyword: options.keyword,
     classificationName,
     size,
+    startDateTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
     sort: "date,asc"
   });
 
@@ -154,7 +165,7 @@ async function getEvents(options = {}) {
   return {
     city,
     stateCode,
-    events: events.map(normalizeEvent).filter((event) => event.id && event.title)
+    events: events.filter(isUsableEvent).map(normalizeEvent)
   };
 }
 
