@@ -4,6 +4,41 @@ import FirebaseFirestore
 import StripePayments
 import StripePaymentsUI
 
+private enum PaymentMethodsPalette {
+    static let red = Color(red: 0.95, green: 0.02, blue: 0.19)
+    static let deepRed = Color(red: 0.62, green: 0.00, blue: 0.13)
+
+    static let background = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+        ? UIColor(red: 0.025, green: 0.025, blue: 0.032, alpha: 1)
+        : UIColor.white
+    })
+
+    static let panel = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+        ? UIColor(red: 0.105, green: 0.105, blue: 0.125, alpha: 1)
+        : UIColor.white
+    })
+
+    static let ink = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+        ? UIColor(red: 0.96, green: 0.96, blue: 0.98, alpha: 1)
+        : UIColor(red: 0.04, green: 0.05, blue: 0.08, alpha: 1)
+    })
+
+    static let muted = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+        ? UIColor(red: 0.70, green: 0.71, blue: 0.77, alpha: 1)
+        : UIColor(red: 0.43, green: 0.45, blue: 0.52, alpha: 1)
+    })
+
+    static let softRed = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+        ? UIColor(red: 0.22, green: 0.03, blue: 0.07, alpha: 1)
+        : UIColor(red: 1.00, green: 0.92, blue: 0.94, alpha: 1)
+    })
+}
+
 /// Wallet-style management of a customer's saved cards (Profile screen)
 struct PaymentMethodView: View {
     // If you present this view standalone and want it to draw its own title, set true.
@@ -15,71 +50,91 @@ struct PaymentMethodView: View {
     @State private var cards: [CardPM] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var showInfo = false
 
     // Add/Edit sheet
     @State private var showAddCard = false
     @State private var editingPMId: String? = nil       // when not nil we’re “editing” (replace flow)
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                if showsHeader {
-                    Text("Payment Methods")
-                        .font(.largeTitle).bold()
-                }
+        ZStack {
+            PaymentMethodsPalette.background.ignoresSafeArea()
+            PaymentMethodsHero()
+                .frame(height: 250)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .ignoresSafeArea(edges: .top)
+                .accessibilityHidden(true)
 
-                Text("Add a card to use for future rides. You can remove it anytime.")
-                    .foregroundStyle(.secondary)
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    headerBar
+                        .padding(.bottom, 6)
 
-                if isLoading {
-                    ProgressView("Working…")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                    heroCopy
 
-                if let err = errorMessage {
-                    Label(err, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.yellow)
-                        .multilineTextAlignment(.leading)
-                }
-
-                if cards.isEmpty {
-                    EmptyWalletTile()
-                        .frame(maxWidth: .infinity)
-                        .onAppear { bootstrapIfNeeded() }
-                } else {
-                    LazyVStack(spacing: 14) {
-                        ForEach(cards) { pm in
-                            CardTile(
-                                brand: pm.brand,
-                                last4: pm.last4,
-                                expMonth: pm.expMonth,
-                                expYear: pm.expYear,
-                                isDefault: pm.isDefault,
-                                onMakeDefault: { makeDefault(pm.id) },
-                                onEdit: {
-                                    editingPMId = pm.id
-                                    showAddCard = true
-                                },
-                                onDelete: { detach(pm.id) }
-                            )
+                    if isLoading && cards.isEmpty {
+                        VStack(spacing: 12) {
+                            ForEach(0..<3, id: \.self) { index in
+                                LoadingPaymentCard(index: index)
+                            }
                         }
+                        .padding(.top, 4)
+                    } else if cards.isEmpty {
+                        EmptyWalletTile()
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
+                            .onAppear { bootstrapIfNeeded() }
+                    } else {
+                        LazyVStack(spacing: 14) {
+                            ForEach(Array(cards.enumerated()), id: \.element.id) { index, pm in
+                                CardTile(
+                                    brand: pm.brand,
+                                    last4: pm.last4,
+                                    expMonth: pm.expMonth,
+                                    expYear: pm.expYear,
+                                    isDefault: pm.isDefault,
+                                    index: index,
+                                    onMakeDefault: { makeDefault(pm.id) },
+                                    onEdit: {
+                                        editingPMId = pm.id
+                                        showAddCard = true
+                                    },
+                                    onDelete: { detach(pm.id) }
+                                )
+                            }
+                        }
+                        .padding(.top, 4)
                     }
-                }
 
-                Button {
-                    editingPMId = nil
-                    showAddCard = true
-                } label: {
-                    Text("Add Payment Method")
-                        .frame(maxWidth: .infinity)
+                    addPaymentButton
+
+                    if let err = errorMessage {
+                        Label(err, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.yellow)
+                            .multilineTextAlignment(.leading)
+                            .padding(.top, 4)
+                    }
+
+                    securityNote
+                        .padding(.top, 8)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(customerId == nil || isLoading)
+                .padding(.horizontal, 28)
+                .padding(.top, 18)
+                .padding(.bottom, 28)
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
             }
-            .padding()
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
         .onAppear { bootstrapIfNeeded() }
+        .alert("Secure Payments", isPresented: $showInfo) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Your payment information is encrypted and processed through Stripe. Rydr never stores your CVV.")
+        }
         .sheet(isPresented: $showAddCard, onDismiss: { reloadIfPossible() }) {
             if let cid = customerId {
                 AddOrReplaceCardSheet(
@@ -104,6 +159,118 @@ struct PaymentMethodView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var headerBar: some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .heavy))
+                    .foregroundStyle(PaymentMethodsPalette.ink)
+                    .frame(width: 48, height: 48)
+                    .background(PaymentMethodsPalette.panel, in: Circle())
+                    .shadow(color: Color.black.opacity(0.12), radius: 12, x: 0, y: 7)
+            }
+            .accessibilityLabel("Back")
+
+            Spacer()
+
+            Text("Payment Methods")
+                .font(.system(size: 18, weight: .black, design: .rounded))
+                .foregroundStyle(PaymentMethodsPalette.ink)
+                .lineLimit(1)
+
+            Spacer()
+
+            Button {
+                showInfo = true
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 21, weight: .bold))
+                    .foregroundStyle(PaymentMethodsPalette.red)
+                    .frame(width: 48, height: 48)
+                    .background(PaymentMethodsPalette.panel, in: Circle())
+                    .shadow(color: Color.black.opacity(0.12), radius: 12, x: 0, y: 7)
+            }
+            .accessibilityLabel("Payment security information")
+        }
+    }
+
+    private var heroCopy: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image("RydrLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 68, height: 68)
+                .accessibilityLabel("Rydr")
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Pay your way.")
+                    .foregroundStyle(PaymentMethodsPalette.ink)
+                Text("Ride with ease.")
+                    .foregroundStyle(PaymentMethodsPalette.red)
+            }
+            .font(.system(size: 34, weight: .black, design: .rounded))
+            .lineLimit(1)
+            .minimumScaleFactor(0.74)
+
+            Text("Manage your cards for faster,\nsafer payments.")
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundStyle(PaymentMethodsPalette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var addPaymentButton: some View {
+        Button {
+            editingPMId = nil
+            showAddCard = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 22, weight: .bold))
+                Text("Add Payment Method")
+                    .font(.system(size: 17, weight: .black, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(PaymentMethodsPalette.red)
+            .frame(maxWidth: .infinity)
+            .frame(height: 58)
+            .background(PaymentMethodsPalette.background.opacity(0.001))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(
+                        PaymentMethodsPalette.red.opacity(customerId == nil || isLoading ? 0.28 : 0.55),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [7, 7], dashPhase: 1)
+                    )
+            }
+        }
+        .disabled(customerId == nil || isLoading)
+        .opacity(customerId == nil || isLoading ? 0.55 : 1)
+        .padding(.top, 8)
+        .accessibilityLabel("Add payment method")
+    }
+
+    private var securityNote: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "shield.checkered")
+                .font(.system(size: 26, weight: .bold))
+                .foregroundStyle(PaymentMethodsPalette.red)
+                .frame(width: 30)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Your payment information is encrypted and secure.")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(PaymentMethodsPalette.ink)
+                Text("We never store your CVV.")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(PaymentMethodsPalette.muted)
+            }
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -247,98 +414,379 @@ private struct CardTile: View {
     let expMonth: Int
     let expYear: Int
     let isDefault: Bool
+    let index: Int
     var onMakeDefault: () -> Void
     var onEdit: () -> Void
     var onDelete: () -> Void
+    @State private var showActions = false
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            LinearGradient(colors: colors(for: brand), startPoint: .topLeading, endPoint: .bottomTrailing)
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-                .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
-                .frame(height: 130)
-                .overlay(
-                    HStack {
-                        Image(systemName: icon(for: brand))
-                            .font(.system(size: 26, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.95))
-                            .padding(.leading, 16)
-                        Spacer()
+        Button {
+            showActions = true
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(brandGradient)
+                    .overlay(CardSpeedTexture().opacity(0.22))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.white.opacity(isDefault ? 0.38 : 0.08), lineWidth: isDefault ? 1.3 : 0.8)
                     }
-                )
+                    .shadow(color: shadowColor, radius: 14, x: 0, y: 8)
 
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if isDefault {
+                            HStack(spacing: 5) {
+                                Image(systemName: "star.fill")
+                                    .font(.system(size: 9, weight: .bold))
+                                Text("Default")
+                                    .font(.system(size: 10, weight: .black, design: .rounded))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(Color.white.opacity(0.16), in: Capsule())
+                            .padding(.bottom, 14)
+                        }
+
+                        brandMark
+                            .frame(height: 36, alignment: .leading)
+
+                        Spacer()
+
+                        Text(displayName)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .lineLimit(1)
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Spacer(minLength: isDefault ? 30 : 16)
+                        Text("•••• \(last4)")
+                            .font(.system(size: 23, weight: .black, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                        Text(String(format: "Expires %02d/%02d", expMonth, expYear % 100))
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.78))
+                            .lineLimit(1)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 21, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.95))
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 18)
+            }
+            .frame(height: isDefault ? 154 : 110)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(displayName), ending in \(last4), expires \(String(format: "%02d/%02d", expMonth, expYear % 100))\(isDefault ? ", default card" : "")")
+        }
+        .buttonStyle(.plain)
+        .confirmationDialog("Manage \(displayName)", isPresented: $showActions, titleVisibility: .visible) {
+            if !isDefault {
+                Button("Make Default", action: onMakeDefault)
+            }
+            Button("Replace Card", action: onEdit)
+            Button("Remove Card", role: .destructive, action: onDelete)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Card ending in \(last4)")
+        }
+    }
+
+    private var normalizedBrand: String {
+        brand.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var displayName: String {
+        switch normalizedBrand {
+        case "visa": return "Visa Debit Card"
+        case "mastercard": return "Mastercard"
+        case "amex", "american express": return "Amex Card"
+        case "discover": return "Discover Card"
+        default:
+            let clean = brand.trimmingCharacters(in: .whitespacesAndNewlines)
+            return clean.isEmpty ? "Payment Card" : "\(clean.capitalized) Card"
+        }
+    }
+
+    @ViewBuilder
+    private var brandMark: some View {
+        switch normalizedBrand {
+        case "visa":
+            Text("VISA")
+                .font(.system(size: 25, weight: .black, design: .rounded).italic())
+                .foregroundStyle(.white)
+        case "mastercard":
+            ZStack {
+                Circle()
+                    .fill(Color(red: 0.92, green: 0.02, blue: 0.10))
+                    .frame(width: 34, height: 34)
+                    .offset(x: -10)
+                Circle()
+                    .fill(Color(red: 1.00, green: 0.67, blue: 0.12).opacity(0.92))
+                    .frame(width: 34, height: 34)
+                    .offset(x: 10)
+            }
+            .frame(width: 58, height: 36, alignment: .leading)
+        case "amex", "american express":
+            Text("AMERICAN\nEXPRESS")
+                .font(.system(size: 14, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .lineSpacing(-2)
+        case "discover":
+            HStack(spacing: 0) {
+                Text("DISC")
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.yellow, .orange, .red],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 15, height: 15)
+                    .padding(.horizontal, 1)
+                Text("VER")
+            }
+            .font(.system(size: 18, weight: .black, design: .rounded))
+            .foregroundStyle(.white)
+        default:
             HStack(spacing: 8) {
-                if isDefault {
-                    Text("Default")
-                        .font(.caption2).padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(.ultraThinMaterial, in: Capsule())
-                } else {
-                    Button("Make Default", action: onMakeDefault)
-                        .font(.caption)
-                        .buttonStyle(.bordered)
-                        .tint(.white)
-                        .foregroundStyle(.white)
-                }
-                Button { onEdit() } label: {
-                    Image(systemName: "pencil")
-                }
-                .font(.caption)
-                .buttonStyle(.bordered)
-                .tint(.white)
-
-                Button(role: .destructive) { onDelete() } label: {
-                    Image(systemName: "trash")
-                }
-                .font(.caption)
-                .buttonStyle(.bordered)
-                .tint(.red)
+                Image(systemName: "creditcard.fill")
+                    .font(.system(size: 24, weight: .bold))
+                Text(brand.isEmpty ? "CARD" : brand.uppercased())
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
-            .padding(10)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Spacer()
-                Text("•••• \(last4)")
-                    .font(.title3).bold().monospacedDigit().foregroundStyle(.white)
-                Text(String(format: "Exp %02d/%02d", expMonth, expYear % 100))
-                    .font(.caption).foregroundStyle(.white.opacity(0.9))
-            }
-            .padding(16)
+            .foregroundStyle(.white)
         }
     }
 
-    private func colors(for brand: String) -> [Color] {
-        switch brand.lowercased() {
-        case "visa":        return [.blue, .indigo]
-        case "mastercard":  return [.orange, .red]
-        case "amex":        return [.teal, .blue]
-        case "discover":    return [.orange, .brown]
-        default:            return [.gray, .black.opacity(0.7)]
+    private var brandGradient: LinearGradient {
+        let colors: [Color]
+        switch normalizedBrand {
+        case "visa":
+            colors = [
+                Color(red: 0.98, green: 0.01, blue: 0.20),
+                Color(red: 0.72, green: 0.00, blue: 0.16),
+                Color(red: 0.50, green: 0.00, blue: 0.12)
+            ]
+        case "mastercard":
+            colors = [
+                Color(red: 0.13, green: 0.14, blue: 0.15),
+                Color(red: 0.055, green: 0.06, blue: 0.065)
+            ]
+        case "amex", "american express":
+            colors = [
+                Color(red: 0.18, green: 0.45, blue: 0.88),
+                Color(red: 0.05, green: 0.12, blue: 0.42)
+            ]
+        case "discover":
+            colors = [
+                Color(red: 0.28, green: 0.28, blue: 0.29),
+                Color(red: 0.08, green: 0.08, blue: 0.09)
+            ]
+        default:
+            colors = [
+                Color(red: 0.44, green: 0.45, blue: 0.50),
+                Color(red: 0.12, green: 0.13, blue: 0.16)
+            ]
         }
+        return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
     }
-    private func icon(for brand: String) -> String {
-        switch brand.lowercased() {
-        case "visa":        return "v.circle.fill"
-        case "mastercard":  return "m.circle.fill"
-        case "amex":        return "a.circle.fill"
-        case "discover":    return "d.circle.fill"
-        default:            return "creditcard.fill"
-        }
+
+    private var shadowColor: Color {
+        normalizedBrand == "visa"
+        ? PaymentMethodsPalette.red.opacity(0.34)
+        : Color.black.opacity(0.22)
     }
 }
 
 private struct EmptyWalletTile: View {
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            LinearGradient(colors: [.gray.opacity(0.4), .black.opacity(0.6)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-                .frame(height: 130)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("No cards saved yet")
-                    .font(.headline).foregroundStyle(.white)
-                Text("Add a card to pay for rides quickly.")
-                    .font(.caption).foregroundStyle(.white.opacity(0.9))
-            }.padding(16)
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: "creditcard.trianglebadge.exclamationmark")
+                .font(.system(size: 30, weight: .bold))
+                .foregroundStyle(PaymentMethodsPalette.red)
+            Text("No cards saved yet")
+                .font(.system(size: 20, weight: .black, design: .rounded))
+                .foregroundStyle(PaymentMethodsPalette.ink)
+            Text("Add a payment method to make ride checkout faster.")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(PaymentMethodsPalette.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(22)
+        .background(PaymentMethodsPalette.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(PaymentMethodsPalette.red.opacity(0.18), lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(0.10), radius: 12, x: 0, y: 7)
+    }
+}
+
+private struct LoadingPaymentCard: View {
+    let index: Int
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(
+                LinearGradient(
+                    colors: [
+                        PaymentMethodsPalette.panel.opacity(0.92),
+                        PaymentMethodsPalette.panel.opacity(0.62)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 12) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(PaymentMethodsPalette.muted.opacity(0.24))
+                        .frame(width: 92, height: 18)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(PaymentMethodsPalette.muted.opacity(0.18))
+                        .frame(width: 160, height: 14)
+                }
+                .padding(22)
+            }
+            .frame(height: index == 0 ? 154 : 110)
+            .redacted(reason: .placeholder)
+            .shadow(color: Color.black.opacity(0.09), radius: 12, x: 0, y: 7)
+    }
+}
+
+private struct PaymentMethodsHero: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    PaymentMethodsPalette.background,
+                    PaymentMethodsPalette.softRed.opacity(0.74),
+                    PaymentMethodsPalette.background.opacity(0.88)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            PaymentCitySkyline()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            PaymentMethodsPalette.red.opacity(0.08),
+                            PaymentMethodsPalette.red.opacity(0.24)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 220, height: 160)
+                .offset(x: 145, y: 60)
+                .blur(radius: 0.8)
+
+            PaymentSpeedLines()
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            PaymentMethodsPalette.red.opacity(0.0),
+                            PaymentMethodsPalette.red.opacity(0.55),
+                            PaymentMethodsPalette.red.opacity(0.0)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ),
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                )
+                .blur(radius: 0.5)
+                .offset(x: 68, y: 62)
+
+            LinearGradient(
+                colors: [
+                    PaymentMethodsPalette.background.opacity(0.0),
+                    PaymentMethodsPalette.background.opacity(0.92)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .clipped()
+    }
+}
+
+private struct PaymentCitySkyline: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let base = rect.maxY
+        let widths: [CGFloat] = [18, 30, 22, 38, 24, 42, 20, 34]
+        let heights: [CGFloat] = [76, 112, 92, 136, 86, 154, 104, 124]
+        var x = rect.minX
+
+        for index in widths.indices {
+            let top = base - heights[index]
+            path.addRoundedRect(
+                in: CGRect(x: x, y: top, width: widths[index], height: heights[index]),
+                cornerSize: CGSize(width: 2, height: 2)
+            )
+            x += widths[index] + CGFloat(index % 2 == 0 ? 11 : 15)
+        }
+
+        return path
+    }
+}
+
+private struct PaymentSpeedLines: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let vanishing = CGPoint(x: rect.maxX * 0.58, y: rect.midY)
+
+        for index in 0..<24 {
+            let y = rect.minY + CGFloat(index) * rect.height / 24
+            let start = CGPoint(x: rect.minX - CGFloat(index % 4) * 16, y: y)
+            let end = CGPoint(x: vanishing.x + CGFloat(index % 6) * 12, y: vanishing.y + CGFloat(index - 12) * 2)
+            path.move(to: start)
+            path.addLine(to: end)
+        }
+
+        for index in 0..<8 {
+            let y = rect.maxY * (0.68 + CGFloat(index) * 0.034)
+            path.move(to: CGPoint(x: rect.minX, y: y))
+            path.addCurve(
+                to: CGPoint(x: rect.maxX, y: y - 44),
+                control1: CGPoint(x: rect.midX * 0.70, y: y + 16),
+                control2: CGPoint(x: rect.midX * 1.28, y: y - 58)
+            )
+        }
+
+        return path
+    }
+}
+
+private struct CardSpeedTexture: View {
+    var body: some View {
+        GeometryReader { proxy in
+            Path { path in
+                for index in 0..<13 {
+                    let y = proxy.size.height * (0.26 + CGFloat(index) * 0.045)
+                    path.move(to: CGPoint(x: proxy.size.width * 0.22, y: y))
+                    path.addCurve(
+                        to: CGPoint(x: proxy.size.width * 0.96, y: y - CGFloat(index) * 2.2),
+                        control1: CGPoint(x: proxy.size.width * 0.48, y: y + 20),
+                        control2: CGPoint(x: proxy.size.width * 0.70, y: y - 24)
+                    )
+                }
+            }
+            .stroke(Color.white.opacity(0.25), lineWidth: 0.7)
         }
     }
 }
@@ -504,6 +952,3 @@ private struct CardPM: Decodable, Identifiable {
     let expYear: Int
     let isDefault: Bool
 }
-
-
-
