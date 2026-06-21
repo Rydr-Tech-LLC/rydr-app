@@ -19,7 +19,5 @@ services:
         sync: false
       - key: FIREBASE_DATABASE_URL
         sync: false
-      - key: EVENTBRITE_PRIVATE_TOKEN
-        sync: false
       - key: TICKETMASTER_API_KEY
         sync: false

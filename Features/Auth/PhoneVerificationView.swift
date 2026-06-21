@@ -6,6 +6,13 @@ import SwiftUI
 import FirebaseAuth
 
 struct PhoneVerificationView: View {
+    private enum Palette {
+        static let ink = Color(red: 0.06, green: 0.09, blue: 0.14)
+        static let muted = Color(red: 0.54, green: 0.55, blue: 0.60)
+        static let inputFill = Color.white.opacity(0.96)
+        static let countryFill = Color(red: 0.965, green: 0.966, blue: 0.975)
+    }
+
     var initialPhoneNumber: String = ""
     var linkToCurrentUser = false
     var onVerified: (String) -> Void
@@ -24,21 +31,25 @@ struct PhoneVerificationView: View {
     var body: some View {
         VStack(spacing: 20) {
             Text("Enter your phone").font(.title).bold()
+                .foregroundColor(Palette.ink)
 
             HStack {
                 Text("🇺🇸 +1")
                     .font(.headline)
+                    .foregroundColor(Palette.ink)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 10)
-                    .background(Color(.systemGray6))
+                    .background(Palette.countryFill)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 TextField("Phone number", text: Binding(
                     get: { nationalNumber },
                     set: { nationalNumber = String($0.filter { $0.isNumber }.prefix(10)) }
                 ))
                 .keyboardType(.numberPad)
+                .foregroundColor(Palette.ink)
+                .tint(Color.red)
                 .padding(12)
-                .background(Color(.secondarySystemBackground))
+                .background(Palette.inputFill)
                 .cornerRadius(10)
                 .accessibilityLabel("US Phone Number Field")
             }
@@ -46,7 +57,7 @@ struct PhoneVerificationView: View {
 
             Text("US numbers only. Enter your 10-digit number.")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(Palette.muted)
 
             if !errorMessage.isEmpty {
                 Text(errorMessage).foregroundColor(.red).font(.footnote)
@@ -72,6 +83,8 @@ struct PhoneVerificationView: View {
         .onChange(of: initialPhoneNumber) { _, _ in
             applyInitialPhoneNumber()
         }
+        .environment(\.colorScheme, .light)
+        .preferredColorScheme(.light)
         .navigationDestination(item: $verificationSession) { verificationSession in
             VerificationCodeView(
                 verificationID: verificationSession.verificationID,

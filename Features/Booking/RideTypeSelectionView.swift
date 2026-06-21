@@ -7,6 +7,7 @@
 import SwiftUI
 
 struct RideTypeSelectionView: View {
+    @Environment(\.colorScheme) private var colorScheme
     var userName: String = "Rydr User" // Replace with actual user data in future
 
     private let options: [RideTypeOption] = [
@@ -56,15 +57,7 @@ struct RideTypeSelectionView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color.white,
-                    Color(red: 0.995, green: 0.985, blue: 0.988),
-                    Color(red: 1.0, green: 0.95, blue: 0.955)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            pageBackground
             .ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
@@ -96,12 +89,35 @@ struct RideTypeSelectionView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    private var pageBackground: LinearGradient {
+        if colorScheme == .dark {
+            return LinearGradient(
+                colors: [
+                    Color.black,
+                    Color(red: 0.055, green: 0.045, blue: 0.05),
+                    Color(red: 0.10, green: 0.035, blue: 0.045)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        return LinearGradient(
+            colors: [
+                Color.white,
+                Color(red: 0.995, green: 0.985, blue: 0.988),
+                Color(red: 1.0, green: 0.95, blue: 0.955)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
     private var header: some View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text("Choose Your")
-                        .foregroundColor(Color(red: 0.05, green: 0.08, blue: 0.14))
+                        .foregroundColor(colorScheme == .dark ? .white : Color(red: 0.05, green: 0.08, blue: 0.14))
                     Text("Ride")
                         .foregroundStyle(Styles.rydrGradient)
                 }
@@ -121,9 +137,9 @@ struct RideTypeSelectionView: View {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "bell")
                         .font(.headline.weight(.bold))
-                        .foregroundColor(Color(red: 0.05, green: 0.08, blue: 0.14))
+                        .foregroundColor(colorScheme == .dark ? .white : Color(red: 0.05, green: 0.08, blue: 0.14))
                         .frame(width: 48, height: 48)
-                        .background(Color.white.opacity(0.94))
+                        .background(Color(.secondarySystemGroupedBackground).opacity(0.94))
                         .clipShape(Circle())
                         .shadow(color: Color.red.opacity(0.10), radius: 16, x: 0, y: 8)
 
@@ -173,10 +189,13 @@ private struct RideTypeOption: Identifiable {
 }
 
 private struct RideOptionCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     let option: RideTypeOption
 
     private var isExecutive: Bool { option.kind == .executive }
     private var isPrestine: Bool { option.kind == .prestine }
+    private var darkMode: Bool { colorScheme == .dark }
+    private var executiveGold: Color { Color(red: 0.96, green: 0.73, blue: 0.32) }
 
     var body: some View {
         HStack(spacing: 15) {
@@ -186,13 +205,13 @@ private struct RideOptionCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(option.title)
                     .font(.title3.weight(.heavy))
-                    .foregroundColor(isExecutive ? .white : Color(red: 0.05, green: 0.08, blue: 0.14))
+                    .foregroundColor(titleColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
 
                 Text(option.subtitle)
                     .font(.footnote.weight(.semibold))
-                    .foregroundColor(isExecutive ? Color.white.opacity(0.86) : Color(red: 0.33, green: 0.35, blue: 0.43))
+                    .foregroundColor(subtitleColor)
                     .lineLimit(1)
 
                 Text(option.badge)
@@ -226,17 +245,29 @@ private struct RideOptionCard: View {
     private var cardBackground: some View {
         Group {
             if isExecutive {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.02, green: 0.02, blue: 0.025),
-                        Color(red: 0.10, green: 0.085, blue: 0.045),
-                        Color.black
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                if darkMode {
+                    LinearGradient(
+                        colors: [
+                            Color(red: 1.0, green: 0.80, blue: 0.36),
+                            Color(red: 0.90, green: 0.63, blue: 0.20),
+                            Color(red: 0.70, green: 0.45, blue: 0.12)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                } else {
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.02, green: 0.02, blue: 0.025),
+                            Color(red: 0.10, green: 0.085, blue: 0.045),
+                            Color.black
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
             } else {
-                Color.white.opacity(0.96)
+                Color(.secondarySystemGroupedBackground).opacity(darkMode ? 0.94 : 0.96)
             }
         }
     }
@@ -245,15 +276,29 @@ private struct RideOptionCard: View {
         RoundedRectangle(cornerRadius: 22, style: .continuous)
             .stroke(
                 isExecutive
-                ? LinearGradient(colors: [Color(red: 0.95, green: 0.73, blue: 0.35), Color.white.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                : LinearGradient(colors: [Color.white.opacity(0.9), Color.red.opacity(isPrestine ? 0.18 : 0.08)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                ? LinearGradient(colors: [darkMode ? Color.black.opacity(0.72) : executiveGold, Color.white.opacity(darkMode ? 0.32 : 0.12)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                : LinearGradient(colors: [Color.white.opacity(darkMode ? 0.14 : 0.9), Color.red.opacity(isPrestine ? 0.22 : 0.10)], startPoint: .topLeading, endPoint: .bottomTrailing),
                 lineWidth: isExecutive ? 1.2 : 1
             )
     }
 
+    private var titleColor: Color {
+        if isExecutive {
+            return darkMode ? .black : .white
+        }
+        return darkMode ? .white : Color(red: 0.05, green: 0.08, blue: 0.14)
+    }
+
+    private var subtitleColor: Color {
+        if isExecutive {
+            return darkMode ? Color.black.opacity(0.72) : Color.white.opacity(0.86)
+        }
+        return darkMode ? Color.white.opacity(0.72) : Color(red: 0.33, green: 0.35, blue: 0.43)
+    }
+
     private var badgeForeground: some ShapeStyle {
         if isExecutive {
-            return AnyShapeStyle(Color(red: 0.98, green: 0.80, blue: 0.42))
+            return AnyShapeStyle(darkMode ? Color.black : executiveGold)
         }
         if isPrestine {
             return AnyShapeStyle(LinearGradient(colors: [Color.red, Color(red: 0.93, green: 0.68, blue: 0.22)], startPoint: .leading, endPoint: .trailing))
@@ -263,7 +308,7 @@ private struct RideOptionCard: View {
 
     private var badgeBackground: some ShapeStyle {
         if isExecutive {
-            return AnyShapeStyle(Color(red: 0.98, green: 0.80, blue: 0.42).opacity(0.16))
+            return AnyShapeStyle(darkMode ? Color.black.opacity(0.12) : executiveGold.opacity(0.16))
         }
         if isPrestine {
             return AnyShapeStyle(Color(red: 0.96, green: 0.72, blue: 0.28).opacity(0.16))
@@ -273,7 +318,7 @@ private struct RideOptionCard: View {
 
     private var chevronForeground: some ShapeStyle {
         if isExecutive {
-            return AnyShapeStyle(Color(red: 0.98, green: 0.80, blue: 0.42))
+            return AnyShapeStyle(darkMode ? Color.black : executiveGold)
         }
         if isPrestine {
             return AnyShapeStyle(LinearGradient(colors: [Color.red, Color(red: 0.93, green: 0.68, blue: 0.22)], startPoint: .leading, endPoint: .trailing))
@@ -283,7 +328,7 @@ private struct RideOptionCard: View {
 
     private var chevronBackground: some ShapeStyle {
         if isExecutive {
-            return AnyShapeStyle(Color(red: 0.98, green: 0.80, blue: 0.42).opacity(0.14))
+            return AnyShapeStyle(darkMode ? Color.black.opacity(0.14) : executiveGold.opacity(0.14))
         }
         return AnyShapeStyle(Color.red.opacity(0.08))
     }

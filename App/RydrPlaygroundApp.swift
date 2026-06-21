@@ -14,22 +14,24 @@ struct RydrApp: App {
 
     @StateObject private var session = UserSessionManager()
     @State private var showSplash = true
+    @AppStorage("appAppearance") private var appAppearance = RydrAppAppearance.system.rawValue
 
     var body: some Scene {
         WindowGroup {
-            if showSplash {
-                SplashVideoView { showSplash = false }
-            } else {
-                if session.isLoggedIn {
-                    MainTabView().environmentObject(session)
+            Group {
+                if showSplash {
+                    SplashVideoView { showSplash = false }
                 } else {
-                    WelcomeView().environmentObject(session)
+                    if session.isLoggedIn {
+                        MainTabView().environmentObject(session)
+                    } else {
+                        WelcomeView().environmentObject(session)
+                    }
                 }
             }
+            .preferredColorScheme(RydrAppAppearance(rawValue: appAppearance)?.colorScheme)
         }
     }
 }
-
-
 
 

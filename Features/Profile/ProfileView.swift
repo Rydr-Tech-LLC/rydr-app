@@ -10,6 +10,7 @@ import FirebaseFirestore
 // MARK: - ProfileView
 struct ProfileView: View {
     @EnvironmentObject var session: UserSessionManager
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var bankVM = RydrBankVM()
 
     @State private var showImagePicker = false
@@ -28,8 +29,7 @@ struct ProfileView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(spacing: 24) {
-
+            VStack(spacing: 20) {
                 profileHeader
 
                 if !session.isCashHubOnly {
@@ -43,30 +43,36 @@ struct ProfileView: View {
                     preferencesCard
                 }
 
-                // Logout
-                Button {
-                    session.logout()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .font(.headline.weight(.semibold))
-                        Text("Log Out")
-                            .font(.headline.weight(.semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .foregroundStyle(Styles.rydrGradient)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Styles.rydrGradient, lineWidth: 1.5)
-                    )
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 10)
+                logoutButton
             }
+            .padding(.top, 14)
+            .padding(.bottom, 118)
         }
         .navigationTitle("Profile")
-        .background(Color(.systemGroupedBackground))
+        .navigationBarTitleDisplayMode(.inline)
+        .background(profileBackground.ignoresSafeArea())
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "bell")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(primaryText)
+                            .frame(width: 42, height: 42)
+                            .background(adaptiveCardBackground, in: Circle())
+                            .shadow(color: softShadow, radius: 12, x: 0, y: 6)
+
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 7, height: 7)
+                            .offset(x: -7, y: 8)
+                    }
+                }
+                .accessibilityLabel("Notifications")
+            }
+        }
         .onAppear {
             session.loadUserProfile()
             loadExistingProfilePhoto()
@@ -102,10 +108,10 @@ struct ProfileView: View {
                     (profileImage ?? Image(systemName: "person.crop.circle.fill"))
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 72, height: 72)
+                        .frame(width: 82, height: 82)
                         .clipShape(Circle())
                         .overlay(Circle().stroke(Styles.rydrGradient, lineWidth: 2))
-                        .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 3)
+                        .shadow(color: Color.red.opacity(colorScheme == .dark ? 0.18 : 0.16), radius: 15, x: 0, y: 8)
                         .opacity(isUploadingPhoto ? 0.4 : 1)
 
                     if isUploadingPhoto {
@@ -116,26 +122,36 @@ struct ProfileView: View {
             .buttonStyle(.plain)
             .disabled(isUploadingPhoto)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Hello, \(session.userName)")
-                    .font(.title3.weight(.bold))
-                Text("View and manage your account")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            NavigationLink {
+                PersonalInfoView()
+            } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Hello, \(session.userName)")
+                            .font(.title2.weight(.heavy))
+                            .foregroundStyle(primaryText)
+                        Text("View and manage your account")
+                            .font(.footnote)
+                            .foregroundStyle(secondaryText)
 
-                Text(session.isCashHubOnly ? "Cash Rydr Hub Member" : "Rydr Member")
-                    .font(.caption2.weight(.bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Styles.rydrGradient)
-                    .clipShape(Capsule())
+                        Label(session.isCashHubOnly ? "Cash Rydr Hub Member" : "Rydr Member", systemImage: "star.circle.fill")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Styles.rydrGradient)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Styles.rydrGradient.opacity(0.11), in: Capsule())
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(secondaryText)
+                }
             }
-
-            Spacer()
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal)
-        .padding(.top, 8)
+        .padding(.horizontal, 24)
     }
 
     // MARK: - RydrBank balance summary card
@@ -147,76 +163,69 @@ struct ProfileView: View {
         return NavigationLink {
             RydrBankView()
         } label: {
-            ZStack(alignment: .topTrailing) {
-                Styles.rydrGradient
+            HStack(spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("RydrBank Balance")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(primaryText)
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text("\(bankVM.summary.codesAvailable)")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundStyle(primaryText)
+                        Image("RydrBankWalletR")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 20, height: 20)
+                    }
+                    Text(bankVM.summary.codesAvailable == 1 ? "1 free ride" : "\(bankVM.summary.codesAvailable) free rides")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(secondaryText)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Rectangle()
+                    .fill(Color.red.opacity(0.12))
+                    .frame(width: 1, height: 62)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Next Reward")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(primaryText)
+                    Text(remaining == 0 ? "Ready" : "\(remaining) rides to go")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(primaryText)
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.red.opacity(0.16))
+                            Capsule()
+                                .fill(Styles.rydrGradient)
+                                .frame(width: geo.size.width * CGFloat(progress) / 10.0)
+                        }
+                    }
+                    .frame(height: 6)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Image(systemName: "gift.fill")
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundColor(.white.opacity(0.85))
-                    .frame(width: 44, height: 44)
-                    .background(Color.white.opacity(0.16))
-                    .clipShape(Circle())
-                    .padding(16)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("RydrBank Balance")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.white.opacity(0.9))
-
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(bankVM.summary.codesAvailable)")
-                            .font(.system(size: 40, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
-                        Text(bankVM.summary.codesAvailable == 1 ? "free ride" : "free rides")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(.white.opacity(0.9))
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text("Next Reward")
-                                .font(.caption.weight(.bold))
-                                .foregroundColor(.white.opacity(0.85))
-                            Spacer()
-                            Text("\(progress)/10")
-                                .font(.caption.weight(.bold))
-                                .foregroundColor(.white.opacity(0.85))
-                        }
-
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(Color.white.opacity(0.22))
-                                Capsule()
-                                    .fill(Color.white)
-                                    .frame(width: geo.size.width * CGFloat(progress) / 10.0)
-                            }
-                        }
-                        .frame(height: 8)
-
-                        Text(remaining == 0
-                             ? "Reward ready on your next eligible ride."
-                             : "\(remaining) more eligible \(remaining == 1 ? "ride" : "rides") to go.")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundColor(.white.opacity(0.8))
-                    }
-                }
-                .padding(18)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(Styles.rydrGradient)
+                    .frame(width: 48, height: 48)
+                    .background(Styles.rydrGradient.opacity(0.10), in: Circle())
             }
-            .frame(height: 168)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .shadow(color: Color.red.opacity(0.22), radius: 18, x: 0, y: 10)
+            .padding(18)
+            .background(rewardCardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: Color.red.opacity(colorScheme == .dark ? 0.16 : 0.14), radius: 20, x: 0, y: 10)
         }
         .buttonStyle(.plain)
-        .padding(.horizontal)
+        .padding(.horizontal, 24)
     }
 
     private var cashHubOnlyAccountContent: some View {
-        Group {
+        VStack(spacing: 16) {
             SectionHeader(title: "Account")
             TileGrid(tiles: [
                 .init(title: "Personal Information",
-                      subtitle: "Name, contact, and account details",
+                      subtitle: "Update your details and preferences",
                       icon: "person.text.rectangle",
                       destination: AnyView(PersonalInfoView())),
                 .init(title: "Cash Rydr Hub",
@@ -248,32 +257,32 @@ struct ProfileView: View {
                 .buttonStyle(GradientButtonStyle())
             }
             .padding()
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .padding(.horizontal)
+            .background(adaptiveCardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: softShadow, radius: 14, x: 0, y: 8)
+            .padding(.horizontal, 24)
         }
     }
 
     private var riderAccountContent: some View {
-        Group {
+        VStack(spacing: 16) {
             SectionHeader(title: "Account")
             TileGrid(tiles: [
                 .init(title: "Personal Information",
-                      subtitle: "Name, contact, and account details",
+                      subtitle: "Update your details and preferences",
                       icon: "person.text.rectangle",
                       destination: AnyView(PersonalInfoView())),
                 .init(title: "Ride History & Receipts",
-                      subtitle: "Past rides and receipts",
+                      subtitle: "View your past rides and receipts",
                       icon: "clock.arrow.circlepath",
                       destination: AnyView(RideHistoryView()
                         .navigationTitle("Ride History"))),
                 .init(title: "Payment Methods",
-                      subtitle: "Cards and billing",
+                      subtitle: "Manage cards and payment options",
                       icon: "creditcard",
                       destination: AnyView(PaymentMethodView()
                         .navigationTitle("Payment Methods"))),
                 .init(title: "Notifications",
-                      subtitle: "Alerts and updates",
+                      subtitle: "Manage your alerts and updates",
                       icon: "bell.badge",
                       destination: AnyView(Text("Coming soon").navigationTitle("Notifications")))
             ])
@@ -291,13 +300,13 @@ struct ProfileView: View {
                       icon: "banknote",
                       destination: AnyView(RydrBankView())),
                 .init(title: "Help & Support",
-                      subtitle: "FAQs and contact support",
+                      subtitle: "Get help, view FAQs, and contact support",
                       icon: "questionmark.circle",
                       destination: AnyView(HelpSupportView())),
                 .init(title: "Community",
-                      subtitle: "Local events near you",
+                      subtitle: "Find Atlanta events and tickets",
                       icon: "person.3.sequence",
-                      destination: AnyView(Text("Coming soon").navigationTitle("Community")))
+                      destination: AnyView(CommunityView()))
             ])
         }
     }
@@ -308,53 +317,77 @@ struct ProfileView: View {
         NavigationLink {
             SettingsView()
         } label: {
-            HStack(spacing: 14) {
+            HStack(spacing: 16) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    Circle()
                         .fill(Styles.rydrGradient.opacity(0.12))
-                        .frame(width: 46, height: 46)
+                        .frame(width: 58, height: 58)
                     Image(systemName: "gearshape")
-                        .font(.system(size: 19, weight: .semibold))
+                        .font(.system(size: 25, weight: .semibold))
                         .foregroundStyle(Styles.rydrGradient)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Settings")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.headline.weight(.bold))
                         .foregroundStyle(.primary)
-                    Text("App preferences and privacy")
+                    Text("Manage app settings and preferences")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer()
 
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
+                ZStack {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 39, weight: .bold))
+                        .foregroundStyle(Styles.rydrGradient.opacity(0.10))
+                    VStack(spacing: 5) {
+                        settingsSliderDot(active: true)
+                        settingsSliderDot(active: false)
+                        settingsSliderDot(active: false)
+                    }
+                    .offset(x: 20)
+                }
             }
-            .padding(14)
+            .padding(16)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.white)
-                    .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 3)
+                    .fill(adaptiveCardBackground)
+                    .shadow(color: softShadow, radius: 14, x: 0, y: 8)
             )
         }
         .buttonStyle(.plain)
-        .padding(.horizontal)
+        .padding(.horizontal, 24)
+    }
+
+    private func settingsSliderDot(active: Bool) -> some View {
+        HStack(spacing: 3) {
+            Capsule()
+                .fill(Color.red.opacity(active ? 0.95 : 0.18))
+                .frame(width: 21, height: 4)
+            Circle()
+                .fill(active ? Color.red : Color(.systemGray4))
+                .frame(width: 10, height: 10)
+        }
     }
 
     // MARK: - Preferences card
     private var preferencesCard: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                HStack(spacing: 8) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
                     Image(systemName: "slider.horizontal.3")
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(Styles.rydrGradient)
                     Text("Preferences")
-                        .font(.headline)
+                            .font(.title3.weight(.heavy))
                         .foregroundStyle(Styles.rydrGradient)
+                    }
+                    Text("Customize your ride experience")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(secondaryText)
                 }
 
                 Spacer()
@@ -364,25 +397,33 @@ struct ProfileView: View {
                     climate = "Neutral"
                     conversation = "Light"
                     driverPref = "No preference"
-                } label: {
-                    Text("Reset to Default")
+            } label: {
+                    Label("Reset to Default", systemImage: "arrow.counterclockwise")
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Styles.rydrGradient)
                         .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color(.systemGray6))
-                        .clipShape(Capsule())
+                        .padding(.vertical, 9)
+                        .background(adaptiveCardBackground, in: Capsule())
+                        .overlay(Capsule().stroke(Color.red.opacity(0.16), lineWidth: 1))
                 }
             }
 
             VStack(spacing: 10) {
                 PreferencePicker(title: "Type of Music", selection: $musicType,
+                                 subtitle: "What kind of music do you enjoy?",
+                                 icon: "music.note",
                                  options: ["No preference", "Hip-Hop", "R&B", "Pop", "Country", "Jazz", "Podcast"])
                 PreferencePicker(title: "Climate Control", selection: $climate,
+                                 subtitle: "How would you like the climate?",
+                                 icon: "fanblades",
                                  options: ["Cool", "Neutral", "Warm"])
                 PreferencePicker(title: "Conversation", selection: $conversation,
+                                 subtitle: "How much would you like to chat?",
+                                 icon: "bubble.left.and.bubble.right",
                                  options: ["Silence", "Light", "Talkative"])
-                PreferencePicker(title: "Driver", selection: $driverPref,
+                PreferencePicker(title: "Driver Preference", selection: $driverPref,
+                                 subtitle: "Choose your driver preference",
+                                 icon: "steeringwheel",
                                  options: ["No preference", "Male", "Female"])
             }
 
@@ -396,19 +437,81 @@ struct ProfileView: View {
                         .font(.subheadline.weight(.bold))
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .padding(.vertical, 16)
                 .background(Styles.rydrGradient)
                 .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
         }
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(.white)
-                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 4)
+                .fill(adaptiveCardBackground)
+                .shadow(color: softShadow, radius: 18, x: 0, y: 10)
         )
-        .padding(.horizontal)
+        .padding(.horizontal, 24)
+    }
+
+    private var profileBackground: Color {
+        colorScheme == .dark ? .black : Color(.systemGroupedBackground)
+    }
+
+    private var adaptiveCardBackground: Color {
+        colorScheme == .dark ? Color(red: 0.085, green: 0.085, blue: 0.095) : .white
+    }
+
+    private var rewardCardBackground: LinearGradient {
+        if colorScheme == .dark {
+            return LinearGradient(
+                colors: [
+                    Color(red: 0.15, green: 0.055, blue: 0.065),
+                    Color(red: 0.09, green: 0.065, blue: 0.075)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+        return LinearGradient(
+            colors: [
+                Color(red: 1.0, green: 0.88, blue: 0.90),
+                Color(red: 1.0, green: 0.96, blue: 0.97)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var primaryText: Color {
+        colorScheme == .dark ? .white : Color(red: 0.05, green: 0.08, blue: 0.14)
+    }
+
+    private var secondaryText: Color {
+        colorScheme == .dark ? Color.white.opacity(0.64) : Color(red: 0.38, green: 0.40, blue: 0.48)
+    }
+
+    private var softShadow: Color {
+        colorScheme == .dark ? Color.black.opacity(0.32) : Color.black.opacity(0.055)
+    }
+
+    private var logoutButton: some View {
+        Button {
+            session.logout()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .font(.headline.weight(.semibold))
+                Text("Log Out")
+                    .font(.headline.weight(.bold))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .foregroundStyle(Styles.rydrGradient)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Styles.rydrGradient, lineWidth: 1.5)
+            )
+        }
+        .padding(.horizontal, 24)
     }
 
     // MARK: - Image picker handler
@@ -467,7 +570,7 @@ struct SectionHeader: View {
                 .foregroundStyle(Styles.rydrGradient)
             Spacer()
         }
-        .padding(.horizontal)
+        .padding(.horizontal, 24)
     }
 }
 
@@ -482,9 +585,13 @@ struct TileItem: Identifiable {
 
 struct TileGrid: View {
     let tiles: [TileItem]
+    private let columns = [
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8)
+    ]
 
     var body: some View {
-        VStack(spacing: 10) {
+        LazyVGrid(columns: columns, spacing: 8) {
             ForEach(tiles) { tile in
                 NavigationLink {
                     tile.destination
@@ -494,66 +601,92 @@ struct TileGrid: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal)
+        .padding(.horizontal, 24)
         .padding(.bottom, 6)
     }
 }
 
 struct TileCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     var subtitle: String = ""
     let icon: String
 
     var body: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Styles.rydrGradient.opacity(0.12))
-                    .frame(width: 46, height: 46)
-                Image(systemName: icon)
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(Styles.rydrGradient)
-            }
+        VStack(alignment: .leading, spacing: 13) {
+            iconBubble
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.subheadline.weight(.bold))
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 if !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 0)
 
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 30, height: 30)
+                    .background(Styles.rydrGradient, in: Circle())
+            }
         }
-        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
+        .padding(15)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(.white)
-                .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 3)
+                .fill(colorScheme == .dark ? Color(red: 0.085, green: 0.085, blue: 0.095) : .white)
+                .shadow(color: colorScheme == .dark ? .black.opacity(0.28) : .black.opacity(0.055), radius: 14, x: 0, y: 8)
         )
+    }
+
+    private var iconBubble: some View {
+        Image(systemName: icon)
+            .font(.system(size: 23, weight: .semibold))
+            .foregroundStyle(Styles.rydrGradient)
+            .frame(width: 54, height: 54)
+            .background(Styles.rydrGradient.opacity(0.10), in: Circle())
+            .shadow(color: Color.red.opacity(colorScheme == .dark ? 0.12 : 0.10), radius: 10, x: 0, y: 5)
     }
 }
 
 // MARK: - Preference Picker row
 struct PreferencePicker: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     @Binding var selection: String
+    let subtitle: String
+    let icon: String
     let options: [String]
 
     var body: some View {
-        HStack {
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.primary)
+        HStack(spacing: 13) {
+            Image(systemName: icon)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Styles.rydrGradient)
+                .frame(width: 52, height: 52)
+                .background(Styles.rydrGradient.opacity(0.10), in: Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
 
             Spacer()
 
@@ -564,36 +697,27 @@ struct PreferencePicker: View {
             } label: {
                 HStack(spacing: 6) {
                     Text(selection)
-                        .font(.caption.weight(.bold))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(Styles.rydrGradient)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Image(systemName: "chevron.down")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(Styles.rydrGradient)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(Styles.rydrGradient.opacity(0.10))
-                .clipShape(Capsule())
+                .frame(width: 138)
+                .padding(.vertical, 12)
+                .background(Color(.tertiarySystemGroupedBackground), in: Capsule())
             }
         }
-        .padding(.vertical, 4)
+        .padding(13)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(colorScheme == .dark ? Color(red: 0.11, green: 0.11, blue: 0.12) : .white)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                )
+        )
     }
 }
-
-// MARK: - Settings (placeholder)
-struct SettingsView: View {
-    var body: some View {
-        List {
-            Toggle("Dark Mode", isOn: .constant(false))
-            Toggle("Location Services", isOn: .constant(true))
-            Toggle("Face ID for Login", isOn: .constant(true))
-        }
-        .navigationTitle("Settings")
-    }
-}
-
-
-
-
-

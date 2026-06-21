@@ -9,6 +9,17 @@ import FirebaseAuth
 import FirebaseFirestore
 
 struct LoginView: View {
+    private enum Palette {
+        static let ink = Color(red: 0.05, green: 0.09, blue: 0.16)
+        static let inputInk = Color(red: 0.06, green: 0.09, blue: 0.14)
+        static let googleInk = Color(red: 0.16, green: 0.17, blue: 0.22)
+        static let muted = Color(red: 0.54, green: 0.55, blue: 0.60)
+        static let divider = Color.black.opacity(0.08)
+        static let inputBorder = Color.black.opacity(0.09)
+        static let inputFill = Color.white.opacity(0.96)
+        static let countryFill = Color(red: 0.965, green: 0.966, blue: 0.975)
+    }
+
     private struct LoginProfile {
         let name: String
         let email: String
@@ -125,6 +136,8 @@ struct LoginView: View {
                 }
             )
         }
+        .environment(\.colorScheme, .light)
+        .preferredColorScheme(.light)
     }
 
     private var header: some View {
@@ -142,7 +155,7 @@ struct LoginView: View {
             VStack(spacing: 6) {
                 HStack(spacing: 6) {
                     Text("Hello")
-                        .foregroundColor(Color(red: 0.05, green: 0.09, blue: 0.16))
+                        .foregroundColor(Palette.ink)
                     Text("There!")
                         .foregroundStyle(Styles.rydrGradient)
                 }
@@ -151,7 +164,7 @@ struct LoginView: View {
 
                 Text("Let's get you started.")
                     .font(.title3.weight(.semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Palette.muted)
             }
         }
     }
@@ -164,14 +177,14 @@ struct LoginView: View {
                         .font(.title3)
                     Text("+1")
                         .font(.headline.weight(.bold))
-                        .foregroundColor(Color(red: 0.06, green: 0.09, blue: 0.14))
+                        .foregroundColor(Palette.inputInk)
                     Image(systemName: "chevron.down")
                         .font(.caption.weight(.bold))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Palette.muted)
                 }
                 .frame(width: 138)
                 .frame(maxHeight: .infinity)
-                .background(Color(.systemGray6).opacity(0.75))
+                .background(Palette.countryFill)
 
                 TextField("Phone number", text: Binding(
                     get: { phoneNumber },
@@ -180,21 +193,23 @@ struct LoginView: View {
                 .keyboardType(.numberPad)
                 .textContentType(.telephoneNumber)
                 .font(.title3.weight(.semibold))
+                .foregroundColor(Palette.inputInk)
+                .tint(Color.red)
                 .padding(.horizontal, 20)
                 .accessibilityLabel("US phone number field")
             }
             .frame(height: 66)
-            .background(Color.white.opacity(0.95))
+            .background(Palette.inputFill)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.black.opacity(0.09), lineWidth: 1)
+                    .stroke(Palette.inputBorder, lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.04), radius: 12, x: 0, y: 8)
 
             Text("US numbers only. Enter your 10-digit number.")
                 .font(.footnote.weight(.medium))
-                .foregroundColor(.secondary)
+                .foregroundColor(Palette.muted)
 
             Button {
                 sendCode()
@@ -230,17 +245,19 @@ struct LoginView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Confirm your password for \(repair.profile.email) to enable phone login on this account.")
                     .font(.footnote)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Palette.muted)
 
                 SecureField("Password", text: $phoneRepairPassword)
                     .font(.body.weight(.medium))
+                    .foregroundColor(Palette.inputInk)
+                    .tint(Color.red)
                     .padding(.horizontal, 16)
                     .frame(height: 54)
-                    .background(Color.white)
+                    .background(Palette.inputFill)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.black.opacity(0.09), lineWidth: 1)
+                            .stroke(Palette.inputBorder, lineWidth: 1)
                     )
                     .accessibilityLabel("Password for phone login link")
 
@@ -256,11 +273,11 @@ struct LoginView: View {
                 .disabled(phoneRepairPassword.isEmpty || isRepairingPhoneLogin)
             }
             .padding(16)
-            .background(.white.opacity(0.82))
+            .background(Color.white.opacity(0.82))
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                    .stroke(Palette.divider, lineWidth: 1)
             )
         }
     }
@@ -292,7 +309,7 @@ struct LoginView: View {
                     sendPasswordReset()
                 }
                 .font(.footnote.weight(.bold))
-                .foregroundColor(.secondary)
+                .foregroundColor(Palette.muted)
                 .accessibilityLabel("Reset password via email")
 
                 Spacer()
@@ -310,13 +327,13 @@ struct LoginView: View {
     private var divider: some View {
         HStack(spacing: 14) {
             Rectangle()
-                .fill(Color.black.opacity(0.08))
+                .fill(Palette.divider)
                 .frame(height: 1)
             Text("OR")
                 .font(.footnote.weight(.bold))
-                .foregroundColor(.secondary)
+                .foregroundColor(Palette.muted)
             Rectangle()
-                .fill(Color.black.opacity(0.08))
+                .fill(Palette.divider)
                 .frame(height: 1)
         }
         .padding(.vertical, 4)
@@ -347,15 +364,15 @@ struct LoginView: View {
                     Text("Sign in with Google")
                         .font(.headline.weight(.bold))
                 }
-                .foregroundColor(Color(red: 0.16, green: 0.17, blue: 0.22))
+                .foregroundColor(Palette.googleInk)
                 .frame(maxWidth: .infinity)
                 .frame(height: 62)
             }
-            .background(Color.white.opacity(0.95))
+            .background(Palette.inputFill)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                    .stroke(Palette.divider, lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.05), radius: 12, x: 0, y: 8)
             .accessibilityLabel("Sign in with Google")

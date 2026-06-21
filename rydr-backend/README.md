@@ -7,7 +7,7 @@ This service is intentionally separate from the existing payment and banking ser
 - `rydr-stripe-backend` / Stripe backend service
 - `rydr-bank-service`
 
-Those services remain operational and should continue to own their current responsibilities. `rydr-backend` is the home for new Rydr platform features including Community, Discover, Eventbrite, Ticketmaster, Cash Rydr Hub, Chat, and Notifications.
+Those services remain operational and should continue to own their current responsibilities. `rydr-backend` is the home for new Rydr platform features including Community, Discover, Ticketmaster, Cash Rydr Hub, Chat, and Notifications.
 
 ## Tech Stack
 
@@ -32,7 +32,7 @@ src/
 │   └── notifications.js
 │
 ├── services/
-│   ├── eventbriteService.js
+│   ├── ticketmasterService.js
 │   ├── firestoreService.js
 │   └── notificationService.js
 │
@@ -92,10 +92,10 @@ GET /health
 }
 ```
 
-Current placeholder feature routes:
+Current feature routes:
 
-- `GET /events`
-- `GET /events/:id`
+- `GET /events` - Atlanta event search powered by Ticketmaster Discovery
+- `GET /events/:id` - normalized Ticketmaster event detail
 - `GET /community/posts`
 - `POST /community/posts`
 - `GET /chat/conversations`
@@ -113,7 +113,6 @@ FIREBASE_CLIENT_EMAIL=firebase-adminsdk@example.iam.gserviceaccount.com
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
 FIREBASE_DATABASE_URL=
 
-EVENTBRITE_API_TOKEN=
 TICKETMASTER_API_KEY=
 ```
 
@@ -148,9 +147,8 @@ Required Render environment variables:
 - `FIREBASE_PRIVATE_KEY`
 - `FIREBASE_DATABASE_URL`, if needed by your Firebase project
 
-Optional future integration variables:
+Integration variables:
 
-- `EVENTBRITE_API_TOKEN`
 - `TICKETMASTER_API_KEY`
 
 ## Future Feature Areas
@@ -159,10 +157,9 @@ This backend is structured to support:
 
 - Community
 - Discover
-- Eventbrite
 - Ticketmaster
 - Cash Rydr Hub
 - Chat
 - Notifications
 
-The current routes return mock data while preserving service boundaries for future implementation.
+The event routes call Ticketmaster Discovery. The remaining placeholder routes preserve service boundaries for future implementation.

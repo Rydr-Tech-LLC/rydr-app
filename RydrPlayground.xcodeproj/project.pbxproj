@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		677BD2D77BC63C61137AC7B6 /* CommunityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9BB0CF78DAA0E8D26F1D50C /* CommunityView.swift */; };
 		8B2D68F02E4160F20043BDBE /* FirebaseAI in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2D68EF2E4160F20043BDBE /* FirebaseAI */; };
 		8B2D68F22E4160F20043BDBE /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2D68F12E4160F20043BDBE /* FirebaseAnalyticsCore */; };
 		8B2D68F42E4160F20043BDBE /* FirebaseAppDistribution-Beta in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2D68F32E4160F20043BDBE /* FirebaseAppDistribution-Beta */; };
@@ -30,6 +31,7 @@
 		D9935A322E077A9800056DB7 /* StripePaymentSheet in Frameworks */ = {isa = PBXBuildFile; productRef = D9935A312E077A9800056DB7 /* StripePaymentSheet */; };
 		D9935A342E077A9800056DB7 /* StripePayments in Frameworks */ = {isa = PBXBuildFile; productRef = D9935A332E077A9800056DB7 /* StripePayments */; };
 		D9935A362E077A9800056DB7 /* StripePaymentsUI in Frameworks */ = {isa = PBXBuildFile; productRef = D9935A352E077A9800056DB7 /* StripePaymentsUI */; };
+		E85C2ED3AD4FA4801E1BA4BE /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6467ACB7D822B6910AE8D280 /* Settings.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -50,9 +52,11 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		6467ACB7D822B6910AE8D280 /* Settings.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Settings.swift; path = Features/Profile/Settings.swift; sourceTree = "<group>"; };
 		D9A571E42DF9C6A900C04006 /* RydrPlayground.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RydrPlayground.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D9A571F22DF9C6AB00C04006 /* RydrPlaygroundTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RydrPlaygroundTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D9A571FC2DF9C6AB00C04006 /* RydrPlaygroundUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RydrPlaygroundUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D9BB0CF78DAA0E8D26F1D50C /* CommunityView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CommunityView.swift; path = Features/Profile/CommunityView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -120,6 +124,8 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		8BC309C82E538CA400CCD3E0 /* App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = App;
 			sourceTree = "<group>";
 		};
@@ -134,6 +140,8 @@
 		};
 		8BC309CA2E538CBB00CCD3E0 /* SharedUI */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = SharedUI;
 			sourceTree = "<group>";
 		};
@@ -156,6 +164,8 @@
 		};
 		D9A571F52DF9C6AB00C04006 /* RydrPlaygroundTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = RydrPlaygroundTests;
 			sourceTree = "<group>";
 		};
@@ -237,6 +247,8 @@
 				D9A571FF2DF9C6AB00C04006 /* RydrPlaygroundUITests */,
 				8B7F67542FE391C30094C08D /* Frameworks */,
 				D9A571E52DF9C6A900C04006 /* Products */,
+				6467ACB7D822B6910AE8D280 /* Settings.swift */,
+				D9BB0CF78DAA0E8D26F1D50C /* CommunityView.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -319,8 +331,6 @@
 				D9A571F52DF9C6AB00C04006 /* RydrPlaygroundTests */,
 			);
 			name = RydrPlaygroundTests;
-			packageProductDependencies = (
-			);
 			productName = RydrPlaygroundTests;
 			productReference = D9A571F22DF9C6AB00C04006 /* RydrPlaygroundTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -342,8 +352,6 @@
 				D9A571FF2DF9C6AB00C04006 /* RydrPlaygroundUITests */,
 			);
 			name = RydrPlaygroundUITests;
-			packageProductDependencies = (
-			);
 			productName = RydrPlaygroundUITests;
 			productReference = D9A571FC2DF9C6AB00C04006 /* RydrPlaygroundUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -426,6 +434,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E85C2ED3AD4FA4801E1BA4BE /* Settings.swift in Sources */,
+				677BD2D77BC63C61137AC7B6 /* CommunityView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -609,7 +619,7 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.5;
@@ -657,7 +667,7 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.5;

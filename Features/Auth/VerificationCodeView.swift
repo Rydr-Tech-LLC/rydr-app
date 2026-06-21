@@ -15,6 +15,16 @@ struct PhoneVerificationSession: Identifiable, Hashable {
 }
 
 struct VerificationCodeView: View {
+    private enum Palette {
+        static let ink = Color(red: 0.06, green: 0.09, blue: 0.14)
+        static let supportingInk = Color(red: 0.18, green: 0.19, blue: 0.23)
+        static let muted = Color(red: 0.54, green: 0.55, blue: 0.60)
+        static let divider = Color.black.opacity(0.08)
+        static let inputBorder = Color.black.opacity(0.09)
+        static let inputFill = Color.white.opacity(0.96)
+        static let iconFill = Color(red: 0.965, green: 0.966, blue: 0.975)
+    }
+
     let verificationID: String
     let phoneNumber: String
     var linkToCurrentUser = false
@@ -72,6 +82,8 @@ struct VerificationCodeView: View {
         .onDisappear {
             timer?.invalidate()
         }
+        .environment(\.colorScheme, .light)
+        .preferredColorScheme(.light)
     }
 
     private var topBar: some View {
@@ -81,7 +93,7 @@ struct VerificationCodeView: View {
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.title3.weight(.bold))
-                    .foregroundColor(Color(red: 0.06, green: 0.09, blue: 0.14))
+                    .foregroundColor(Palette.ink)
                     .frame(width: 50, height: 50)
                     .background(Color.white.opacity(0.86))
                     .clipShape(Circle())
@@ -126,7 +138,7 @@ struct VerificationCodeView: View {
             VStack(spacing: 10) {
                 HStack(spacing: 7) {
                     Text("Verify")
-                        .foregroundColor(Color(red: 0.06, green: 0.09, blue: 0.14))
+                        .foregroundColor(Palette.ink)
                     Text("Your Phone")
                         .foregroundStyle(Styles.rydrGradient)
                 }
@@ -135,11 +147,11 @@ struct VerificationCodeView: View {
 
                 Text("We sent a 6-digit code to:")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Palette.muted)
 
                 Text(formattedPhoneNumber)
                     .font(.headline.weight(.bold))
-                    .foregroundColor(Color(red: 0.06, green: 0.09, blue: 0.14))
+                    .foregroundColor(Palette.ink)
             }
             .multilineTextAlignment(.center)
         }
@@ -159,6 +171,7 @@ struct VerificationCodeView: View {
                 .focused($isFocused)
                 .foregroundColor(.clear)
                 .accentColor(.clear)
+                .tint(.clear)
                 .frame(height: 64)
                 .opacity(0.02)
                 .onChange(of: verificationCode) { _, newValue in
@@ -179,11 +192,11 @@ struct VerificationCodeView: View {
 
         return ZStack {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.96))
+                .fill(Palette.inputFill)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(
-                            isActive || hasCharacter ? Color.red.opacity(0.72) : Color.black.opacity(0.09),
+                            isActive || hasCharacter ? Color.red.opacity(0.72) : Palette.inputBorder,
                             lineWidth: isActive || hasCharacter ? 1.5 : 1
                         )
                 )
@@ -192,10 +205,10 @@ struct VerificationCodeView: View {
             if hasCharacter {
                 Text(String(characters[index]))
                     .font(.title2.weight(.bold))
-                    .foregroundColor(Color(red: 0.06, green: 0.09, blue: 0.14))
+                    .foregroundColor(Palette.ink)
             } else if isActive {
                 Capsule()
-                    .fill(Color(red: 0.06, green: 0.09, blue: 0.14))
+                    .fill(Palette.ink)
                     .frame(width: 3, height: 26)
             }
         }
@@ -210,7 +223,7 @@ struct VerificationCodeView: View {
 
             Text(canResend ? "You can request a new code" : "Resend available in")
                 .font(.footnote.weight(.semibold))
-                .foregroundColor(Color(red: 0.18, green: 0.19, blue: 0.23))
+                .foregroundColor(Palette.supportingInk)
 
             Spacer()
 
@@ -263,18 +276,18 @@ struct VerificationCodeView: View {
     private var securityDivider: some View {
         HStack(spacing: 14) {
             Rectangle()
-                .fill(Color.black.opacity(0.08))
+                .fill(Palette.divider)
                 .frame(height: 1)
 
             Image(systemName: "lock.fill")
                 .font(.caption.weight(.bold))
-                .foregroundColor(.secondary.opacity(0.7))
+                .foregroundColor(Palette.muted)
                 .frame(width: 32, height: 32)
-                .background(Color(.systemGray6))
+                .background(Palette.iconFill)
                 .clipShape(Circle())
 
             Rectangle()
-                .fill(Color.black.opacity(0.08))
+                .fill(Palette.divider)
                 .frame(height: 1)
         }
         .padding(.top, 8)
@@ -285,7 +298,7 @@ struct VerificationCodeView: View {
         VStack(spacing: 10) {
             Text("Didn't receive the code?")
                 .font(.footnote.weight(.semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(Palette.muted)
 
             Button {
                 onResendCode()
@@ -293,7 +306,7 @@ struct VerificationCodeView: View {
             } label: {
                 Text(canResend ? "Resend Code" : "Resend Code (\(countdown)s)")
                     .font(.subheadline.weight(.bold))
-                    .foregroundStyle(canResend ? Styles.rydrGradient : LinearGradient(colors: [.secondary], startPoint: .leading, endPoint: .trailing))
+                    .foregroundStyle(canResend ? Styles.rydrGradient : LinearGradient(colors: [Palette.muted], startPoint: .leading, endPoint: .trailing))
             }
             .disabled(!canResend)
             .accessibilityLabel(canResend ? "Resend code" : "Resend code available in \(countdown) seconds")

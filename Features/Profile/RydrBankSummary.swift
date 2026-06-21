@@ -219,6 +219,7 @@ final class RydrBankVM: ObservableObject {
 // MARK: - View
 
 struct RydrBankView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var vm = RydrBankVM()
 
     // Transfer sheet state
@@ -241,15 +242,7 @@ struct RydrBankView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color.white,
-                    Color(red: 0.995, green: 0.985, blue: 0.988),
-                    Color(red: 1.0, green: 0.95, blue: 0.955)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            bankBackground
             .ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
@@ -286,12 +279,39 @@ struct RydrBankView: View {
         }
     }
 
+    private var bankBackground: LinearGradient {
+        if colorScheme == .dark {
+            return LinearGradient(
+                colors: [
+                    Color.black,
+                    Color(red: 0.055, green: 0.045, blue: 0.05),
+                    Color(red: 0.10, green: 0.035, blue: 0.045)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        return LinearGradient(
+            colors: [
+                Color.white,
+                Color(red: 0.995, green: 0.985, blue: 0.988),
+                Color(red: 1.0, green: 0.95, blue: 0.955)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private var cardBackground: Color {
+        colorScheme == .dark ? Color(red: 0.085, green: 0.085, blue: 0.095) : .white
+    }
+
     private var bankHeader: some View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("RydrBank")
                     .font(.system(size: 34, weight: .heavy, design: .rounded))
-                    .foregroundColor(Color(red: 0.04, green: 0.05, blue: 0.08))
+                    .foregroundColor(colorScheme == .dark ? .white : Color(red: 0.04, green: 0.05, blue: 0.08))
 
                 (
                     Text("Earn ")
@@ -314,9 +334,9 @@ struct RydrBankView: View {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "bell")
                         .font(.headline.weight(.bold))
-                        .foregroundColor(Color(red: 0.05, green: 0.08, blue: 0.14))
+                        .foregroundColor(colorScheme == .dark ? .white : Color(red: 0.05, green: 0.08, blue: 0.14))
                         .frame(width: 48, height: 48)
-                        .background(Color.white.opacity(0.94))
+                        .background(Color(.secondarySystemGroupedBackground).opacity(0.94))
                         .clipShape(Circle())
                         .shadow(color: Color.red.opacity(0.10), radius: 16, x: 0, y: 8)
 
@@ -488,7 +508,7 @@ struct RydrBankView: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(.white)
+                .fill(cardBackground)
                 .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 3)
         )
         .padding(.horizontal)
@@ -523,7 +543,7 @@ struct RydrBankView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Your Codes")
                         .font(.title3.weight(.bold))
-                        .foregroundColor(Color(red: 0.05, green: 0.08, blue: 0.14))
+                        .foregroundColor(colorScheme == .dark ? .white : Color(red: 0.05, green: 0.08, blue: 0.14))
                     Text("Active RydrBank codes ready to apply, reserve, or transfer.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -539,7 +559,7 @@ struct RydrBankView: View {
                         .foregroundStyle(Styles.rydrGradient)
                         .padding(.horizontal, 12)
                         .frame(height: 36)
-                        .background(Color.white)
+                        .background(cardBackground)
                         .clipShape(Capsule())
                         .overlay(Capsule().stroke(Color.red.opacity(0.14), lineWidth: 1))
                 }
@@ -631,7 +651,7 @@ struct RydrBankView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Earn more free rides")
                     .font(.headline.weight(.bold))
-                    .foregroundColor(Color(red: 0.05, green: 0.08, blue: 0.14))
+                    .foregroundColor(colorScheme == .dark ? .white : Color(red: 0.05, green: 0.08, blue: 0.14))
                 Text("Take eligible rides and bank more RydrBank codes.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -653,7 +673,7 @@ struct RydrBankView: View {
             }
         }
         .padding(16)
-        .background(Color.white)
+        .background(cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 6)
         .padding(.horizontal, 24)
@@ -740,7 +760,7 @@ struct RydrBankView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(code.code)
                         .font(.headline.weight(.heavy))
-                        .foregroundColor(Color(red: 0.05, green: 0.08, blue: 0.14))
+                        .foregroundColor(colorScheme == .dark ? .white : Color(red: 0.05, green: 0.08, blue: 0.14))
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
                         .textSelection(.enabled)
@@ -803,7 +823,7 @@ struct RydrBankView: View {
             .padding(.horizontal, 14)
             .padding(.bottom, 14)
         }
-        .background(Color.white)
+        .background(cardBackground)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.06), radius: 12, x: 0, y: 6)
         .accessibilityElement(children: .combine)
@@ -899,7 +919,7 @@ struct RydrBankView: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(.white)
+                .fill(cardBackground)
                 .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
         )
         .opacity(readOnly ? 0.75 : 1)
@@ -1059,6 +1079,7 @@ private struct RydrBankWalletArt: View {
 }
 
 private struct RydrBankProgressView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let summary: RydrBankSummary
 
     private let groups: [(title: String, icon: String, key: String)] = [
@@ -1088,7 +1109,7 @@ private struct RydrBankProgressView: View {
             }
             .padding(.bottom, 28)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .background((colorScheme == .dark ? Color.black : Color(.systemGroupedBackground)).ignoresSafeArea())
         .navigationTitle("Progress")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -1152,7 +1173,7 @@ private struct RydrBankProgressView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(18)
-        .background(Color.white)
+        .background(colorScheme == .dark ? Color(red: 0.085, green: 0.085, blue: 0.095) : .white)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 5)
         .padding(.horizontal, 24)
@@ -1181,6 +1202,7 @@ private enum RydrBankHistoryStatus: String, CaseIterable {
 }
 
 private struct RydrBankHistoryView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let codes: [RydrBankCode]
     @State private var range: RydrBankHistoryRange = .days30
     @State private var status: RydrBankHistoryStatus = .all
@@ -1238,7 +1260,7 @@ private struct RydrBankHistoryView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(30)
-                    .background(Color.white)
+                    .background(colorScheme == .dark ? Color(red: 0.085, green: 0.085, blue: 0.095) : .white)
                     .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                 } else {
                     VStack(spacing: 12) {
@@ -1250,7 +1272,7 @@ private struct RydrBankHistoryView: View {
             }
             .padding(24)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .background((colorScheme == .dark ? Color.black : Color(.systemGroupedBackground)).ignoresSafeArea())
         .navigationTitle("History")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -1278,7 +1300,7 @@ private struct RydrBankHistoryView: View {
             Spacer()
         }
         .padding(14)
-        .background(Color.white)
+        .background(colorScheme == .dark ? Color(red: 0.085, green: 0.085, blue: 0.095) : .white)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 4)
     }

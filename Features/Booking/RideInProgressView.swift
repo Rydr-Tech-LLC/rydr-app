@@ -76,6 +76,10 @@ struct RideInProgressView: View {
                             showPaymentSheet = true
                         }
                     },
+                    onOpenMaps: {
+                        showTripOptionsSheet = false
+                        openPreferredMap()
+                    },
                     onChangePickup: { showTripOptionsSheet = false },
                     onChangeDropoff: { showTripOptionsSheet = false },
                     onAddStop: { showTripOptionsSheet = false },
@@ -282,6 +286,21 @@ struct RideInProgressView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+
+            if isRidingToDropoff {
+                Button {
+                    shareRide()
+                } label: {
+                    Label("Share ETA", systemImage: "square.and.arrow.up")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(Color.green, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Share ride ETA")
+            }
         }
         .padding(14)
         .background(
@@ -296,8 +315,14 @@ struct RideInProgressView: View {
 
     private var primaryActionsRow: some View {
         HStack(spacing: 12) {
-            labeledActionButton(title: "Message", icon: "message.fill", tint: .primary) {
-                showChat = true
+            if isRidingToDropoff {
+                labeledActionButton(title: "Share ETA", icon: "square.and.arrow.up", tint: .primary) {
+                    shareRide()
+                }
+            } else {
+                labeledActionButton(title: "Message", icon: "message.fill", tint: .primary) {
+                    showChat = true
+                }
             }
             labeledActionButton(title: "More", icon: "ellipsis", tint: .primary) {
                 showTripOptionsSheet = true
@@ -663,7 +688,7 @@ struct RideInProgressView: View {
     private var phaseInfoSubtitle: String {
         switch rideManager.currentRide?.status {
         case .enRouteToDropoff?:
-            return "Enjoy your ride. Message your driver if you need anything."
+            return "Share your ETA with someone you trust, or follow the trip below."
         case .waitingForRider?:
             if rideManager.pickupWaitSecondsRemaining > 0 {
                 return "Your driver has arrived. Please head to the pickup spot."
@@ -673,6 +698,10 @@ struct RideInProgressView: View {
         default:
             return "Your driver is heading to the pickup location."
         }
+    }
+
+    private var isRidingToDropoff: Bool {
+        rideManager.currentRide?.status == .enRouteToDropoff
     }
 
     private var pickupTimelineColor: Color {
@@ -822,12 +851,37 @@ struct RideInProgressView: View {
     }
 
     private func shareRide() {
-        let text = "I'm on a Rydr: \(rideManager.currentRide?.pickup ?? "") → \(rideManager.currentRide?.dropoff ?? "")"
+        guard let ride = rideManager.currentRide else { return }
+
+        let text: String
+        if isRidingToDropoff {
+            text = """
+            I'm in my Rydr and on the way to \(ride.dropoff).
+            ETA: \(etaArrivalText) (\(etaText)).
+            Trip: \(ride.pickup) → \(ride.dropoff)
+            """
+        } else {
+            text = """
+            My Rydr driver is on the way.
+            ETA: \(etaArrivalText) (\(etaText)).
+            Trip: \(ride.pickup) → \(ride.dropoff)
+            """
+        }
         let avc = UIActivityViewController(activityItems: [text], applicationActivities: nil)
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .first?.keyWindow?.rootViewController?
             .present(avc, animated: true)
+    }
+
+    private func openPreferredMap() {
+        guard let destination = activeDestinationCoordinate else { return }
+        RydrMapHandoff.openDirections(
+            to: destination,
+            name: rideManager.currentRide?.status == .enRouteToDropoff
+                ? rideManager.currentRide?.dropoff
+                : rideManager.currentRide?.pickup
+        )
     }
 
     private func callDriver() {
@@ -839,6 +893,7 @@ struct RideInProgressView: View {
     private struct TripOptionsSheet: View {
         let cancelTitle: String
         var onPayment: () -> Void
+        var onOpenMaps: () -> Void
         var onChangePickup: () -> Void
         var onChangeDropoff: () -> Void
         var onAddStop: () -> Void
@@ -851,6 +906,7 @@ struct RideInProgressView: View {
                 List {
                     Section {
                         optionRow("creditcard.fill", "Payment method", action: onPayment)
+                        optionRow("map.fill", "Open in \(RydrMapHandoff.currentProvider.title)", action: onOpenMaps)
                     }
 
                     Section {

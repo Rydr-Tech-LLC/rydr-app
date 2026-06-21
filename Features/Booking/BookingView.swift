@@ -1446,24 +1446,34 @@ private struct ShortcutTile: View {
                     .frame(height: 84)
 
                 VStack(spacing: 7) {
-                    Image(systemName: shortcut.icon)
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(shortcut.tint)
+                    shortcutIcon
                     Text(shortcut.label)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.primary)
                 }
-
-                if shortcut.kind == .custom {
-                    Circle()
-                        .stroke(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
-                        .foregroundStyle(Color.purple.opacity(0.35))
-                        .frame(width: 46, height: 46)
-                        .offset(y: -9)
-                }
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private var shortcutIcon: some View {
+        if shortcut.kind == .custom {
+            Image(systemName: shortcut.icon)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(shortcut.tint)
+                .frame(width: 46, height: 46)
+                .overlay(
+                    Circle()
+                        .stroke(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                        .foregroundStyle(Color.purple.opacity(0.35))
+                )
+        } else {
+            Image(systemName: shortcut.icon)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(shortcut.tint)
+                .frame(width: 46, height: 46)
+        }
     }
 
     private var tileBackground: LinearGradient {
