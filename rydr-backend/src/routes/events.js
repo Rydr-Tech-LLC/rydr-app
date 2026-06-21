@@ -3,6 +3,15 @@ const ticketmasterService = require("../services/ticketmasterService");
 
 const router = express.Router();
 
+router.get("/status", (req, res) => {
+  res.json({
+    provider: "ticketmaster",
+    configured: Boolean(process.env.TICKETMASTER_API_KEY),
+    city: "Atlanta",
+    stateCode: "GA"
+  });
+});
+
 router.get("/", async (req, res, next) => {
   try {
     const payload = await ticketmasterService.getEvents({

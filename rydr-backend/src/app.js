@@ -47,10 +47,16 @@ app.use((err, req, res, next) => {
     console.error(err);
   }
 
-  res.status(statusCode).json({
+  const payload = {
     error: statusCode === 500 ? "Internal Server Error" : err.message,
     message: process.env.NODE_ENV === "production" ? undefined : err.message
-  });
+  };
+
+  if (err.details) {
+    payload.details = err.details;
+  }
+
+  res.status(statusCode).json(payload);
 });
 
 if (require.main === module) {

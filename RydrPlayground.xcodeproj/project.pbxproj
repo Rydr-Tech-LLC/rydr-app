@@ -60,6 +60,14 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		8B8AA5D42FE8367C004C7F9F /* Exceptions for "Features" folder in "RydrPlayground" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Profile/CommunityView.swift,
+				Profile/Settings.swift,
+			);
+			target = D9A571E32DF9C6A900C04006 /* RydrPlayground */;
+		};
 		8BC309D32E538EF400CCD3E0 /* Exceptions for "Core" folder in "RydrPlaygroundTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -124,8 +132,6 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		8BC309C82E538CA400CCD3E0 /* App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = App;
 			sourceTree = "<group>";
 		};
@@ -140,14 +146,13 @@
 		};
 		8BC309CA2E538CBB00CCD3E0 /* SharedUI */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = SharedUI;
 			sourceTree = "<group>";
 		};
 		8BC309CB2E538CD300CCD3E0 /* Features */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
+				8B8AA5D42FE8367C004C7F9F /* Exceptions for "Features" folder in "RydrPlayground" target */,
 				8BC309D52E538FA000CCD3E0 /* Exceptions for "Features" folder in "RydrPlaygroundTests" target */,
 				8BC309D62E538FA000CCD3E0 /* Exceptions for "Features" folder in "RydrPlaygroundUITests" target */,
 			);
@@ -164,8 +169,6 @@
 		};
 		D9A571F52DF9C6AB00C04006 /* RydrPlaygroundTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = RydrPlaygroundTests;
 			sourceTree = "<group>";
 		};
@@ -364,7 +367,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1640;
-				LastUpgradeCheck = 2620;
+				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					D9A571E32DF9C6A900C04006 = {
 						CreatedOnToolsVersion = 16.4;

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "2620"
+   LastUpgradeVersion = "2650"
    version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -51,16 +51,6 @@
          </BuildableReference>
       </BuildableProductRunnable>
       <EnvironmentVariables>
-         <EnvironmentVariable
-            key = "FIRAppCheckDebugToken"
-            value = "956C33B1-F036-4D76-AD96-B1A627F06927"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
-            key = "XcodeAppCheckDebugToken"
-            value = "6B0F1666-9B57-4043-A7F5-9B98351983C4"
-            isEnabled = "YES">
-         </EnvironmentVariable>
          <EnvironmentVariable
             key = "RYDR_USE_MOCK_RIDES"
             value = "1"

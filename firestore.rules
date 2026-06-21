@@ -34,6 +34,42 @@ service cloud.firestore {
       return signedIn() && data.riderUid == request.auth.uid;
     }
 
+    function cashHubConnectedDriver(data) {
+      return signedIn() && (
+        data.connectedDriverUid == request.auth.uid ||
+        data.acceptedByUid == request.auth.uid
+      );
+    }
+
+    function validCashHubRequestCreate() {
+      return signedIn()
+        && request.resource.data.riderUid == request.auth.uid
+        && request.resource.data.status == "open";
+    }
+
+    function validCashHubRequestUpdate() {
+      return cashHubRequestOwner(resource.data)
+        || cashHubConnectedDriver(resource.data)
+        || (
+          signedIn()
+          && resource.data.status == "open"
+          && (!("connectedDriverUid" in resource.data) || resource.data.connectedDriverUid == null || resource.data.connectedDriverUid == "")
+          && request.resource.data.connectedDriverUid == request.auth.uid
+        );
+    }
+
+    function validCashHubResponseCreate() {
+      return signedIn()
+        && request.resource.data.authorUid == request.auth.uid;
+    }
+
+    function validCashHubResponseUpdate(parentRequestId) {
+      return signedIn() && (
+        resource.data.authorUid == request.auth.uid ||
+        cashHubRequestOwner(get(/databases/$(database)/documents/cashRydrRequests/$(parentRequestId)).data)
+      );
+    }
+
     function isUnclaimedRideRequest(data) {
       return signedIn()
         && data.status in ["pending", "available"]
@@ -139,12 +175,14 @@ service cloud.firestore {
 
     match /cashRydrRequests/{requestId} {
       allow read: if signedIn();
-      allow create: if signedIn();
-      allow update: if signedIn();
+      allow create: if validCashHubRequestCreate();
+      allow update: if validCashHubRequestUpdate();
       allow delete: if cashHubRequestOwner(resource.data);
 
       match /responses/{responseId} {
-        allow read, create, update: if signedIn();
+        allow read: if signedIn();
+        allow create: if validCashHubResponseCreate();
+        allow update: if validCashHubResponseUpdate(requestId);
       }
     }
 

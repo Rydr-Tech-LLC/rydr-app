@@ -18,9 +18,12 @@ function getAPIKey() {
   return process.env.TICKETMASTER_API_KEY;
 }
 
-function buildError(message, statusCode = 500) {
+function buildError(message, statusCode = 500, details = undefined) {
   const error = new Error(message);
   error.statusCode = statusCode;
+  if (details) {
+    error.details = details;
+  }
   return error;
 }
 
@@ -99,11 +102,32 @@ async function ticketmasterFetch(path, params) {
   });
 
   const response = await fetch(url);
-  const body = await response.json().catch(() => ({}));
+  const responseText = await response.text();
+  let body = {};
+
+  if (responseText) {
+    try {
+      body = JSON.parse(responseText);
+    } catch {
+      body = {};
+    }
+  }
 
   if (!response.ok) {
-    const message = body?.fault?.faultstring || body?.message || "Ticketmaster request failed.";
-    throw buildError(message, response.status);
+    const message =
+      body?.fault?.faultstring ||
+      body?.fault?.faultstring?.message ||
+      body?.message ||
+      body?.error_description ||
+      body?.error ||
+      "Ticketmaster request failed.";
+
+    throw buildError(message, response.status, {
+      provider: "ticketmaster",
+      upstreamStatus: response.status,
+      upstreamStatusText: response.statusText,
+      upstreamBody: responseText.slice(0, 500)
+    });
   }
 
   return body;

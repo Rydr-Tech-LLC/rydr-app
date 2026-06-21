@@ -429,16 +429,28 @@ private struct CommunityEventsService {
 
         guard (200..<300).contains(http.statusCode) else {
             let serverError = try? JSONDecoder().decode(CommunityServerError.self, from: data)
-            throw CommunityEventsError.server(serverError?.message ?? serverError?.error ?? "Events could not be loaded.")
+            if let message = serverError?.message ?? serverError?.error {
+                throw CommunityEventsError.server(message)
+            }
+
+            let body = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw CommunityEventsError.httpStatus(http.statusCode, body)
         }
 
-        return try JSONDecoder().decode(CommunityEventsResponse.self, from: data).events
+        do {
+            return try JSONDecoder().decode(CommunityEventsResponse.self, from: data).events
+        } catch {
+            throw CommunityEventsError.decoding
+        }
     }
 }
 
 private enum CommunityEventsError: LocalizedError {
     case badURL
     case badResponse
+    case decoding
+    case httpStatus(Int, String?)
     case server(String)
 
     var errorDescription: String? {
@@ -447,6 +459,13 @@ private enum CommunityEventsError: LocalizedError {
             return "The events request could not be built."
         case .badResponse:
             return "The events service returned an unexpected response."
+        case .decoding:
+            return "The events service returned data Rydr could not read."
+        case .httpStatus(let status, let body):
+            if let body, !body.isEmpty {
+                return "Events request failed with HTTP \(status): \(body)"
+            }
+            return "Events request failed with HTTP \(status)."
         case .server(let message):
             return message
         }
