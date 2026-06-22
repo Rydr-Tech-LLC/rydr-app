@@ -5,687 +5,714 @@
 //  Created by Khris Nunnally on 6/14/25.
 //
 import SwiftUI
-import UIKit
-
-private enum WelcomePalette {
-    static let rydrRed = Color(red: 0.95, green: 0.02, blue: 0.19)
-    static let deepRed = Color(red: 0.70, green: 0.00, blue: 0.14)
-
-    static let background = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.025, green: 0.025, blue: 0.032, alpha: 1)
-        : UIColor.white
-    })
-
-    static let heroTop = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.03, green: 0.03, blue: 0.04, alpha: 1)
-        : UIColor.white
-    })
-
-    static let heroMid = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.10, green: 0.03, blue: 0.05, alpha: 1)
-        : UIColor(red: 1.00, green: 0.97, blue: 0.98, alpha: 1)
-    })
-
-    static let heroBottom = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.025, green: 0.025, blue: 0.032, alpha: 1)
-        : UIColor.white
-    })
-
-    static let ink = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.97, green: 0.97, blue: 0.99, alpha: 1)
-        : UIColor(red: 0.06, green: 0.07, blue: 0.12, alpha: 1)
-    })
-
-    static let cardInk = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.96, green: 0.96, blue: 0.98, alpha: 1)
-        : UIColor(red: 0.10, green: 0.11, blue: 0.16, alpha: 1)
-    })
-
-    static let muted = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.72, green: 0.73, blue: 0.78, alpha: 1)
-        : UIColor(red: 0.42, green: 0.43, blue: 0.50, alpha: 1)
-    })
-
-    static let secondaryMuted = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.66, green: 0.67, blue: 0.73, alpha: 1)
-        : UIColor(red: 0.46, green: 0.47, blue: 0.54, alpha: 1)
-    })
-
-    static let cardFill = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.105, green: 0.105, blue: 0.125, alpha: 1)
-        : UIColor.white
-    })
-
-    static let medallionFill = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.065, green: 0.065, blue: 0.078, alpha: 1)
-        : UIColor.white
-    })
-
-    static let softRedFill = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-        ? UIColor(red: 0.26, green: 0.02, blue: 0.07, alpha: 1)
-        : UIColor(red: 1.0, green: 0.91, blue: 0.94, alpha: 1)
-    })
-}
 
 struct WelcomeView: View {
+    @State private var showSignup = false
+    @State private var contentVisible = false
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
         NavigationStack {
             GeometryReader { proxy in
                 let safeTop = proxy.safeAreaInsets.top
+                let safeBottom = proxy.safeAreaInsets.bottom
+                let viewportHeight = proxy.size.height
 
-                ZStack(alignment: .bottom) {
-                    WelcomePalette.background.ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    ZStack(alignment: .top) {
+                        WelcomeBackground()
 
-                    VStack(spacing: 0) {
-                        hero
-                            .frame(height: min(proxy.size.height * 0.54, 470))
-                            .padding(.top, max(0, safeTop - 6))
-                        Spacer(minLength: 0)
-                    }
-                    .ignoresSafeArea(edges: .top)
+                        VStack(spacing: 0) {
+                            topBar(safeTop: safeTop)
 
-                    BottomSpeedRibbon()
-                        .frame(height: 120)
-                        .opacity(0.88)
-                        .ignoresSafeArea(edges: .bottom)
-                        .accessibilityHidden(true)
+                            VStack(spacing: 22) {
+                                LogoSection()
+                                    .padding(.top, 0)
+                                    .opacity(contentVisible ? 1 : 0)
+                                    .offset(y: contentVisible ? 0 : 18)
 
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 14) {
-                            Spacer()
-                                .frame(height: min(proxy.size.height * 0.36, 320))
+                                HeroSection()
+                                    .opacity(contentVisible ? 1 : 0)
+                                    .offset(y: contentVisible ? 0 : 24)
 
-                            headline
-                            benefits
-                                .padding(.top, 8)
+                                FeatureHighlights()
+                                    .opacity(contentVisible ? 1 : 0)
+                                    .offset(y: contentVisible ? 0 : 30)
 
-                            VStack(spacing: 12) {
-                                NavigationLink(destination: SignupCoordinator()) {
-                                    WelcomeActionCard(
-                                        icon: "car.fill",
-                                        title: "Ride with Rydr",
-                                        subtitle: "Sign up to take your first ride",
-                                        isPrimary: true
-                                    )
+                                VStack(spacing: 14) {
+                                    Button {
+                                        showSignup = true
+                                    } label: {
+                                        PrimaryCTAButton()
+                                    }
+                                    .buttonStyle(WelcomePressStyle())
+
+                                    NavigationLink(destination: CashHubSignupView()) {
+                                        ActionCard(
+                                            icon: .asset("RydrLogo"),
+                                            title: "Ride with CashRydr",
+                                            subtitle: "Post. Negotiate. Ride."
+                                        )
+                                    }
+                                    .buttonStyle(WelcomePressStyle())
+
+                                    NavigationLink(destination: LoginView()) {
+                                        ActionCard(
+                                            icon: .system("person.crop.circle.fill"),
+                                            title: "Log Into Your Existing Ride Account",
+                                            subtitle: "Access your account"
+                                        )
+                                    }
+                                    .buttonStyle(WelcomePressStyle())
                                 }
-                                .buttonStyle(.plain)
-
-                                NavigationLink(destination: CashHubSignupView()) {
-                                    WelcomeActionCard(
-                                        icon: "stylizedR",
-                                        title: "Ride with CashRydr Hub",
-                                        subtitle: "Post. Negotiate. Ride.",
-                                        isPrimary: false
-                                    )
-                                }
-                                .buttonStyle(.plain)
-
-                                NavigationLink(destination: LoginView()) {
-                                    WelcomeActionCard(
-                                        icon: "person.fill",
-                                        title: "Log Into Existing Ride Account",
-                                        subtitle: "Access Your Account",
-                                        isPrimary: false
-                                    )
-                                }
-                                .buttonStyle(.plain)
+                                .padding(.top, 2)
+                                .opacity(contentVisible ? 1 : 0)
+                                .offset(y: contentVisible ? 0 : 36)
                             }
-                            .padding(.top, 12)
-
-                            Spacer(minLength: 96)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, safeBottom + 28)
+                            .frame(maxWidth: 560)
+                            .frame(maxWidth: .infinity)
                         }
-                        .padding(.horizontal, 28)
-                        .frame(maxWidth: 560)
-                        .frame(maxWidth: .infinity)
+                    }
+                    .frame(minHeight: max(viewportHeight, 860))
+                }
+                .background(WelcomePalette.background)
+                .ignoresSafeArea(edges: [.top, .bottom])
+                .onAppear {
+                    withAnimation(.spring(response: 0.85, dampingFraction: 0.88).delay(0.12)) {
+                        contentVisible = true
                     }
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
         }
-    }
-
-    private var hero: some View {
-        ZStack(alignment: .top) {
-            RydrCityHeroBackground()
-                .accessibilityHidden(true)
-
-            VStack(spacing: 0) {
-                LogoMedallion()
-                    .frame(width: 186, height: 186)
-                    .padding(.top, 74)
-                Spacer()
-            }
+        .fullScreenCover(isPresented: $showSignup) {
+            SignupCoordinator()
         }
+        .preferredColorScheme(.light)
+        .environment(\.colorScheme, .light)
     }
 
-    private var headline: some View {
-        VStack(spacing: 0) {
-            Text("RIDE")
-                .font(.system(size: 56, weight: .black, design: .rounded).italic())
-                .foregroundStyle(WelcomePalette.ink)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 62)
-
-            HStack(spacing: 8) {
-                SpeedWordMark()
-                    .frame(width: 86, height: 34)
-                    .offset(y: 3)
-
-                Text("DIFFERENT")
-                    .font(.system(size: 48, weight: .black, design: .rounded).italic())
-                    .foregroundStyle(WelcomePalette.rydrRed)
-                    .minimumScaleFactor(0.72)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 36)
-
-            Text("Your ride. Your way. Anytime, anywhere.")
-                .font(.system(size: 17, weight: .bold, design: .rounded))
-                .foregroundStyle(WelcomePalette.muted)
-                .padding(.top, 8)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private var benefits: some View {
-        HStack(spacing: 0) {
-            BenefitBadge(
-                icon: "shield.fill",
-                accentIcon: "checkmark",
-                title: "Safe & Reliable",
-                subtitle: "Your safety is\nour priority"
-            )
-            Divider().frame(height: 54)
-            BenefitBadge(
-                icon: "timer",
-                accentIcon: nil,
-                title: "Rides in Minutes",
-                subtitle: "Get there,\nstress free"
-            )
-            Divider().frame(height: 54)
-            BenefitBadge(
-                icon: "person.fill",
-                accentIcon: "stars",
-                title: "Top Rated",
-                subtitle: "Great experiences\nevery time"
-            )
-        }
-    }
-}
-
-private struct LogoMedallion: View {
-    private let red = Color(red: 0.95, green: 0.02, blue: 0.19)
-
-    var body: some View {
-        ZStack {
-            ParticleRing()
-                .foregroundStyle(red)
-
-            Circle()
-                .fill(WelcomePalette.medallionFill)
-                .shadow(color: red.opacity(0.10), radius: 18, x: 0, y: 10)
-
-            VStack(spacing: 4) {
-                Image("RydrLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 76, height: 76)
-                    .accessibilityLabel("Rydr logo")
-
-                Text("Rydr")
-                    .font(.system(size: 24, weight: .black, design: .rounded))
-                    .foregroundStyle(red)
-
-                Text("Ride Different")
-                    .font(.system(size: 12, weight: .medium, design: .serif).italic())
-                    .foregroundStyle(red)
-            }
-            .offset(y: 8)
-        }
-    }
-}
-
-private struct ParticleRing: View {
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(lineWidth: 2)
-                .padding(22)
-
-            ForEach(0..<150, id: \.self) { index in
-                let angle = Double(index) * 2.399963
-                let radius = 77.0 + Double((index * 37) % 22)
-                let dotSize = CGFloat(1.2 + Double((index * 11) % 5) * 0.45)
-
-                Circle()
-                    .frame(width: dotSize, height: dotSize)
-                    .offset(
-                        x: CGFloat(cos(angle) * radius),
-                        y: CGFloat(sin(angle) * radius)
-                    )
-                    .opacity(0.22 + Double((index * 13) % 8) * 0.08)
-            }
-        }
-    }
-}
-
-private struct RydrCityHeroBackground: View {
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    WelcomePalette.heroTop,
-                    WelcomePalette.heroMid,
-                    WelcomePalette.heroBottom
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            CitySkyline()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.64, green: 0.66, blue: 0.72).opacity(0.35),
-                            Color(red: 0.12, green: 0.13, blue: 0.18).opacity(0.16)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .blur(radius: 1.2)
-                .offset(y: 54)
-
-            SpeedLines()
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 1.0, green: 0.02, blue: 0.19).opacity(0.0),
-                            Color(red: 1.0, green: 0.02, blue: 0.19).opacity(0.86),
-                            Color(red: 1.0, green: 0.55, blue: 0.64).opacity(0.0)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ),
-                    style: StrokeStyle(lineWidth: 4, lineCap: .round)
-                )
-                .blur(radius: 0.7)
-                .offset(y: 58)
-
-            RoadGlow()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.clear,
-                            Color(red: 1.0, green: 0.02, blue: 0.19).opacity(0.18),
-                            WelcomePalette.background.opacity(0.95)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .offset(y: 118)
-
-            SedanIllustration()
-                .frame(width: 255, height: 150)
-                .offset(x: 88, y: 248)
-        }
-        .clipped()
-    }
-}
-
-private struct CitySkyline: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let base = rect.maxY * 0.76
-        let widths: [CGFloat] = [34, 52, 30, 44, 28, 56, 38, 46, 30, 62, 38, 46]
-        var x = rect.minX - 28
-
-        for (index, width) in widths.enumerated() {
-            let height = CGFloat([148, 214, 108, 168, 84, 190, 124, 166, 96, 226, 132, 172][index])
-            let top = base - height
-            path.addRoundedRect(
-                in: CGRect(x: x, y: top, width: width, height: height),
-                cornerSize: CGSize(width: 2, height: 2)
-            )
-
-            let antennaX = x + width * 0.56
-            path.move(to: CGPoint(x: antennaX, y: top))
-            path.addLine(to: CGPoint(x: antennaX + 5, y: top - 18))
-
-            x += width + CGFloat([18, 26, 16, 22][index % 4])
-        }
-
-        return path
-    }
-}
-
-private struct SpeedLines: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let vanishing = CGPoint(x: rect.midX, y: rect.maxY * 0.58)
-
-        for index in 0..<18 {
-            let y = rect.maxY * (0.30 + CGFloat(index) * 0.030)
-            let startsLeft = index % 2 == 0
-            let startX = startsLeft ? rect.minX - 48 : rect.maxX + 48
-            path.move(to: CGPoint(x: startX, y: y))
-            path.addLine(to: CGPoint(x: vanishing.x + CGFloat(index - 9) * 3, y: vanishing.y))
-        }
-
-        for index in 0..<7 {
-            let y = rect.maxY * (0.64 + CGFloat(index) * 0.028)
-            path.move(to: CGPoint(x: rect.minX - 40, y: y))
-            path.addLine(to: CGPoint(x: rect.maxX * 0.45, y: y - CGFloat(index) * 9))
-        }
-
-        return path
-    }
-}
-
-private struct RoadGlow: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.midX, y: rect.midY * 0.56))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY * 0.84))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY * 0.84))
-        path.closeSubpath()
-        return path
-    }
-}
-
-private struct SedanIllustration: View {
-    private let red = Color(red: 0.95, green: 0.02, blue: 0.19)
-
-    var body: some View {
-        ZStack {
-            Path { path in
-                path.move(to: CGPoint(x: 26, y: 96))
-                path.addCurve(to: CGPoint(x: 78, y: 53), control1: CGPoint(x: 42, y: 68), control2: CGPoint(x: 58, y: 56))
-                path.addCurve(to: CGPoint(x: 132, y: 42), control1: CGPoint(x: 96, y: 50), control2: CGPoint(x: 114, y: 43))
-                path.addCurve(to: CGPoint(x: 224, y: 72), control1: CGPoint(x: 172, y: 39), control2: CGPoint(x: 205, y: 54))
-                path.addCurve(to: CGPoint(x: 238, y: 108), control1: CGPoint(x: 236, y: 84), control2: CGPoint(x: 242, y: 96))
-                path.addCurve(to: CGPoint(x: 178, y: 124), control1: CGPoint(x: 219, y: 121), control2: CGPoint(x: 198, y: 125))
-                path.addLine(to: CGPoint(x: 54, y: 122))
-                path.addCurve(to: CGPoint(x: 26, y: 96), control1: CGPoint(x: 42, y: 120), control2: CGPoint(x: 30, y: 111))
-                path.closeSubpath()
-            }
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color.white,
-                        Color(red: 0.78, green: 0.80, blue: 0.86),
-                        Color(red: 0.18, green: 0.18, blue: 0.23)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .shadow(color: Color.black.opacity(0.26), radius: 12, x: 4, y: 9)
-
-            Path { path in
-                path.move(to: CGPoint(x: 80, y: 58))
-                path.addCurve(to: CGPoint(x: 134, y: 48), control1: CGPoint(x: 96, y: 52), control2: CGPoint(x: 116, y: 49))
-                path.addCurve(to: CGPoint(x: 182, y: 62), control1: CGPoint(x: 154, y: 48), control2: CGPoint(x: 169, y: 53))
-                path.addLine(to: CGPoint(x: 154, y: 75))
-                path.addLine(to: CGPoint(x: 92, y: 74))
-                path.closeSubpath()
-            }
-            .fill(Color(red: 0.12, green: 0.13, blue: 0.18).opacity(0.78))
-
-            RoundedRectangle(cornerRadius: 5)
-                .fill(red)
-                .frame(width: 78, height: 10)
-                .offset(x: 68, y: 15)
-                .shadow(color: red.opacity(0.55), radius: 8, x: -10, y: 0)
-
-            RoundedRectangle(cornerRadius: 4)
-                .fill(red.opacity(0.88))
-                .frame(width: 34, height: 8)
-                .offset(x: -92, y: 6)
-
-            Circle()
-                .fill(Color(red: 0.06, green: 0.06, blue: 0.08))
-                .frame(width: 39, height: 39)
-                .offset(x: -64, y: 45)
-            Circle()
-                .stroke(Color.white.opacity(0.45), lineWidth: 4)
-                .frame(width: 24, height: 24)
-                .offset(x: -64, y: 45)
-
-            Circle()
-                .fill(Color(red: 0.06, green: 0.06, blue: 0.08))
-                .frame(width: 43, height: 43)
-                .offset(x: 74, y: 44)
-            Circle()
-                .stroke(Color.white.opacity(0.45), lineWidth: 4)
-                .frame(width: 26, height: 26)
-                .offset(x: 74, y: 44)
-
-            Text("R")
-                .font(.system(size: 20, weight: .black, design: .rounded))
-                .foregroundStyle(red)
-                .offset(x: 103, y: 6)
-        }
-        .opacity(0.96)
-    }
-}
-
-private struct SpeedWordMark: View {
-    var body: some View {
-        VStack(spacing: 4) {
-            ForEach(0..<5, id: \.self) { index in
-                Capsule()
-                    .fill(Color(red: 0.95, green: 0.02, blue: 0.19).opacity(0.95 - Double(index) * 0.08))
-                    .frame(height: 4)
-                    .padding(.leading, CGFloat(index) * 10)
-            }
-        }
-    }
-}
-
-private struct BenefitBadge: View {
-    let icon: String
-    let accentIcon: String?
-    let title: String
-    let subtitle: String
-
-    private let red = Color(red: 0.95, green: 0.02, blue: 0.19)
-
-    var body: some View {
-        VStack(spacing: 7) {
-            ZStack(alignment: .topTrailing) {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(WelcomePalette.softRedFill)
-                    .frame(width: 43, height: 43)
-                    .shadow(color: red.opacity(0.20), radius: 14, x: 0, y: 8)
-
-                Image(systemName: icon)
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(red)
-                    .frame(width: 43, height: 43)
-
-                if accentIcon == "checkmark" {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .heavy))
-                        .foregroundStyle(.white)
-                        .offset(x: -10, y: 14)
-                } else if accentIcon == "stars" {
-                    HStack(spacing: 1) {
-                        ForEach(0..<3, id: \.self) { _ in
-                            Image(systemName: "star.fill")
-                                .font(.system(size: 6, weight: .black))
-                                .foregroundStyle(red)
-                        }
+    private func topBar(safeTop: CGFloat) -> some View {
+        HStack {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(WelcomePalette.ink)
+                    .frame(width: 44, height: 44)
+                    .background(.white.opacity(0.86), in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.82), lineWidth: 1)
                     }
-                    .offset(x: 4, y: -5)
-                }
+                    .shadow(color: .black.opacity(0.08), radius: 16, x: 0, y: 8)
             }
+            .buttonStyle(WelcomePressStyle(scale: 0.92))
+            .accessibilityLabel("Back")
 
-            Text(title)
-                .font(.system(size: 12, weight: .black, design: .rounded))
-                .foregroundStyle(WelcomePalette.cardInk)
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-
-            Text(subtitle)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(WelcomePalette.secondaryMuted)
-                .multilineTextAlignment(.center)
-                .lineSpacing(-1)
-                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
         }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
+        .padding(.horizontal, 22)
+        .padding(.top, safeTop + 6)
+        .padding(.bottom, 0)
     }
 }
 
-private struct WelcomeActionCard: View {
-    let icon: String
-    let title: String
-    let subtitle: String
-    let isPrimary: Bool
+private enum WelcomePalette {
+    static let red = Color(red: 0.96, green: 0.02, blue: 0.19)
+    static let redDeep = Color(red: 0.66, green: 0.0, blue: 0.15)
+    static let redSoft = Color(red: 1.0, green: 0.89, blue: 0.92)
+    static let ink = Color(red: 0.035, green: 0.055, blue: 0.11)
+    static let navy = Color(red: 0.025, green: 0.045, blue: 0.105)
+    static let slate = Color(red: 0.36, green: 0.38, blue: 0.47)
+    static let lightGray = Color(red: 0.957, green: 0.963, blue: 0.975)
+    static let background = Color(red: 0.988, green: 0.99, blue: 0.996)
 
-    private let red = Color(red: 0.95, green: 0.02, blue: 0.19)
+    static let rydrGradient = LinearGradient(
+        colors: [red, Color(red: 0.88, green: 0.0, blue: 0.24), redDeep],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 
+    static let horizontalRydrGradient = LinearGradient(
+        colors: [Color(red: 1.0, green: 0.12, blue: 0.28), red, redDeep],
+        startPoint: .leading,
+        endPoint: .trailing
+    )
+}
+
+private struct WelcomeBackground: View {
     var body: some View {
-        HStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(isPrimary ? Color.white.opacity(0.18) : WelcomePalette.softRedFill)
-                    .frame(width: 64, height: 64)
-
-                if icon == "stylizedR" {
-                    Image("RydrLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 40, height: 40)
-                } else {
-                    Image(systemName: icon)
-                        .font(.system(size: 29, weight: .heavy))
-                        .foregroundStyle(isPrimary ? .white : red)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title)
-                    .font(.system(size: 20, weight: .black, design: .rounded))
-                    .foregroundStyle(isPrimary ? Color.white : WelcomePalette.cardInk)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.74)
-
-                Text(subtitle)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(isPrimary ? Color.white.opacity(0.88) : WelcomePalette.secondaryMuted)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-            }
-
-            Spacer(minLength: 8)
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 24, weight: .heavy))
-                .foregroundStyle(isPrimary ? Color.white : red)
-        }
-        .padding(.horizontal, 18)
-        .frame(height: 78)
-        .background(cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-        .shadow(color: isPrimary ? red.opacity(0.30) : Color.black.opacity(0.12), radius: 13, x: 0, y: 8)
-        .overlay {
-            if isPrimary {
-                PrimaryCardSpeedTexture()
-                    .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
-                    .allowsHitTesting(false)
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder
-    private var cardBackground: some View {
-        if isPrimary {
+        ZStack(alignment: .topTrailing) {
             LinearGradient(
-                colors: [red, Color(red: 0.88, green: 0.00, blue: 0.18), Color(red: 0.72, green: 0.00, blue: 0.13)],
+                colors: [.white, WelcomePalette.lightGray, .white],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-        } else {
-            WelcomePalette.cardFill
-        }
-    }
-}
+            .ignoresSafeArea()
 
-private struct PrimaryCardSpeedTexture: View {
-    var body: some View {
-        GeometryReader { proxy in
-            Path { path in
-                for index in 0..<22 {
-                    let y = proxy.size.height * (0.18 + CGFloat(index) * 0.032)
-                    path.move(to: CGPoint(x: proxy.size.width * 0.48, y: y))
-                    path.addLine(to: CGPoint(x: proxy.size.width + 20, y: y + CGFloat(index % 3) * 2))
-                }
-            }
-            .stroke(Color.white.opacity(0.10), lineWidth: 1)
-        }
-    }
-}
-
-private struct BottomSpeedRibbon: View {
-    var body: some View {
-        ZStack(alignment: .bottom) {
-            LinearGradient(
+            RadialGradient(
                 colors: [
-                    Color.clear,
-                    WelcomePalette.background.opacity(0.94),
-                    WelcomePalette.background
+                    WelcomePalette.red.opacity(0.14),
+                    WelcomePalette.red.opacity(0.05),
+                    .clear
                 ],
-                startPoint: .top,
+                center: .top,
+                startRadius: 18,
+                endRadius: 220
+            )
+            .frame(height: 360)
+            .offset(y: 20)
+            .blur(radius: 8)
+
+            AtlantaSkylineBackground()
+                .frame(height: 300)
+                .padding(.top, 72)
+                .opacity(0.72)
+
+            SpeedTrailBackground()
+                .ignoresSafeArea()
+
+            HalftoneAccent()
+                .frame(width: 170, height: 170)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .offset(x: -72, y: 54)
+                .opacity(0.26)
+        }
+    }
+}
+
+struct AtlantaSkylineBackground: View {
+    var body: some View {
+        Canvas { context, size in
+            let baseY = size.height * 0.76
+            let startX = size.width * 0.40
+            let strokeColor = WelcomePalette.navy.opacity(0.105)
+            let fillColor = WelcomePalette.navy.opacity(0.026)
+
+            func tower(x: CGFloat, width: CGFloat, height: CGFloat, crown: CGFloat = 0, spire: CGFloat = 0) {
+                let topY = baseY - height
+                var body = Path()
+                body.move(to: CGPoint(x: x, y: baseY))
+                body.addLine(to: CGPoint(x: x, y: topY + crown))
+                if crown > 0 {
+                    body.addLine(to: CGPoint(x: x + width * 0.5, y: topY))
+                    body.addLine(to: CGPoint(x: x + width, y: topY + crown))
+                } else {
+                    body.addLine(to: CGPoint(x: x + width, y: topY))
+                }
+                body.addLine(to: CGPoint(x: x + width, y: baseY))
+                body.closeSubpath()
+
+                context.fill(body, with: .color(fillColor))
+                context.stroke(body, with: .color(strokeColor), lineWidth: 1.1)
+
+                guard spire > 0 else { return }
+                var spirePath = Path()
+                spirePath.move(to: CGPoint(x: x + width * 0.5, y: topY))
+                spirePath.addLine(to: CGPoint(x: x + width * 0.5, y: topY - spire))
+                context.stroke(spirePath, with: .color(strokeColor.opacity(0.85)), lineWidth: 0.9)
+            }
+
+            tower(x: startX, width: 24, height: 72, crown: 10)
+            tower(x: startX + 34, width: 35, height: 104)
+            tower(x: startX + 80, width: 27, height: 88, crown: 20, spire: 18)
+            tower(x: startX + 118, width: 46, height: 142)
+            tower(x: startX + 174, width: 34, height: 102, crown: 24, spire: 14)
+            tower(x: startX + 218, width: 48, height: 190, crown: 16, spire: 54)
+            tower(x: startX + 276, width: 34, height: 112)
+            tower(x: startX + 320, width: 42, height: 150, crown: 12, spire: 24)
+
+            var wheel = Path()
+            let wheelCenter = CGPoint(x: startX + 70, y: baseY - 30)
+            let wheelRadius: CGFloat = 24
+            wheel.addEllipse(in: CGRect(
+                x: wheelCenter.x - wheelRadius,
+                y: wheelCenter.y - wheelRadius,
+                width: wheelRadius * 2,
+                height: wheelRadius * 2
+            ))
+            for index in 0..<12 {
+                let angle = CGFloat(index) * .pi / 6
+                wheel.move(to: wheelCenter)
+                wheel.addLine(to: CGPoint(
+                    x: wheelCenter.x + cos(angle) * wheelRadius,
+                    y: wheelCenter.y + sin(angle) * wheelRadius
+                ))
+            }
+            context.stroke(wheel, with: .color(strokeColor.opacity(0.72)), lineWidth: 0.8)
+
+            var horizon = Path()
+            horizon.move(to: CGPoint(x: startX - 24, y: baseY))
+            horizon.addCurve(
+                to: CGPoint(x: size.width + 20, y: baseY - 6),
+                control1: CGPoint(x: startX + 80, y: baseY + 8),
+                control2: CGPoint(x: size.width * 0.78, y: baseY - 10)
+            )
+            context.stroke(horizon, with: .color(strokeColor.opacity(0.42)), lineWidth: 1)
+        }
+        .blur(radius: 0.25)
+        .mask {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .black.opacity(0.45), location: 0.18),
+                    .init(color: .black, location: 0.48),
+                    .init(color: .clear, location: 1)
+                ],
+                startPoint: .leading,
                 endPoint: .bottom
             )
-
-            Path { path in
-                path.move(to: CGPoint(x: -30, y: 74))
-                path.addCurve(to: CGPoint(x: 150, y: 64), control1: CGPoint(x: 48, y: 20), control2: CGPoint(x: 94, y: 98))
-                path.addCurve(to: CGPoint(x: 360, y: 54), control1: CGPoint(x: 238, y: 10), control2: CGPoint(x: 278, y: 92))
-                path.addCurve(to: CGPoint(x: 540, y: 24), control1: CGPoint(x: 418, y: 18), control2: CGPoint(x: 468, y: 36))
-            }
-            .stroke(
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.95, green: 0.02, blue: 0.19).opacity(0.75),
-                        Color(red: 1.0, green: 0.55, blue: 0.63).opacity(0.35),
-                        Color(red: 0.95, green: 0.02, blue: 0.19).opacity(0.85)
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                ),
-                style: StrokeStyle(lineWidth: 14, lineCap: .round)
-            )
-            .blur(radius: 0.6)
-
-            Path { path in
-                path.move(to: CGPoint(x: -40, y: 104))
-                path.addCurve(to: CGPoint(x: 180, y: 76), control1: CGPoint(x: 56, y: 46), control2: CGPoint(x: 112, y: 128))
-                path.addCurve(to: CGPoint(x: 410, y: 70), control1: CGPoint(x: 260, y: 22), control2: CGPoint(x: 326, y: 108))
-                path.addCurve(to: CGPoint(x: 560, y: 36), control1: CGPoint(x: 456, y: 46), control2: CGPoint(x: 506, y: 52))
-            }
-            .stroke(Color(red: 0.64, green: 0.00, blue: 0.13).opacity(0.24), lineWidth: 8)
         }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+struct SpeedTrailBackground: View {
+    @State private var drift = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let height = proxy.size.height
+
+            ZStack {
+                ForEach(0..<5, id: \.self) { index in
+                    SpeedTrailShape(offset: CGFloat(index) * 36)
+                        .trim(from: 0.05, to: 0.96)
+                        .stroke(
+                            WelcomePalette.horizontalRydrGradient,
+                            style: StrokeStyle(lineWidth: CGFloat(9 - index), lineCap: .round)
+                        )
+                        .opacity(0.16 - Double(index) * 0.018)
+                        .blur(radius: CGFloat(index) * 0.6)
+                        .frame(width: width * 1.28, height: height * 0.48)
+                        .offset(x: drift ? -18 : 10, y: height * 0.18 + CGFloat(index * 18))
+                        .animation(
+                            .easeInOut(duration: 3.4 + Double(index) * 0.24).repeatForever(autoreverses: true),
+                            value: drift
+                        )
+                }
+
+                ForEach(0..<4, id: \.self) { index in
+                    Capsule()
+                        .fill(WelcomePalette.red.opacity(0.13))
+                        .frame(width: width * 0.74, height: CGFloat(3 + index))
+                        .blur(radius: 0.8)
+                        .rotationEffect(.degrees(-38))
+                        .offset(x: width * 0.28 + (drift ? 24 : -12), y: height * (0.15 + CGFloat(index) * 0.035))
+                        .animation(
+                            .easeInOut(duration: 2.8 + Double(index) * 0.18).repeatForever(autoreverses: true),
+                            value: drift
+                        )
+                }
+            }
+            .onAppear { drift = true }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct SpeedTrailShape: Shape {
+    let offset: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: -rect.width * 0.05, y: rect.height * 0.84 - offset))
+        path.addCurve(
+            to: CGPoint(x: rect.width * 0.52, y: rect.height * 0.58 - offset * 0.32),
+            control1: CGPoint(x: rect.width * 0.18, y: rect.height * 0.86 - offset * 0.6),
+            control2: CGPoint(x: rect.width * 0.34, y: rect.height * 0.58 - offset * 0.25)
+        )
+        path.addCurve(
+            to: CGPoint(x: rect.width * 1.04, y: rect.height * 0.28 - offset * 0.08),
+            control1: CGPoint(x: rect.width * 0.74, y: rect.height * 0.56 - offset * 0.2),
+            control2: CGPoint(x: rect.width * 0.82, y: rect.height * 0.34 - offset * 0.1)
+        )
+        return path
+    }
+}
+
+private struct HalftoneAccent: View {
+    var body: some View {
+        Canvas { context, size in
+            for row in 0..<16 {
+                for column in 0..<16 {
+                    let progress = CGFloat(row + column) / 32
+                    let radius = max(0.8, 4.8 * (1 - progress))
+                    let point = CGPoint(
+                        x: CGFloat(column) * size.width / 15,
+                        y: CGFloat(row) * size.height / 15
+                    )
+                    let rect = CGRect(x: point.x, y: point.y, width: radius, height: radius)
+                    context.fill(Path(ellipseIn: rect), with: .color(WelcomePalette.red.opacity(0.42)))
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct LogoSection: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                AnimatedLogoRing()
+                    .frame(width: 152, height: 152)
+
+                Image("RydrWelcomeLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 136, height: 136)
+                    .shadow(color: WelcomePalette.red.opacity(0.18), radius: 18, x: 0, y: 10)
+            }
+            .frame(width: 152, height: 152)
+            .accessibilityLabel("Rydr. Ride Different.")
+            .accessibilityAddTraits(.isImage)
+        }
+    }
+}
+
+struct AnimatedLogoRing: View {
+    @State private var pulse = false
+    @State private var rotate = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [WelcomePalette.red.opacity(0.12), .clear],
+                        center: .center,
+                        startRadius: 20,
+                        endRadius: 82
+                    )
+                )
+                .scaleEffect(pulse ? 1.03 : 0.95)
+
+            Circle()
+                .stroke(
+                    WelcomePalette.red.opacity(pulse ? 0.34 : 0.52),
+                    style: StrokeStyle(lineWidth: 1.4, lineCap: .round, dash: [1.6, 6.4])
+                )
+                .padding(4)
+                .rotationEffect(.degrees(rotate ? 360 : 0))
+
+            Circle()
+                .stroke(
+                    WelcomePalette.red.opacity(pulse ? 0.12 : 0.22),
+                    style: StrokeStyle(lineWidth: 5, lineCap: .round, dash: [0.8, 9])
+                )
+                .padding(10)
+                .rotationEffect(.degrees(rotate ? -220 : 0))
+                .scaleEffect(pulse ? 1.018 : 0.992)
+        }
+        .animation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true), value: pulse)
+        .animation(.linear(duration: 18).repeatForever(autoreverses: false), value: rotate)
+        .onAppear {
+            pulse = true
+            rotate = true
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+struct HeroSection: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: -6) {
+                Text("RIDE")
+                    .font(.system(size: 66, weight: .black, design: .default))
+                    .italic()
+                    .foregroundStyle(WelcomePalette.navy)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.62)
+
+                Text("DIFFERENT")
+                    .font(.system(size: 54, weight: .black, design: .default))
+                    .italic()
+                    .foregroundStyle(WelcomePalette.horizontalRydrGradient)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.56)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Your ride. Your way.")
+                    .foregroundStyle(WelcomePalette.navy)
+                Text("Anytime, anywhere.")
+                    .foregroundStyle(WelcomePalette.red)
+            }
+            .font(.system(size: 26, weight: .semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+        }
+        .padding(.top, 0)
+    }
+}
+
+private struct FeatureHighlights: View {
+    private let features: [FeatureCard.Model] = [
+        .init(icon: "checkmark.shield.fill", title: "Safe & Reliable", subtitle: "Your safety is our priority"),
+        .init(icon: "bolt.fill", title: "Rides in Minutes", subtitle: "Get there stress free"),
+        .init(icon: "star.fill", title: "Top Rated", subtitle: "Great experiences every time")
+    ]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(features) { feature in
+                FeatureCard(model: feature)
+            }
+        }
+    }
+}
+
+struct FeatureCard: View {
+    struct Model: Identifiable {
+        let id = UUID()
+        let icon: String
+        let title: String
+        let subtitle: String
+    }
+
+    let model: Model
+    @State private var visible = false
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(WelcomePalette.redSoft.opacity(0.95))
+                    .frame(width: 54, height: 54)
+                    .shadow(color: WelcomePalette.red.opacity(0.14), radius: 18, x: 0, y: 8)
+
+                Image(systemName: model.icon)
+                    .font(.system(size: 24, weight: .black))
+                    .foregroundStyle(WelcomePalette.horizontalRydrGradient)
+            }
+
+            VStack(spacing: 6) {
+                Text(model.title)
+                    .font(.system(size: 15, weight: .black))
+                    .foregroundStyle(WelcomePalette.ink)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.72)
+
+                Text(model.subtitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(WelcomePalette.slate)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.72)
+            }
+
+            Capsule()
+                .fill(WelcomePalette.horizontalRydrGradient)
+                .frame(width: 26, height: 4)
+                .padding(.top, 2)
+        }
+        .padding(.horizontal, 7)
+        .frame(maxWidth: .infinity)
+        .frame(height: 152)
+        .background {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(.white.opacity(0.58))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(.white.opacity(0.86), lineWidth: 1)
+                }
+        }
+        .shadow(color: WelcomePalette.red.opacity(0.08), radius: 22, x: 0, y: 16)
+        .shadow(color: .black.opacity(0.05), radius: 16, x: 0, y: 10)
+        .scaleEffect(visible ? 1 : 0.96)
+        .animation(.spring(response: 0.7, dampingFraction: 0.84), value: visible)
+        .onAppear { visible = true }
+    }
+}
+
+struct PrimaryCTAButton: View {
+    @State private var glow = false
+    @State private var streak = false
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            ButtonSpeedStreaks(active: streak)
+                .frame(width: 94)
+                .offset(x: -54)
+
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(.white)
+                    .frame(width: 58, height: 58)
+                    .overlay {
+                        Image(systemName: "car.fill")
+                            .font(.system(size: 27, weight: .bold))
+                            .foregroundStyle(WelcomePalette.horizontalRydrGradient)
+                    }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("SIGN UP & RIDE")
+                        .font(.system(size: 23, weight: .black))
+                        .tracking(0)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+
+                    Text("Take your first ride in minutes")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                }
+                .layoutPriority(1)
+
+                Spacer(minLength: 4)
+
+                Circle()
+                    .fill(.white)
+                    .frame(width: 46, height: 46)
+                    .overlay {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 22, weight: .black))
+                            .foregroundStyle(WelcomePalette.red)
+                    }
+            }
+            .padding(.leading, 18)
+            .padding(.trailing, 14)
+            .frame(height: 98)
+            .background(WelcomePalette.horizontalRydrGradient, in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(.white.opacity(0.26), lineWidth: 1)
+            }
+            .shadow(color: WelcomePalette.red.opacity(glow ? 0.44 : 0.28), radius: glow ? 30 : 20, x: 0, y: glow ? 18 : 12)
+        }
+        .padding(.leading, 14)
+        .onAppear {
+            glow = true
+            streak = true
+        }
+        .animation(.easeInOut(duration: 1.9).repeatForever(autoreverses: true), value: glow)
+        .animation(.easeInOut(duration: 1.35).repeatForever(autoreverses: true), value: streak)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Sign up and ride. Take your first ride in minutes.")
+    }
+}
+
+private struct ButtonSpeedStreaks: View {
+    let active: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(0..<7, id: \.self) { index in
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [.clear, .white.opacity(0.85), WelcomePalette.red.opacity(0.76)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: CGFloat(92 - index * 7), height: CGFloat(max(3, 9 - index)))
+                    .offset(x: active ? CGFloat(index * 4) : CGFloat(-8 - index * 3))
+                    .opacity(0.72 - Double(index) * 0.06)
+            }
+        }
+        .blur(radius: 0.4)
+    }
+}
+
+enum ActionCardIcon {
+    case system(String)
+    case asset(String)
+}
+
+struct ActionCard: View {
+    let icon: ActionCardIcon
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: 13) {
+            RoundedRectangle(cornerRadius: 21, style: .continuous)
+                .fill(WelcomePalette.redSoft.opacity(0.82))
+                .frame(width: 60, height: 60)
+                .overlay {
+                    switch icon {
+                    case .system(let name):
+                        Image(systemName: name)
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(WelcomePalette.horizontalRydrGradient)
+                    case .asset(let name):
+                        Image(name)
+                            .resizable()
+                            .scaledToFit()
+                            .padding(12)
+                    }
+                }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.system(size: 18, weight: .black))
+                    .foregroundStyle(WelcomePalette.ink)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(subtitle)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(WelcomePalette.slate)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            .layoutPriority(1)
+
+            Spacer(minLength: 4)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 23, weight: .black))
+                .foregroundStyle(WelcomePalette.red)
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 92)
+        .background {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .fill(.white.opacity(0.72))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(.white.opacity(0.9), lineWidth: 1)
+                }
+        }
+        .shadow(color: .black.opacity(0.07), radius: 18, x: 0, y: 10)
+        .shadow(color: WelcomePalette.red.opacity(0.06), radius: 24, x: 0, y: 14)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct WelcomePressStyle: ButtonStyle {
+    var scale: CGFloat = 0.975
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scale : 1)
+            .opacity(configuration.isPressed ? 0.94 : 1)
+            .animation(.spring(response: 0.26, dampingFraction: 0.72), value: configuration.isPressed)
     }
 }
 
