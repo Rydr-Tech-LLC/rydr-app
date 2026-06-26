@@ -1,0 +1,620 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn() && (
+        request.auth.token.admin == true ||
+        request.auth.token.role == "admin"
+      );
+    }
+
+    function hasVerifiedPhone() {
+      return signedIn()
+        && ("phone_number" in request.auth.token)
+        && request.auth.token.phone_number is string;
+    }
+
+    function phoneMatches(data) {
+      return hasVerifiedPhone()
+        && (
+          (("phoneNumber" in data) && data.phoneNumber == request.auth.token.phone_number) ||
+          (("phoneE164" in data) && data.phoneE164 == request.auth.token.phone_number)
+        );
+    }
+
+    function isServiceManagedWrite() {
+      return isAdmin();
+    }
+
+    function affectedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function backendOwnedProfileFields() {
+      return [
+        "admin",
+        "adminRole",
+        "approvalStatus",
+        "approvedAt",
+        "approvedBy",
+        "availableBalance",
+        "backgroundCheckPassed",
+        "backgroundCheckStatus",
+        "balance",
+        "betaBackgroundCheckBypassEnabled",
+        "betaTester",
+        "cashHubLastLateReleaseAt",
+        "cashHubLastLateReleaseRequestId",
+        "cashHubLateReleaseCount",
+        "cashHubPenaltyCount",
+        "cashHubRating",
+        "cashHubTrustScore",
+        "cashHubWarnings",
+        "debugApprovalBypassEnabled",
+        "debugApprovalBypassUpdatedAt",
+        "identityVerifiedAt",
+        "isAdmin",
+        "isApproved",
+        "isLicenseVerified",
+        "isRydrVerifiedDriver",
+        "isVerified",
+        "paymentStatus",
+        "pendingBalance",
+        "rating",
+        "reviewStatus",
+        "stripeAccountId",
+        "stripeCustomerId",
+        "trustScore",
+        "verificationStatus",
+        "verifiedAt",
+        "walletBalance",
+        "walletCents"
+      ];
+    }
+
+    function noBackendOwnedKeysOnCreate() {
+      return !request.resource.data.keys().hasAny(backendOwnedProfileFields());
+    }
+
+    function noBackendOwnedKeysChanged() {
+      return !affectedKeys().hasAny(backendOwnedProfileFields());
+    }
+
+    function validNotificationToken(uid, appName, roleName) {
+      return isSelf(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.role == roleName
+        && request.resource.data.platform == "ios"
+        && request.resource.data.app == appName
+        && request.resource.data.fcmToken is string
+        && request.resource.data.enabled is bool;
+    }
+
+    function rideParticipant(data) {
+      return signedIn() && (
+        data.driverId == request.auth.uid ||
+        data.riderId == request.auth.uid ||
+        data.acceptedDriverId == request.auth.uid ||
+        data.connectedDriverId == request.auth.uid ||
+        data.connectedDriverUid == request.auth.uid ||
+        (("participants" in data) && data.participants is list && data.participants.hasAny([request.auth.uid]))
+      );
+    }
+
+    function isUnclaimedRideRequest(data) {
+      return signedIn()
+        && data.status in ["pending", "available"]
+        && (!("acceptedDriverId" in data) || data.acceptedDriverId == null || data.acceptedDriverId == "")
+        && (!("rideId" in data) || data.rideId == null || data.rideId == "")
+        && (!("driverId" in data) || data.driverId == null || data.driverId == "" || data.driverId == request.auth.uid);
+    }
+
+    function validRiderRideCreate() {
+      return signedIn()
+        && request.resource.data.riderId == request.auth.uid
+        && request.resource.data.status == "pending";
+    }
+
+    function matchingAcceptedRideRequest(rideId) {
+      let requestDoc = getAfter(/databases/$(database)/documents/rideRequests/$(rideId));
+      return signedIn()
+        && requestDoc.data.acceptedDriverId == request.auth.uid
+        && requestDoc.data.riderId == request.resource.data.riderId;
+    }
+
+    function validRiderRideMirrorCreate(rideId) {
+      let requestDoc = get(/databases/$(database)/documents/rideRequests/$(rideId));
+      return signedIn()
+        && requestDoc.data.riderId == request.auth.uid
+        && request.resource.data.status in ["riderCancelled", "cancelled"]
+        && request.resource.data.keys().hasOnly(["status", "cancelledAt", "updatedAt"]);
+    }
+
+    function validRideClaim() {
+      return isUnclaimedRideRequest(resource.data)
+        && request.resource.data.acceptedDriverId == request.auth.uid
+        && request.resource.data.status == "accepted"
+        && affectedKeys().hasOnly(["status", "acceptedAt", "acceptedDriverId", "rideId", "updatedAt"]);
+    }
+
+    function validRideLifecycleUpdate() {
+      return rideParticipant(resource.data)
+        && affectedKeys().hasOnly([
+          "acceptedAt",
+          "acceptedDriverId",
+          "arrivedAtPickupAt",
+          "arrivedAtStopAt",
+          "cancelledAt",
+          "cancelledBy",
+          "cashCompletedAt",
+          "cashRideStartedAt",
+          "completedAt",
+          "connectedDriverId",
+          "driverConfirmedAt",
+          "driverLocation",
+          "driverLocationUpdatedAt",
+          "driverMarkedMissedAt",
+          "driverQueueStatus",
+          "driverRiderRating",
+          "enRouteToPickupAt",
+          "headedToDropoffAt",
+          "hasActiveRide",
+          "missedAt",
+          "navigationProvider",
+          "navigationStartedAt",
+          "navigatingToDropoffAt",
+          "navigatingToStopAt",
+          "pickupComplimentaryWaitSeconds",
+          "pickupPaidWaitStartedAt",
+          "pickupWaitStartedAt",
+          "releasedAt",
+          "riderRideState",
+          "riderStatusMessage",
+          "rideId",
+          "rideStartedAt",
+          "startedAt",
+          "status",
+          "stopWaitStartedAt",
+          "updatedAt"
+        ]);
+    }
+
+    function chatParticipant(data) {
+      return signedIn() && (
+        data.riderId == request.auth.uid ||
+        data.driverId == request.auth.uid ||
+        (("participants" in data) && data.participants is list && data.participants.hasAny([request.auth.uid]))
+      );
+    }
+
+    function validRideChatCreate() {
+      return signedIn()
+        && (request.resource.data.riderId == request.auth.uid || request.resource.data.driverId == request.auth.uid)
+        && request.resource.data.status in ["active", "closed"];
+    }
+
+    function validRideChatUpdate() {
+      return chatParticipant(resource.data)
+        && affectedKeys().hasOnly(["status", "updatedAt"]);
+    }
+
+    function validChatMessageCreate(chatId) {
+      return signedIn()
+        && chatParticipant(get(/databases/$(database)/documents/rideChats/$(chatId)).data)
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.senderRole in ["rider", "driver", "support"]
+        && request.resource.data.text is string;
+    }
+
+    function cashHubRequestOwner(data) {
+      return signedIn() && data.riderUid == request.auth.uid;
+    }
+
+    function cashHubConnectedDriver(data) {
+      return signedIn() && (
+        data.connectedDriverUid == request.auth.uid ||
+        data.acceptedByUid == request.auth.uid
+      );
+    }
+
+    function validCashHubRequestCreate() {
+      return signedIn()
+        && request.resource.data.riderUid == request.auth.uid
+        && request.resource.data.status == "open";
+    }
+
+    function validCashHubOwnerUpdate() {
+      return cashHubRequestOwner(resource.data)
+        && affectedKeys().hasOnly([
+          "agreedPrice",
+          "budgetRange",
+          "connectedAt",
+          "connectedDriverName",
+          "connectedDriverUid",
+          "destination",
+          "notes",
+          "passengers",
+          "pickup",
+          "rideType",
+          "scheduledTime",
+          "selectedOfferId",
+          "status",
+          "updatedAt",
+          "visibility"
+        ]);
+    }
+
+    function validCashHubDriverConnect() {
+      return signedIn()
+        && resource.data.status == "open"
+        && (!("connectedDriverUid" in resource.data) || resource.data.connectedDriverUid == null || resource.data.connectedDriverUid == "")
+        && request.resource.data.connectedDriverUid == request.auth.uid
+        && request.resource.data.acceptedByUid == request.auth.uid
+        && affectedKeys().hasOnly([
+          "acceptedAt",
+          "acceptedByName",
+          "acceptedByUid",
+          "agreedPrice",
+          "connectedAt",
+          "connectedDriverName",
+          "connectedDriverUid",
+          "driverQueueStatus",
+          "status",
+          "updatedAt"
+        ]);
+    }
+
+    function validCashHubConnectedDriverUpdate() {
+      return cashHubConnectedDriver(resource.data)
+        && affectedKeys().hasOnly([
+          "acceptedByName",
+          "acceptedByUid",
+          "cashCompletedAt",
+          "cashRideStartedAt",
+          "connectedDriverName",
+          "connectedDriverUid",
+          "driverArrivedAt",
+          "driverConfirmedAt",
+          "driverMarkedMissedAt",
+          "driverQueueStatus",
+          "lateReleasePenalty",
+          "lateReleasePenaltyReason",
+          "releasedAt",
+          "releasedByName",
+          "releasedByUid",
+          "status",
+          "updatedAt"
+        ]);
+    }
+
+    function validCashHubResponseCreate(requestId) {
+      let requestDoc = get(/databases/$(database)/documents/cashRydrRequests/$(requestId));
+      return signedIn()
+        && requestDoc.data.status in ["open", "connected"]
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.authorRole in ["rider", "driver"];
+    }
+
+    function validCashHubResponseUpdate(requestId) {
+      let requestDoc = get(/databases/$(database)/documents/cashRydrRequests/$(requestId));
+      return signedIn()
+        && (
+          resource.data.authorUid == request.auth.uid ||
+          cashHubRequestOwner(requestDoc.data)
+        )
+        && affectedKeys().hasOnly(["status", "updatedAt"]);
+    }
+
+    function supportOwner(data) {
+      return signedIn() && data.userId == request.auth.uid;
+    }
+
+    function publicDriverOwnerWritableKeys() {
+      return [
+        "approximateLocation",
+        "displayName",
+        "eligibleRideTypes",
+        "isOnline",
+        "profilePhotoURL",
+        "tierRates",
+        "uid",
+        "updatedAt",
+        "vehicleSummary"
+      ];
+    }
+
+    function validPublicDriverProfileOwnerCreate(driverUid) {
+      return isSelf(driverUid)
+        && request.resource.data.uid == driverUid
+        && request.resource.data.keys().hasOnly(publicDriverOwnerWritableKeys());
+    }
+
+    function validPublicDriverProfileOwnerUpdate(driverUid) {
+      return isSelf(driverUid)
+        && request.resource.data.uid == driverUid
+        && resource.data.uid == driverUid
+        && affectedKeys().hasOnly(publicDriverOwnerWritableKeys());
+    }
+
+    match /riders/{uid} {
+      allow get: if isSelf(uid) || phoneMatches(resource.data) || isAdmin();
+      allow list: if false;
+      allow create: if isSelf(uid) && noBackendOwnedKeysOnCreate();
+      allow update: if isSelf(uid) && noBackendOwnedKeysChanged();
+      allow delete: if isAdmin();
+
+      match /notificationTokens/{tokenId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow create, update: if validNotificationToken(uid, "rider", "rider");
+        allow delete: if isSelf(uid) || isAdmin();
+      }
+
+      match /cashHubFavoriteDrivers/{driverUid} {
+        allow read, create, update, delete: if isSelf(uid);
+      }
+
+      match /cashHubBlockedDrivers/{driverUid} {
+        allow read, create, update, delete: if isSelf(uid);
+      }
+    }
+
+    match /drivers/{uid} {
+      allow get: if isSelf(uid) || phoneMatches(resource.data) || isAdmin();
+      allow list: if false;
+      allow create: if isSelf(uid) && noBackendOwnedKeysOnCreate();
+      allow update: if isSelf(uid) && noBackendOwnedKeysChanged();
+      allow delete: if isAdmin();
+
+      match /notificationTokens/{tokenId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow create, update: if validNotificationToken(uid, "driver", "driver");
+        allow delete: if isSelf(uid) || isAdmin();
+      }
+
+      match /cashHubPenaltyMarkers/{markerId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
+    match /driver_status/{uid} {
+      allow read: if signedIn();
+      allow create, update: if isSelf(uid)
+        && request.resource.data.keys().hasOnly([
+          "availabilityStatus",
+          "course",
+          "hasActiveRide",
+          "isOnline",
+          "lat",
+          "lng",
+          "location",
+          "online",
+          "qualifiedRideTypes",
+          "rideTypes",
+          "selectedRideTypes",
+          "speed",
+          "supportedRideTypes",
+          "tierRates",
+          "updatedAt"
+        ]);
+      allow delete: if isSelf(uid) || isAdmin();
+    }
+
+    match /publicDriverProfiles/{driverUid} {
+      allow read: if signedIn();
+      allow create: if validPublicDriverProfileOwnerCreate(driverUid) || isAdmin();
+      allow update: if validPublicDriverProfileOwnerUpdate(driverUid) || isAdmin();
+      allow delete: if isSelf(driverUid) || isAdmin();
+    }
+
+    match /driverApprovalRequests/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow create, update: if isSelf(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.requestType in ["backgroundCheck", "debugApprovalBypass", "identityReview"]
+        && request.resource.data.keys().hasOnly([
+          "requestType",
+          "requested",
+          "source",
+          "uid",
+          "updatedAt"
+        ]);
+      allow delete: if isAdmin();
+    }
+
+    match /cashHubDriverProfiles/{driverUid} {
+      allow read: if signedIn();
+      allow create: if isSelf(driverUid) && noBackendOwnedKeysOnCreate();
+      allow update: if isSelf(driverUid) && noBackendOwnedKeysChanged();
+      allow delete: if isAdmin();
+    }
+
+    match /rideRequests/{rideId} {
+      allow read: if rideParticipant(resource.data) || isUnclaimedRideRequest(resource.data) || isAdmin();
+      allow create: if validRiderRideCreate();
+      allow update: if validRideClaim() || validRideLifecycleUpdate() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /rides/{rideId} {
+      allow read: if rideParticipant(resource.data) || isAdmin();
+      allow create: if validRiderRideCreate()
+        || validRiderRideMirrorCreate(rideId)
+        || (signedIn() && request.resource.data.driverId == request.auth.uid && matchingAcceptedRideRequest(rideId))
+        || isAdmin();
+      allow update: if validRideLifecycleUpdate() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /rideChats/{rideId} {
+      allow read: if chatParticipant(resource.data) || isAdmin();
+      allow create: if validRideChatCreate() || isAdmin();
+      allow update: if validRideChatUpdate() || isAdmin();
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if chatParticipant(get(/databases/$(database)/documents/rideChats/$(rideId)).data) || isAdmin();
+        allow create: if validChatMessageCreate(rideId) || isAdmin();
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    match /riderRatings/{ratingId} {
+      allow create: if signedIn() && request.resource.data.driverId == request.auth.uid;
+      allow read: if signedIn() && (resource.data.driverId == request.auth.uid || isAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    match /cashRydrRequests/{requestId} {
+      allow read: if signedIn();
+      allow create: if validCashHubRequestCreate();
+      allow update: if validCashHubOwnerUpdate() || validCashHubDriverConnect() || validCashHubConnectedDriverUpdate() || isAdmin();
+      allow delete: if cashHubRequestOwner(resource.data) || isAdmin();
+
+      match /responses/{responseId} {
+        allow read: if signedIn();
+        allow create: if validCashHubResponseCreate(requestId);
+        allow update: if validCashHubResponseUpdate(requestId) || isAdmin();
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /supportTickets/{ticketId} {
+      allow read: if supportOwner(resource.data) || isAdmin();
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.userRole in ["rider", "driver"];
+      allow update: if (supportOwner(resource.data) && affectedKeys().hasOnly(["status", "updatedAt"])) || isAdmin();
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if supportOwner(get(/databases/$(database)/documents/supportTickets/$(ticketId)).data) || isAdmin();
+        allow create: if signedIn()
+          && supportOwner(get(/databases/$(database)/documents/supportTickets/$(ticketId)).data)
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.senderRole in ["rider", "driver"]
+          && request.resource.data.text is string;
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    match /supportCallRequests/{requestId} {
+      allow read: if supportOwner(resource.data) || isAdmin();
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.userRole in ["rider", "driver"];
+      allow update, delete: if isAdmin();
+    }
+
+    match /accountDeletionRequests/{requestId} {
+      allow create: if signedIn()
+        && (
+          requestId == request.auth.uid ||
+          request.resource.data.uid == request.auth.uid ||
+          request.resource.data.userId == request.auth.uid
+        );
+      allow read: if (
+          requestId == request.auth.uid ||
+          resource.data.uid == request.auth.uid ||
+          resource.data.userId == request.auth.uid
+        ) || isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    match /waitTimeEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow write: if false;
+
+      match /rydrBankCodes/{codeId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow write: if false;
+      }
+
+      match /rydrContrib/{contribId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow write: if false;
+      }
+    }
+
+    match /codes_index/{codeId} {
+      allow read, write: if false;
+    }
+
+    match /audits/{auditId} {
+      allow read, write: if false;
+    }
+
+    match /stripeLedger/{ledgerId} {
+      allow read: if signedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        resource.data.riderId == request.auth.uid ||
+        resource.data.uid == request.auth.uid ||
+        isAdmin()
+      );
+      allow write: if false;
+    }
+
+    match /wallets/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    match /payments/{paymentId} {
+      allow read: if signedIn() && (
+        resource.data.uid == request.auth.uid ||
+        resource.data.riderId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+      allow write: if false;
+    }
+
+    match /stripeCustomers/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    match /betaTesters/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    match /disputes/{disputeId} {
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.riderId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if signedIn()
+        && (
+          request.resource.data.userId == request.auth.uid ||
+          request.resource.data.riderId == request.auth.uid ||
+          request.resource.data.driverId == request.auth.uid
+        );
+      allow update, delete: if isAdmin();
+    }
+
+    match /notificationTokens/{uid} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -264,27 +264,22 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         canGoOnline = enabled || canGoOnline
 
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        let payload: [String: Any] = enabled ? [
-            "backgroundCheckPassed": true,
-            "backgroundCheckStatus": "approved",
-            "betaTester": true,
-            "betaBackgroundCheckBypassEnabled": true,
-            "debugApprovalBypassEnabled": true,
-            "debugApprovalBypassUpdatedAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
-        ] : [
-            "betaBackgroundCheckBypassEnabled": false,
-            "debugApprovalBypassEnabled": false,
-            "debugApprovalBypassUpdatedAt": FieldValue.serverTimestamp(),
+        let payload: [String: Any] = [
+            "uid": uid,
+            "requestType": "debugApprovalBypass",
+            "requested": enabled,
+            "source": "driver-ios-debug",
             "updatedAt": FieldValue.serverTimestamp()
         ]
 
-        db.collection("drivers").document(uid).setData(payload, merge: true) { [weak self] error in
+        db.collection("driverApprovalRequests").document(uid).setData(payload, merge: true) { [weak self] error in
             DispatchQueue.main.async {
                 if let error {
-                    self?.statusMessage = "Could not update test approval: \(error.localizedDescription)"
+                    self?.statusMessage = "Could not submit test approval request: \(error.localizedDescription)"
                 } else {
-                    self?.statusMessage = enabled ? "Test approval bypass enabled." : "Test approval bypass disabled."
+                    self?.statusMessage = enabled
+                        ? "Local simulator approval enabled. Backend approval request recorded for admin review."
+                        : "Local simulator approval disabled. Backend approval request updated."
                 }
             }
         }
@@ -1295,9 +1290,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private func publishDriverProfile() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let user = Auth.auth().currentUser
+        let displayName = user?.displayName ?? "Rydr Driver"
         db.collection("drivers").document(uid).setData([
             "uid": uid,
-            "displayName": user?.displayName ?? "Rydr Driver",
+            "displayName": displayName,
             "email": user?.email ?? "",
             "standardDispatchEnabled": true,
             "qualifiedRideTypes": eligibleRideTypes,
@@ -1307,6 +1303,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             "tierRates": tierRatesPayload(),
             "updatedAt": FieldValue.serverTimestamp()
         ], merge: true)
+        publishPublicDriverProfile(uid: uid, displayName: displayName, online: isOnline)
     }
 
     private func updateDriverPresence(online: Bool) {
@@ -1348,6 +1345,39 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             }
         }
         db.collection("drivers").document(uid).setData(driverPayload, merge: true)
+        publishPublicDriverProfile(uid: uid, displayName: Auth.auth().currentUser?.displayName ?? "Rydr Driver", online: online)
+    }
+
+    private func publishPublicDriverProfile(uid: String, displayName: String, online: Bool) {
+        var payload: [String: Any] = [
+            "uid": uid,
+            "displayName": displayName,
+            "profilePhotoURL": profilePhotoURL ?? "",
+            "vehicleSummary": publicVehicleSummary(),
+            "isOnline": online,
+            "eligibleRideTypes": Array(selectedRideTypes).sorted(),
+            "tierRates": tierRatesPayload(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        if let loc = lastLocation {
+            payload["approximateLocation"] = [
+                "lat": roundedCoordinate(loc.coordinate.latitude),
+                "lng": roundedCoordinate(loc.coordinate.longitude),
+                "updatedAt": FieldValue.serverTimestamp()
+            ]
+        }
+
+        db.collection("publicDriverProfiles").document(uid).setData(payload, merge: true)
+    }
+
+    private func publicVehicleSummary() -> String {
+        let selected = selectedRideTypes.sorted().first
+        return selected ?? "Rydr vehicle"
+    }
+
+    private func roundedCoordinate(_ value: CLLocationDegrees) -> Double {
+        (value * 1000).rounded() / 1000
     }
 
     private func applyVehicleEligibility(from data: [String: Any]) {
@@ -1687,9 +1717,7 @@ struct DriverDashboardView: View {
         case .fareInsights:
             activeSheet = .fareInsights
         case .logout:
-            try? Auth.auth().signOut()
-            session.isLoggedIn = false
-            session.canGoOnline = false
+            session.logout()
         default:
             activeSheet = .menu(item)
         }

@@ -19,7 +19,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         rideType: String,
         near center: CLLocationCoordinate2D
     ) async throws -> [Driver] {
-        let snapshot = try await db.collection("drivers")
+        let snapshot = try await db.collection("publicDriverProfiles")
             .whereField("isOnline", isEqualTo: true)
             .getDocuments()
 
@@ -155,7 +155,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         let enabled = data["standardDispatchEnabled"] as? Bool ?? true
         guard enabled else { return nil }
 
-        let supportedRideTypes = data["selectedRideTypes"] as? [String]
+        let supportedRideTypes = data["eligibleRideTypes"] as? [String]
+            ?? data["selectedRideTypes"] as? [String]
             ?? data["rideTypes"] as? [String]
             ?? data["supportedRideTypes"] as? [String]
             ?? []
@@ -176,7 +177,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         return Driver(
             id: document.documentID,
             name: driverName(from: data),
-            profileImage: data["profileImage"] as? String,
+            profileImage: data["profilePhotoURL"] as? String ?? data["profileImage"] as? String,
             carImage: data["carImage"] as? String,
             carMakeModel: vehicleName(from: data),
             rating: rating,
@@ -209,6 +210,11 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         if let point = data["geoPoint"] as? GeoPoint {
             return CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
         }
+        if let location = data["approximateLocation"] as? [String: Any],
+           let lat = location["lat"] as? CLLocationDegrees,
+           let lng = location["lng"] as? CLLocationDegrees {
+            return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        }
         if let location = data["location"] as? [String: Any],
            let lat = location["lat"] as? CLLocationDegrees,
            let lng = location["lng"] as? CLLocationDegrees {
@@ -232,6 +238,9 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
     }
 
     private func vehicleName(from data: [String: Any]) -> String {
+        if let summary = data["vehicleSummary"] as? String, !summary.isEmpty {
+            return summary
+        }
         if let car = data["carMakeModel"] as? String, !car.isEmpty {
             return car
         }

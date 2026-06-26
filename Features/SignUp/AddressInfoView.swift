@@ -32,39 +32,34 @@ struct AddressInfoView: View {
     }
 
     var body: some View {
-        ZStack {
-            SignupPalette.background.ignoresSafeArea()
-            LocationHero()
-                .frame(height: 290)
-                .frame(maxHeight: .infinity, alignment: .top)
-                .ignoresSafeArea(edges: .top)
-                .accessibilityHidden(true)
+        SignupScreenScaffold(
+            activeStep: 1,
+            hero: {
+                SignupMapPingHero()
+            },
+            content: {
+                VStack(spacing: 18) {
+                    Spacer(minLength: 184)
 
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 17) {
-                    SignupBackButton { dismiss() }
+                    SignupFormPanel {
+                        SignupStepHeader(active: 1)
 
-                    Spacer(minLength: 82)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Where Are")
-                            .foregroundStyle(SignupPalette.ink)
-                        HStack(spacing: 7) {
-                            Text("You")
+                        VStack(spacing: 8) {
+                            Text("Where Are You Located?")
+                                .font(.system(size: 24, weight: .black, design: .rounded))
                                 .foregroundStyle(SignupPalette.ink)
-                            Text("Located?")
-                                .foregroundStyle(SignupPalette.red)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.82)
+
+                            Text("We'll use this to personalize your experience.")
+                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                .foregroundStyle(SignupPalette.muted)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                    }
-                    .font(.system(size: 29, weight: .black, design: .rounded))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.76)
 
-                    Text("This helps us find rides\nnear you.")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(SignupPalette.muted)
-
-                    VStack(spacing: 12) {
+                        VStack(spacing: 12) {
                         SignupInputRow(icon: "house", placeholder: "Street Address") {
                             TextField("Street Address", text: $street)
                                 .textContentType(.streetAddressLine1)
@@ -120,82 +115,18 @@ struct AddressInfoView: View {
                                 }
                         }
                     }
-                    .padding(.top, 2)
+                        .padding(.top, 2)
 
-                    Button("Continue") { onNext() }
-                        .buttonStyle(SignupPrimaryButtonStyle())
-                        .disabled(!canContinue)
-                        .opacity(canContinue ? 1 : 0.56)
-                        .padding(.top, 8)
+                        Button("Continue") { onNext() }
+                            .buttonStyle(SignupPrimaryButtonStyle())
+                            .disabled(!canContinue)
+                            .opacity(canContinue ? 1 : 0.56)
 
-                    SignupProgressDots(active: 1)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 6)
+                        SignupSecurityFooter(text: "Your address helps us match nearby rides faster.")
+                    }
                 }
-                .padding(.horizontal, 28)
-                .padding(.top, 16)
-                .padding(.bottom, 28)
-                .frame(maxWidth: 440)
-                .frame(maxWidth: .infinity)
-            }
-        }
-        .navigationBarBackButtonHidden(true)
-        .toolbar(.hidden, for: .navigationBar)
-    }
-}
-
-private struct LocationHero: View {
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    SignupPalette.background,
-                    Color(red: 1, green: 0.90, blue: 0.93).opacity(0.38),
-                    SignupPalette.background.opacity(0.90)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            RoadGrid()
-                .stroke(SignupPalette.muted.opacity(0.16), lineWidth: 1)
-                .offset(y: 20)
-            SignupSpeedLines()
-                .stroke(
-                    LinearGradient(
-                        colors: [SignupPalette.red.opacity(0), SignupPalette.red.opacity(0.62), SignupPalette.red.opacity(0)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ),
-                    style: StrokeStyle(lineWidth: 4, lineCap: .round)
-                )
-                .offset(y: 74)
-                .blur(radius: 0.4)
-            SignupMiniCity()
-                .fill(SignupPalette.red.opacity(0.13))
-                .frame(width: 150, height: 110)
-                .offset(x: 105, y: 42)
-            Image(systemName: "mappin.circle.fill")
-                .font(.system(size: 82, weight: .black))
-                .foregroundStyle(SignupPalette.red)
-                .shadow(color: SignupPalette.red.opacity(0.36), radius: 20, x: 0, y: 12)
-                .offset(x: 18, y: 18)
-        }
-    }
-}
-
-private struct RoadGrid: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        for index in 0..<12 {
-            let x = rect.width * CGFloat(index) / 11
-            path.move(to: CGPoint(x: x, y: rect.minY))
-            path.addLine(to: CGPoint(x: rect.midX + (x - rect.midX) * 1.8, y: rect.maxY))
-        }
-        for index in 0..<10 {
-            let y = rect.height * CGFloat(index) / 9
-            path.move(to: CGPoint(x: rect.minX, y: y))
-            path.addLine(to: CGPoint(x: rect.maxX, y: y))
-        }
-        return path
+            },
+            onBack: { dismiss() }
+        )
     }
 }

@@ -66,7 +66,24 @@ final class DriverSessionManager: ObservableObject {
         driverEmail = email
         isLoggedIn = true
         canGoOnline = false // default until Firestore confirms approval or beta test bypass.
+        Task {
+            await DriverNotificationManager.shared.saveCurrentTokenForAuthenticatedUser()
+        }
         startDriverStatusListener()
+    }
+
+    func logout() {
+        let uid = Auth.auth().currentUser?.uid
+        Task {
+            await DriverNotificationManager.shared.disableAndDeleteCurrentTokenForLogout(uid: uid)
+        }
+        driverListener?.remove()
+        driverListener = nil
+        try? Auth.auth().signOut()
+        driverName = ""
+        driverEmail = ""
+        isLoggedIn = false
+        canGoOnline = false
     }
 
     /// Observes the driver's Firestore document for background check status updates.

@@ -9,6 +9,7 @@
 // AddLocationSheet.swift
 import SwiftUI
 import MapKit
+import UIKit
 
 public struct AddLocationSheet: View {
     public enum Shortcut: String, CaseIterable { case home, work, custom
@@ -53,9 +54,29 @@ public struct AddLocationSheet: View {
                 Spacer(minLength: 0)
             }
             .padding()
+            .background(
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dismissKeyboard()
+                    }
+            )
             .navigationTitle("Add Location")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        dismissKeyboard()
+                    }
+                }
+            }
         }
+    }
+
+    private func dismissKeyboard() {
+        searching = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 
@@ -101,6 +122,7 @@ private struct SearchField: View {
             TextField("Search for a place", text: $text)
                 .textInputAutocapitalization(.words)
                 .disableAutocorrection(true)
+                .submitLabel(.search)
         }
         .padding(12)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
@@ -128,4 +150,3 @@ private struct SuggestionList: View {
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.black.opacity(0.06), lineWidth: 1))
     }
 }
-

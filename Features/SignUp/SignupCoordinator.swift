@@ -37,7 +37,7 @@ struct SignupCoordinator: View {
     @State private var state = ""
     @State private var zip = ""
     @State private var agreedToTerms = false
-    @State private var isVerifiedUser = false
+    @State private var verificationRequested = false
     @State private var stateIDFront: PhotosPickerItem?
     @State private var stateIDBack: PhotosPickerItem?
     @State private var selfieImage: PhotosPickerItem?
@@ -149,7 +149,7 @@ struct SignupCoordinator: View {
                 case .termsAndVerification:
                     TermsAndVerificationView(
                         termsAccepted: $agreedToTerms,
-                        wantsVerification: $isVerifiedUser,
+                        wantsVerification: $verificationRequested,
                         idFront: $stateIDFront,
                         idBack: $stateIDBack,
                         selfie: $selfieImage,
@@ -269,7 +269,7 @@ struct SignupCoordinator: View {
                 "zip": zip
             ],
             "agreedToTerms": agreedToTerms,
-            "verifiedUser": isVerifiedUser,
+            "verificationRequested": verificationRequested,
             "hasRydrRiderAccess": true,
             "cashHubRole": CashHubRole.rider.rawValue,
             "createdAt": FieldValue.serverTimestamp()
@@ -329,39 +329,29 @@ struct SignupCoordinator: View {
     ) {
         guard let user = Auth.auth().currentUser else { return }
         let uid = user.uid
-        let doc = Firestore.firestore().collection("riders").document(uid)
 
-        doc.getDocument { snap, _ in
-            if let cid = snap?.data()?["stripeCustomerId"] as? String, !cid.isEmpty {
-                print("✅ Stripe customer already provisioned:", cid)
-                return
-            }
+        user.getIDToken { token, _ in
+            var req = URLRequest(url: backendBase.appendingPathComponent("create-customer"))
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            if let token = token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
 
-            user.getIDToken { token, _ in
-                var req = URLRequest(url: backendBase.appendingPathComponent("create-customer"))
-                req.httpMethod = "POST"
-                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                // (Optional) If you later secure the backend, send the ID token:
-                if let token = token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+            let body: [String: Any] = [
+                "email": user.email ?? "user-\(uid)@example.com",
+                "name":  user.displayName ?? "Rydr User",
+                "uid":   uid
+            ]
+            req.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
 
-                let body: [String: Any] = [
-                    "email": user.email ?? "user-\(uid)@example.com",
-                    "name":  user.displayName ?? "Rydr User",
-                    "uid":   uid
-                ]
-                req.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
+            URLSession.shared.dataTask(with: req) { data, _, _ in
+                guard
+                    let data = data,
+                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                    let cid = json["customerId"] as? String
+                else { print("❌ Failed to provision Stripe customer"); return }
 
-                URLSession.shared.dataTask(with: req) { data, _, _ in
-                    guard
-                        let data = data,
-                        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                        let cid = json["customerId"] as? String
-                    else { print("❌ Failed to provision Stripe customer"); return }
-
-                    doc.setData(["stripeCustomerId": cid], merge: true)
-                    print("✅ Provisioned Stripe customer:", cid)
-                }.resume()
-            }
+                print("✅ Stripe customer provisioned by backend:", cid)
+            }.resume()
         }
     }
 }

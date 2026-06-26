@@ -298,8 +298,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
                 }
 
                 if isLateRelease {
-                    self.recordLateReleasePenalty(driverUid: uid, request: request)
-                    self.confirmationMessage = "Ride released. Late release marker added because this was within 1 hour of pickup."
+                    self.confirmationMessage = "Ride released. This release was flagged for admin review because it was within 1 hour of pickup."
                 } else {
                     self.confirmationMessage = "Ride released back to Cash Hub."
                 }
@@ -316,23 +315,6 @@ private final class DriverCashRydrHubVM: ObservableObject {
                     self?.errorMessage = error?.localizedDescription
                 }
             }
-    }
-
-    private func recordLateReleasePenalty(driverUid: String, request: DriverCashRideRequest) {
-        let driverRef = db.collection("drivers").document(driverUid)
-        driverRef.setData([
-            "cashHubLateReleaseCount": FieldValue.increment(Int64(1)),
-            "cashHubLastLateReleaseAt": FieldValue.serverTimestamp(),
-            "cashHubLastLateReleaseRequestId": request.id,
-            "updatedAt": FieldValue.serverTimestamp()
-        ], merge: true)
-
-        driverRef.collection("cashHubPenaltyMarkers").addDocument(data: [
-            "requestId": request.id,
-            "scheduledTime": Timestamp(date: request.scheduledTime),
-            "reason": "Released within 1 hour of scheduled pickup.",
-            "createdAt": FieldValue.serverTimestamp()
-        ])
     }
 
     private func syncResponseListeners(for requests: [DriverCashRideRequest]) {

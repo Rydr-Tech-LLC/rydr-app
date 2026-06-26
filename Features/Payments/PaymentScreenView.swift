@@ -1,6 +1,5 @@
 import SwiftUI
 import FirebaseAuth
-import FirebaseFirestore
 import StripePayments
 import StripePaymentsUI
 
@@ -18,55 +17,58 @@ struct PaymentScreenView: View {
     @State private var customerId: String?
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var showAddCard = false
+    @State private var canSubmitCard = false
+    @State private var cardParams: STPPaymentMethodParams?
+    @State private var presentingVC: UIViewController?
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .top) {
             SignupPalette.background.ignoresSafeArea()
-            SignupRoadHero()
-                .frame(height: 280)
-                .frame(maxHeight: .infinity, alignment: .top)
+
+            PaymentMotionHero()
+                .frame(height: 210)
+                .frame(maxWidth: .infinity)
                 .ignoresSafeArea(edges: .top)
+                .accessibilityHidden(true)
+
+            PaymentBottomSkyline()
+                .frame(height: 126)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .ignoresSafeArea(edges: .bottom)
                 .accessibilityHidden(true)
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
-                    VStack(spacing: 4) {
-                        HStack(spacing: 7) {
-                            Text("Add Your")
-                                .foregroundStyle(SignupPalette.ink)
-                            Text("Card")
-                                .foregroundStyle(SignupPalette.red)
-                        }
-                        .font(.system(size: 30, weight: .black, design: .rounded))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
+                    SignupBackButton(action: { dismiss() })
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                        Text("Secure payments. Smooth rides.")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundStyle(SignupPalette.muted)
-                    }
-                    .padding(.top, 74)
+                    PaymentHeader()
+                        .padding(.top, 34)
 
-                    SignupCardPreview()
+                    SignupStepHeader(active: 2)
+                        .padding(.horizontal, 54)
                         .padding(.top, 2)
 
-                    VStack(spacing: 12) {
-                        StaticSignupField(icon: "creditcard", text: customerId == nil ? "Preparing secure card form..." : "Card Number", trailing: "viewfinder")
-                        HStack(spacing: 10) {
-                            StaticSignupField(icon: "calendar", text: "MM / YY")
-                            StaticSignupField(icon: "lock", text: "CVV", trailing: "questionmark.circle")
-                        }
-                        StaticSignupField(icon: "person", text: "Name on Card")
-                    }
-                    .redacted(reason: customerId == nil ? .placeholder : [])
+                    Image("SignupVisaCard")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 330)
+                        .frame(height: 184)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .shadow(color: SignupPalette.red.opacity(0.26), radius: 24, x: 0, y: 16)
+                        .accessibilityHidden(true)
+                        .padding(.top, 6)
 
-                    Button(isLoading ? "Working..." : "Save Card") {
-                        showAddCard = true
+                    paymentForm
+
+                    Button(isLoading ? "Working..." : "Save & Continue") {
+                        addCard()
                     }
                     .buttonStyle(SignupPrimaryButtonStyle())
-                    .disabled(customerId == nil || isLoading)
-                    .opacity(customerId == nil || isLoading ? 0.56 : 1)
+                    .disabled(customerId == nil || !canSubmitCard || isLoading)
+                    .opacity(customerId == nil || !canSubmitCard || isLoading ? 0.56 : 1)
+                    .padding(.top, 4)
 
                     if showSkip {
                         Button("Add Payment Later") { onSkip() }
@@ -75,89 +77,95 @@ struct PaymentScreenView: View {
                     }
 
                     if isLoading {
-                        ProgressView("Working...")
+                        ProgressView("Preparing secure payment setup...")
                             .font(.footnote.weight(.semibold))
+                            .tint(SignupPalette.red)
                     }
 
                     if let err = errorMessage {
                         Label(err, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.yellow)
+                            .foregroundStyle(SignupPalette.red)
                             .font(.footnote.weight(.semibold))
                             .multilineTextAlignment(.leading)
                     }
 
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "shield.checkered")
-                            .font(.system(size: 23, weight: .bold))
-                            .foregroundStyle(SignupPalette.red)
-                        Text("Your card information is encrypted\nand stored securely.")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(SignupPalette.muted)
-                    }
-                    .padding(.top, 8)
-
-                    SignupProgressDots(active: 2)
-                        .padding(.top, 4)
+                    SignupSecurityFooter(text: "Your payment details are 100% secure.")
+                        .padding(.bottom, 108)
                 }
                 .padding(.horizontal, 28)
                 .padding(.top, 16)
-                .padding(.bottom, 28)
-                .frame(maxWidth: 440)
+                .frame(maxWidth: 430)
                 .frame(maxWidth: .infinity)
             }
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .preferredColorScheme(.light)
         .onAppear { bootstrap() }
-        .sheet(isPresented: $showAddCard) {
-            if let cid = customerId {
-                AddCardSheet_Signup(backendBase: backendBase, customerId: cid) { result in
-                    showAddCard = false
-                    switch result {
-                    case .success: onComplete()
-                    case .failure(let err): errorMessage = err.localizedDescription
-                    }
-                }
+        .background(PresenterResolver_Signup { vc in presentingVC = vc })
+        .hideKeyboardOnTap()
+    }
+
+    private var paymentForm: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 10) {
+                Image(systemName: "creditcard.fill")
+                    .font(.system(size: 15, weight: .black))
+                    .foregroundStyle(SignupPalette.red)
+                Text("Card Information")
+                    .font(.system(size: 14, weight: .black, design: .rounded))
+                    .foregroundStyle(SignupPalette.ink)
+                Spacer()
+                Label("Secured by Stripe", systemImage: "lock.fill")
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .foregroundStyle(SignupPalette.muted)
+                    .labelStyle(.titleAndIcon)
             }
+
+            SignupStripeCardEntry(
+                paymentMethodParams: $cardParams,
+                canSubmit: $canSubmitCard,
+                isReady: customerId != nil
+            )
+
+            PaymentSecurityStrip()
         }
+        .padding(.top, 4)
     }
 
     // MARK: - Setup
 
     private func bootstrap() {
+        guard customerId == nil else { return }
         guard let user = Auth.auth().currentUser else {
             error("You must be logged in.")
             return
         }
+        isLoading = true
         ensureCustomer(for: user) { result in
-            if case .success(let cid) = result {
-                self.customerId = cid
-            } else if case .failure(let e) = result {
-                self.error(e.localizedDescription)
+            DispatchQueue.main.async {
+                self.isLoading = false
+                if case .success(let cid) = result {
+                    self.customerId = cid
+                } else if case .failure(let e) = result {
+                    self.error(e.localizedDescription)
+                }
             }
         }
     }
 
     private func ensureCustomer(for user: User, completion: @escaping (Result<String, Error>) -> Void) {
         let uid = user.uid
-        let doc = Firestore.firestore().collection("riders").document(uid)
 
-        doc.getDocument { snap, _ in
-            if let cid = snap?.data()?["stripeCustomerId"] as? String, !cid.isEmpty {
-                completion(.success(cid)); return
-            }
-            let email = user.email ?? "user-\(uid)@example.com"
-            let name  = user.displayName ?? "Rydr User"
+        let email = user.email ?? "user-\(uid)@example.com"
+        let name  = user.displayName ?? "Rydr User"
 
-            requestJSON(path: "create-customer", body: ["email": email, "name": name, "uid": uid]) { (resp: CreateCustomerResponse_Signup?) in
-                guard let cid = resp?.customerId, !cid.isEmpty else {
-                    completion(.failure(NSError(domain: "Stripe", code: -1,
-                                                userInfo: [NSLocalizedDescriptionKey: "No customerId from server"]))); return
-                }
-                doc.setData(["stripeCustomerId": cid], merge: true) { _ in
-                    completion(.success(cid))
-                }
+        requestJSON(path: "create-customer", body: ["email": email, "name": name, "uid": uid]) { (resp: CreateCustomerResponse_Signup?) in
+            guard let cid = resp?.customerId, !cid.isEmpty else {
+                completion(.failure(NSError(domain: "Stripe", code: -1,
+                                            userInfo: [NSLocalizedDescriptionKey: "No customerId from server"]))); return
             }
+            completion(.success(cid))
         }
     }
 
@@ -196,56 +204,120 @@ struct PaymentScreenView: View {
             self.isLoading = false
         }
     }
+
+    private func addCard() {
+        guard let customerId else {
+            error("Payment setup is still loading.")
+            return
+        }
+        guard let pmParams = cardParams else {
+            error("Enter a valid card before saving.")
+            return
+        }
+
+        errorMessage = nil
+        isLoading = true
+
+        var req = URLRequest(url: backendBase.appendingPathComponent("create-setup-intent"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["customerId": customerId])
+
+        URLSession.shared.dataTask(with: req) { data, _, err in
+            if let err = err {
+                finishCardSave(.failure(err))
+                return
+            }
+            guard let data,
+                  let setupIntent = try? JSONDecoder().decode(SetupIntentResponse_Signup.self, from: data)
+            else {
+                finishCardSave(.failure(simple("Failed to create SetupIntent")))
+                return
+            }
+
+            let confirm = STPSetupIntentConfirmParams(clientSecret: setupIntent.clientSecret)
+            confirm.paymentMethodParams = pmParams
+
+            let handler = STPPaymentHandler.shared()
+            let context = AuthContext_Signup(presenting: presentingVC)
+
+            handler.confirmSetupIntent(confirm, with: context) { status, _, error in
+                switch status {
+                case .succeeded:
+                    finishCardSave(.success(()))
+                case .failed:
+                    finishCardSave(.failure(error ?? simple("Confirmation failed")))
+                case .canceled:
+                    finishCardSave(.failure(simple("Canceled")))
+                @unknown default:
+                    finishCardSave(.failure(simple("Unknown payment status")))
+                }
+            }
+        }.resume()
+    }
+
+    private func finishCardSave(_ result: Result<Void, Error>) {
+        DispatchQueue.main.async {
+            isLoading = false
+            switch result {
+            case .success:
+                onComplete()
+            case .failure(let error):
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func simple(_ message: String) -> NSError {
+        NSError(domain: "PaymentScreen", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
+    }
 }
 
 private struct SignupCardPreview: View {
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.96, green: 0.02, blue: 0.20),
-                            Color(red: 0.55, green: 0.00, blue: 0.12),
-                            Color(red: 0.10, green: 0.02, blue: 0.05)
+                            SignupPalette.coral,
+                            SignupPalette.red,
+                            SignupPalette.wine
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
                 .overlay(CardPreviewTexture().opacity(0.34))
-                .shadow(color: SignupPalette.red.opacity(0.32), radius: 16, x: 0, y: 10)
+                .shadow(color: SignupPalette.red.opacity(0.30), radius: 20, x: 0, y: 14)
 
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(red: 0.92, green: 0.78, blue: 0.43), Color(red: 0.58, green: 0.44, blue: 0.18)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 36, height: 28)
+                    Spacer()
                     Text("VISA")
                         .font(.system(size: 20, weight: .black, design: .rounded).italic())
-                    Spacer()
-                    Image(systemName: "wave.3.right")
-                        .font(.system(size: 17, weight: .bold))
                 }
                 .foregroundStyle(.white)
 
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.90, green: 0.77, blue: 0.44), Color(red: 0.57, green: 0.43, blue: 0.18)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 36, height: 28)
-
-                Text("4242   4242   4242   4242")
+                Text("••••   ••••   ••••   4242")
                     .font(.system(size: 18, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
 
                 HStack(spacing: 28) {
-                    cardMeta("08/30", "EXP DATE")
-                    cardMeta("424", "CVV")
-                    cardMeta("30168", "ZIP CODE")
+                    cardMeta("KHRIS NUNNALLY", "CARDHOLDER")
+                    Spacer()
+                    cardMeta("08/30", "EXPIRES")
                 }
             }
             .padding(18)
@@ -257,7 +329,7 @@ private struct SignupCardPreview: View {
                 .frame(width: 120, height: 120)
                 .offset(x: 42, y: -2)
         }
-        .frame(height: 174)
+        .frame(height: 176)
         .accessibilityHidden(true)
     }
 
@@ -269,6 +341,197 @@ private struct SignupCardPreview: View {
                 .font(.system(size: 7, weight: .black, design: .rounded))
         }
         .foregroundStyle(.white.opacity(0.88))
+    }
+}
+
+private struct PaymentHeader: View {
+    var body: some View {
+        VStack(spacing: 10) {
+            Text("STEP ")
+                .foregroundStyle(SignupPalette.muted)
+            + Text("3")
+                .foregroundStyle(SignupPalette.red)
+            + Text(" OF 4")
+                .foregroundStyle(SignupPalette.muted)
+
+            VStack(spacing: 7) {
+                Text("Add Payment Method")
+                    .font(.system(size: 24, weight: .black, design: .rounded))
+                    .foregroundStyle(SignupPalette.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+
+                Text("Add a payment method to your Rydr wallet\nso you're ready to ride.")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(SignupPalette.muted)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+            }
+        }
+        .font(.system(size: 12, weight: .black, design: .rounded))
+        .padding(.horizontal, 18)
+        .padding(.vertical, 9)
+        .background(.ultraThinMaterial, in: Capsule())
+        .background(Color.white.opacity(0.72), in: Capsule())
+    }
+}
+
+private struct PaymentMotionHero: View {
+    @State private var phase: CGFloat = -90
+    @State private var dragOffset: CGFloat = 0
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color.white,
+                    Color(red: 1.0, green: 0.96, blue: 0.97),
+                    SignupPalette.background.opacity(0.72)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            PaymentRouteLines(phase: phase + dragOffset)
+                .stroke(SignupPalette.red.opacity(0.18), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+                .blur(radius: 0.1)
+
+            PaymentRouteLines(phase: phase * 0.65 + dragOffset)
+                .stroke(SignupPalette.red.opacity(0.09), style: StrokeStyle(lineWidth: 3.2, lineCap: .round))
+                .blur(radius: 1.2)
+
+            Image(systemName: "car.fill")
+                .font(.system(size: 18, weight: .black))
+                .foregroundStyle(SignupPalette.redGradient)
+                .shadow(color: SignupPalette.red.opacity(0.28), radius: 8, x: 0, y: 4)
+                .offset(x: 114 + dragOffset * 0.06, y: 62)
+
+            Circle()
+                .stroke(SignupPalette.red.opacity(0.14), style: StrokeStyle(lineWidth: 1.3, dash: [2, 4]))
+                .frame(width: 44, height: 44)
+                .overlay {
+                    Circle()
+                        .fill(SignupPalette.red.opacity(0.34))
+                        .frame(width: 8, height: 8)
+                }
+                .offset(x: 178, y: 48)
+        }
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { dragOffset = $0.translation.width * 0.35 }
+                .onEnded { _ in
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                        dragOffset = 0
+                    }
+                }
+        )
+        .onAppear {
+            withAnimation(.linear(duration: 18).repeatForever(autoreverses: false)) {
+                phase = 110
+            }
+        }
+    }
+}
+
+private struct PaymentRouteLines: Shape {
+    var phase: CGFloat
+
+    var animatableData: CGFloat {
+        get { phase }
+        set { phase = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        for index in 0..<7 {
+            let y = rect.height * (0.44 + CGFloat(index) * 0.035)
+            path.move(to: CGPoint(x: rect.minX - 70 + phase * 0.18, y: y))
+            path.addCurve(
+                to: CGPoint(x: rect.maxX + 70 + phase * 0.08, y: y + CGFloat(index - 3) * 3),
+                control1: CGPoint(x: rect.width * 0.30 + phase, y: y - 58),
+                control2: CGPoint(x: rect.width * 0.78 + phase * 0.25, y: y + 38)
+            )
+        }
+        return path
+    }
+}
+
+private struct PaymentBottomSkyline: View {
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            LinearGradient(
+                colors: [
+                    Color.clear,
+                    SignupPalette.background.opacity(0.28),
+                    SignupPalette.background
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            Image("SignupAtlantaSkyline")
+                .resizable()
+                .scaledToFill()
+                .frame(maxWidth: .infinity)
+                .frame(height: 126)
+                .clipped()
+                .opacity(0.54)
+                .saturation(0.15)
+                .overlay {
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.08),
+                            SignupPalette.red.opacity(0.05),
+                            SignupPalette.background.opacity(0.26)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+        }
+    }
+}
+
+private struct PaymentSecurityStrip: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            PaymentSecurityItem(icon: "shield.checkered", title: "Bank-level", subtitle: "Security")
+            Divider().frame(height: 28)
+            PaymentSecurityItem(icon: "lock.fill", title: "Encrypted", subtitle: "Payments")
+            Divider().frame(height: 28)
+            PaymentSecurityItem(icon: "checkmark.circle", title: "Powered by", subtitle: "Stripe")
+        }
+        .padding(.vertical, 11)
+        .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .stroke(SignupPalette.softLine, lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(0.045), radius: 10, x: 0, y: 6)
+    }
+}
+
+private struct PaymentSecurityItem: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(SignupPalette.muted)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                Text(subtitle)
+            }
+            .font(.system(size: 10, weight: .black, design: .rounded))
+            .foregroundStyle(SignupPalette.muted)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -321,93 +584,33 @@ private struct StaticSignupField: View {
     }
 }
 
-// MARK: - Minimal Add-card sheet for signup (distinct type names to avoid clashes)
-
-private struct AddCardSheet_Signup: View {
-    let backendBase: URL
-    let customerId: String
-    let completion: (Result<Void, Error>) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var canSubmit = false
-    @State private var isWorking = false
-    @State private var errorText: String?
-    @State private var cardParams: STPPaymentMethodParams?
-    @State private var presentingVC: UIViewController?
+private struct SignupStripeCardEntry: View {
+    @Binding var paymentMethodParams: STPPaymentMethodParams?
+    @Binding var canSubmit: Bool
+    let isReady: Bool
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 16) {
-                CardFormRepresentable_Signup(paymentMethodParams: $cardParams, onEditingChanged: { canSubmit = $0 })
-                    .frame(height: 220)
+        HStack(spacing: 12) {
+            CardFormRepresentable_Signup(
+                paymentMethodParams: $paymentMethodParams,
+                onEditingChanged: { canSubmit = $0 }
+            )
+            .frame(height: 58)
+            .disabled(!isReady)
+            .opacity(isReady ? 1 : 0.45)
 
-                if let e = errorText {
-                    Text(e).foregroundStyle(.red).font(.footnote)
-                }
-
-                Button {
-                    addCard()
-                } label: {
-                    if isWorking { ProgressView().frame(maxWidth: .infinity) }
-                    else { Text("Save Card").frame(maxWidth: .infinity) }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canSubmit || isWorking)
-
-                Spacer()
-            }
-            .padding()
-            .navigationTitle("Add Card")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-            .background(PresenterResolver_Signup { vc in presentingVC = vc })
+            Image(systemName: canSubmit ? "checkmark.circle.fill" : "lock.fill")
+                .font(.system(size: 16, weight: .black))
+                .foregroundStyle(canSubmit ? SignupPalette.success : SignupPalette.muted.opacity(0.70))
         }
-    }
-
-    private func addCard() {
-        guard let pmParams = cardParams else { return }
-        errorText = nil; isWorking = true
-
-        var req = URLRequest(url: backendBase.appendingPathComponent("create-setup-intent"))
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["customerId": customerId])
-
-        URLSession.shared.dataTask(with: req) { data, _, err in
-            if let err = err { finish(.failure(err)); return }
-            guard let data = data,
-                  let si = try? JSONDecoder().decode(SetupIntentResponse_Signup.self, from: data)
-            else { finish(.failure(simple("Failed to create SetupIntent"))); return }
-
-            let confirm = STPSetupIntentConfirmParams(clientSecret: si.clientSecret)
-            confirm.paymentMethodParams = pmParams
-
-            let handler = STPPaymentHandler.shared()
-            let ctx = AuthContext_Signup(presenting: presentingVC)
-
-            handler.confirmSetupIntent(confirm, with: ctx) { status, _, error in
-                switch status {
-                case .succeeded: finish(.success(()))
-                case .failed:    finish(.failure(error ?? simple("Confirmation failed")))
-                case .canceled:  finish(.failure(simple("Canceled")))
-                @unknown default:finish(.failure(simple("Unknown status")))
-                }
-            }
-        }.resume()
-    }
-
-    private func finish(_ result: Result<Void, Error>) {
-        DispatchQueue.main.async {
-            isWorking = false
-            if case .failure(let e) = result { errorText = e.localizedDescription }
-            completion(result)
+        .padding(.horizontal, 14)
+        .frame(height: 72)
+        .background(SignupPalette.field, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(canSubmit ? SignupPalette.success.opacity(0.40) : SignupPalette.softLine, lineWidth: 1)
         }
-    }
-    private func simple(_ msg: String) -> NSError {
-        NSError(domain: "AddCard", code: -1, userInfo: [NSLocalizedDescriptionKey: msg])
+        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 7)
     }
 }
 
@@ -455,8 +658,3 @@ private struct PresenterResolver_Signup: UIViewControllerRepresentable {
 // DTOs with unique names in this file
 private struct CreateCustomerResponse_Signup: Decodable { let customerId: String }
 private struct SetupIntentResponse_Signup: Decodable { let clientSecret: String }
-
-
-
-
-

@@ -241,7 +241,7 @@ struct DriverSignupCoordinator: View {
                         started: $backgroundCheckStarted
                     ) {
                         if backgroundCheckStarted {
-                            upsertDriver(["backgroundCheckStatus": "pending"]) // backend will later set to "passed" or "failed"
+                            recordDriverApprovalRequest(type: "backgroundCheck")
                             session.canGoOnline = false
                             path.append(.payouts)
                         }
@@ -311,6 +311,19 @@ struct DriverSignupCoordinator: View {
                             }
                         }
                 }
+        }
+    }
+
+    private func recordDriverApprovalRequest(type: String) {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        Firestore.firestore().collection("driverApprovalRequests").document(uid).setData([
+            "uid": uid,
+            "requestType": type,
+            "source": "driver-ios-signup",
+            "requested": true,
+            "updatedAt": FieldValue.serverTimestamp()
+        ], merge: true) { err in
+            if let err = err { errorText = err.localizedDescription }
         }
     }
 }

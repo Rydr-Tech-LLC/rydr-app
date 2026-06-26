@@ -10,6 +10,8 @@ import UIKit
 import FirebaseCore
 import FirebaseAuth
 import FirebaseAppCheck
+import FirebaseMessaging
+import UserNotifications
 
 private final class RydrDriverAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
   func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
@@ -20,7 +22,7 @@ private final class RydrDriverAppCheckProviderFactory: NSObject, AppCheckProvide
   }
 }
 
-class AppDelegate: NSObject, UIApplicationDelegate {
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
   func application(_ application: UIApplication,
                    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
     #if targetEnvironment(simulator)
@@ -33,11 +35,71 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
     FirebaseApp.configure()
 
+    UNUserNotificationCenter.current().delegate = self
+    Messaging.messaging().delegate = self
+    DriverNotificationManager.shared.configureForLaunch(application: application)
+
     #if DEBUG
     Auth.auth().settings?.isAppVerificationDisabledForTesting = true
     #endif
 
     return true
+  }
+
+  func application(
+    _ application: UIApplication,
+    open url: URL,
+    options: [UIApplication.OpenURLOptionsKey : Any] = [:]
+  ) -> Bool {
+    return Auth.auth().canHandle(url)
+  }
+
+  func application(
+    _ application: UIApplication,
+    didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+    fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+  ) {
+    if Auth.auth().canHandleNotification(userInfo) {
+      completionHandler(.noData)
+      return
+    }
+    completionHandler(.noData)
+  }
+
+  func application(
+    _ application: UIApplication,
+    didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+  ) {
+    DriverNotificationManager.shared.handleAPNSTokenRegistration(deviceToken)
+  }
+
+  func application(
+    _ application: UIApplication,
+    didFailToRegisterForRemoteNotificationsWithError error: Error
+  ) {
+    DriverNotificationManager.shared.handleAPNSTokenRegistrationFailure(error)
+  }
+
+  func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+    DriverNotificationManager.shared.handleFCMTokenUpdate(fcmToken)
+  }
+
+  func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    DriverNotificationManager.shared.handleForegroundNotification(notification.request.content.userInfo)
+    completionHandler([.banner, .sound, .badge])
+  }
+
+  func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
+    DriverNotificationManager.shared.handleNotificationTap(response.notification.request.content.userInfo)
+    completionHandler()
   }
 }
 

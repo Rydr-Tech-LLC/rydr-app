@@ -2,6 +2,7 @@ import SwiftUI
 import MapKit
 import _MapKit_SwiftUI
 import CoreLocation
+import UIKit
 
 private struct RoutePreview {
     let estimate: RideEstimate
@@ -170,6 +171,12 @@ struct BookingView: View {
                             mapPosition = .region(start)
                         }
                     }
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        TapGesture().onEnded {
+                            dismissBookingKeyboard()
+                        }
+                    )
 
                 // Slider panel
                 slider
@@ -242,6 +249,14 @@ struct BookingView: View {
             .presentationDetents([.large])
         }
         .navigationBarBackButtonHidden(false)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    dismissBookingKeyboard()
+                }
+            }
+        }
     }
 
     // MARK: - High priority drag for snapping panel
@@ -257,6 +272,12 @@ struct BookingView: View {
                 let anchors: [CGFloat] = [sliderMinY, (sliderMaxY * 0.5), sliderMaxY]
                 sliderOffset = anchors.min(by: { abs($0 - sliderOffset) < abs($1 - sliderOffset) }) ?? sliderOffset
             }
+    }
+
+    private func dismissBookingKeyboard() {
+        focusedField = nil
+        shortcutFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     // MARK: - Slider content (structured like Apple Maps panel)
@@ -781,6 +802,9 @@ struct BookingView: View {
                 .textInputAutocapitalization(.words)
                 .disableAutocorrection(true)
                 .textContentType(.fullStreetAddress)
+                .onSubmit {
+                    dismissBookingKeyboard()
+                }
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemGroupedBackground).opacity(0.72)))
@@ -891,6 +915,9 @@ struct BookingView: View {
                         TextField("Enter promo code", text: $promoCode)
                             .textInputAutocapitalization(.never)
                             .disableAutocorrection(true)
+                            .onSubmit {
+                                dismissBookingKeyboard()
+                            }
                             .padding(12)
                             .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemGroupedBackground)))
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.black.opacity(0.06), lineWidth: 1))

@@ -1,0 +1,59 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn() && (
+        request.auth.token.admin == true ||
+        request.auth.token.role == "admin"
+      );
+    }
+
+    function validImageUpload() {
+      return request.resource != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /pendingProfilePhotos/{uid}/{fileName} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow create, update: if isSelf(uid) && validImageUpload();
+      allow delete: if isSelf(uid) || isAdmin();
+    }
+
+    match /profilePhotos/{fileName} {
+      allow read: if true;
+      allow create, update: if signedIn()
+        && fileName == request.auth.uid + ".jpg"
+        && validImageUpload();
+      allow delete: if signedIn()
+        && fileName == request.auth.uid + ".jpg";
+    }
+
+    match /riders/{uid}/cashHubProfilePhoto.jpg {
+      allow read: if true;
+      allow create, update: if isSelf(uid) && validImageUpload();
+      allow delete: if isSelf(uid) || isAdmin();
+    }
+
+    match /driverProfilePhotos/{uid}/{fileName} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow create, update: if isSelf(uid)
+        && fileName.matches('pending-[0-9]+\\.jpg')
+        && validImageUpload();
+      allow delete: if isSelf(uid) || isAdmin();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -90,7 +90,7 @@ private struct CashHubFavoriteDriver: Identifiable, Equatable {
 
 private enum CashHubVisibility: String, CaseIterable, Identifiable {
     case favoriteDrivers = "Favorite Drivers"
-    case publicCommunity = "Public Cash Hub Community"
+    case publicCommunity = "Public CashRydr Hub Community"
 
     var id: String { rawValue }
 
@@ -1393,26 +1393,36 @@ private struct CashHubTermsView: View {
 
 private struct CashHubHeader: View {
     var body: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("RydrCash Hub")
-                    .font(.title2.weight(.black))
-                Text("Cash rides. Real people. Your terms.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+        CashRydrHubBannerView()
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 2)
+            .frame(maxWidth: .infinity)
+            .background(Color(.systemGroupedBackground))
+    }
+}
 
-            Spacer()
+private struct CashRydrHubBannerView: View {
+    private let aspectRatio: CGFloat = 1774.0 / 887.0
 
-            Image(systemName: "person.2.wave.2.fill")
-                .font(.headline.weight(.black))
-                .foregroundStyle(Styles.rydrGradient)
-                .frame(width: 42, height: 42)
-                .background(Circle().fill(Color.red.opacity(0.08)))
+    var body: some View {
+        GeometryReader { proxy in
+            let height = min(max(proxy.size.width / aspectRatio, 170), 220)
+
+            Image("CashRydrHubBanner")
+                .resizable()
+                .scaledToFill()
+                .frame(width: proxy.size.width, height: height)
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .stroke(Color.white.opacity(0.70), lineWidth: 1)
+                }
+                .shadow(color: Color.black.opacity(0.16), radius: 20, x: 0, y: 12)
+                .accessibilityLabel("CashRydr Hub. Post a ride, compare offers, chat, and choose the best driver.")
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemBackground))
+        .aspectRatio(aspectRatio, contentMode: .fit)
+        .frame(maxHeight: 220)
     }
 }
 
@@ -1429,7 +1439,7 @@ private struct CashHubQuickPostCard: View {
                     .background(Circle().fill(Color.red.opacity(0.10)))
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Need a cash ride?")
+                    Text("Need A Cash Ride?")
                         .font(.headline.weight(.black))
                     Text("Post the trip, budget, and timing. Drivers can make offers.")
                         .font(.footnote)
@@ -1543,7 +1553,7 @@ private struct CashHubFeedTimelineCard: View {
 
             if filteredEvents.isEmpty {
                 Text(events.isEmpty
-                     ? "Your Cash Hub updates will appear here as you post rides, favorite drivers, complete trips, and update your profile."
+                     ? "Your CashRydr Hub updates will appear here as you post rides, favorite drivers, complete trips, and update your profile."
                      : "Nothing in this category yet.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

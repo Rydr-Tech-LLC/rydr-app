@@ -69,12 +69,19 @@ class UserSessionManager: ObservableObject {
         selectedTab = startingTab
         accountAccess = access
         isLoggedIn = true
+        Task {
+            await NotificationManager.shared.saveCurrentTokenForAuthenticatedUser()
+        }
         if access == nil {
             loadUserProfile()
         }
     }
 
     func logout() {
+        let uid = Auth.auth().currentUser?.uid
+        Task {
+            await NotificationManager.shared.disableAndDeleteCurrentTokenForLogout(uid: uid)
+        }
         userName = ""
         userEmail = ""
         selectedTab = .ride
@@ -101,6 +108,9 @@ class UserSessionManager: ObservableObject {
                         self.accountAccess = .cashHubOnly
                         self.selectedTab = .profile
                         self.isLoggedIn = true
+                        Task {
+                            await NotificationManager.shared.saveCurrentTokenForAuthenticatedUser()
+                        }
                     }
                     return
                 }
@@ -132,6 +142,9 @@ class UserSessionManager: ObservableObject {
                         self.selectedTab = .cashHub
                     }
                     self.isLoggedIn = true
+                    Task {
+                        await NotificationManager.shared.saveCurrentTokenForAuthenticatedUser()
+                    }
                 }
             }
     }

@@ -4,6 +4,7 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
+const admin = require("firebase-admin");
 const Stripe = require("stripe");
 
 dotenv.config();
@@ -15,6 +16,47 @@ if (!process.env.STRIPE_SECRET_KEY) {
 
 const app = express();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
+
+function firebaseCredential() {
+  const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = process.env;
+
+  if (FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY) {
+    return admin.credential.cert({
+      projectId: FIREBASE_PROJECT_ID,
+      clientEmail: FIREBASE_CLIENT_EMAIL,
+      privateKey: FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
+    });
+  }
+
+  return admin.credential.applicationDefault();
+}
+
+function initializeFirebase() {
+  if (admin.apps.length > 0) return admin.app();
+  return admin.initializeApp({ credential: firebaseCredential() });
+}
+
+async function verifiedFirebaseUid(req) {
+  const authorization = req.header("authorization") || "";
+  const match = authorization.match(/^Bearer (.+)$/);
+  if (!match) return null;
+
+  initializeFirebase();
+  const decoded = await admin.auth().verifyIdToken(match[1]);
+  return decoded.uid;
+}
+
+async function persistStripeCustomerId(uid, customerId) {
+  if (!uid || !customerId) return;
+  initializeFirebase();
+  await admin.firestore().collection("riders").doc(uid).set(
+    {
+      stripeCustomerId: customerId,
+      stripeCustomerUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
+}
 
 // --- CORS (optional; iOS native calls don't need it, web would) ---
 const allowed = (process.env.CORS_ORIGINS || "")
@@ -67,13 +109,18 @@ app.use(express.json());
 app.post("/create-customer", async (req, res) => {
   try {
     const { email, name, uid } = req.body || {};
+    const verifiedUid = await verifiedFirebaseUid(req);
+    const stripeMetadataUid = verifiedUid || uid;
 
     // 1) Prefer lookup by metadata.firebase_uid (if provided)
-    if (uid) {
+    if (stripeMetadataUid) {
       const byUid = await stripe.customers.search({
-        query: `metadata['firebase_uid']:'${uid}'`,
+        query: `metadata['firebase_uid']:'${stripeMetadataUid}'`,
       });
       if (byUid.data.length) {
+        if (verifiedUid) {
+          await persistStripeCustomerId(verifiedUid, byUid.data[0].id);
+        }
         return res.json({ customerId: byUid.data[0].id });
       }
     }
@@ -83,10 +130,13 @@ app.post("/create-customer", async (req, res) => {
       const byEmail = await stripe.customers.search({ query: `email:'${email}'` });
       if (byEmail.data.length) {
         // Backfill UID so future lookups use metadata
-        if (uid && byEmail.data[0].metadata?.firebase_uid !== uid) {
+        if (stripeMetadataUid && byEmail.data[0].metadata?.firebase_uid !== stripeMetadataUid) {
           await stripe.customers.update(byEmail.data[0].id, {
-            metadata: { ...byEmail.data[0].metadata, firebase_uid: uid },
+            metadata: { ...byEmail.data[0].metadata, firebase_uid: stripeMetadataUid },
           });
+        }
+        if (verifiedUid) {
+          await persistStripeCustomerId(verifiedUid, byEmail.data[0].id);
         }
         return res.json({ customerId: byEmail.data[0].id });
       }
@@ -96,8 +146,11 @@ app.post("/create-customer", async (req, res) => {
     const customer = await stripe.customers.create({
       email: email || undefined,
       name: name || undefined,
-      metadata: uid ? { firebase_uid: uid } : undefined,
+      metadata: stripeMetadataUid ? { firebase_uid: stripeMetadataUid } : undefined,
     });
+    if (verifiedUid) {
+      await persistStripeCustomerId(verifiedUid, customer.id);
+    }
     return res.json({ customerId: customer.id });
   } catch (e) {
     console.error("❌ create-customer:", e);
@@ -232,7 +285,6 @@ app.post("/detach-payment-method", async (req, res) => {
 // --- Listen ---
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-
 
 
 

@@ -16,6 +16,7 @@
 		8B2D68FA2E4160F20043BDBE /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2D68F92E4160F20043BDBE /* FirebaseFunctions */; };
 		8B2D68FC2E4160F20043BDBE /* FirebaseInAppMessaging-Beta in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2D68FB2E4160F20043BDBE /* FirebaseInAppMessaging-Beta */; };
 		8B2D68FE2E4160F20043BDBE /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2D68FD2E4160F20043BDBE /* FirebaseStorage */; };
+		8B2D69002E4160F20043BDBE /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2D68FF2E4160F20043BDBE /* FirebaseMessaging */; };
 		8BC309E52E59E81D00CCD3E0 /* StripeIdentity in Frameworks */ = {isa = PBXBuildFile; productRef = 8BC309E42E59E81D00CCD3E0 /* StripeIdentity */; };
 		8BFA10022E98A00100C0DEX1 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 8BFA10012E98A00100C0DEX1 /* FirebaseCrashlytics */; };
 		D917BFB62E04AEB900F44272 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = D917BFB52E04AEB900F44272 /* GoogleSignIn */; };
@@ -202,6 +203,7 @@
 				8B2D68F42E4160F20043BDBE /* FirebaseAppDistribution-Beta in Frameworks */,
 				8B2D68FA2E4160F20043BDBE /* FirebaseFunctions in Frameworks */,
 				8B2D68FE2E4160F20043BDBE /* FirebaseStorage in Frameworks */,
+				8B2D69002E4160F20043BDBE /* FirebaseMessaging in Frameworks */,
 				8B2D68F22E4160F20043BDBE /* FirebaseAnalyticsCore in Frameworks */,
 				8B2D68F02E4160F20043BDBE /* FirebaseAI in Frameworks */,
 				D97904F82DFF4B6700A42B1F /* FirebaseFirestore in Frameworks */,
@@ -311,6 +313,7 @@
 				8B2D68F92E4160F20043BDBE /* FirebaseFunctions */,
 				8B2D68FB2E4160F20043BDBE /* FirebaseInAppMessaging-Beta */,
 				8B2D68FD2E4160F20043BDBE /* FirebaseStorage */,
+				8B2D68FF2E4160F20043BDBE /* FirebaseMessaging */,
 				8BC309E42E59E81D00CCD3E0 /* StripeIdentity */,
 			);
 			productName = RydrPlayground;
@@ -607,9 +610,12 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RydrPlayground/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Rydr;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Rydr uses your camera to take a profile photo and to capture your ID and selfie for identity verification during signup.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Rydr uses your location to find nearby drivers, set your pickup point, and show your trip progress on the map.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Rydr uses Face ID to confirm your identity before quick login.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Rydr uses your location to match rides, track active trips, and improve pickup accuracy.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Rydr uses your location to set pickup points, find nearby drivers, and track active trips.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Rydr may save receipts or support images to your photo library when you choose to export them.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Rydr lets you select photos from your library for your profile picture and ID verification during signup.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -618,6 +624,7 @@
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = "";
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -655,9 +662,12 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RydrPlayground/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Rydr;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Rydr uses your camera to take a profile photo and to capture your ID and selfie for identity verification during signup.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Rydr uses your location to find nearby drivers, set your pickup point, and show your trip progress on the map.";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Rydr uses Face ID to confirm your identity before quick login.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Rydr uses your location to match rides, track active trips, and improve pickup accuracy.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Rydr uses your location to set pickup points, find nearby drivers, and track active trips.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Rydr may save receipts or support images to your photo library when you choose to export them.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Rydr lets you select photos from your library for your profile picture and ID verification during signup.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -666,6 +676,7 @@
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
+				INFOPLIST_KEY_UIStatusBarStyle = "";
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -886,6 +897,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D9723BF42DFDB2BA0075DBC1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseStorage;
+		};
+		8B2D68FF2E4160F20043BDBE /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D9723BF42DFDB2BA0075DBC1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
 		};
 		8BC309E42E59E81D00CCD3E0 /* StripeIdentity */ = {
 			isa = XCSwiftPackageProductDependency;

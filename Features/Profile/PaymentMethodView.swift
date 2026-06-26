@@ -1,6 +1,5 @@
 import SwiftUI
 import FirebaseAuth
-import FirebaseFirestore
 import StripePayments
 import StripePaymentsUI
 
@@ -137,26 +136,30 @@ struct PaymentMethodView: View {
         }
         .sheet(isPresented: $showAddCard, onDismiss: { reloadIfPossible() }) {
             if let cid = customerId {
-                AddOrReplaceCardSheet(
-                    backendBase: backendBase,
-                    customerId: cid,
-                    replacePaymentMethodId: editingPMId
-                ) { result in
-                    showAddCard = false
-                    switch result {
-                    case .success(let newPMId):
-                        // If this was an “edit”, make the new one default and remove the old
-                        if let oldId = editingPMId {
+                if let editingPMId {
+                    AddOrReplaceCardSheet(
+                        backendBase: backendBase,
+                        customerId: cid,
+                        replacePaymentMethodId: editingPMId
+                    ) { result in
+                        showAddCard = false
+                        switch result {
+                        case .success(let newPMId):
                             setDefault(newPMId) { _ in
-                                detach(oldId) { _ in reloadIfPossible() }
+                                detach(editingPMId) { _ in reloadIfPossible() }
                             }
-                        } else {
-                            // Added new card from the button; refresh list
-                            reloadIfPossible()
+                        case .failure(let e):
+                            errorMessage = e.localizedDescription
                         }
-                    case .failure(let e):
-                        errorMessage = e.localizedDescription
                     }
+                } else {
+                    PaymentScreenView(
+                        onComplete: {
+                            showAddCard = false
+                            reloadIfPossible()
+                        },
+                        showSkip: false
+                    )
                 }
             }
         }
@@ -302,28 +305,20 @@ private extension PaymentMethodView {
 
     func ensureCustomer(for user: User, completion: @escaping (Result<String, Error>) -> Void) {
         let uid = user.uid
-        let doc = Firestore.firestore().collection("riders").document(uid)
 
-        doc.getDocument { snap, _ in
-            if let cid = snap?.data()?["stripeCustomerId"] as? String, !cid.isEmpty {
-                completion(.success(cid)); return
-            }
-            let email = user.email ?? "user-\(uid)@example.com"
-            let name  = user.displayName ?? "Rydr User"
+        let email = user.email ?? "user-\(uid)@example.com"
+        let name  = user.displayName ?? "Rydr User"
 
-            requestJSON(
-                backendBase: backendBase,
-                path: "create-customer",
-                body: ["email": email, "name": name, "uid": uid],
-                decode: CreateCustomerResponse.self
-            ) { resp in
-                guard let cid = resp?.customerId, !cid.isEmpty else {
-                    completion(.failure(simple("Failed to create customer"))); return
-                }
-                doc.setData(["stripeCustomerId": cid], merge: true) { _ in
-                    completion(.success(cid))
-                }
+        requestJSON(
+            backendBase: backendBase,
+            path: "create-customer",
+            body: ["email": email, "name": name, "uid": uid],
+            decode: CreateCustomerResponse.self
+        ) { resp in
+            guard let cid = resp?.customerId, !cid.isEmpty else {
+                completion(.failure(simple("Failed to create customer"))); return
             }
+            completion(.success(cid))
         }
     }
 

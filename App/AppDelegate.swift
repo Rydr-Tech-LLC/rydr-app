@@ -9,7 +9,9 @@ import UIKit
 import FirebaseCore
 import FirebaseAuth
 import FirebaseAppCheck
+import FirebaseMessaging
 import Stripe
+import UserNotifications
 
 private final class RydrAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
   func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
@@ -20,7 +22,7 @@ private final class RydrAppCheckProviderFactory: NSObject, AppCheckProviderFacto
   }
 }
 
-class AppDelegate: NSObject, UIApplicationDelegate {
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
 
   func application(
     _ application: UIApplication,
@@ -41,6 +43,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
     // ✅ Firebase
     FirebaseApp.configure()
+
+    UNUserNotificationCenter.current().delegate = self
+    Messaging.messaging().delegate = self
+    NotificationManager.shared.configureForLaunch(application: application)
 
     // (Optional) Easier phone auth in DEBUG on simulator
     #if DEBUG
@@ -86,6 +92,41 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     }
     completionHandler(.noData)
   }
-}
 
+  func application(
+    _ application: UIApplication,
+    didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+  ) {
+    NotificationManager.shared.handleAPNSTokenRegistration(deviceToken)
+  }
+
+  func application(
+    _ application: UIApplication,
+    didFailToRegisterForRemoteNotificationsWithError error: Error
+  ) {
+    NotificationManager.shared.handleAPNSTokenRegistrationFailure(error)
+  }
+
+  func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+    NotificationManager.shared.handleFCMTokenUpdate(fcmToken)
+  }
+
+  func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    NotificationManager.shared.handleForegroundNotification(notification.request.content.userInfo)
+    completionHandler([.banner, .sound, .badge])
+  }
+
+  func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
+    NotificationManager.shared.handleNotificationTap(response.notification.request.content.userInfo)
+    completionHandler()
+  }
+}
 
