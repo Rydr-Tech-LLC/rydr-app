@@ -718,6 +718,8 @@ struct DrawerDestinationView: View {
                 DriverProfileView()
             } else if item == .community {
                 DriverCashRydrHubView()
+            } else if item == .walletPayouts {
+                DriverWalletPayoutsView(vm: vm)
             } else if item == .settings {
                 DriverSettingsView()
             } else {

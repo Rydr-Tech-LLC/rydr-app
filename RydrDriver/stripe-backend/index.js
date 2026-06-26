@@ -371,6 +371,86 @@ app.get("/connect/status", async (req, res) => {
   }
 });
 
+// Driver: Stripe Connect — Balance available for payouts
+// Query: ?accountId=acct_xxx
+app.get("/connect/balance", async (req, res) => {
+  try {
+    const { accountId } = req.query;
+    if (!accountId) return res.status(400).json({ error: "missing_accountId" });
+
+    const [acct, balance] = await Promise.all([
+      stripe.accounts.retrieve(accountId),
+      stripe.balance.retrieve({ stripeAccount: accountId }),
+    ]);
+
+    const available = balance.available.filter((entry) => entry.currency === "usd");
+    const pending = balance.pending.filter((entry) => entry.currency === "usd");
+    const instantAvailableAmount = available.reduce((sum, entry) => sum + entry.amount, 0);
+    const pendingAmount = pending.reduce((sum, entry) => sum + entry.amount, 0);
+
+    res.json({
+      instantAvailableAmount,
+      pendingAmount,
+      currency: "usd",
+      payoutsEnabled: acct.payouts_enabled,
+    });
+  } catch (err) {
+    console.error("connect/balance error", err);
+    res.status(500).json({ error: "balance_failed" });
+  }
+});
+
+// Driver: Stripe Connect — Instant payout from ride-earnings balance
+// Body: { accountId, amount, currency?, uid? }
+app.post("/connect/instant-payout", async (req, res) => {
+  try {
+    const { accountId, amount, currency = "usd", uid } = req.body || {};
+    if (!accountId) return res.status(400).json({ error: "missing_accountId" });
+    if (!Number.isInteger(amount) || amount <= 0) {
+      return res.status(400).json({ error: "invalid_amount" });
+    }
+
+    const acct = await stripe.accounts.retrieve(accountId);
+    if (!acct.payouts_enabled) {
+      return res.status(400).json({ error: "payouts_not_enabled" });
+    }
+
+    const payout = await stripe.payouts.create(
+      {
+        amount,
+        currency,
+        method: "instant",
+        metadata: {
+          uid: uid || acct.metadata?.uid || "",
+          source: "driver_wallet_instant_pay",
+        },
+      },
+      { stripeAccount: accountId }
+    );
+
+    await persistStripeLedger(`payout_${payout.id}`, {
+      type: "instant_payout.created",
+      payoutId: payout.id,
+      accountId,
+      uid: uid || acct.metadata?.uid || null,
+      amount: payout.amount,
+      currency: payout.currency,
+      status: payout.status,
+      method: payout.method,
+    });
+
+    res.json({
+      payoutId: payout.id,
+      amount: payout.amount,
+      currency: payout.currency,
+      status: payout.status,
+    });
+  } catch (err) {
+    console.error("connect/instant-payout error", err);
+    res.status(500).json({ error: "instant_payout_failed", detail: err.message });
+  }
+});
+
 // ============================================================================
 // Driver: Identity (Stripe Identity) — Create hosted session
 // Body: { uid, email, name }
@@ -439,7 +519,6 @@ app.post("/payment-methods/detach", async (req, res) => {
 // --- Listen ---
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-
 
 
 
