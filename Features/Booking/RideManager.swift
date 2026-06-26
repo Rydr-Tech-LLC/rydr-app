@@ -22,6 +22,8 @@ struct Driver: Identifiable, Equatable {
     let perMile: Double            // driver-set, will be capped by ride type
     var coordinate: CLLocationCoordinate2D
     var score: Int                 // proximity/quality score
+    var stripeAccountId: String? = nil       // Stripe Connect account, for destination-charge payouts
+    var stripeChargesEnabled: Bool = false   // Connect account has completed onboarding
 
     static func == (lhs: Driver, rhs: Driver) -> Bool { lhs.id == rhs.id }
 }
@@ -75,7 +77,7 @@ struct RideTierPricing {
 }
 
 enum RydrPricing {
-    static let driverPayoutShare = 0.60
+    static let driverPayoutShare = 0.70
 
     static func config(for rideType: String) -> RideTierPricing {
         switch tier(for: rideType) {
@@ -189,6 +191,7 @@ struct PaymentCard: Identifiable, Equatable {
     let id = UUID()
     let last4: String
     let brand: String              // "Visa", "Mastercard", etc.
+    var stripePaymentMethodId: String? = nil   // nil for mock/placeholder cards (no real charge possible)
 }
 
 struct ReceiptChargeLine: Identifiable, Equatable {
@@ -401,6 +404,9 @@ final class RideManager: ObservableObject {
         PaymentCard(last4: "1881", brand: "Mastercard")
     ]
     @Published var selectedCardIndex: Int = 0
+    @Published var stripeCustomerId: String?
+
+    private let stripeBackendBase = URL(string: "https://rydr-stripe-backend.onrender.com")!
 
     // Live locations for in-progress map/route
     @Published var liveDriverCoordinate: CLLocationCoordinate2D = .init(latitude: 33.7490, longitude: -84.3880)
@@ -438,6 +444,7 @@ final class RideManager: ObservableObject {
     init(rideService: RideService = DebugFallbackRideService(primary: FirestoreRideService(), fallback: MockRideService())) {
         self.rideService = rideService
         restoreActiveRideIfNeeded()
+        Task { await loadRealPaymentMethods() }
     }
 
     deinit {
@@ -675,6 +682,7 @@ final class RideManager: ObservableObject {
                 }
             }
             _ = try? await RydrBankAPI.rideComplete(rideId: backendRideId, distanceMi: distance, rideType: rideType)
+            await chargeRiderForRide(ride, totalAmount: chargeBreakdown.calculatedTotal)
         }
     }
 
@@ -952,6 +960,10 @@ final class RideManager: ObservableObject {
         clearActiveRideSnapshot()
         state = .completed
         closeRideChatIfNeeded(chatContext)
+
+        Task {
+            await chargeRiderForRide(ride, totalAmount: chargeBreakdown.calculatedTotal)
+        }
     }
 
     private func closeRideChatIfNeeded(_ context: RideChatContext?) {
@@ -1158,4 +1170,134 @@ final class RideManager: ObservableObject {
         state = .inProgress
         hasRecoveredActiveRide = true
     }
+
+    // MARK: - Stripe (real wallet + ride charge with driver 70/30 destination split)
+
+    private func currentIDToken() async -> String? {
+        guard let user = Auth.auth().currentUser else { return nil }
+        return try? await user.getIDToken()
+    }
+
+    private func stripeRequest(_ path: String, body: [String: Any]) async -> Data? {
+        var request = URLRequest(url: stripeBackendBase.appendingPathComponent(path))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        if let token = await currentIDToken() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            return data
+        } catch {
+            print("❌ Stripe request to \(path) failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Looks up (or creates, idempotently) the signed-in rider's Stripe customerId.
+    private func ensureStripeCustomerId() async -> String? {
+        if let stripeCustomerId { return stripeCustomerId }
+        guard let user = Auth.auth().currentUser else { return nil }
+
+        let email = user.email ?? "user-\(user.uid)@example.com"
+        let name = user.displayName ?? "Rydr Rider"
+        guard let data = await stripeRequest("create-customer", body: ["email": email, "name": name, "uid": user.uid]),
+              let response = try? JSONDecoder().decode(StripeCustomerResponse_Ride.self, from: data) else {
+            return nil
+        }
+        stripeCustomerId = response.customerId
+        return response.customerId
+    }
+
+    /// Replaces the placeholder saved cards with the rider's real Stripe wallet, if reachable.
+    /// On failure (offline, no real cards yet, etc.) the existing/mock cards are left untouched.
+    func loadRealPaymentMethods() async {
+        guard let customerId = await ensureStripeCustomerId() else { return }
+        guard let data = await stripeRequest("list-payment-methods", body: ["customerId": customerId]),
+              let response = try? JSONDecoder().decode(StripePaymentMethodsResponse_Ride.self, from: data),
+              !response.paymentMethods.isEmpty else {
+            return
+        }
+
+        savedCards = response.paymentMethods.map {
+            PaymentCard(last4: $0.last4, brand: $0.brand.capitalized, stripePaymentMethodId: $0.id)
+        }
+        if let defaultIndex = response.paymentMethods.firstIndex(where: { $0.isDefault }) {
+            selectedCardIndex = defaultIndex
+        } else {
+            selectedCardIndex = 0
+        }
+    }
+
+    /// Off-session charges the rider's saved card for a completed (or prorated-cancelled) ride.
+    /// When the driver has a Stripe Connect account, this is a destination charge: the driver
+    /// is transferred (amount - applicationFee), and Rydr keeps applicationFee
+    /// (30% of the per-mile/per-minute fare + 100% of the booking fee).
+    private func chargeRiderForRide(_ ride: Ride, totalAmount: Double) async {
+        guard totalAmount > 0 else { return }
+        guard let customerId = await ensureStripeCustomerId() else {
+            print("❌ Ride charge skipped: no Stripe customerId available")
+            return
+        }
+
+        let card = savedCards[min(selectedCardIndex, savedCards.count - 1)]
+        guard let paymentMethodId = card.stripePaymentMethodId else {
+            // Mock/placeholder card on file (e.g. debug build with no real wallet) — nothing to charge.
+            print("ℹ️ Ride charge skipped: no real saved payment method on file")
+            return
+        }
+
+        let amountCents = Int((totalAmount * 100).rounded())
+        guard amountCents > 0 else { return }
+
+        var body: [String: Any] = [
+            "amount": amountCents,
+            "currency": "usd",
+            "customerId": customerId,
+            "paymentMethodId": paymentMethodId,
+            "confirm": true,
+        ]
+
+        if let driverAccountId = ride.driver.stripeAccountId, ride.driver.stripeChargesEnabled {
+            let fareBreakdown = Self.fareBreakdown(estimate: ride.estimate, with: ride.driver, rideType: ride.rideType)
+            let applicationFeeCents = max(0, min(amountCents, Int((fareBreakdown.platformShare * 100).rounded())))
+            body["driverAccountId"] = driverAccountId
+            body["applicationFeeAmount"] = applicationFeeCents
+        }
+
+        guard let data = await stripeRequest("create-payment-intent", body: body) else {
+            print("❌ Ride charge failed: no response from backend")
+            return
+        }
+        if let response = try? JSONDecoder().decode(StripePaymentIntentResponse_Ride.self, from: data) {
+            if let error = response.error {
+                print("❌ Ride charge failed: \(error)")
+            } else {
+                print("✅ Ride charge succeeded: \(response.paymentIntentId ?? "") status=\(response.status ?? "")")
+            }
+        }
+    }
+}
+
+private struct StripeCustomerResponse_Ride: Decodable {
+    let customerId: String
+}
+
+private struct StripePaymentMethodDTO_Ride: Decodable {
+    let id: String
+    let brand: String
+    let last4: String
+    let isDefault: Bool
+}
+
+private struct StripePaymentMethodsResponse_Ride: Decodable {
+    let paymentMethods: [StripePaymentMethodDTO_Ride]
+}
+
+private struct StripePaymentIntentResponse_Ride: Decodable {
+    let clientSecret: String?
+    let paymentIntentId: String?
+    let status: String?
+    let error: String?
 }

@@ -185,7 +185,9 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             perMinute: rate.perMinute,
             perMile: rate.perMile,
             coordinate: coordinate,
-            score: score
+            score: score,
+            stripeAccountId: data["stripeAccountId"] as? String,
+            stripeChargesEnabled: data["stripeChargesEnabled"] as? Bool ?? false
         )
     }
 

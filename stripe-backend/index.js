@@ -58,6 +58,42 @@ async function persistStripeCustomerId(uid, customerId) {
   );
 }
 
+// --- Driver Connect helpers ---
+function appBaseURL() {
+  const base = process.env.APP_BASE_URL;
+  if (!base) {
+    throw new Error("APP_BASE_URL is required for hosted Stripe return URLs");
+  }
+  return base.replace(/\/+$/, "");
+}
+
+async function updateDriver(uid, payload) {
+  if (!uid) return;
+  initializeFirebase();
+  await admin.firestore().collection("drivers").doc(uid).set(
+    {
+      ...payload,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+// Denormalize the subset of Connect status the rider app needs (to build a
+// destination charge) onto the driver's public profile, which riders can read.
+async function updatePublicDriverConnectStatus(uid, { stripeAccountId, stripeChargesEnabled }) {
+  if (!uid) return;
+  initializeFirebase();
+  await admin.firestore().collection("publicDriverProfiles").doc(uid).set(
+    {
+      stripeAccountId,
+      stripeChargesEnabled: !!stripeChargesEnabled,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
 // --- CORS (optional; iOS native calls don't need it, web would) ---
 const allowed = (process.env.CORS_ORIGINS || "")
   .split(",").map(s => s.trim()).filter(Boolean);
@@ -72,7 +108,7 @@ app.use(cors({
 app.get("/", (_req, res) => res.send("✅ Rydr Stripe backend is running"));
 
 // --- Webhook (RAW body; mount BEFORE json parser) ---
-app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
+app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
   const sig = req.headers["stripe-signature"];
   try {
     const event = stripe.webhooks.constructEvent(
@@ -91,6 +127,24 @@ app.post("/webhook", express.raw({ type: "application/json" }), (req, res) => {
       case "payment_intent.payment_failed":
         console.log("⚠️ payment_intent.payment_failed:", event.data.object.id);
         break;
+      case "account.updated": {
+        const acct = event.data.object;
+        console.log("ℹ️ account.updated", acct.id, {
+          charges_enabled: acct.charges_enabled,
+          payouts_enabled: acct.payouts_enabled,
+        });
+        await updateDriver(acct.metadata?.uid, {
+          stripeAccountId: acct.id,
+          stripeChargesEnabled: acct.charges_enabled,
+          stripePayoutsEnabled: acct.payouts_enabled,
+          stripeRequirementsDue: acct.requirements?.currently_due || [],
+        });
+        await updatePublicDriverConnectStatus(acct.metadata?.uid, {
+          stripeAccountId: acct.id,
+          stripeChargesEnabled: acct.charges_enabled,
+        });
+        break;
+      }
       default:
         console.log("ℹ️ Unhandled event:", event.type);
     }
@@ -198,23 +252,71 @@ app.post("/create-setup-intent", async (req, res) => {
 });
 
 // --- PaymentIntent (charge) ---
-// Body: { amount: <int cents>, currency: "usd", customerId?: "cus_..." }
+// Body: { amount: <int cents>, currency: "usd", customerId?: "cus_...",
+//         driverAccountId?: "acct_...", applicationFeeAmount?: <int cents>,
+//         paymentMethodId?: "pm_...", confirm?: boolean }
+//
+// If driverAccountId is provided, this becomes a Stripe Connect "destination
+// charge": the rider's card is charged the full `amount` on the platform
+// account, Stripe automatically transfers (amount - applicationFeeAmount) to
+// the driver's connected account, and the platform keeps applicationFeeAmount
+// (the driver's 70/30-split platform cut + the full booking fee).
+//
+// If paymentMethodId + confirm are provided, the PaymentIntent is confirmed
+// immediately off-session (used at ride completion, when the rider isn't
+// actively present in a payment UI to authenticate a new charge). Otherwise
+// this falls back to the original behavior of returning a clientSecret for
+// the client to confirm itself.
 app.post("/create-payment-intent", async (req, res) => {
   try {
-    const { amount, currency = "usd", customerId } = req.body || {};
+    const {
+      amount,
+      currency = "usd",
+      customerId,
+      driverAccountId,
+      applicationFeeAmount,
+      paymentMethodId,
+      confirm,
+    } = req.body || {};
+
     if (!Number.isInteger(amount) || amount <= 0) {
       return res.status(400).json({ error: "invalid_amount" });
     }
-    const pi = await stripe.paymentIntents.create({
+
+    const params = {
       amount,
       currency,
       customer: customerId,
-      automatic_payment_methods: { enabled: true },
-    });
-    res.json({ clientSecret: pi.client_secret, paymentIntentId: pi.id });
+    };
+
+    if (driverAccountId) {
+      if (!Number.isInteger(applicationFeeAmount) || applicationFeeAmount < 0 || applicationFeeAmount > amount) {
+        return res.status(400).json({ error: "invalid_application_fee_amount" });
+      }
+      params.application_fee_amount = applicationFeeAmount;
+      params.transfer_data = { destination: driverAccountId };
+    }
+
+    if (paymentMethodId && confirm) {
+      params.payment_method = paymentMethodId;
+      params.confirm = true;
+      params.off_session = true;
+    } else {
+      params.automatic_payment_methods = { enabled: true };
+    }
+
+    const pi = await stripe.paymentIntents.create(params);
+    res.json({ clientSecret: pi.client_secret, paymentIntentId: pi.id, status: pi.status });
   } catch (e) {
     console.error("❌ create-payment-intent:", e);
-    res.status(500).json({ error: "payment_intent_failed" });
+    const code = e?.raw?.code || e?.code;
+    if (code === "authentication_required") {
+      return res.status(402).json({
+        error: "authentication_required",
+        paymentIntentId: e?.raw?.payment_intent?.id || null,
+      });
+    }
+    res.status(402).json({ error: e.message || "payment_intent_failed" });
   }
 });
 
@@ -279,6 +381,114 @@ app.post("/detach-payment-method", async (req, res) => {
   } catch (e) {
     console.error("❌ detach-payment-method:", e);
     res.status(500).json({ error: "detach_failed" });
+  }
+});
+
+// ============================================================================
+// Driver: Stripe Connect — return pages for hosted onboarding (opened in an
+// in-app Safari sheet; the user just taps Done to go back to the app, which
+// polls /connect/status itself, so these only need to show a friendly message).
+function returnPageHTML(message) {
+  return `<!doctype html>
+<html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rydr</title></head>
+<body style="font-family: -apple-system, sans-serif; text-align: center; padding: 48px 24px;">
+<h2>${message}</h2>
+<p>You can close this window and return to the Rydr Driver app.</p>
+</body></html>`;
+}
+
+app.get("/return/complete", (_req, res) => {
+  res.send(returnPageHTML("You're all set!"));
+});
+
+app.get("/return/refresh", (_req, res) => {
+  res.send(returnPageHTML("Let's try that again."));
+});
+
+// ============================================================================
+// Driver: Stripe Connect (Express) — Create account
+// Body: { uid, email, firstName, lastName, phone, dob:{day,month,year}, address:{ line1, city, state, postal_code, line2? } }
+app.post("/connect/accounts", async (req, res) => {
+  try {
+    const { uid, email, firstName, lastName, phone, dob, address } =
+      req.body || {};
+
+    if (!uid || !email || !firstName || !lastName || !phone || !dob || !address) {
+      return res.status(400).json({ error: "missing_required_fields" });
+    }
+
+    const account = await stripe.accounts.create({
+      type: "express",
+      country: "US",
+      email,
+      business_type: "individual",
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
+      individual: {
+        first_name: firstName,
+        last_name: lastName,
+        email,
+        phone,
+        dob, // { day, month, year }
+        address, // { line1, city, state, postal_code, line2? }
+      },
+      metadata: { uid },
+    });
+
+    await updateDriver(uid, { stripeAccountId: account.id });
+    await updatePublicDriverConnectStatus(uid, {
+      stripeAccountId: account.id,
+      stripeChargesEnabled: account.charges_enabled,
+    });
+
+    res.json({ accountId: account.id });
+  } catch (err) {
+    console.error("❌ connect/accounts error", err);
+    res.status(500).json({ error: "account_create_failed" });
+  }
+});
+
+// Driver: Stripe Connect — Create onboarding link
+// Body: { accountId }
+app.post("/connect/account-link", async (req, res) => {
+  try {
+    const { accountId } = req.body || {};
+    if (!accountId) return res.status(400).json({ error: "missing_accountId" });
+
+    const base = appBaseURL();
+    const link = await stripe.accountLinks.create({
+      account: accountId,
+      type: "account_onboarding",
+      refresh_url: `${base}/return/refresh`,
+      return_url: `${base}/return/complete`,
+    });
+
+    res.json({ url: link.url });
+  } catch (err) {
+    console.error("❌ connect/account-link error", err);
+    res.status(500).json({ error: "account_link_failed" });
+  }
+});
+
+// Driver: Stripe Connect — Status
+// Query: ?accountId=acct_xxx
+app.get("/connect/status", async (req, res) => {
+  try {
+    const { accountId } = req.query;
+    if (!accountId) return res.status(400).json({ error: "missing_accountId" });
+
+    const acct = await stripe.accounts.retrieve(accountId);
+    res.json({
+      charges_enabled: acct.charges_enabled,
+      payouts_enabled: acct.payouts_enabled,
+      requirements_due: acct.requirements?.currently_due ?? [],
+    });
+  } catch (err) {
+    console.error("❌ connect/status error", err);
+    res.status(500).json({ error: "status_failed" });
   }
 });
 

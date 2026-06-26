@@ -248,7 +248,23 @@ struct DriverSignupCoordinator: View {
                     }
 
                 case .payouts:
-                    PayoutsSetupView(connectOnboarded: $connectOnboarded) {
+                    PayoutsSetupView(
+                        uid: Auth.auth().currentUser?.uid ?? "",
+                        email: email,
+                        firstName: firstName,
+                        lastName: lastName,
+                        phone: phoneNumber,
+                        dob: dob,
+                        street: street,
+                        addressLine2: addressLine2,
+                        city: city,
+                        state: state,
+                        zip: zip,
+                        connectOnboarded: $connectOnboarded
+                    ) { accountId in
+                        if let accountId {
+                            upsertDriver(["stripeAccountId": accountId])
+                        }
                         if connectOnboarded { path.append(.done) }
                     }
 
@@ -629,12 +645,29 @@ struct BackgroundCheckView: View {
 
 // MARK: - Step 9: Payouts (Stripe Connect Express onboarding)
 struct PayoutsSetupView: View {
-    @Binding var connectOnboarded: Bool
-    var onNext: () -> Void
+    let uid: String
+    let email: String
+    let firstName: String
+    let lastName: String
+    let phone: String
+    let dob: Date
+    let street: String
+    let addressLine2: String
+    let city: String
+    let state: String
+    let zip: String
 
+    @Binding var connectOnboarded: Bool
+    /// Called when the flow finishes. Passes the Stripe Connect accountId (if one was created) so the
+    /// caller can persist it, then advances if connectOnboarded is true.
+    var onNext: (String?) -> Void
+
+    @State private var accountId: String?
     @State private var isPresenting = false
     @State private var onboardingURL: URL?
+    @State private var isLoading = false
     @State private var message: String?
+    @State private var isError = false
 
     var body: some View {
         VStack(spacing: 16) {
@@ -642,36 +675,173 @@ struct PayoutsSetupView: View {
             Text("Link a bank account for ACH deposits, and optionally add a debit card for Instant Payouts.")
                 .font(.footnote).foregroundStyle(.secondary)
 
-            Button("Open Stripe Onboarding") {
-                // TODO: Call backend to create or fetch Express account then create Account Link URL
-                #if DEBUG
-                onboardingURL = URL(string: "https://connect.stripe.com/express/onboarding")
-                isPresenting = true
-                #else
-                message = "Stripe Connect onboarding needs the Stripe backend account-link route configured before live payouts. For beta testing, payouts should remain alpha-only."
-                #endif
+            Button {
+                Task { await startOnboarding() }
+            } label: {
+                if isLoading {
+                    ProgressView().tint(.white)
+                } else {
+                    Text("Open Stripe Onboarding")
+                }
             }
             .buttonStyle(.borderedProminent).tint(.red)
-            .sheet(isPresented: $isPresenting) {
+            .disabled(isLoading || uid.isEmpty)
+            .sheet(isPresented: $isPresenting, onDismiss: {
+                Task { await refreshStatus() }
+            }) {
                 if let onboardingURL { SafariView(url: onboardingURL) }
             }
 
             if let message {
                 Text(message)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isError ? .red : .secondary)
                     .multilineTextAlignment(.center)
             }
 
-            Toggle("I completed payout setup", isOn: $connectOnboarded)
-                .toggleStyle(SwitchToggleStyle(tint: .red))
+            if connectOnboarded {
+                Label("Payouts are set up", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+            }
 
-            Button("Finish") { onNext() }
+            Button("Finish") { onNext(accountId) }
                 .buttonStyle(.borderedProminent).tint(.red)
                 .disabled(!connectOnboarded)
             Spacer()
         }
         .padding()
+    }
+
+    private var stripeBackendBase: URL { URL(string: "https://rydr-stripe-backend.onrender.com")! }
+
+    private func dobDictionary() -> [String: Int] {
+        let components = Calendar.current.dateComponents([.day, .month, .year], from: dob)
+        return [
+            "day": components.day ?? 1,
+            "month": components.month ?? 1,
+            "year": components.year ?? 2000,
+        ]
+    }
+
+    private func addressDictionary() -> [String: String] {
+        var dict: [String: String] = [
+            "line1": street,
+            "city": city,
+            "state": state,
+            "postal_code": zip,
+        ]
+        if !addressLine2.isEmpty { dict["line2"] = addressLine2 }
+        return dict
+    }
+
+    @MainActor
+    private func startOnboarding() async {
+        guard !uid.isEmpty else {
+            message = "Missing account information. Please restart signup."
+            isError = true
+            return
+        }
+
+        isLoading = true
+        isError = false
+        message = nil
+        defer { isLoading = false }
+
+        do {
+            let resolvedAccountId: String
+            if let accountId {
+                resolvedAccountId = accountId
+            } else {
+                resolvedAccountId = try await createConnectAccount()
+                accountId = resolvedAccountId
+            }
+
+            let url = try await createAccountLink(accountId: resolvedAccountId)
+            onboardingURL = url
+            isPresenting = true
+        } catch {
+            message = "Couldn't reach the payouts service. Please check your connection and try again."
+            isError = true
+        }
+    }
+
+    private func createConnectAccount() async throws -> String {
+        var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/accounts"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "uid": uid,
+            "email": email,
+            "firstName": firstName,
+            "lastName": lastName,
+            "phone": phone,
+            "dob": dobDictionary(),
+            "address": addressDictionary(),
+        ])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        let decoded = try JSONDecoder().decode(ConnectAccountResponse.self, from: data)
+        return decoded.accountId
+    }
+
+    private func createAccountLink(accountId: String) async throws -> URL {
+        var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/account-link"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["accountId": accountId])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        let decoded = try JSONDecoder().decode(AccountLinkResponse.self, from: data)
+        guard let url = URL(string: decoded.url) else { throw URLError(.badURL) }
+        return url
+    }
+
+    @MainActor
+    private func refreshStatus() async {
+        guard let accountId else { return }
+        var request = URLRequest(
+            url: stripeBackendBase.appendingPathComponent("connect/status")
+                .appending(queryItems: [URLQueryItem(name: "accountId", value: accountId)])
+        )
+        request.httpMethod = "GET"
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            let status = try JSONDecoder().decode(ConnectStatusResponse.self, from: data)
+            if status.payoutsEnabled || status.requirementsDue.isEmpty {
+                connectOnboarded = true
+                message = nil
+            } else {
+                message = "A few more details are needed to finish payouts setup: \(status.requirementsDue.joined(separator: ", "))."
+                isError = false
+            }
+        } catch {
+            message = "Couldn't confirm payouts status yet. You can reopen onboarding to finish."
+            isError = true
+        }
+    }
+
+    struct ConnectAccountResponse: Decodable { let accountId: String }
+    struct AccountLinkResponse: Decodable { let url: String }
+    struct ConnectStatusResponse: Decodable {
+        let chargesEnabled: Bool
+        let payoutsEnabled: Bool
+        let requirementsDue: [String]
+
+        enum CodingKeys: String, CodingKey {
+            case chargesEnabled = "charges_enabled"
+            case payoutsEnabled = "payouts_enabled"
+            case requirementsDue = "requirements_due"
+        }
     }
 }
 
