@@ -16,6 +16,10 @@ if (!process.env.STRIPE_SECRET_KEY) {
 
 const app = express();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
+const identityFlows = {
+  driver: "vf_1TmzHIBOkTOLtDHQffuNJGj8",
+  verified_rider: "vf_1TmyroBOkTOLtDHQ6iv0Ojxc",
+};
 
 function firebaseCredential() {
   const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = process.env;
@@ -46,6 +50,21 @@ async function verifiedFirebaseUid(req) {
   return decoded.uid;
 }
 
+async function requireFirebaseUid(req, res) {
+  try {
+    const uid = await verifiedFirebaseUid(req);
+    if (!uid) {
+      res.status(401).json({ error: "unauthorized" });
+      return null;
+    }
+    return uid;
+  } catch (err) {
+    console.warn("⚠️ Firebase auth failed", err.message);
+    res.status(401).json({ error: "unauthorized" });
+    return null;
+  }
+}
+
 async function persistStripeCustomerId(uid, customerId) {
   if (!uid || !customerId) return;
   initializeFirebase();
@@ -53,6 +72,18 @@ async function persistStripeCustomerId(uid, customerId) {
     {
       stripeCustomerId: customerId,
       stripeCustomerUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
+}
+
+async function updateRider(uid, payload) {
+  if (!uid) return;
+  initializeFirebase();
+  await admin.firestore().collection("riders").doc(uid).set(
+    {
+      ...payload,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true }
   );
@@ -84,6 +115,72 @@ async function driverData(uid) {
   initializeFirebase();
   const snapshot = await admin.firestore().collection("drivers").doc(uid).get();
   return snapshot.exists ? snapshot.data() : null;
+}
+
+async function identityProfile(uid, role) {
+  initializeFirebase();
+  const collection = role === "driver" ? "drivers" : "riders";
+  const snapshot = await admin.firestore().collection(collection).doc(uid).get();
+  const data = snapshot.exists ? snapshot.data() : {};
+  const firstName = data?.firstName || "";
+  const lastName = data?.lastName || "";
+  const displayName = data?.displayName || data?.name || [firstName, lastName].filter(Boolean).join(" ");
+  return {
+    email: data?.email || undefined,
+    name: displayName || undefined,
+  };
+}
+
+async function updateIdentityStatus(session, status) {
+  const uid = session.metadata?.uid;
+  const role = session.metadata?.role;
+  if (!uid || !role) return;
+
+  const timestamp = admin.firestore.FieldValue.serverTimestamp();
+  const base = {
+    identityStatus: status,
+    stripeIdentityVerificationId: session.id,
+    stripeIdentityFlow: role,
+    stripeIdentityLastEventAt: timestamp,
+  };
+  const lastError = session.last_error?.reason || session.last_error?.code || null;
+
+  if (role === "driver") {
+    if (status === "verified") {
+      await updateDriver(uid, {
+        ...base,
+        identityVerified: true,
+        identityVerifiedAt: timestamp,
+      });
+    } else {
+      await updateDriver(uid, {
+        ...base,
+        identityVerified: false,
+        identityLastError: lastError,
+      });
+    }
+    return;
+  }
+
+  if (role === "verified_rider") {
+    if (status === "verified") {
+      await updateRider(uid, {
+        ...base,
+        verifiedRider: true,
+        identityVerified: true,
+        verifiedBadge: true,
+        identityVerifiedAt: timestamp,
+      });
+    } else {
+      await updateRider(uid, {
+        ...base,
+        verifiedRider: false,
+        identityVerified: false,
+        verifiedBadge: false,
+        identityLastError: lastError,
+      });
+    }
+  }
 }
 
 // Denormalize the subset of Connect status the rider app needs (to build a
@@ -152,6 +249,18 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
         });
         break;
       }
+      case "identity.verification_session.verified":
+        await updateIdentityStatus(event.data.object, "verified");
+        break;
+      case "identity.verification_session.processing":
+        await updateIdentityStatus(event.data.object, "processing");
+        break;
+      case "identity.verification_session.requires_input":
+        await updateIdentityStatus(event.data.object, "requires_input");
+        break;
+      case "identity.verification_session.canceled":
+        await updateIdentityStatus(event.data.object, "canceled");
+        break;
       default:
         console.log("ℹ️ Unhandled event:", event.type);
     }
@@ -164,6 +273,76 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
 
 // --- JSON parser for all OTHER routes ---
 app.use(express.json());
+
+// --- Stripe Identity verification sessions ---
+// Body: { role: "driver" | "verified_rider" } -> { id, client_secret, status }
+app.post("/identity/create-session", async (req, res) => {
+  try {
+    const uid = await requireFirebaseUid(req, res);
+    if (!uid) return;
+
+    const { role } = req.body || {};
+    const verificationFlow = identityFlows[role];
+    if (!verificationFlow) {
+      return res.status(400).json({ error: "invalid_identity_role" });
+    }
+
+    const profile = await identityProfile(uid, role);
+    const session = await stripe.identity.verificationSessions.create({
+      verification_flow: verificationFlow,
+      provided_details: {
+        email: profile.email,
+      },
+      metadata: {
+        uid,
+        role,
+        verification_flow: verificationFlow,
+      },
+    });
+
+    if (!session.client_secret) {
+      return res.status(500).json({ error: "missing_client_secret" });
+    }
+
+    await updateIdentityStatus(session, "requires_input");
+
+    res.json({
+      id: session.id,
+      client_secret: session.client_secret,
+      status: session.status,
+    });
+  } catch (err) {
+    console.error("❌ identity/create-session error", err);
+    res.status(500).json({ error: "identity_session_failed" });
+  }
+});
+
+app.get("/identity/status", async (req, res) => {
+  try {
+    const uid = await requireFirebaseUid(req, res);
+    if (!uid) return;
+
+    const role = String(req.query.role || "");
+    if (!identityFlows[role]) {
+      return res.status(400).json({ error: "invalid_identity_role" });
+    }
+
+    initializeFirebase();
+    const collection = role === "driver" ? "drivers" : "riders";
+    const snapshot = await admin.firestore().collection(collection).doc(uid).get();
+    const data = snapshot.exists ? snapshot.data() : {};
+    res.json({
+      identityVerified: !!data.identityVerified,
+      verifiedRider: !!data.verifiedRider,
+      verifiedBadge: !!data.verifiedBadge,
+      identityStatus: data.identityStatus || "not_started",
+      stripeIdentityVerificationId: data.stripeIdentityVerificationId || null,
+    });
+  } catch (err) {
+    console.error("❌ identity/status error", err);
+    res.status(500).json({ error: "identity_status_failed" });
+  }
+});
 
 // --- Create-or-get Customer (idempotent) ---
 // Body: { email?: string, name?: string, uid?: string } -> { customerId }
@@ -603,7 +782,3 @@ app.post("/connect/instant-payout", async (req, res) => {
 // --- Listen ---
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-
-
-
-

@@ -17,13 +17,7 @@ enum DriverApprovalPolicy {
         let status = (data["backgroundCheckStatus"] as? String)?.lowercased() ?? "pending"
         let passed = (data["backgroundCheckPassed"] as? Bool) ?? false
         let allowedByString = approvedStatuses.contains(status)
-        return passed || allowedByString || isBetaBypassed(data: data)
-    }
-
-    static func isBetaBypassed(data: [String: Any]) -> Bool {
-        let isBetaTester = data["betaTester"] as? Bool ?? false
-        let bypassEnabled = data["betaBackgroundCheckBypassEnabled"] as? Bool ?? false
-        return isBetaTester && bypassEnabled
+        return passed || allowedByString
     }
 }
 
@@ -65,7 +59,7 @@ final class DriverSessionManager: ObservableObject {
         driverName = name
         driverEmail = email
         isLoggedIn = true
-        canGoOnline = false // default until Firestore confirms approval or beta test bypass.
+        canGoOnline = false // default until Firestore confirms approval.
         Task {
             await DriverNotificationManager.shared.saveCurrentTokenForAuthenticatedUser()
         }

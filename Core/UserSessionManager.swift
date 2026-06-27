@@ -54,6 +54,7 @@ class UserSessionManager: ObservableObject {
     @AppStorage("userEmail") var userEmail: String = ""
     @Published var selectedTab: MainAppTab = .ride
     @Published private(set) var accountAccess: RydrAccountAccess?
+    @Published var verifiedBadge: Bool = false
 
     var hasRiderAccess: Bool { accountAccess == .rider }
     var isCashHubOnly: Bool { accountAccess == .cashHubOnly }
@@ -68,6 +69,7 @@ class UserSessionManager: ObservableObject {
         userEmail = email
         selectedTab = startingTab
         accountAccess = access
+        verifiedBadge = false
         isLoggedIn = true
         Task {
             await NotificationManager.shared.saveCurrentTokenForAuthenticatedUser()
@@ -86,6 +88,7 @@ class UserSessionManager: ObservableObject {
         userEmail = ""
         selectedTab = .ride
         accountAccess = nil
+        verifiedBadge = false
         isLoggedIn = false
     }
 
@@ -121,6 +124,7 @@ class UserSessionManager: ObservableObject {
                 let emailFromDb = data["email"] as? String
                 let completedRiderTerms = data["agreedToTerms"] as? Bool ?? false
                 let explicitRiderAccess = data["hasRydrRiderAccess"] as? Bool ?? false
+                let hasVerifiedBadge = data["verifiedBadge"] as? Bool ?? data["verifiedRider"] as? Bool ?? false
                 let address = data["address"] as? [String: Any] ?? [:]
                 let hasRiderAddress = ["street", "city", "state", "zip"].contains { key in
                     !(address[key] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -138,6 +142,7 @@ class UserSessionManager: ObservableObject {
 
                     if let emailFromDb { self.userEmail = emailFromDb }
                     self.accountAccess = hasRiderAccess ? .rider : .cashHubOnly
+                    self.verifiedBadge = hasVerifiedBadge
                     if !hasRiderAccess && self.selectedTab != .profile {
                         self.selectedTab = .cashHub
                     }

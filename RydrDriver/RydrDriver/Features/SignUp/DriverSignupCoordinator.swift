@@ -68,7 +68,7 @@ struct DriverSignupCoordinator: View {
 
     // Progress flags
     @State private var identityVerified = false
-    @State private var backgroundCheckStarted = false
+    @State private var backgroundCheckAcknowledged = false
     @State private var connectOnboarded = false
 
     // Errors
@@ -245,9 +245,9 @@ struct DriverSignupCoordinator: View {
                         dob: dob,
                         licenseNumber: licenseNumber,
                         licenseState: licenseState,
-                        started: $backgroundCheckStarted
+                        acknowledged: $backgroundCheckAcknowledged
                     ) {
-                        if backgroundCheckStarted {
+                        if backgroundCheckAcknowledged {
                             recordDriverApprovalRequest(type: "backgroundCheck")
                             session.canGoOnline = false
                             path.append(.payouts)

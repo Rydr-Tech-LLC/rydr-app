@@ -2,14 +2,14 @@
 //  BackgroundCheckView.swift
 //  Rydr Driver
 //
-//  Step 7 of driver signup: Background Check intro. Extracted out of
-//  DriverSignupCoordinator.swift and restyled to match the premium
-//  onboarding mockup (feature checklist, "Powered by checkr" badge, shared
-//  step indicator). The hosted Checkr integration itself is untouched —
-//  this only restyles the launch screen around it.
+//  Step 7 of driver signup: Background Check beta acknowledgement. This
+//  screen is intentionally isolated so the real Checkr flow can replace the
+//  beta acknowledgement without reshaping the signup coordinator.
 //
 
 import SwiftUI
+import FirebaseAuth
+import FirebaseFirestore
 
 struct BackgroundCheckView: View {
     let firstName: String
@@ -20,24 +20,16 @@ struct BackgroundCheckView: View {
     let licenseNumber: String
     let licenseState: String
 
-    @Binding var started: Bool
+    @Binding var acknowledged: Bool
 
     var currentStep: Int = 7
     var totalSteps: Int = 8
 
     var onNext: () -> Void
 
-    @State private var showConsent = false
-    @State private var presentingApply = false
-    @State private var applyURL: URL?
+    @State private var isSaving = false
     @State private var message: String?
-
-    private let features: [(icon: String, text: String)] = [
-        ("lock.shield.fill", "Secure & confidential"),
-        ("checkmark.seal.fill", "FCRA compliant"),
-        ("clock.fill", "Takes about 5-10 minutes"),
-        ("shield.lefthalf.filled", "Used for safety")
-    ]
+    @State private var messageIsError = false
 
     var body: some View {
         ScrollView {
@@ -47,58 +39,33 @@ struct BackgroundCheckView: View {
                 heroIllustration
 
                 VStack(spacing: 8) {
-                    Text("Background Check")
+                    Text("Background Check (Beta)")
                         .font(.system(size: 26, weight: .heavy, design: .rounded))
                         .foregroundStyle(Styles.rydrGradient)
-                    Text("We use a secure partner to run a criminal and driving record screen.")
+                    Text("Background checks are required for all Rydr drivers.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
 
-                VStack(spacing: 12) {
-                    ForEach(features, id: \.text) { feature in
-                        HStack(spacing: 12) {
-                            ZStack {
-                                Circle().fill(Color.red.opacity(0.1)).frame(width: 36, height: 36)
-                                Image(systemName: feature.icon)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(Styles.rydrGradient)
-                            }
-                            Text(feature.text)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundColor(.primary)
-                            Spacer()
-                        }
-                    }
-                }
-                .padding(16)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
-
-                poweredByBadge
-
-                Toggle("I consent to a background check (FCRA)", isOn: $showConsent)
-                    .toggleStyle(SwitchToggleStyle(tint: .red))
-                    .font(.subheadline)
-
-                SignupContinueButton(
-                    title: started ? "Background Check Started" : "Start Background Check",
-                    systemImage: "shield.lefthalf.filled",
-                    isEnabled: showConsent,
-                    action: startCheck
-                )
-                .sheet(isPresented: $presentingApply) {
-                    if let url = applyURL { SafariView(url: url) }
-                }
+                infoCard
+                warningCard
+                acknowledgementCheckbox
 
                 if let message {
                     Text(message)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(messageIsError ? .red : .secondary)
                         .multilineTextAlignment(.center)
                 }
 
-                SignupContinueButton(title: "Continue", isEnabled: started, action: onNext)
+                SignupContinueButton(
+                    title: acknowledged ? "Continue" : "Accept & Continue",
+                    systemImage: "checkmark.shield.fill",
+                    isEnabled: acknowledged,
+                    isLoading: isSaving,
+                    action: saveAcknowledgement
+                )
 
                 Spacer(minLength: 8)
             }
@@ -106,6 +73,9 @@ struct BackgroundCheckView: View {
             .padding(.top, 6)
         }
         .background(Color(.systemBackground))
+        .task {
+            await loadExistingAcknowledgement()
+        }
     }
 
     private var heroIllustration: some View {
@@ -117,28 +87,135 @@ struct BackgroundCheckView: View {
         }
     }
 
-    private var poweredByBadge: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "checkmark.shield.fill")
-                .foregroundStyle(Styles.rydrGradient)
-            Text("Powered by checkr")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+    private var infoCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Rydr is committed to rider and driver safety.")
+                .font(.headline.weight(.bold))
+
+            Text("All drivers are normally required to complete a background check before becoming eligible to accept rides.")
+            Text("As part of this closed beta program, background checks are temporarily deferred for approved beta participants while we complete integration with our background screening provider.")
+            Text("Participation in the beta does not waive this requirement. A successful background check will be required before public launch or continued access to the Rydr Driver platform.")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Capsule().fill(Color(.secondarySystemBackground)))
+        .font(.subheadline)
+        .foregroundStyle(.primary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
     }
 
-    private func startCheck() {
-        guard showConsent else { return }
-        // TODO: Call backend to create Checkr Candidate + Invitation, return hosted Apply URL.
-        #if DEBUG
-        applyURL = URL(string: "https://apply.checkr.com/apply/demo")
-        presentingApply = true
-        #else
-        message = "Background checks are manually bypassed only for approved beta testers. No production Checkr invitation was created."
-        #endif
-        started = true
+    private var warningCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("Important")
+                    .font(.headline.weight(.heavy))
+            }
+
+            Text("Because this beta involves real interactions between riders and drivers, Rydr maintains a zero-tolerance policy for misconduct.")
+
+            Text("Any reports of unsafe behavior, harassment, fraud, violence, illegal activity, or violations of the Rydr Community Standards may result in:")
+
+            VStack(alignment: .leading, spacing: 7) {
+                bullet("Immediate removal from beta testing")
+                bullet("Suspension of your account")
+                bullet("Permanent ineligibility to drive on the Rydr platform")
+            }
+        }
+        .font(.subheadline)
+        .foregroundStyle(.primary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.orange.opacity(0.12)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+        )
+    }
+
+    private var acknowledgementCheckbox: some View {
+        Button {
+            acknowledged.toggle()
+            message = nil
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: acknowledged ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(acknowledged ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.secondary))
+                    .frame(width: 28)
+
+                Text("I understand that a background check is required to drive on the Rydr platform. I acknowledge that this requirement is temporarily deferred only for the beta program, and I agree to complete a background check when required. I also understand that misconduct during beta may result in immediate removal from testing and may affect my future eligibility to drive with Rydr.")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(acknowledged ? Color.red.opacity(0.06) : Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(acknowledged ? Color.red.opacity(0.28) : Color.gray.opacity(0.18), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func bullet(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("•")
+                .font(.subheadline.weight(.bold))
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @MainActor
+    private func loadExistingAcknowledgement() async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+
+        do {
+            let snapshot = try await Firestore.firestore().collection("drivers").document(uid).getDocument()
+            let data = snapshot.data() ?? [:]
+            let status = (data["backgroundCheckStatus"] as? String)?.lowercased()
+            let alreadyAcknowledged = data["backgroundCheckAcknowledged"] as? Bool ?? false
+            if alreadyAcknowledged && status == "beta_deferred" {
+                acknowledged = true
+            }
+        } catch {
+            message = "We couldn't confirm your saved background check acknowledgement. Please try again."
+            messageIsError = true
+        }
+    }
+
+    private func saveAcknowledgement() {
+        guard acknowledged else { return }
+        guard let uid = Auth.auth().currentUser?.uid else {
+            message = "Your session expired. Please sign in again."
+            messageIsError = true
+            return
+        }
+
+        isSaving = true
+        message = nil
+        messageIsError = false
+
+        Firestore.firestore().collection("drivers").document(uid).setData([
+            "backgroundCheckAcknowledged": true,
+            "backgroundCheckStatus": "beta_deferred",
+            "backgroundAcknowledgedAt": FieldValue.serverTimestamp(),
+            "backgroundAcknowledgementVersion": 1
+        ], merge: true) { error in
+            isSaving = false
+            if let error {
+                message = "We couldn't save your acknowledgement: \(error.localizedDescription)"
+                messageIsError = true
+                return
+            }
+            onNext()
+        }
     }
 }

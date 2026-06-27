@@ -20,6 +20,10 @@ struct ProfileView: View {
     @State private var previousProfileImage: Image?
     @State private var isUploadingPhoto = false
     @State private var photoErrorMessage: String?
+    @State private var isVerifiedRider = false
+    @State private var isCheckingRiderVerification = false
+    @State private var riderVerificationMessage: String?
+    @State private var riderVerificationIsError = false
 
     // Preferences (local for now; wire to Firestore later)
     @State private var musicType: String = "No preference"
@@ -76,6 +80,7 @@ struct ProfileView: View {
         .onAppear {
             session.loadUserProfile()
             loadExistingProfilePhoto()
+            loadRiderIdentityStatus()
             if !session.isCashHubOnly { bankVM.start() }
         }
         .onDisappear { bankVM.stop() }
@@ -134,12 +139,23 @@ struct ProfileView: View {
                             .font(.footnote)
                             .foregroundStyle(secondaryText)
 
-                        Label(session.isCashHubOnly ? "Cash Rydr Hub Member" : "Rydr Member", systemImage: "star.circle.fill")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(Styles.rydrGradient)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 4)
-                            .background(Styles.rydrGradient.opacity(0.11), in: Capsule())
+                        HStack(spacing: 6) {
+                            Label(session.isCashHubOnly ? "Cash Rydr Hub Member" : "Rydr Member", systemImage: "star.circle.fill")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(Styles.rydrGradient)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 4)
+                                .background(Styles.rydrGradient.opacity(0.11), in: Capsule())
+
+                            if session.verifiedBadge || isVerifiedRider {
+                                Label("Verified", systemImage: "checkmark.seal.fill")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.green)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4)
+                                    .background(Color.green.opacity(0.11), in: Capsule())
+                            }
+                        }
                     }
 
                     Spacer()
@@ -290,6 +306,7 @@ struct ProfileView: View {
             settingsRow
 
             SectionHeader(title: "Features")
+            verifiedRiderCard
             TileGrid(tiles: [
                 .init(title: "Cash Rydr Hub",
                       subtitle: "Posts, offers, and ride activity",
@@ -309,6 +326,68 @@ struct ProfileView: View {
                       destination: AnyView(CommunityView()))
             ])
         }
+    }
+
+    private var verifiedRiderCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 13) {
+                Image(systemName: isVerifiedRider ? "checkmark.seal.fill" : "checkmark.seal")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(isVerifiedRider ? Color.green : Color.red)
+                    .frame(width: 46, height: 46)
+                    .background((isVerifiedRider ? Color.green : Color.red).opacity(0.10), in: Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isVerifiedRider ? "Verified Rider" : "Become a Verified Rider")
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(primaryText)
+                    Text("Verify your identity to earn a Verified Badge that lets drivers know you've confirmed your identity through Rydr.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+
+            if let riderVerificationMessage {
+                Text(riderVerificationMessage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(riderVerificationIsError ? .orange : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button {
+                Task { await startRiderVerification() }
+            } label: {
+                HStack(spacing: 8) {
+                    if isCheckingRiderVerification {
+                        ProgressView().tint(isVerifiedRider ? .secondary : .white)
+                    } else {
+                        Image(systemName: isVerifiedRider ? "checkmark" : "shield.lefthalf.filled")
+                    }
+                    Text(isVerifiedRider ? "Verified Rider" : "Verify Identity")
+                }
+                .font(.subheadline.weight(.bold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+                .background {
+                    if isVerifiedRider {
+                        Color(.secondarySystemBackground)
+                    } else {
+                        Styles.rydrGradient
+                    }
+                }
+                .foregroundStyle(isVerifiedRider ? .green : .white)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isVerifiedRider || isCheckingRiderVerification)
+        }
+        .padding(16)
+        .background(adaptiveCardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: softShadow, radius: 14, x: 0, y: 8)
+        .padding(.horizontal, 24)
     }
 
     // MARK: - Settings row (full-width)
@@ -557,6 +636,70 @@ struct ProfileView: View {
                 }
             }.resume()
         }
+    }
+
+    private func loadRiderIdentityStatus() {
+        Task {
+            do {
+                let status = try await RiderIdentityVerificationService.shared.fetchStatus()
+                await MainActor.run {
+                    isVerifiedRider = status.verifiedRider || status.verifiedBadge || status.identityStatus == "verified"
+                }
+            } catch {
+                // Profile status refresh is best-effort; verification itself surfaces errors.
+            }
+        }
+    }
+
+    @MainActor
+    private func startRiderVerification() async {
+        isCheckingRiderVerification = true
+        riderVerificationMessage = nil
+        riderVerificationIsError = false
+        defer { isCheckingRiderVerification = false }
+
+        do {
+            let clientSecret = try await RiderIdentityVerificationService.shared.createSession()
+            let result = try await RiderIdentityVerificationService.shared.presentVerification(clientSecret: clientSecret)
+
+            switch result {
+            case .flowCompleted:
+                riderVerificationMessage = "Verification submitted. Confirming with Stripe..."
+                try await confirmRiderVerifiedStatus()
+            case .flowCanceled:
+                riderVerificationIsError = true
+                riderVerificationMessage = "Verification was canceled. You can try again anytime."
+            case .flowFailed(let error):
+                riderVerificationIsError = true
+                riderVerificationMessage = error.localizedDescription
+            }
+        } catch {
+            riderVerificationIsError = true
+            riderVerificationMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func confirmRiderVerifiedStatus() async throws {
+        for _ in 0..<8 {
+            let status = try await RiderIdentityVerificationService.shared.fetchStatus()
+            if status.verifiedRider || status.verifiedBadge || status.identityStatus == "verified" {
+                isVerifiedRider = true
+                riderVerificationIsError = false
+                riderVerificationMessage = "Verified Badge added to your profile."
+                session.loadUserProfile()
+                return
+            }
+            if status.identityStatus == "requires_input" || status.identityStatus == "canceled" {
+                riderVerificationIsError = true
+                riderVerificationMessage = "Stripe needs more information before verification can be completed."
+                return
+            }
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+
+        riderVerificationIsError = false
+        riderVerificationMessage = "Stripe is still processing your verification. Check back shortly."
     }
 }
 

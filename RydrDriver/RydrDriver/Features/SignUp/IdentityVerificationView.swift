@@ -10,6 +10,7 @@
 //
 
 import SwiftUI
+import StripeIdentity
 
 struct IdentityVerificationView: View {
     @Binding var isVerified: Bool
@@ -19,9 +20,9 @@ struct IdentityVerificationView: View {
 
     var onNext: () -> Void
 
-    @State private var isPresenting = false
-    @State private var url: URL?
+    @State private var isLoading = false
     @State private var message: String?
+    @State private var isError = false
 
     private let features: [(icon: String, text: String)] = [
         ("doc.text.viewfinder", "Government-issued ID"),
@@ -68,15 +69,20 @@ struct IdentityVerificationView: View {
 
                 poweredByBadge
 
-                SignupContinueButton(title: "Start Verification", systemImage: "shield.lefthalf.filled", isEnabled: true, action: startVerification)
-                    .sheet(isPresented: $isPresenting) {
-                        if let url { SafariView(url: url) }
-                    }
+                SignupContinueButton(
+                    title: isVerified ? "Identity Verified" : "Start Verification",
+                    systemImage: isVerified ? "checkmark.seal.fill" : "shield.lefthalf.filled",
+                    isEnabled: !isLoading && !isVerified,
+                    isLoading: isLoading,
+                    action: { Task { await startVerification() } }
+                )
+                .disabled(isVerified)
+                .opacity(isVerified ? 0.55 : 1)
 
                 if let message {
                     Text(message)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isError ? .orange : .secondary)
                         .multilineTextAlignment(.center)
                 }
 
@@ -87,10 +93,6 @@ struct IdentityVerificationView: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundColor(.green)
                     }
-                } else {
-                    Toggle("I completed verification", isOn: $isVerified)
-                        .toggleStyle(SwitchToggleStyle(tint: .red))
-                        .font(.subheadline)
                 }
 
                 SignupContinueButton(title: "Continue", isEnabled: isVerified, action: onNext)
@@ -125,13 +127,53 @@ struct IdentityVerificationView: View {
         .background(Capsule().fill(Color(.secondarySystemBackground)))
     }
 
-    private func startVerification() {
-        // TODO: Call backend to create Stripe Identity verification session and return hosted link URL
-        #if DEBUG
-        url = URL(string: "https://verify.stripe.com/demo")
-        isPresenting = true
-        #else
-        message = "Stripe Identity is waiting on backend configuration. For beta testing, an admin can mark this account as manually reviewed."
-        #endif
+    @MainActor
+    private func startVerification() async {
+        isLoading = true
+        isError = false
+        message = nil
+        defer { isLoading = false }
+
+        do {
+            let clientSecret = try await DriverIdentityVerificationService.shared.createSession()
+            let result = try await DriverIdentityVerificationService.shared.presentVerification(clientSecret: clientSecret)
+
+            switch result {
+            case .flowCompleted:
+                message = "Verification submitted. Confirming with Stripe..."
+                try await confirmVerifiedStatus()
+            case .flowCanceled:
+                isError = true
+                message = "Verification was canceled. Please complete identity verification to continue."
+            case .flowFailed(let error):
+                isError = true
+                message = error.localizedDescription
+            }
+        } catch {
+            isError = true
+            message = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func confirmVerifiedStatus() async throws {
+        for _ in 0..<8 {
+            let status = try await DriverIdentityVerificationService.shared.fetchStatus()
+            if status.identityVerified || status.identityStatus == "verified" {
+                isVerified = true
+                isError = false
+                message = "Identity Verified"
+                return
+            }
+            if status.identityStatus == "requires_input" || status.identityStatus == "canceled" {
+                isError = true
+                message = "Stripe needs more information before identity verification can be completed."
+                return
+            }
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+
+        isError = false
+        message = "Stripe is still processing your verification. Please try Continue again in a moment."
     }
 }

@@ -628,6 +628,28 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Added for Rydr Mission Control (internal admin portal). Riders and
+    // drivers can file/read their own safety reports; only admins (Mission
+    // Control, via the Admin SDK) can list across all reports, dismiss,
+    // escalate, or otherwise moderate. Mission Control itself bypasses this
+    // entirely via the Admin SDK — this rule only governs the mobile apps,
+    // which do not yet write here (see beta readiness audit P0 #11); add the
+    // client-side write call when that gets built.
+    match /safetyReports/{reportId} {
+      allow read: if signedIn() && (
+        resource.data.riderId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if signedIn()
+        && (
+          request.resource.data.riderId == request.auth.uid ||
+          request.resource.data.driverId == request.auth.uid
+        )
+        && request.resource.data.status == "open";
+      allow update, delete: if isAdmin();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
