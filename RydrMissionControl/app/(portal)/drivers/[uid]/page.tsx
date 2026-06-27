@@ -13,7 +13,7 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
   const snap = await adminDb.collection("drivers").doc(params.uid).get();
   if (!snap.exists) notFound();
 
-  const driver = { uid: snap.id, ...(snap.data() as DriverRecord) };
+  const driver = { ...(snap.data() as DriverRecord), uid: snap.id };
   const { checks, missing, canApprove } = evaluateDriverRequirements(driver);
   const createdAt = toDateSafe(driver.createdAt);
   const dob = toDateSafe(driver.dob);

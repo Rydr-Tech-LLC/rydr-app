@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function RidersPage() {
   const snap = await adminDb.collection("riders").limit(500).get();
-  const riders = snap.docs.map((doc) => ({ uid: doc.id, ...(doc.data() as RiderRecord) }));
+  const riders = snap.docs.map((doc) => ({ ...(doc.data() as RiderRecord), uid: doc.id }));
 
   return (
     <div className="space-y-6">

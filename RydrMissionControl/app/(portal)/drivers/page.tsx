@@ -10,7 +10,7 @@ export default async function DriverVerificationQueuePage() {
   const snap = await adminDb.collection("drivers").limit(300).get();
 
   const queue = snap.docs
-    .map((doc) => ({ uid: doc.id, ...(doc.data() as DriverRecord) }))
+    .map((doc) => ({ ...(doc.data() as DriverRecord), uid: doc.id }))
     .filter((d) => {
       const status = d.driverApprovalStatus ?? "pending";
       return status === "pending" || status === "needs_attention";

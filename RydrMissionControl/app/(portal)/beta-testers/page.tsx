@@ -11,8 +11,8 @@ export default async function BetaTestersPage() {
     adminDb.collection("riders").limit(500).get()
   ]);
 
-  const drivers = driverSnap.docs.map((doc) => ({ uid: doc.id, ...(doc.data() as DriverRecord) }));
-  const riders = riderSnap.docs.map((doc) => ({ uid: doc.id, ...(doc.data() as RiderRecord) }));
+  const drivers = driverSnap.docs.map((doc) => ({ ...(doc.data() as DriverRecord), uid: doc.id }));
+  const riders = riderSnap.docs.map((doc) => ({ ...(doc.data() as RiderRecord), uid: doc.id }));
 
   const approvedDrivers = drivers.filter((d) => d.driverApprovalStatus === "approved");
   const pendingDrivers = drivers.filter((d) => !d.driverApprovalStatus || d.driverApprovalStatus === "pending" || d.driverApprovalStatus === "needs_attention");

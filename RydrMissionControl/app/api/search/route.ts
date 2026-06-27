@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   }
 
   const drivers = driverSnap.docs
-    .map((doc) => ({ uid: doc.id, ...(doc.data() as DriverRecord) }))
+    .map((doc) => ({ ...(doc.data() as DriverRecord), uid: doc.id }))
     .filter((d) =>
       matches([
         d.firstName,
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     .map((d) => ({ uid: d.uid, name: `${d.firstName ?? ""} ${d.lastName ?? ""}`.trim(), email: d.email }));
 
   const riders = riderSnap.docs
-    .map((doc) => ({ uid: doc.id, ...(doc.data() as RiderRecord) }))
+    .map((doc) => ({ ...(doc.data() as RiderRecord), uid: doc.id }))
     .filter((r) => matches([r.firstName, r.lastName, r.email, r.phoneNumber, r.phoneE164, r.uid]))
     .slice(0, 25)
     .map((r) => ({ uid: r.uid, name: `${r.firstName ?? ""} ${r.lastName ?? ""}`.trim(), email: r.email }));

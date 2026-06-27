@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AllDriversPage() {
   const snap = await adminDb.collection("drivers").limit(500).get();
-  const drivers = snap.docs.map((doc) => ({ uid: doc.id, ...(doc.data() as DriverRecord) }));
+  const drivers = snap.docs.map((doc) => ({ ...(doc.data() as DriverRecord), uid: doc.id }));
 
   return (
     <div className="space-y-6">
