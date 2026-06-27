@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
   const snap = await adminDb.collection("safetyReports").orderBy("createdAt", "desc").limit(200).get().catch(() => null);
-  const reports = snap ? snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as SafetyReport) })) : [];
+  const reports = snap ? snap.docs.map((doc) => ({ ...(doc.data() as SafetyReport), id: doc.id })) : [];
 
   return (
     <div className="space-y-6">
