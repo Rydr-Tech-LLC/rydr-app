@@ -1,6 +1,7 @@
 {
   "images" : [
     {
+      "filename" : "Rydr - Driver (1).png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -12,6 +13,7 @@
           "value" : "dark"
         }
       ],
+      "filename" : "Rydr Driver Dark (1).jpg",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"

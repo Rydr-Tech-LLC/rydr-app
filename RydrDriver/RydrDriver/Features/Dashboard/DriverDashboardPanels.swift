@@ -335,27 +335,13 @@ struct DriverDashboardActionDock: View {
                 action: onRateCardTapped
             )
 
-            Button {
+            DriverGoOnlinePowerButton(vm: vm, isCompact: isCompact) {
                 if vm.isReadyToGoOnline || vm.isOnline {
                     vm.toggleOnline()
                 } else if let reason = vm.goOnlineBlockReason {
                     vm.statusMessage = reason
                 }
-            } label: {
-                VStack(spacing: 5) {
-                    Image(systemName: vm.isOnline ? "pause.fill" : "power")
-                        .font(.title3.weight(.black))
-                    Text(vm.isOnline ? "Offline" : "Online")
-                        .font(.caption2.weight(.black))
-                }
-                .foregroundStyle(.white)
-                .frame(width: isCompact ? 54 : 58, height: isCompact ? 54 : 58)
-                .background(Circle().fill(goButtonBackground))
-                .overlay(Circle().stroke(Color.white.opacity(0.28), lineWidth: 1))
-                .shadow(color: vm.hasSavedRateSettings || vm.isOnline ? Color.red.opacity(0.40) : Color.black.opacity(0.14), radius: 18, y: 8)
             }
-            .buttonStyle(.plain)
-            .accessibilityHint(vm.goOnlineBlockReason ?? (vm.isOnline ? "Tap to go offline" : "Tap to go online"))
 
             DriverDockIcon(
                 title: "Cash Hub",
@@ -388,11 +374,80 @@ struct DriverDashboardActionDock: View {
         )
         .shadow(color: .black.opacity(0.16), radius: 18, y: 10)
     }
+}
 
-    private var goButtonBackground: AnyShapeStyle {
-        vm.hasSavedRateSettings || vm.isOnline
-            ? AnyShapeStyle(Styles.rydrGradient)
-            : AnyShapeStyle(Color(.systemGray3))
+/// The dock's center "Go Online / Go Offline" control. Instead of a flat,
+/// solid-filled circle ("bubble"), the power icon sits inside a soft,
+/// slowly-breathing glow: green while the driver is online and receiving
+/// ride requests, red while offline (signaling "ready to go online" /
+/// "tap to start"), and a dim, static gray when going online isn't
+/// available yet.
+private struct DriverGoOnlinePowerButton: View {
+    @ObservedObject var vm: DriverDashboardVM
+    var isCompact: Bool
+    var action: () -> Void
+
+    @State private var pulse = false
+
+    private var canInteract: Bool { vm.isOnline || vm.hasSavedRateSettings }
+
+    private var glowColor: Color {
+        guard canInteract else { return Color(.systemGray3) }
+        return vm.isOnline ? .green : .red
+    }
+
+    private var size: CGFloat { isCompact ? 54 : 58 }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                // Outer halo — large, heavily blurred, pulsates in scale + opacity.
+                Circle()
+                    .fill(glowColor)
+                    .frame(width: size * 1.5, height: size * 1.5)
+                    .blur(radius: 18)
+                    .opacity(canInteract ? (pulse ? 0.55 : 0.22) : 0.12)
+                    .scaleEffect(pulse ? 1.0 : 0.8)
+
+                // Inner halo — tighter, brighter, gives the glow a hot center.
+                Circle()
+                    .fill(glowColor)
+                    .frame(width: size * 1.05, height: size * 1.05)
+                    .blur(radius: 9)
+                    .opacity(canInteract ? (pulse ? 0.85 : 0.5) : 0.16)
+
+                // Crisp core: a thin ring (not a filled bubble) so the map/dock
+                // material shows through, with the icon glowing in glowColor.
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: size, height: size)
+                Circle()
+                    .strokeBorder(glowColor.opacity(canInteract ? 0.9 : 0.4), lineWidth: 1.6)
+                    .frame(width: size, height: size)
+
+                VStack(spacing: 5) {
+                    Image(systemName: vm.isOnline ? "pause.fill" : "power")
+                        .font(.title3.weight(.black))
+                    Text(vm.isOnline ? "Online" : "Offline")
+                        .font(.caption2.weight(.black))
+                }
+                .foregroundStyle(canInteract ? glowColor : Color.secondary)
+            }
+            .frame(width: size, height: size)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(vm.goOnlineBlockReason ?? (vm.isOnline ? "Tap to go offline" : "Tap to go online"))
+        .onAppear { startPulsing() }
+        .onChange(of: vm.isOnline) { _, _ in startPulsing() }
+        .onChange(of: canInteract) { _, _ in startPulsing() }
+    }
+
+    private func startPulsing() {
+        pulse = false
+        guard canInteract else { return }
+        withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+            pulse = true
+        }
     }
 }
 

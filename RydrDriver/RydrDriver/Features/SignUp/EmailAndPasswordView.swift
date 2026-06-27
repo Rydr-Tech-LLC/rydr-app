@@ -1,127 +1,168 @@
 //
-//  EmailPasswordView.swift
-//  RydrSignupFlow
+//  EmailAndPasswordView.swift
+//  Rydr Driver
+//
+//  Step 2 of driver signup: "Create Your Login" — restyled to match the
+//  premium onboarding mockup (icon-prefixed fields, eye-toggle on password
+//  fields, requirement chips, reassurance card, gradient Continue button,
+//  shared step indicator).
 //
 
 import SwiftUI
 import FirebaseAuth
 
-
 struct EmailAndPasswordView: View {
     @Binding var email: String
     @Binding var password: String
     @Binding var confirmPassword: String
-    var onNext: () -> Void
-    
-    @State private var errorMessage = ""
 
-    @State private var passwordValidations: [String: Bool] = [
-        "At least 8 characters": false,
-        "1 uppercase letter": false,
-        "1 number": false,
-        "1 special character": false
+    var currentStep: Int = 2
+    var totalSteps: Int = 8
+
+    var onNext: () -> Void
+
+    @State private var errorMessage = ""
+    @State private var isPasswordVisible = false
+    @State private var isConfirmVisible = false
+
+    private let rules: [(key: String, label: String)] = [
+        ("length", "8 characters"),
+        ("uppercase", "1 uppercase"),
+        ("number", "1 number"),
+        ("special", "1 special char")
     ]
 
+    private func passes(_ key: String) -> Bool {
+        switch key {
+        case "length": return password.count >= 8
+        case "uppercase": return password.rangeOfCharacter(from: .uppercaseLetters) != nil
+        case "number": return password.rangeOfCharacter(from: .decimalDigits) != nil
+        case "special": return password.rangeOfCharacter(from: CharacterSet(charactersIn: "!@#$%^&*()_+{}|:<>?-=[];,./")) != nil
+        default: return false
+        }
+    }
+
     private var allValid: Bool {
-        passwordValidations.values.allSatisfy { $0 } && !confirmPassword.isEmpty && password == confirmPassword
+        rules.allSatisfy { passes($0.key) } && !confirmPassword.isEmpty && password == confirmPassword && !email.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     var body: some View {
-        VStack(spacing: 25) {
-            // Header & Email Field
-            Text("Set Up Your Login")
-                .font(.title).bold()
-                .foregroundStyle(LinearGradient(
-                    colors: [Color.red, Color(red: 0.5, green: 0, blue: 0.13).opacity(0.7)],
-                    startPoint: .leading, endPoint: .trailing
-                ))
+        ScrollView {
+            VStack(spacing: 22) {
+                DriverOnboardingStepIndicator(currentStep: currentStep, totalSteps: totalSteps, stepTitle: "Create Your Login")
 
-            HStack {
-                Image(systemName: "envelope").foregroundColor(.gray)
-                TextField("Email Address", text: $email)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-            }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(10)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-            )
+                VStack(spacing: 8) {
+                    Text("Create Your Login")
+                        .font(.system(size: 26, weight: .heavy, design: .rounded))
+                        .foregroundStyle(Styles.rydrGradient)
+                    Text("This is how you'll sign in to drive with Rydr.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
 
-            // Password Field
-            HStack {
-                Image(systemName: "lock").foregroundColor(.gray)
-                SecureField("Create Password", text: $password)
-                    .onChange(of: password) {
-                        validatePassword(password)
-                    }
-            }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(10)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-            )
-
-            // Password Rules – always displayed
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(passwordValidations.sorted(by: { $0.key < $1.key }), id: \.key) { rule, passed in
+                VStack(spacing: 14) {
                     HStack {
-                        Image(systemName: passed ? "checkmark.circle.fill" : "circle")
-                            .foregroundColor(passed ? .green : .gray)
-                        Text(rule).font(.caption)
+                        Image(systemName: "envelope.fill").foregroundColor(.gray)
+                        TextField("Email Address", text: $email)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(14)
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+
+                    passwordField(
+                        placeholder: "Create Password",
+                        text: $password,
+                        isVisible: $isPasswordVisible
+                    )
+
+                    requirementChips
+
+                    passwordField(
+                        placeholder: "Confirm Password",
+                        text: $confirmPassword,
+                        isVisible: $isConfirmVisible
+                    )
+
+                    if !confirmPassword.isEmpty && password != confirmPassword {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.red)
+                            Text("Passwords do not match.")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.opacity)
                     }
                 }
-            }.padding(.horizontal)
 
-            // Confirm Password Field
-            HStack {
-                Image(systemName: "lock.rotation").foregroundColor(.gray)
-                SecureField("Confirm Password", text: $confirmPassword)
-            }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(10)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-            )
+                SignupContinueButton(title: "Continue", isEnabled: allValid, action: onNext)
 
-            // Password match feedback
-            if !confirmPassword.isEmpty && password != confirmPassword {
-                Text("Passwords do not match.")
-                    .foregroundColor(.red)
-                    .font(.caption)
-                    .transition(.opacity)
-            }
+                SignupInfoCard(
+                    icon: "lock.shield.fill",
+                    title: "Your security matters",
+                    message: "Your password is encrypted and never visible to anyone — including us."
+                )
 
-            // Continue Button
-            Button("Continue") {
-                onNext()
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.red)
-            .disabled(!allValid)
-            
-            if !errorMessage.isEmpty {
-                Text(errorMessage)
-                    .foregroundColor(.red)
-                    .font(.caption)
-            }
+                if !errorMessage.isEmpty {
+                    Text(errorMessage)
+                        .foregroundColor(.red)
+                        .font(.caption)
+                }
 
-            Spacer()
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 6)
+        }
+        .background(Color(.systemBackground))
+        .hideKeyboardOnTap()
+    }
+
+    private func passwordField(placeholder: String, text: Binding<String>, isVisible: Binding<Bool>) -> some View {
+        HStack {
+            Image(systemName: "lock.fill").foregroundColor(.gray)
+            Group {
+                if isVisible.wrappedValue {
+                    TextField(placeholder, text: text)
+                } else {
+                    SecureField(placeholder, text: text)
+                }
+            }
+            Button {
+                isVisible.wrappedValue.toggle()
+            } label: {
+                Image(systemName: isVisible.wrappedValue ? "eye.slash.fill" : "eye.fill")
+                    .foregroundColor(.gray)
+            }
         }
         .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(14)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.gray.opacity(0.3), lineWidth: 1))
     }
 
-    private func validatePassword(_ text: String) {
-        passwordValidations["At least 8 characters"] = text.count >= 8
-        passwordValidations["1 uppercase letter"] = text.rangeOfCharacter(from: .uppercaseLetters) != nil
-        passwordValidations["1 number"] = text.rangeOfCharacter(from: .decimalDigits) != nil
-        passwordValidations["1 special character"] = text.rangeOfCharacter(from: CharacterSet(charactersIn: "!@#$%^&*()_+{}|:<>?-=[];,./")) != nil
+    private var requirementChips: some View {
+        let columns = [GridItem(.flexible()), GridItem(.flexible())]
+        return LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+            ForEach(rules, id: \.key) { rule in
+                let passed = passes(rule.key)
+                HStack(spacing: 5) {
+                    Image(systemName: passed ? "checkmark.circle.fill" : "circle")
+                        .font(.caption2)
+                        .foregroundColor(passed ? .green : .gray)
+                    Text(rule.label)
+                        .font(.caption2.weight(.medium))
+                        .foregroundColor(passed ? .primary : .secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(passed ? Color.green.opacity(0.1) : Color(.systemGray6)))
+            }
+        }
+        .padding(.horizontal, 2)
     }
 }
-

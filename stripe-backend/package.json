@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.js"
+    "test": "node --check index.js && node --check scripts/delete-connected-accounts.js",
+    "start": "node index.js",
+    "delete-connected-accounts": "node scripts/delete-connected-accounts.js"
   },
   "keywords": [],
   "author": "",

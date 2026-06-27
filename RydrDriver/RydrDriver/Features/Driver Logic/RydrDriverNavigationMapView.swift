@@ -13,18 +13,59 @@ struct RydrDriverNavigationMapView: View {
     let heading: CLLocationDirection
     let onRecenter: () -> Void
 
+    /// Route geometry passed in from `MKRoute.polyline`, upsampled with a Catmull-Rom
+    /// spline so curves render as smooth arcs rather than the sparse line segments
+    /// MapKit's raw directions response returns.
+    private var renderedRouteCoordinates: [CLLocationCoordinate2D] {
+        Self.smoothedRouteCoordinates(routeCoordinates)
+    }
+
+    /// The driver's raw GPS fix, projected onto the nearest point of the route line.
+    /// This keeps the vehicle marker glued to the road even when GPS jitter would
+    /// otherwise place it slightly off the polyline.
+    private var snappedDriverCoordinate: CLLocationCoordinate2D? {
+        guard let driverCoordinate else { return nil }
+        return Self.closestPoint(to: driverCoordinate, on: routeCoordinates) ?? driverCoordinate
+    }
+
     var body: some View {
         Map(position: $position, interactionModes: [.all]) {
-            if !routeCoordinates.isEmpty {
-                MapPolyline(coordinates: routeCoordinates)
-                    .stroke(Color.black.opacity(0.16), lineWidth: 12)
+            if renderedRouteCoordinates.count > 1 {
+                // Soft contact shadow beneath the route so it reads as sitting on the
+                // road surface rather than floating above it.
+                MapPolyline(coordinates: renderedRouteCoordinates)
+                    .stroke(
+                        Color.black.opacity(0.24),
+                        style: StrokeStyle(lineWidth: 17, lineCap: .round, lineJoin: .round)
+                    )
 
-                MapPolyline(coordinates: routeCoordinates)
-                    .stroke(Color.black.opacity(0.32), lineWidth: 7)
+                // Fully opaque casing — covers the road's own centerline/lane markings
+                // so they never visually split the route down the middle.
+                MapPolyline(coordinates: renderedRouteCoordinates)
+                    .stroke(
+                        Color.white.opacity(0.94),
+                        style: StrokeStyle(lineWidth: 13, lineCap: .round, lineJoin: .round)
+                    )
+
+                // Brand-colored route fill — ~25% wider than the previous styling and
+                // painted directly on top of the casing.
+                MapPolyline(coordinates: renderedRouteCoordinates)
+                    .stroke(
+                        Styles.rydrGradient,
+                        style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round)
+                    )
+
+                // Thin gloss highlight down the center for added depth, like Apple Maps'
+                // painted-on route treatment.
+                MapPolyline(coordinates: renderedRouteCoordinates)
+                    .stroke(
+                        Color.white.opacity(0.22),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
+                    )
             }
 
-            if let driverCoordinate {
-                Annotation("", coordinate: driverCoordinate, anchor: .center) {
+            if let markerCoordinate = snappedDriverCoordinate ?? driverCoordinate {
+                Annotation("", coordinate: markerCoordinate, anchor: .center) {
                     RydrNavigationDriverMarker(heading: heading)
                 }
             }
@@ -52,6 +93,107 @@ struct RydrDriverNavigationMapView: View {
                 .padding(.bottom, 300)
                 .frame(maxHeight: .infinity, alignment: .bottom)
         }
+    }
+
+    // MARK: - Route geometry helpers
+
+    /// Inserts Catmull-Rom interpolated points between each pair of route coordinates so
+    /// curves render as smooth arcs instead of the sparse polyline MapKit's directions
+    /// response returns. The underlying points still come straight from `MKRoute.polyline`,
+    /// which is already snapped to the road network — this only adds visual smoothing.
+    private static func smoothedRouteCoordinates(
+        _ coordinates: [CLLocationCoordinate2D],
+        segmentsPerPoint: Int = 8
+    ) -> [CLLocationCoordinate2D] {
+        guard coordinates.count > 2 else { return coordinates }
+
+        var points = coordinates
+        points.insert(points[0], at: 0)
+        points.append(points[points.count - 1])
+
+        var smoothed: [CLLocationCoordinate2D] = []
+        for i in 1..<(points.count - 2) {
+            let p0 = points[i - 1]
+            let p1 = points[i]
+            let p2 = points[i + 1]
+            let p3 = points[i + 2]
+
+            for step in 0..<segmentsPerPoint {
+                let t = Double(step) / Double(segmentsPerPoint)
+                smoothed.append(catmullRom(p0, p1, p2, p3, t))
+            }
+        }
+
+        if let last = coordinates.last {
+            smoothed.append(last)
+        }
+        return smoothed
+    }
+
+    private static func catmullRom(
+        _ p0: CLLocationCoordinate2D,
+        _ p1: CLLocationCoordinate2D,
+        _ p2: CLLocationCoordinate2D,
+        _ p3: CLLocationCoordinate2D,
+        _ t: Double
+    ) -> CLLocationCoordinate2D {
+        let t2 = t * t
+        let t3 = t2 * t
+
+        func interpolate(_ a: Double, _ b: Double, _ c: Double, _ d: Double) -> Double {
+            0.5 * (
+                (2 * b)
+                + (-a + c) * t
+                + (2 * a - 5 * b + 4 * c - d) * t2
+                + (-a + 3 * b - 3 * c + d) * t3
+            )
+        }
+
+        return CLLocationCoordinate2D(
+            latitude: interpolate(p0.latitude, p1.latitude, p2.latitude, p3.latitude),
+            longitude: interpolate(p0.longitude, p1.longitude, p2.longitude, p3.longitude)
+        )
+    }
+
+    /// Projects `coordinate` onto the nearest point of `path`, used to glue the vehicle
+    /// marker to the route line and absorb GPS jitter.
+    private static func closestPoint(
+        to coordinate: CLLocationCoordinate2D,
+        on path: [CLLocationCoordinate2D]
+    ) -> CLLocationCoordinate2D? {
+        guard path.count > 1 else { return path.first }
+
+        var bestPoint: CLLocationCoordinate2D?
+        var bestDistance = Double.greatestFiniteMagnitude
+
+        for index in 0..<(path.count - 1) {
+            let projected = projectOntoSegment(coordinate, start: path[index], end: path[index + 1])
+            let distance = CLLocation(latitude: projected.latitude, longitude: projected.longitude)
+                .distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude))
+            if distance < bestDistance {
+                bestDistance = distance
+                bestPoint = projected
+            }
+        }
+        return bestPoint
+    }
+
+    /// Planar projection of `point` onto the segment `start`-`end`. Adequate accuracy at
+    /// navigation zoom scales, where segment lengths are short relative to Earth's curvature.
+    private static func projectOntoSegment(
+        _ point: CLLocationCoordinate2D,
+        start: CLLocationCoordinate2D,
+        end: CLLocationCoordinate2D
+    ) -> CLLocationCoordinate2D {
+        let dx = end.longitude - start.longitude
+        let dy = end.latitude - start.latitude
+        let lengthSquared = dx * dx + dy * dy
+        guard lengthSquared > 0 else { return start }
+
+        var t = ((point.longitude - start.longitude) * dx + (point.latitude - start.latitude) * dy) / lengthSquared
+        t = max(0, min(1, t))
+
+        return CLLocationCoordinate2D(latitude: start.latitude + t * dy, longitude: start.longitude + t * dx)
     }
 }
 

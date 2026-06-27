@@ -78,6 +78,12 @@ async function updateDriver(uid, payload) {
   );
 }
 
+async function driverData(uid) {
+  if (!firestore || !uid) return null;
+  const snapshot = await firestore.collection("drivers").doc(uid).get();
+  return snapshot.exists ? snapshot.data() : null;
+}
+
 // --- CORS (adjust origin if you want to lock it down) ---
 app.use(cors());
 
@@ -303,6 +309,28 @@ app.post("/connect/accounts", async (req, res) => {
       return res.status(400).json({ error: "missing_required_fields" });
     }
 
+    const existingAccountId = (await driverData(uid))?.stripeAccountId;
+    if (existingAccountId) {
+      try {
+        const existing = await stripe.accounts.retrieve(existingAccountId);
+        if (!existing.deleted) {
+          await updateDriver(uid, {
+            stripeAccountId: existing.id,
+            stripeChargesEnabled: !!existing.charges_enabled,
+            stripePayoutsEnabled: !!existing.payouts_enabled,
+            stripeRequirementsDue: existing.requirements?.currently_due || [],
+          });
+          return res.json({ accountId: existing.id, reused: true });
+        }
+      } catch (err) {
+        console.warn("Stored Stripe account could not be reused", {
+          uid,
+          accountId: existingAccountId,
+          message: err.message,
+        });
+      }
+    }
+
     const account = await stripe.accounts.create({
       type: "express",
       country: "US",
@@ -323,7 +351,9 @@ app.post("/connect/accounts", async (req, res) => {
       metadata: { uid },
     });
 
-    res.json({ accountId: account.id });
+    await updateDriver(uid, { stripeAccountId: account.id });
+
+    res.json({ accountId: account.id, reused: false });
   } catch (err) {
     console.error("connect/accounts error", err);
     res.status(500).json({ error: "account_create_failed" });
@@ -519,7 +549,6 @@ app.post("/payment-methods/detach", async (req, res) => {
 // --- Listen ---
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-
 
 
 

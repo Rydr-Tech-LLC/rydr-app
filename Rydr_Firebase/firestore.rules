@@ -386,6 +386,21 @@ service cloud.firestore {
       }
     }
 
+    // Lightweight phone -> uid pointer used to resolve a driver's phone number
+    // without ever needing to run a `list`/query against /drivers (which is
+    // disabled there to prevent phone-number enumeration). The document only
+    // ever contains a uid pointer, never profile data, so a public `get` is safe.
+    match /driverPhoneIndex/{phone} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(["uid", "createdAt"]);
+      allow update: if isSelf(resource.data.uid)
+        && request.resource.data.uid == resource.data.uid;
+      allow delete: if isAdmin();
+    }
+
     match /driver_status/{uid} {
       allow read: if signedIn();
       allow create, update: if isSelf(uid)

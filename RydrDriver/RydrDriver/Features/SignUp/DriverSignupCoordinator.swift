@@ -1,44 +1,22 @@
 //
-//  DriverSignupStep.swift
-//  Rydr Driver
-//
-//  Created by Khris Nunnally on 9/1/25.
-//
-
-//
 //  DriverSignupCoordinator.swift
 //  Rydr Driver
 //
-//  Driver signup flow with verification steps, Checkr invite, and Stripe Connect onboarding.
-//  This file is self-contained with lightweight placeholder views and network stubs you can
-//  wire to your Render backend. It reuses your existing EmailAndPasswordView and AddressInfoView
-//  types if they are in this target/module; otherwise, replace with equivalents.
-//
-//  Created by ChatGPT on 2025-09-01.
-//
-
-//
-//  DriverSignupCoordinator.swift
-//  Rydr Driver
-//
-//  Driver signup flow with verification steps, Checkr invite, and Stripe Connect onboarding.
-//  This file is self-contained with lightweight placeholder views and network stubs you can
-//  wire to your Render backend. It reuses your existing EmailAndPasswordView and AddressInfoView
-//  types if they are in this target/module; otherwise, replace with equivalents.
-//
-//  
+//  Top-level driver signup flow coordinator. Owns shared step state and the
+//  NavigationStack path; each step's UI now lives in its own file under
+//  Features/SignUp/ (see the "Step screens" note below) so this file stays
+//  focused on navigation, Firebase/Firestore writes, and account linking.
 //
 
 import SwiftUI
 import PhotosUI
 import FirebaseAuth
 import FirebaseFirestore
-import SafariServices
 
 // MARK: - Coordinator
 
 enum DriverSignupStep: Hashable {
-    case phone
+    case phoneCode
     case nameDOB
     case emailPassword
     case address
@@ -58,6 +36,7 @@ struct DriverSignupCoordinator: View {
 
     // Shared state
     @State private var phoneNumber: String = ""
+    @State private var pendingVerificationID: String = ""
     @State private var firstName: String = ""
     @State private var lastName: String = ""
     @State private var dob: Date = Calendar.current.date(byAdding: .year, value: -26, to: Date()) ?? Date()
@@ -98,25 +77,65 @@ struct DriverSignupCoordinator: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            PhoneVerificationView_Driver { verifiedE164 in
-                phoneNumber = verifiedE164
-                // Check for an existing driver by phone before allowing signup to proceed
-                driverExists(phoneE164: verifiedE164) { exists in
-                    if exists {
-                        errorText = "An account with this phone number already exists. Please sign in."
-                        existingAccountAlert = true
-                    } else {
-                        upsertDriver([
-                            "phoneNumber": verifiedE164,
-                            "phoneE164": verifiedE164,
-                            "createdAt": FieldValue.serverTimestamp()
-                        ])
-                        path.append(.nameDOB)
-                    }
+            DriverPhoneEntryView(
+                onCodeSent: { verificationID, e164Phone in
+                    phoneNumber = e164Phone
+                    pendingVerificationID = verificationID
+                    path.append(.phoneCode)
                 }
-            }
+            )
             .navigationDestination(for: DriverSignupStep.self) { step in
                 switch step {
+                case .phoneCode:
+                    DriverPhoneCodeEntryView(
+                        verificationID: $pendingVerificationID,
+                        phoneNumber: phoneNumber,
+                        onEditNumber: {
+                            if !path.isEmpty { path.removeLast() }
+                        },
+                        onResendCode: {
+                            PhoneAuthProvider.provider().verifyPhoneNumber(phoneNumber, uiDelegate: nil) { id, error in
+                                Task { @MainActor in
+                                    guard let id, !id.isEmpty, error == nil else { return }
+                                    pendingVerificationID = id
+                                }
+                            }
+                        },
+                        onVerify: { credential, completion in
+                            // Signing in here establishes this phone number as the Firebase
+                            // Auth identity for the account. Every later phone-based driver
+                            // login resolves to this same uid, and the email/password step
+                            // that follows links onto this account instead of creating a
+                            // second, disconnected one.
+                            Auth.auth().signIn(with: credential) { result, error in
+                                Task { @MainActor in
+                                    if let error {
+                                        completion(.failure(error))
+                                        return
+                                    }
+                                    guard let user = result?.user else {
+                                        completion(.failure(NSError(domain: "DriverSignup", code: -1, userInfo: [NSLocalizedDescriptionKey: "Verification failed: missing user."])))
+                                        return
+                                    }
+                                    completion(.success(user))
+
+                                    // Check for an existing driver by phone before allowing
+                                    // signup to proceed.
+                                    let verifiedE164 = phoneNumber
+                                    driverExists(phoneE164: verifiedE164) { exists in
+                                        if exists {
+                                            try? Auth.auth().signOut()
+                                            errorText = "An account with this phone number already exists. Please sign in."
+                                            existingAccountAlert = true
+                                        } else {
+                                            path.append(.nameDOB)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    )
+
                 case .nameDOB:
                     NameDOBView(firstName: $firstName, lastName: $lastName, dob: $dob) {
                         upsertDriver(["firstName": firstName, "lastName": lastName, "dob": Timestamp(date: dob)])
@@ -129,19 +148,7 @@ struct DriverSignupCoordinator: View {
                         password: $password,
                         confirmPassword: $confirmPassword
                     ) {
-                        Auth.auth().createUser(withEmail: email, password: password) { result, error in
-                            if let error = error {
-                                print("❌ createUser: \(error.localizedDescription)")
-                                return
-                            }
-                            upsertDriver([
-                                "uid": Auth.auth().currentUser?.uid ?? "",
-                                "email": email,
-                                "firstName": firstName,
-                                "lastName": lastName
-                            ])
-                            path.append(.address)
-                        }
+                        completeEmailPasswordStep()
                     }
 
                 case .address:
@@ -275,8 +282,6 @@ struct DriverSignupCoordinator: View {
                         session.canGoOnline = false
                         dismiss()
                     })
-                case .phone:
-                    EmptyView()
                 }
             }
             .toolbar { ToolbarItem(placement: .navigationBarLeading) { Button("Close") { dismiss() } } }
@@ -288,6 +293,74 @@ struct DriverSignupCoordinator: View {
         }
     }
 
+    // MARK: - Email/password step
+
+    /// Handles the email/password step by linking the email/password credential onto
+    /// the phone-authenticated account created in the previous step (rather than
+    /// creating a separate account), so phone login and email login resolve to the
+    /// same Firebase Auth uid. Also handles the case where the driver tapped
+    /// "Continue" once already, navigated back, and returned here unchanged --
+    /// re-linking the same credential would error, so we detect that and just
+    /// continue instead of erroring out.
+    private func completeEmailPasswordStep() {
+        // The phone step already signed this driver into Firebase via phone auth, so
+        // Auth.auth().currentUser is the phone-authenticated account. We LINK the
+        // email/password credential onto that same account (rather than calling
+        // createUser, which would mint a second, unrelated UID) so that phone login
+        // and email login both resolve to the same driver going forward.
+        guard let phoneUser = Auth.auth().currentUser else {
+            errorText = "Your phone verification session expired. Please restart signup."
+            existingAccountAlert = true
+            return
+        }
+
+        if phoneUser.email == email {
+            // Driver tapped Continue once already, navigated back, and returned here
+            // without changing anything -- already linked, just continue.
+            finishEmailPasswordStep(uid: phoneUser.uid)
+            return
+        }
+
+        let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+        phoneUser.link(with: credential) { result, error in
+            if let error = error as NSError? {
+                if let code = AuthErrorCode(rawValue: error.code) {
+                    switch code {
+                    case .emailAlreadyInUse, .credentialAlreadyInUse:
+                        errorText = "That email is already in use by another account. Please sign in instead or use a different email."
+                        existingAccountAlert = true
+                        return
+                    case .providerAlreadyLinked:
+                        // This phone account already has an email/password provider attached.
+                        finishEmailPasswordStep(uid: phoneUser.uid)
+                        return
+                    default:
+                        break
+                    }
+                }
+                print("❌ link email credential: \(error.localizedDescription)")
+                errorText = error.localizedDescription
+                return
+            }
+            guard let uid = result?.user.uid else { return }
+            finishEmailPasswordStep(uid: uid)
+        }
+    }
+
+    private func finishEmailPasswordStep(uid: String) {
+        upsertDriver([
+            "uid": uid,
+            "email": email,
+            "firstName": firstName,
+            "lastName": lastName,
+            "phoneNumber": phoneNumber,
+            "phoneE164": phoneNumber,
+            "createdAt": FieldValue.serverTimestamp()
+        ])
+        writePhoneIndex(phoneE164: phoneNumber, uid: uid)
+        path.append(.address)
+    }
+
     // MARK: - Firestore helper
     private func upsertDriver(_ fields: [String: Any]) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
@@ -297,37 +370,30 @@ struct DriverSignupCoordinator: View {
     }
 
     private func driverExists(phoneE164: String, completion: @escaping (Bool) -> Void) {
-        let db = Firestore.firestore()
-        let drivers = db.collection("drivers")
-
-        // Try a direct document lookup (in case you keyed by phone)
-        drivers.document(phoneE164).getDocument { snapshot, _ in
-            if let snapshot = snapshot, snapshot.exists {
-                completion(true)
-                return
+        // Pre-auth (no Firebase Auth user exists yet at this step), so we can't run any
+        // query against /drivers — that collection disallows `list` entirely to prevent
+        // phone-number enumeration. Instead check the dedicated phone->uid pointer doc,
+        // which is readable by anyone via `get` (it exposes nothing but a uid).
+        Firestore.firestore()
+            .collection("driverPhoneIndex")
+            .document(phoneE164)
+            .getDocument { snapshot, _ in
+                completion(snapshot?.exists == true)
             }
+    }
 
-            // Query by standardized E.164 field first
-            drivers.whereField("phoneE164", isEqualTo: phoneE164)
-                .limit(to: 1)
-                .getDocuments { querySnapshot, _ in
-                    if let querySnapshot = querySnapshot, !querySnapshot.documents.isEmpty {
-                        completion(true)
-                        return
-                    }
-
-                    // Fallback for legacy data that used `phoneNumber`
-                    drivers.whereField("phoneNumber", isEqualTo: phoneE164)
-                        .limit(to: 1)
-                        .getDocuments { qs2, _ in
-                            if let qs2 = qs2, !qs2.documents.isEmpty {
-                                completion(true)
-                            } else {
-                                completion(false)
-                            }
-                        }
+    private func writePhoneIndex(phoneE164: String, uid: String) {
+        Firestore.firestore()
+            .collection("driverPhoneIndex")
+            .document(phoneE164)
+            .setData([
+                "uid": uid,
+                "createdAt": FieldValue.serverTimestamp()
+            ]) { err in
+                if let err = err {
+                    print("⚠️ writePhoneIndex failed: \(err.localizedDescription)")
                 }
-        }
+            }
     }
 
     private func recordDriverApprovalRequest(type: String) {
@@ -344,553 +410,21 @@ struct DriverSignupCoordinator: View {
     }
 }
 
-// MARK: - Step 1: Phone (placeholder using simple OTP feel)
-struct PhoneVerificationView_Driver: View {
-    var onVerified: (String) -> Void
-    @State private var phone: String = ""
-    @State private var sent = false
-    @State private var code: String = ""
-    @State private var error: String = ""
-
-    // Phone helpers
-    private func digitsOnly(_ s: String) -> String { s.filter { "0123456789".contains($0) } }
-    private var sanitizedDigits: String { digitsOnly(phone) }
-    private var isPhoneValid: Bool { sanitizedDigits.count >= 10 }
-    private var e164Phone: String { "+1" + sanitizedDigits }
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Verify your phone").font(.title).bold()
-            HStack(spacing: 8) {
-                Text("+1")
-                    .fontWeight(.semibold)
-                    .foregroundStyle(Styles.rydrGradient)
-                    .padding(.leading, 12)
-                    .accessibilityHidden(true)
-
-                Divider()
-                    .frame(height: 20)
-
-                TextField("Phone number", text: $phone)
-                    .keyboardType(.numberPad)
-                    .textContentType(.telephoneNumber)
-                    .autocorrectionDisabled(true)
-                    .textInputAutocapitalization(.never)
-            }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(.secondarySystemBackground))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Styles.rydrGradient, lineWidth: 2)
-            )
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Phone Number Field")
-            .onChange(of: phone, initial: false) { _, newValue in
-                let digits = digitsOnly(newValue)
-                if digits != newValue { phone = digits }
-            }
-            if !sent {
-                Button("Send Code") { sent = true /* Plug Firebase PhoneAuth here */ }
-                    .disabled(!isPhoneValid)
-                    .buttonStyle(.borderedProminent).tint(.red)
-            } else {
-                SecureField("6-digit code", text: $code).textFieldStyle(.roundedBorder)
-                    .keyboardType(.numberPad)
-                Button("Verify") { onVerified(e164Phone) }
-                    .buttonStyle(.borderedProminent).tint(.red)
-            }
-            if !error.isEmpty { Text(error).foregroundStyle(.red) }
-            Spacer()
-        }
-        .padding()
-    }
-}
-
-// MARK: - Step 2: Name + DOB
-struct NameDOBView: View {
-    @Binding var firstName: String
-    @Binding var lastName: String
-    @Binding var dob: Date
-    var onNext: () -> Void
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Your details").font(.title).bold()
-            TextField("First name", text: $firstName).textFieldStyle(.roundedBorder)
-            TextField("Last name", text: $lastName).textFieldStyle(.roundedBorder)
-            DatePicker("Date of birth", selection: $dob, displayedComponents: .date)
-                .datePickerStyle(.compact)
-            Button("Continue", action: onNext)
-                .buttonStyle(.borderedProminent).tint(.red)
-            Spacer()
-        }.padding()
-    }
-}
-
-// MARK: - Step 3 already provided by your EmailAndPasswordView (reused)
-// MARK: - Step 4 already provided by your AddressInfoView (reused)
-
-// MARK: - Step 5: License capture
-struct DriverLicenseView: View {
-    @Binding var licenseNumber: String
-    @Binding var licenseState: String
-    @Binding var front: PhotosPickerItem?
-    @Binding var back: PhotosPickerItem?
-    var onNext: () -> Void
-
-    private let states = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"]
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                Text("Driver's license").font(.title).bold()
-                TextField("License number", text: $licenseNumber).textFieldStyle(.roundedBorder)
-                Menu {
-                    ForEach(states, id: \.self) { abbr in Button(abbr) { licenseState = abbr } }
-                } label: {
-                    HStack {
-                        Text(licenseState.isEmpty ? "State" : licenseState)
-                        Spacer(); Image(systemName: "chevron.up.chevron.down").font(.footnote)
-                    }
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 8).strokeBorder(.secondary.opacity(0.3)))
-                }
-
-                PhotosPicker(selection: $front, matching: .images) { UploadBox(label: "Upload license (front)") }
-                PhotosPicker(selection: $back, matching: .images) { UploadBox(label: "Upload license (back)") }
-
-                Button("Continue", action: onNext)
-                    .buttonStyle(.borderedProminent).tint(.red)
-            }
-            .padding()
-        }
-    }
-}
-
-// MARK: - Step 6: Vehicle & docs
-struct VehicleInfoView: View {
-    @Binding var make: String
-    @Binding var model: String
-    @Binding var year: String
-    @Binding var fuelType: String
-    @Binding var plate: String
-    @Binding var registrationDoc: PhotosPickerItem?
-    @Binding var insuranceCard: PhotosPickerItem?
-    var onNext: () -> Void
-
-    private var eligibility: DriverVehicleEligibility {
-        DriverVehicleEligibility.evaluate(make: make, model: model, year: year, fuelType: fuelType)
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                Text("Vehicle & documents").font(.title).bold()
-                HStack { TextField("Make", text: $make).textFieldStyle(.roundedBorder) }
-                HStack { TextField("Model", text: $model).textFieldStyle(.roundedBorder) }
-                HStack { TextField("Year", text: $year).keyboardType(.numberPad).textFieldStyle(.roundedBorder) }
-                Picker("Fuel type", selection: $fuelType) {
-                    ForEach(DriverVehicleFuelType.allCases) { type in
-                        Text(type.rawValue).tag(type.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                HStack { TextField("Plate number", text: $plate).textFieldStyle(.roundedBorder) }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Eligible ride types")
-                        .font(.headline)
-                    if eligibility.eligibleRideTypes.isEmpty {
-                        Text("Manual review required before this vehicle can receive standard Rydr requests.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        HStack {
-                            ForEach(eligibility.eligibleRideTypes, id: \.self) { rideType in
-                                Text(rideType)
-                                    .font(.caption.weight(.semibold))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(Capsule().fill(Color.red.opacity(0.14)))
-                                    .foregroundStyle(.red)
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
-
-                PhotosPicker(selection: $registrationDoc, matching: .images) { UploadBox(label: "Upload registration") }
-                PhotosPicker(selection: $insuranceCard, matching: .images) { UploadBox(label: "Upload insurance card") }
-
-                Button("Continue", action: onNext)
-                    .buttonStyle(.borderedProminent).tint(.red)
-            }
-            .padding()
-        }
-    }
-}
-
-// MARK: - Step 7: Identity (Stripe Identity via hosted link)
-struct IdentityVerificationView: View {
-    @Binding var isVerified: Bool
-    var onNext: () -> Void
-
-    @State private var isPresenting = false
-    @State private var url: URL?
-    @State private var message: String?
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Verify identity").font(.title).bold()
-            Text("You will be redirected to a secure verification flow to scan your ID and selfie.")
-                .font(.footnote).foregroundStyle(.secondary)
-
-            Button("Start Identity Verification") {
-                // TODO: Call backend to create Stripe Identity verification session and return hosted link URL
-                #if DEBUG
-                url = URL(string: "https://verify.stripe.com/demo")
-                isPresenting = true
-                #else
-                message = "Stripe Identity is waiting on backend configuration. For beta testing, an admin can mark this account as manually reviewed."
-                #endif
-            }
-            .buttonStyle(.borderedProminent).tint(.red)
-            .sheet(isPresented: $isPresenting) {
-                if let url { SafariView(url: url) }
-            }
-
-            if let message {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
-            Toggle("I completed verification", isOn: $isVerified)
-                .toggleStyle(SwitchToggleStyle(tint: .red))
-
-            Button("Continue") { onNext() }
-                .buttonStyle(.borderedProminent).tint(.red)
-                .disabled(!isVerified)
-            Spacer()
-        }.padding()
-    }
-}
-
-// MARK: - Step 8: Background check (Checkr hosted Apply)
-struct BackgroundCheckView: View {
-    let firstName: String
-    let lastName: String
-    let email: String
-    let phone: String
-    let dob: Date
-    let licenseNumber: String
-    let licenseState: String
-
-    @Binding var started: Bool
-    var onNext: () -> Void
-
-    @State private var showConsent = false
-    @State private var presentingApply = false
-    @State private var applyURL: URL?
-    @State private var message: String?
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Background check").font(.title).bold()
-            Text("We use a secure partner to run a criminal and driving record screen. You’ll review disclosures & provide additional info on their site.")
-                .font(.footnote).foregroundStyle(.secondary)
-
-            Toggle("I consent to a background check (FCRA)", isOn: $showConsent)
-                .toggleStyle(SwitchToggleStyle(tint: .red))
-
-            Button("Start Background Check") {
-                guard showConsent else { return }
-                // TODO: Call backend to create Checkr Candidate + Invitation, return hosted Apply URL.
-                #if DEBUG
-                applyURL = URL(string: "https://apply.checkr.com/apply/demo")
-                presentingApply = true
-                #else
-                message = "Background checks are manually bypassed only for approved beta testers. No production Checkr invitation was created."
-                #endif
-                started = true
-            }
-            .buttonStyle(.borderedProminent).tint(.red)
-            .disabled(!showConsent)
-            .sheet(isPresented: $presentingApply) {
-                if let url = applyURL { SafariView(url: url) }
-            }
-
-            if let message {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
-            Button("Continue") { onNext() }
-                .buttonStyle(.borderedProminent).tint(.red)
-                .disabled(!started)
-            Spacer()
-        }
-        .padding()
-    }
-}
-
-// MARK: - Step 9: Payouts (Stripe Connect Express onboarding)
-struct PayoutsSetupView: View {
-    let uid: String
-    let email: String
-    let firstName: String
-    let lastName: String
-    let phone: String
-    let dob: Date
-    let street: String
-    let addressLine2: String
-    let city: String
-    let state: String
-    let zip: String
-
-    @Binding var connectOnboarded: Bool
-    /// Called when the flow finishes. Passes the Stripe Connect accountId (if one was created) so the
-    /// caller can persist it, then advances if connectOnboarded is true.
-    var onNext: (String?) -> Void
-
-    @State private var accountId: String?
-    @State private var isPresenting = false
-    @State private var onboardingURL: URL?
-    @State private var isLoading = false
-    @State private var message: String?
-    @State private var isError = false
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Set up payouts").font(.title).bold()
-            Text("Link a bank account for ACH deposits, and optionally add a debit card for Instant Payouts.")
-                .font(.footnote).foregroundStyle(.secondary)
-
-            Button {
-                Task { await startOnboarding() }
-            } label: {
-                if isLoading {
-                    ProgressView().tint(.white)
-                } else {
-                    Text("Open Stripe Onboarding")
-                }
-            }
-            .buttonStyle(.borderedProminent).tint(.red)
-            .disabled(isLoading || uid.isEmpty)
-            .sheet(isPresented: $isPresenting, onDismiss: {
-                Task { await refreshStatus() }
-            }) {
-                if let onboardingURL { SafariView(url: onboardingURL) }
-            }
-
-            if let message {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(isError ? .red : .secondary)
-                    .multilineTextAlignment(.center)
-            }
-
-            if connectOnboarded {
-                Label("Payouts are set up", systemImage: "checkmark.seal.fill")
-                    .foregroundStyle(.green)
-            }
-
-            Button("Finish") { onNext(accountId) }
-                .buttonStyle(.borderedProminent).tint(.red)
-                .disabled(!connectOnboarded)
-            Spacer()
-        }
-        .padding()
-    }
-
-    private var stripeBackendBase: URL { URL(string: "https://rydr-stripe-backend.onrender.com")! }
-
-    private func dobDictionary() -> [String: Int] {
-        let components = Calendar.current.dateComponents([.day, .month, .year], from: dob)
-        return [
-            "day": components.day ?? 1,
-            "month": components.month ?? 1,
-            "year": components.year ?? 2000,
-        ]
-    }
-
-    private func addressDictionary() -> [String: String] {
-        var dict: [String: String] = [
-            "line1": street,
-            "city": city,
-            "state": state,
-            "postal_code": zip,
-        ]
-        if !addressLine2.isEmpty { dict["line2"] = addressLine2 }
-        return dict
-    }
-
-    @MainActor
-    private func startOnboarding() async {
-        guard !uid.isEmpty else {
-            message = "Missing account information. Please restart signup."
-            isError = true
-            return
-        }
-
-        isLoading = true
-        isError = false
-        message = nil
-        defer { isLoading = false }
-
-        do {
-            let resolvedAccountId: String
-            if let accountId {
-                resolvedAccountId = accountId
-            } else {
-                resolvedAccountId = try await createConnectAccount()
-                accountId = resolvedAccountId
-            }
-
-            let url = try await createAccountLink(accountId: resolvedAccountId)
-            onboardingURL = url
-            isPresenting = true
-        } catch {
-            message = "Couldn't reach the payouts service. Please check your connection and try again."
-            isError = true
-        }
-    }
-
-    private func createConnectAccount() async throws -> String {
-        var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/accounts"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "uid": uid,
-            "email": email,
-            "firstName": firstName,
-            "lastName": lastName,
-            "phone": phone,
-            "dob": dobDictionary(),
-            "address": addressDictionary(),
-        ])
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
-        let decoded = try JSONDecoder().decode(ConnectAccountResponse.self, from: data)
-        return decoded.accountId
-    }
-
-    private func createAccountLink(accountId: String) async throws -> URL {
-        var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/account-link"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["accountId": accountId])
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
-        let decoded = try JSONDecoder().decode(AccountLinkResponse.self, from: data)
-        guard let url = URL(string: decoded.url) else { throw URLError(.badURL) }
-        return url
-    }
-
-    @MainActor
-    private func refreshStatus() async {
-        guard let accountId else { return }
-        var request = URLRequest(
-            url: stripeBackendBase.appendingPathComponent("connect/status")
-                .appending(queryItems: [URLQueryItem(name: "accountId", value: accountId)])
-        )
-        request.httpMethod = "GET"
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                throw URLError(.badServerResponse)
-            }
-            let status = try JSONDecoder().decode(ConnectStatusResponse.self, from: data)
-            if status.payoutsEnabled || status.requirementsDue.isEmpty {
-                connectOnboarded = true
-                message = nil
-            } else {
-                message = "A few more details are needed to finish payouts setup: \(status.requirementsDue.joined(separator: ", "))."
-                isError = false
-            }
-        } catch {
-            message = "Couldn't confirm payouts status yet. You can reopen onboarding to finish."
-            isError = true
-        }
-    }
-
-    struct ConnectAccountResponse: Decodable { let accountId: String }
-    struct AccountLinkResponse: Decodable { let url: String }
-    struct ConnectStatusResponse: Decodable {
-        let chargesEnabled: Bool
-        let payoutsEnabled: Bool
-        let requirementsDue: [String]
-
-        enum CodingKeys: String, CodingKey {
-            case chargesEnabled = "charges_enabled"
-            case payoutsEnabled = "payouts_enabled"
-            case requirementsDue = "requirements_due"
-        }
-    }
-}
-
-// MARK: - Done
-struct SignupCompleteView: View {
-    var onFinish: (() -> Void)? = nil
-
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 72))
-                .foregroundStyle(.green)
-                .symbolRenderingMode(.hierarchical)
-
-            Text("Application submitted")
-                .font(.title).bold()
-
-            Text("We’ll notify you when your background check is complete. You can continue exploring the app in the meantime.")
-                .font(.body)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
-
-            Button(action: { onFinish?() }) {
-                Text("Done").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.red)
-            .padding(.top, 8)
-
-            Spacer()
-        }
-        .padding()
-    }
-}
-
-// MARK: - Small UI helpers
-struct UploadBox: View {
-    var label: String
-    var body: some View {
-        HStack { Image(systemName: "tray.and.arrow.up"); Text(label); Spacer() }
-            .padding()
-            .frame(maxWidth: .infinity)
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(.secondary.opacity(0.3)))
-    }
-}
-
-struct SafariView: UIViewControllerRepresentable {
-    let url: URL
-    func makeUIViewController(context: Context) -> SFSafariViewController { SFSafariViewController(url: url) }
-    func updateUIViewController(_ vc: SFSafariViewController, context: Context) {}
-}
+// MARK: - Step screens
+//
+// Every step screen now lives in its own file under Features/SignUp/, each
+// with a default `currentStep`/`totalSteps` matching its position below, and
+// each rendering the shared DriverOnboardingStepIndicator "flow bubble"
+// tracker:
+//   1. NameDOBView.swift            — name + date of birth
+//   2. EmailAndPasswordView.swift   — login credentials
+//   3. AddressInfoView.swift        — home address
+//   4. DriverLicenseView.swift      — license capture
+//   5. VehicleInfoView.swift        — vehicle & documents
+//   6. IdentityVerificationView.swift — Stripe Identity launch screen
+//   7. BackgroundCheckView.swift    — Checkr launch screen
+//   8. PayoutsSetupView.swift       — Stripe Connect payouts launch screen
+//
+// Shared helpers (UploadBox, SafariView, SignupInfoCard, SignupContinueButton)
+// live in SignupSharedUI.swift, and the final SignupCompleteView.swift caps
+// off the flow.

@@ -753,12 +753,17 @@ struct DriverRideInProgressView: View {
     }
 
     private var navigationCamera: MapCamera {
-        let center = driverCoordinate ?? displayedRouteCoordinates.first ?? primaryDestinationCoordinate ?? DriverMapDefaults.pilotCoordinate
+        let driver = driverCoordinate ?? displayedRouteCoordinates.first ?? primaryDestinationCoordinate ?? DriverMapDefaults.pilotCoordinate
+        let heading = routeHeading
+        // Offset the look-at point ahead of the vehicle (rather than centering directly
+        // on it) so the marker settles in the lower third of the screen with more road
+        // visible ahead — the cinematic framing Apple Maps uses for turn-by-turn.
+        let lookAheadCenter = driver.offset(bearingDegrees: heading, distanceMeters: 60)
         return MapCamera(
-            centerCoordinate: center,
-            distance: 720,
-            heading: routeHeading,
-            pitch: 68
+            centerCoordinate: lookAheadCenter,
+            distance: 800,
+            heading: heading,
+            pitch: 65
         )
     }
 
@@ -943,6 +948,26 @@ private extension MKPolyline {
         var coordinates = Array(repeating: kCLLocationCoordinate2DInvalid, count: pointCount)
         getCoordinates(&coordinates, range: NSRange(location: 0, length: pointCount))
         return coordinates
+    }
+}
+
+private extension CLLocationCoordinate2D {
+    /// Returns the coordinate `distanceMeters` away from `self` along `bearingDegrees`,
+    /// using the standard spherical-Earth destination-point formula.
+    func offset(bearingDegrees: CLLocationDirection, distanceMeters: Double) -> CLLocationCoordinate2D {
+        let earthRadius = 6_371_000.0
+        let bearing = bearingDegrees * .pi / 180
+        let lat1 = latitude * .pi / 180
+        let lon1 = longitude * .pi / 180
+        let angularDistance = distanceMeters / earthRadius
+
+        let lat2 = asin(sin(lat1) * cos(angularDistance) + cos(lat1) * sin(angularDistance) * cos(bearing))
+        let lon2 = lon1 + atan2(
+            sin(bearing) * sin(angularDistance) * cos(lat1),
+            cos(angularDistance) - sin(lat1) * sin(lat2)
+        )
+
+        return CLLocationCoordinate2D(latitude: lat2 * 180 / .pi, longitude: lon2 * 180 / .pi)
     }
 }
 

@@ -79,6 +79,13 @@ async function updateDriver(uid, payload) {
   );
 }
 
+async function driverData(uid) {
+  if (!uid) return null;
+  initializeFirebase();
+  const snapshot = await admin.firestore().collection("drivers").doc(uid).get();
+  return snapshot.exists ? snapshot.data() : null;
+}
+
 // Denormalize the subset of Connect status the rider app needs (to build a
 // destination charge) onto the driver's public profile, which riders can read.
 async function updatePublicDriverConnectStatus(uid, { stripeAccountId, stripeChargesEnabled }) {
@@ -413,9 +420,41 @@ app.post("/connect/accounts", async (req, res) => {
   try {
     const { uid, email, firstName, lastName, phone, dob, address } =
       req.body || {};
+    const verifiedUid = await verifiedFirebaseUid(req);
+    const driverUid = verifiedUid || uid;
 
-    if (!uid || !email || !firstName || !lastName || !phone || !dob || !address) {
+    if (verifiedUid && uid && uid !== verifiedUid) {
+      return res.status(403).json({ error: "uid_mismatch" });
+    }
+
+    if (!driverUid || !email || !firstName || !lastName || !phone || !dob || !address) {
       return res.status(400).json({ error: "missing_required_fields" });
+    }
+
+    const existingAccountId = (await driverData(driverUid))?.stripeAccountId;
+    if (existingAccountId) {
+      try {
+        const existing = await stripe.accounts.retrieve(existingAccountId);
+        if (!existing.deleted) {
+          await updateDriver(driverUid, {
+            stripeAccountId: existing.id,
+            stripeChargesEnabled: !!existing.charges_enabled,
+            stripePayoutsEnabled: !!existing.payouts_enabled,
+            stripeRequirementsDue: existing.requirements?.currently_due || [],
+          });
+          await updatePublicDriverConnectStatus(driverUid, {
+            stripeAccountId: existing.id,
+            stripeChargesEnabled: existing.charges_enabled,
+          });
+          return res.json({ accountId: existing.id, reused: true });
+        }
+      } catch (err) {
+        console.warn("⚠️ Stored Stripe account could not be reused", {
+          uid: driverUid,
+          accountId: existingAccountId,
+          message: err.message,
+        });
+      }
     }
 
     const account = await stripe.accounts.create({
@@ -435,16 +474,16 @@ app.post("/connect/accounts", async (req, res) => {
         dob, // { day, month, year }
         address, // { line1, city, state, postal_code, line2? }
       },
-      metadata: { uid },
+      metadata: { uid: driverUid },
     });
 
-    await updateDriver(uid, { stripeAccountId: account.id });
-    await updatePublicDriverConnectStatus(uid, {
+    await updateDriver(driverUid, { stripeAccountId: account.id });
+    await updatePublicDriverConnectStatus(driverUid, {
       stripeAccountId: account.id,
       stripeChargesEnabled: account.charges_enabled,
     });
 
-    res.json({ accountId: account.id });
+    res.json({ accountId: account.id, reused: false });
   } catch (err) {
     console.error("❌ connect/accounts error", err);
     res.status(500).json({ error: "account_create_failed" });
@@ -564,7 +603,6 @@ app.post("/connect/instant-payout", async (req, res) => {
 // --- Listen ---
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-
 
 
 

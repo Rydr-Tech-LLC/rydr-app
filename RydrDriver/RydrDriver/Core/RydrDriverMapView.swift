@@ -13,6 +13,15 @@ struct RydrDriverMapView: View {
     let workZoneControlBottomPadding: CGFloat
     let onRecenter: () -> Void
 
+    /// Coordinate the work zone camera was last fit to. Used to detect meaningful GPS
+    /// movement so the work zone keeps following the driver instead of staying pinned
+    /// to wherever it was first drawn.
+    @State private var lastFittedCoordinate: CLLocationCoordinate2D?
+
+    private var driverCoordinateKey: String? {
+        driverCoordinate.map { "\($0.latitude),\($0.longitude)" }
+    }
+
     var body: some View {
         RydrDriverMKMapView(
             position: $position,
@@ -59,6 +68,33 @@ struct RydrDriverMapView: View {
         .onChange(of: filterPreferences.effectivePickupMiles) { _, _ in
             fitWorkZoneInViewport()
         }
+        .onChange(of: driverCoordinateKey) { _, _ in
+            recenterWorkZoneIfDriverMoved()
+        }
+        .onAppear {
+            if filterPreferences.workZoneEnabled {
+                fitWorkZoneInViewport()
+            }
+        }
+    }
+
+    /// Re-fits the work zone camera only once the driver has actually moved a
+    /// meaningful distance, so the work zone continuously tracks live GPS without
+    /// re-animating the camera on every tiny location jitter.
+    private func recenterWorkZoneIfDriverMoved() {
+        guard filterPreferences.workZoneEnabled, let driverCoordinate else { return }
+
+        guard let lastFittedCoordinate else {
+            fitWorkZoneInViewport()
+            return
+        }
+
+        let moved = CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
+            .distance(from: CLLocation(latitude: lastFittedCoordinate.latitude, longitude: lastFittedCoordinate.longitude))
+
+        if moved >= 30 {
+            fitWorkZoneInViewport()
+        }
     }
 
     private func workZoneHandleCoordinate(from center: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
@@ -100,21 +136,37 @@ struct RydrDriverMapView: View {
         }
     }
 
+    /// Re-centers on the driver's live GPS location and zooms so the work zone radius
+    /// occupies roughly 70-80% of the visible map — the dynamic "active operating
+    /// territory" feel rather than a static, zoomed-out overlay. The actual 500-700ms
+    /// animated transition happens at the MKMapView layer (see `setRegionIfNeeded`),
+    /// which has precise control over animation duration.
     private func fitWorkZoneInViewport() {
         guard filterPreferences.workZoneEnabled, let driverCoordinate else { return }
+        lastFittedCoordinate = driverCoordinate
 
         let miles = max(filterPreferences.effectivePickupMiles, DriverRideFilterPreferences.minimumWorkZoneMiles)
-        let latitudeDelta = max(0.12, (miles / 69.0) * 2.75)
+
+        // Diameter-to-viewport ratio tuned so the work zone circle's diameter fills
+        // ~75% of the shorter screen dimension (within the requested 70-80% range).
+        let latitudeDelta = max(0.10, (miles / 69.0) * 2.6)
         let longitudeScale = max(0.35, cos(driverCoordinate.latitude * .pi / 180))
-        let longitudeDelta = max(0.12, latitudeDelta / longitudeScale)
+        let longitudeDelta = max(0.10, latitudeDelta / longitudeScale)
+
+        // Bias the camera center north of the driver so the vehicle marker settles in
+        // the lower-middle of the screen — more look-ahead room, less dead-center.
+        let verticalBias = latitudeDelta * 0.16
+        let biasedCenter = CLLocationCoordinate2D(
+            latitude: driverCoordinate.latitude + verticalBias,
+            longitude: driverCoordinate.longitude
+        )
+
         let region = MKCoordinateRegion(
-            center: driverCoordinate,
+            center: biasedCenter,
             span: MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta)
         )
 
-        withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) {
-            position = .region(region)
-        }
+        position = .region(region)
     }
 }
 
@@ -156,10 +208,32 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
     final class Coordinator: NSObject, MKMapViewDelegate {
         private var hasSetInitialRegion = false
         private var lastAppliedRegion: MKCoordinateRegion?
-        private var workZoneGlowOverlayIDs = Set<ObjectIdentifier>()
-        private var workZoneRadiusOverlayIDs = Set<ObjectIdentifier>()
+        private var workZoneOverlayIDs = Set<ObjectIdentifier>()
         private var destinationGlowOverlayIDs = Set<ObjectIdentifier>()
         private var destinationRouteOverlayIDs = Set<ObjectIdentifier>()
+
+        /// The live work zone renderer, kept so the pulse timer can nudge its animation
+        /// phase and trigger a redraw without re-creating the overlay.
+        private weak var workZoneRenderer: WorkZoneOverlayRenderer?
+        private var pulseTimer: Timer?
+        private let pulseStartDate = Date()
+        /// Seconds per breathing cycle — "a gentle pulse every few seconds."
+        private let pulsePeriod: TimeInterval = 3.0
+
+        override init() {
+            super.init()
+            pulseTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+                guard let self, let renderer = self.workZoneRenderer else { return }
+                let elapsed = Date().timeIntervalSince(self.pulseStartDate)
+                let phase = elapsed.truncatingRemainder(dividingBy: self.pulsePeriod) / self.pulsePeriod
+                renderer.pulseProgress = CGFloat(phase)
+                renderer.setNeedsDisplay()
+            }
+        }
+
+        deinit {
+            pulseTimer?.invalidate()
+        }
 
         func configure(
             _ mapView: MKMapView,
@@ -169,21 +243,20 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
             isOnline: Bool,
             pendingRequests: [DriverRideRadarBlip]
         ) {
-            workZoneGlowOverlayIDs.removeAll()
-            workZoneRadiusOverlayIDs.removeAll()
+            workZoneOverlayIDs.removeAll()
             destinationGlowOverlayIDs.removeAll()
             destinationRouteOverlayIDs.removeAll()
             mapView.removeOverlays(mapView.overlays)
             mapView.removeAnnotations(mapView.annotations.filter { !($0 is MKUserLocation) })
 
             if let driverCoordinate, filterPreferences.workZoneEnabled {
+                // A single circle overlay, paired with a custom renderer that draws the
+                // gradient fill, crisp border, soft glow, and pulse in one pass — this
+                // keeps the work zone from ever looking like two mismatched layers.
                 let radiusMeters = filterPreferences.effectivePickupMiles * 1609.344
-                let glowCircle = MKCircle(center: driverCoordinate, radius: radiusMeters)
-                let radiusCircle = MKCircle(center: driverCoordinate, radius: radiusMeters)
-                workZoneGlowOverlayIDs.insert(ObjectIdentifier(glowCircle))
-                workZoneRadiusOverlayIDs.insert(ObjectIdentifier(radiusCircle))
-                mapView.addOverlay(glowCircle)
-                mapView.addOverlay(radiusCircle)
+                let circle = MKCircle(center: driverCoordinate, radius: radiusMeters)
+                workZoneOverlayIDs.insert(ObjectIdentifier(circle))
+                mapView.addOverlay(circle)
             }
 
             if let driverCoordinate,
@@ -216,11 +289,8 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
                     mapView.addAnnotation(
                         RydrDriverMapAnnotation(
                             coordinate: workZoneRadiusLabelCoordinate(from: driverCoordinate, miles: filterPreferences.effectivePickupMiles),
-                            kind: .workZoneRadiusLabel(miles: filterPreferences.effectivePickupMiles)
+                            kind: .workZoneFloatingLabel(miles: filterPreferences.effectivePickupMiles)
                         )
-                    )
-                    mapView.addAnnotation(
-                        RydrDriverMapAnnotation(coordinate: driverCoordinate, kind: .workZoneLabel)
                     )
                     mapView.addAnnotation(
                         RydrDriverMapAnnotation(
@@ -249,20 +319,17 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let circle = overlay as? MKCircle {
-                let renderer = MKCircleRenderer(circle: circle)
-                if workZoneGlowOverlayIDs.contains(ObjectIdentifier(circle)) {
-                    renderer.fillColor = UIColor.clear
-                    renderer.strokeColor = UIColor.systemRed.withAlphaComponent(0.22)
-                    renderer.lineWidth = 10
-                } else if workZoneRadiusOverlayIDs.contains(ObjectIdentifier(circle)) {
-                    renderer.fillColor = UIColor.systemRed.withAlphaComponent(0.08)
-                    renderer.strokeColor = UIColor.systemRed.withAlphaComponent(0.85)
-                    renderer.lineWidth = 2.5
-                } else {
-                    renderer.fillColor = UIColor.clear
-                    renderer.strokeColor = UIColor.systemRed.withAlphaComponent(0.85)
-                    renderer.lineWidth = 2.5
+                if workZoneOverlayIDs.contains(ObjectIdentifier(circle)) {
+                    let renderer = WorkZoneOverlayRenderer(circle: circle)
+                    let elapsed = Date().timeIntervalSince(pulseStartDate)
+                    renderer.pulseProgress = CGFloat(elapsed.truncatingRemainder(dividingBy: pulsePeriod) / pulsePeriod)
+                    workZoneRenderer = renderer
+                    return renderer
                 }
+                let renderer = MKCircleRenderer(circle: circle)
+                renderer.fillColor = UIColor.clear
+                renderer.strokeColor = UIColor.systemRed.withAlphaComponent(0.85)
+                renderer.lineWidth = 2.5
                 return renderer
             }
 
@@ -317,10 +384,8 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
                 return host(WorkZoneCenterMarker(isOnline: isOnline))
             case .workZoneCenter(let isOnline):
                 return host(WorkZoneCenterMarker(isOnline: isOnline))
-            case .workZoneRadiusLabel(let miles):
-                return host(WorkZoneRadiusLabel(miles: miles))
-            case .workZoneLabel:
-                return host(WorkZoneCenterLabel())
+            case .workZoneFloatingLabel(let miles):
+                return host(WorkZoneFloatingLabel(miles: miles))
             case .workZoneHandle(let miles):
                 return host(WorkZoneRadiusHandle(miles: miles))
             case .destination(let corridorMiles):
@@ -342,8 +407,25 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
             if let lastAppliedRegion, regionsAreClose(lastAppliedRegion, region) {
                 return
             }
-            mapView.setRegion(region, animated: animated)
             lastAppliedRegion = region
+
+            guard animated else {
+                mapView.setRegion(region, animated: false)
+                return
+            }
+
+            // Wrapping the (non-animated) region assignment in an explicit UIView
+            // animation block gives precise control over duration — 0.6s sits in the
+            // requested 500-700ms window for a smooth, deliberate camera move rather
+            // than MapKit's default un-tunable `animated: true` timing.
+            UIView.animate(
+                withDuration: 0.6,
+                delay: 0,
+                options: [.curveEaseInOut],
+                animations: {
+                    mapView.setRegion(region, animated: false)
+                }
+            )
         }
 
         private func regionsAreClose(_ lhs: MKCoordinateRegion, _ rhs: MKCoordinateRegion) -> Bool {
@@ -359,7 +441,9 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
         }
 
         private func workZoneRadiusLabelCoordinate(from center: CLLocationCoordinate2D, miles: Double) -> CLLocationCoordinate2D {
-            let latitudeOffset = miles / 69.0
+            // A touch past the circle's true edge so the floating label clears the
+            // outer glow instead of overlapping it.
+            let latitudeOffset = (miles / 69.0) * 1.08
             return CLLocationCoordinate2D(latitude: center.latitude + latitudeOffset, longitude: center.longitude)
         }
     }
@@ -369,8 +453,7 @@ private final class RydrDriverMapAnnotation: NSObject, MKAnnotation {
     enum Kind {
         case driverLocation(isOnline: Bool)
         case workZoneCenter(isOnline: Bool)
-        case workZoneRadiusLabel(miles: Double)
-        case workZoneLabel
+        case workZoneFloatingLabel(miles: Double)
         case workZoneHandle(miles: Double)
         case destination(corridorMiles: Double)
         case rideRequest
@@ -381,10 +464,8 @@ private final class RydrDriverMapAnnotation: NSObject, MKAnnotation {
                 return "driverLocation"
             case .workZoneCenter:
                 return "workZoneCenter"
-            case .workZoneRadiusLabel:
-                return "workZoneRadiusLabel"
-            case .workZoneLabel:
-                return "workZoneLabel"
+            case .workZoneFloatingLabel:
+                return "workZoneFloatingLabel"
             case .workZoneHandle:
                 return "workZoneHandle"
             case .destination:
@@ -402,6 +483,100 @@ private final class RydrDriverMapAnnotation: NSObject, MKAnnotation {
         self.coordinate = coordinate
         self.kind = kind
         super.init()
+    }
+}
+
+/// Draws the work zone circle as a single layered pass — soft outer glow, a subtle
+/// Rydr-red radial gradient fill, a crisp solid border, and a gentle breathing pulse
+/// ring — so it reads as one premium, "painted on the map" territory rather than a
+/// flat static overlay.
+private final class WorkZoneOverlayRenderer: MKOverlayRenderer {
+    private let circle: MKCircle
+
+    /// 0...1 progress through the current pulse cycle, driven by the Coordinator's
+    /// timer. Setting this and calling `setNeedsDisplay()` animates the breathing ring.
+    var pulseProgress: CGFloat = 0
+
+    init(circle: MKCircle) {
+        self.circle = circle
+        super.init(overlay: circle)
+    }
+
+    override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
+        let centerPoint = point(for: MKMapPoint(circle.coordinate))
+        let metersToMapPoints = MKMapPointsPerMeterAtLatitude(circle.coordinate.latitude)
+        let radiusPoints = CGFloat(circle.radius * metersToMapPoints * Double(zoomScale))
+        guard radiusPoints > 0 else { return }
+
+        let brandRed = UIColor.systemRed
+        let boundingRect = CGRect(
+            x: centerPoint.x - radiusPoints,
+            y: centerPoint.y - radiusPoints,
+            width: radiusPoints * 2,
+            height: radiusPoints * 2
+        )
+
+        // Soft outer glow — concentric translucent strokes that fall off with distance.
+        context.saveGState()
+        for step in 0..<5 {
+            let glowRadius = radiusPoints + CGFloat(step) * (radiusPoints * 0.045)
+            let glowAlpha = 0.10 * (1.0 - CGFloat(step) / 5.0)
+            context.setStrokeColor(brandRed.withAlphaComponent(glowAlpha).cgColor)
+            context.setLineWidth(radiusPoints * 0.05)
+            context.addEllipse(in: CGRect(
+                x: centerPoint.x - glowRadius,
+                y: centerPoint.y - glowRadius,
+                width: glowRadius * 2,
+                height: glowRadius * 2
+            ))
+            context.strokePath()
+        }
+        context.restoreGState()
+
+        // Subtle Rydr-red gradient fill, 15-20% opacity from center to edge — frames
+        // the driver without visually overwhelming the marker.
+        context.saveGState()
+        context.addEllipse(in: boundingRect)
+        context.clip()
+        let fillColors = [
+            brandRed.withAlphaComponent(0.15).cgColor,
+            brandRed.withAlphaComponent(0.20).cgColor
+        ] as CFArray
+        if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: fillColors, locations: [0, 1]) {
+            context.drawRadialGradient(
+                gradient,
+                startCenter: centerPoint,
+                startRadius: 0,
+                endCenter: centerPoint,
+                endRadius: radiusPoints,
+                options: []
+            )
+        }
+        context.restoreGState()
+
+        // Crisp solid border at the true radius.
+        context.saveGState()
+        context.setStrokeColor(brandRed.withAlphaComponent(0.9).cgColor)
+        context.setLineWidth(2.5)
+        context.addEllipse(in: boundingRect)
+        context.strokePath()
+        context.restoreGState()
+
+        // Gentle pulse ring — expands just past the border and fades out as it grows,
+        // repeating every few seconds.
+        context.saveGState()
+        let pulseRadius = radiusPoints * (1.0 + 0.07 * pulseProgress)
+        let pulseAlpha = 0.45 * (1.0 - pulseProgress)
+        context.setStrokeColor(brandRed.withAlphaComponent(pulseAlpha).cgColor)
+        context.setLineWidth(2.5)
+        context.addEllipse(in: CGRect(
+            x: centerPoint.x - pulseRadius,
+            y: centerPoint.y - pulseRadius,
+            width: pulseRadius * 2,
+            height: pulseRadius * 2
+        ))
+        context.strokePath()
+        context.restoreGState()
     }
 }
 
@@ -467,33 +642,25 @@ private struct WorkZoneRadiusAdjuster: View {
     }
 }
 
-private struct WorkZoneRadiusLabel: View {
+private struct WorkZoneFloatingLabel: View {
     let miles: Double
 
     var body: some View {
-        Text("\(Int(miles.rounded())) mi")
-            .font(.caption.weight(.black))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(Color.white.opacity(0.96)))
-            .foregroundStyle(Color.red)
-            .overlay(Capsule().stroke(Color.red.opacity(0.20), lineWidth: 1))
-            .shadow(color: Color.red.opacity(0.20), radius: 9, y: 4)
-            .accessibilityLabel("Work zone radius \(Int(miles.rounded())) miles")
-    }
-}
-
-private struct WorkZoneCenterLabel: View {
-    var body: some View {
-        Text("Work Zone")
-            .font(.caption2.weight(.black))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(Color.white.opacity(0.96)))
-            .foregroundStyle(.primary)
-            .overlay(Capsule().stroke(Color.red.opacity(0.12), lineWidth: 1))
-            .shadow(color: Color.red.opacity(0.14), radius: 8, y: 3)
-            .offset(y: -58)
+        VStack(spacing: 2) {
+            Text("Your Work Zone")
+                .font(.caption2.weight(.black))
+                .foregroundStyle(.secondary)
+            Text("\(Int(miles.rounded())) mi")
+                .font(.subheadline.weight(.black))
+                .foregroundStyle(Color.red)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Capsule().fill(Color.white.opacity(0.96)))
+        .overlay(Capsule().stroke(Color.red.opacity(0.20), lineWidth: 1))
+        .shadow(color: Color.red.opacity(0.20), radius: 10, y: 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Your work zone, \(Int(miles.rounded())) mile radius")
     }
 }
 

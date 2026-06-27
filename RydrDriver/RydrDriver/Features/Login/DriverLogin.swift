@@ -18,79 +18,76 @@ struct DriverLoginView: View {
 
     @EnvironmentObject var session: DriverSessionManager
 
-    @State private var isUsingEmail = false
-    @State private var phoneNumber = ""
     @State private var email = ""
     @State private var password = ""
+    @State private var isPasswordVisible = false
     @State private var showLogo = false
     @State private var errorMessage = ""
     @State private var showPasswordResetAlert = false
-    @State private var isSendingCode = false
     @State private var isLoggingIn = false
     @State private var showingSignup = false
-    @State private var verificationSession: DriverPhoneVerificationSession?
 
-    private var sanitizedDigits: String {
-        String(phoneNumber.filter { $0.isNumber }.prefix(10))
-    }
-
-    private var isPhoneValid: Bool {
-        sanitizedDigits.count == 10
-    }
-
-    private var e164Phone: String {
-        "+1" + sanitizedDigits
-    }
+    // Dedicated full-screen phone verification flow (shared with driver signup).
+    @State private var showPhoneFlow = false
+    @State private var phoneFlowPath: [DriverLoginPhoneStep] = []
+    @State private var pendingVerificationID = ""
+    @State private var pendingPhone = ""
 
     var body: some View {
-        VStack(spacing: 25) {
-            Image("Rydr - Driver")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 210, height: 210)
-                .opacity(showLogo ? 1 : 0)
-                .scaleEffect(showLogo ? 1 : 0.92)
-                .animation(.spring(response: 0.75, dampingFraction: 0.82), value: showLogo)
-                .onAppear { showLogo = true }
-                .padding(.top, 12)
-                .accessibilityLabel("Rydr Driver logo")
+        ScrollView {
+            VStack(spacing: 22) {
+                logoLockup
+                    .padding(.top, 12)
 
-            Text("Driver Sign In")
-                .font(.title)
-                .foregroundStyle(Styles.rydrGradient)
+                VStack(spacing: 6) {
+                    (
+                        Text("Driver ")
+                            .foregroundColor(.primary)
+                        + Text("Sign In")
+                            .foregroundStyle(Styles.rydrGradient)
+                    )
+                    .font(.system(size: 32, weight: .heavy, design: .rounded))
 
-            HStack {
-                Text("Not a driver yet?")
-                Button(action: { showingSignup = true }) {
-                    Text("Sign up")
-                        .underline()
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Styles.rydrGradient)
+                    Text("Access your dashboard and manage your rides.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
-                .buttonStyle(.plain)
-            }
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .padding(.top, 8)
 
-            if !isUsingEmail {
-                phoneLoginFields
-            }
+                promoCard
 
-            if isUsingEmail {
                 emailLoginFields
-            }
 
-            if !errorMessage.isEmpty {
-                Text(errorMessage)
-                    .foregroundColor(.red)
-                    .font(.caption)
-                    .multilineTextAlignment(.center)
-            }
+                if !errorMessage.isEmpty {
+                    Text(errorMessage)
+                        .foregroundColor(.red)
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                }
 
-            Spacer()
+                featureRow
+
+                HStack(spacing: 4) {
+                    Text("Not a driver yet?")
+                        .foregroundStyle(.secondary)
+                    Button(action: { showingSignup = true }) {
+                        HStack(spacing: 2) {
+                            Text("Sign up")
+                                .underline()
+                                .fontWeight(.semibold)
+                            Image(systemName: "arrow.right")
+                                .font(.footnote.weight(.semibold))
+                        }
+                        .foregroundStyle(Styles.rydrGradient)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .font(.subheadline)
+                .padding(.top, 4)
+                .padding(.bottom, 12)
+            }
+            .padding(.horizontal, 20)
         }
-        .padding()
         .hideKeyboardOnTap()
         .alert(isPresented: $showPasswordResetAlert) {
             Alert(
@@ -103,91 +100,234 @@ struct DriverLoginView: View {
             DriverSignupCoordinator()
                 .environmentObject(session)
         }
-        .sheet(item: $verificationSession) { verificationSession in
-            DriverVerificationCodeView(
-                verificationID: verificationSession.verificationID,
-                phoneNumber: verificationSession.phoneNumber,
-                onSuccess: { user in
-                    self.verificationSession = nil
-                    completePhoneLogin(for: user)
-                },
-                onResendCode: {
-                    sendCode()
-                }
-            )
+        .fullScreenCover(isPresented: $showPhoneFlow) {
+            phoneFlowCover
         }
     }
 
-    private var phoneLoginFields: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Text("🇺🇸 +1")
-                    .font(.headline)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 10)
-                    .background(Color(.systemGray6))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+    private enum DriverLoginPhoneStep: Hashable {
+        case code
+    }
 
-                TextField("Phone number", text: Binding(
-                    get: { phoneNumber },
-                    set: { phoneNumber = String($0.filter { $0.isNumber }.prefix(10)) }
-                ))
-                .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
-                .textContentType(.telephoneNumber)
-                .accessibilityLabel("US Phone Number Field")
+    private var phoneFlowCover: some View {
+        NavigationStack(path: $phoneFlowPath) {
+            DriverPhoneEntryView(
+                onCodeSent: { verificationID, phone in
+                    pendingVerificationID = verificationID
+                    pendingPhone = phone
+                    phoneFlowPath.append(.code)
+                },
+                onClose: { showPhoneFlow = false }
+            )
+            .navigationDestination(for: DriverLoginPhoneStep.self) { step in
+                switch step {
+                case .code:
+                    DriverPhoneCodeEntryView(
+                        verificationID: $pendingVerificationID,
+                        phoneNumber: pendingPhone,
+                        onEditNumber: {
+                            if !phoneFlowPath.isEmpty { phoneFlowPath.removeLast() }
+                        },
+                        onResendCode: { resendLoginCode() },
+                        onVerify: { credential, completion in
+                            Auth.auth().signIn(with: credential) { result, error in
+                                Task { @MainActor in
+                                    if let error {
+                                        completion(.failure(error))
+                                        return
+                                    }
+                                    guard let user = result?.user else {
+                                        completion(.failure(NSError(domain: "DriverLogin", code: -1, userInfo: [NSLocalizedDescriptionKey: "Verification failed: missing user."])))
+                                        return
+                                    }
+                                    completion(.success(user))
+                                    showPhoneFlow = false
+                                    phoneFlowPath = []
+                                    completePhoneLogin(for: user)
+                                }
+                            }
+                        }
+                    )
+                }
             }
-            .padding(.bottom, 4)
-
-            Text("US numbers only. Enter your 10-digit number.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            Button(isSendingCode ? "Sending..." : "Send Code") {
-                sendCode()
-            }
-            .disabled(isSendingCode || !isPhoneValid)
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(isPhoneValid && !isSendingCode ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.gray))
-            .foregroundColor(.white)
-            .cornerRadius(10)
-            .accessibilityLabel("Send Verification Code")
-
-            Button("Use email and password instead") {
-                withAnimation { isUsingEmail = true }
-            }
-            .font(.caption)
-            .accessibilityLabel("Switch to email and password login")
         }
+    }
+
+    private var logoLockup: some View {
+        ZStack {
+            Circle()
+                .strokeBorder(
+                    Styles.rydrGradient,
+                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [1, 6])
+                )
+                .frame(width: 220, height: 220)
+
+            VStack(spacing: 2) {
+                Image("Rydr - Driver")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 92, height: 92)
+                    .accessibilityHidden(true)
+
+                Text("Rydr")
+                    .font(.system(size: 30, weight: .heavy, design: .rounded))
+                    .foregroundStyle(Styles.rydrGradient)
+
+                Text("Drive Different")
+                    .font(.system(size: 13, weight: .medium))
+                    .italic()
+                    .foregroundStyle(Styles.rydrGradient.opacity(0.85))
+            }
+        }
+        .opacity(showLogo ? 1 : 0)
+        .scaleEffect(showLogo ? 1 : 0.92)
+        .animation(.spring(response: 0.75, dampingFraction: 0.82), value: showLogo)
+        .onAppear { showLogo = true }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Rydr Driver logo")
+    }
+
+    private var promoCard: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.red.opacity(0.12))
+                    .frame(width: 44, height: 44)
+                Image(systemName: "shield.checkered")
+                    .foregroundStyle(Styles.rydrGradient)
+                    .font(.system(size: 18, weight: .semibold))
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("You're in control")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundColor(.primary)
+                Text("Flexible driving. Great earnings. Unmatched support.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Divider().frame(height: 32)
+
+            Image(systemName: "arrow.right")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Styles.rydrGradient)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.red.opacity(0.06))
+        )
+    }
+
+    private var featureRow: some View {
+        HStack(spacing: 0) {
+            featureColumn(icon: "dollarsign.circle.fill", title: "Keep More", subtitle: "Higher earnings")
+            Divider().frame(height: 36)
+            featureColumn(icon: "clock.fill", title: "Work Your Way", subtitle: "Drive when you want")
+            Divider().frame(height: 36)
+            featureColumn(icon: "shield.checkered", title: "We've Got You", subtitle: "Safety first, always")
+        }
+        .padding(.top, 8)
+    }
+
+    private func featureColumn(icon: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(Color.red.opacity(0.1))
+                    .frame(width: 32, height: 32)
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Styles.rydrGradient)
+            }
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.primary)
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var orDivider: some View {
+        HStack {
+            VStack { Divider() }
+            Text("OR")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            VStack { Divider() }
+        }
+        .padding(.vertical, 4)
     }
 
     private var emailLoginFields: some View {
         VStack(spacing: 12) {
-            TextField("Email", text: $email)
-                .textFieldStyle(.roundedBorder)
-                .autocapitalization(.none)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .keyboardType(.emailAddress)
-                .textContentType(.username)
-                .accessibilityLabel("Email Field")
+            HStack(spacing: 10) {
+                Image(systemName: "envelope.fill")
+                    .foregroundStyle(Styles.rydrGradient)
+                    .frame(width: 20)
 
-            SecureField("Password", text: $password)
-                .textFieldStyle(.roundedBorder)
+                TextField("Email address", text: $email)
+                    .autocapitalization(.none)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .keyboardType(.emailAddress)
+                    .textContentType(.username)
+                    .accessibilityLabel("Email Field")
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color(.systemGray4), lineWidth: 1)
+            )
+
+            HStack(spacing: 10) {
+                Image(systemName: "lock.fill")
+                    .foregroundStyle(Styles.rydrGradient)
+                    .frame(width: 20)
+
+                Group {
+                    if isPasswordVisible {
+                        TextField("Password", text: $password)
+                    } else {
+                        SecureField("Password", text: $password)
+                    }
+                }
                 .textContentType(.password)
                 .accessibilityLabel("Password Field")
+
+                Button(action: { isPasswordVisible.toggle() }) {
+                    Image(systemName: isPasswordVisible ? "eye.slash.fill" : "eye.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color(.systemGray4), lineWidth: 1)
+            )
 
             Button(isLoggingIn ? "Logging In..." : "Log In with Email") {
                 emailPasswordLogin()
             }
             .disabled(isLoggingIn || email.isEmpty || password.isEmpty || !isValidEmail(email))
             .opacity(email.isEmpty || password.isEmpty || !isValidEmail(email) ? 0.5 : 1.0)
+            .fontWeight(.semibold)
             .frame(maxWidth: .infinity)
             .padding()
             .background(Styles.rydrGradient)
             .foregroundColor(.white)
-            .cornerRadius(10)
+            .cornerRadius(14)
+            .padding(.top, 4)
             .accessibilityLabel("Login with Email")
 
             Button("Forgot Password?") {
@@ -197,10 +337,25 @@ struct DriverLoginView: View {
             .foregroundColor(.blue)
             .accessibilityLabel("Reset password via email")
 
-            Button("Use phone number instead") {
-                withAnimation { isUsingEmail = false }
+            orDivider
+
+            Button(action: { showPhoneFlow = true }) {
+                HStack {
+                    Image(systemName: "phone.fill")
+                    Text("Use phone number instead")
+                        .fontWeight(.semibold)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                }
+                .padding(.horizontal, 18)
+                .frame(height: 54)
             }
-            .font(.caption)
+            .foregroundStyle(Styles.rydrGradient)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Styles.rydrGradient, lineWidth: 1.5)
+            )
             .accessibilityLabel("Switch to phone login")
         }
     }
@@ -264,39 +419,21 @@ struct DriverLoginView: View {
         }
     }
 
-    private func sendCode() {
-        guard isPhoneValid else {
-            errorMessage = "Please enter a valid 10-digit phone number."
-            return
-        }
-
-        let phone = e164Phone
-        errorMessage = ""
-        isSendingCode = true
-
-        PhoneAuthProvider.provider().verifyPhoneNumber(phone, uiDelegate: nil) { verificationID, error in
+    /// Sends a fresh Firebase verification code for the in-progress login phone
+    /// number, updating `pendingVerificationID` in place so the presented
+    /// DriverPhoneCodeEntryView (bound to it) doesn't need to be recreated.
+    private func resendLoginCode() {
+        guard !pendingPhone.isEmpty else { return }
+        PhoneAuthProvider.provider().verifyPhoneNumber(pendingPhone, uiDelegate: nil) { verificationID, error in
             Task { @MainActor in
-                isSendingCode = false
-                if let error {
-                    errorMessage = "Failed to send code: \(error.localizedDescription)"
-                    return
-                }
-
-                guard let verificationID, !verificationID.isEmpty else {
-                    errorMessage = "Firebase did not return a verification session. Please resend the code."
-                    return
-                }
-
-                verificationSession = DriverPhoneVerificationSession(
-                    verificationID: verificationID,
-                    phoneNumber: phone
-                )
+                guard let verificationID, !verificationID.isEmpty, error == nil else { return }
+                pendingVerificationID = verificationID
             }
         }
     }
 
     private func completePhoneLogin(for user: User) {
-        let phone = user.phoneNumber ?? e164Phone
+        let phone = user.phoneNumber ?? pendingPhone
 
         Firestore.firestore()
             .collection("drivers")
@@ -312,6 +449,7 @@ struct DriverLoginView: View {
                     if let snapshot, snapshot.exists {
                         let profile = makeLoginProfile(from: snapshot.data() ?? [:], user: user, fallbackEmail: user.email ?? "")
                         session.login(name: profile.name, email: profile.email)
+                        backfillPhoneIndexIfNeeded(phone: phone, uid: user.uid)
                         return
                     }
 
@@ -321,11 +459,14 @@ struct DriverLoginView: View {
     }
 
     private func lookupDriverByPhone(_ phone: String, signedInUser user: User) {
+        // /drivers disallows `list` entirely (to prevent phone-number enumeration), so we
+        // can't query it by phone field directly. Resolve via the dedicated phone->uid
+        // pointer doc instead, then fetch the driver's own document by uid (a `get`,
+        // which the rules allow for the owning uid or a verified-phone match).
         Firestore.firestore()
-            .collection("drivers")
-            .whereField("phoneE164", isEqualTo: phone)
-            .limit(to: 1)
-            .getDocuments { snapshot, error in
+            .collection("driverPhoneIndex")
+            .document(phone)
+            .getDocument { snapshot, error in
                 Task { @MainActor in
                     if let error {
                         try? Auth.auth().signOut()
@@ -333,36 +474,46 @@ struct DriverLoginView: View {
                         return
                     }
 
-                    if let document = snapshot?.documents.first {
-                        handlePhoneMatchedDriver(documentID: document.documentID, data: document.data(), user: user)
-                        return
-                    }
-
-                    lookupDriverByLegacyPhone(phone, signedInUser: user)
-                }
-            }
-    }
-
-    private func lookupDriverByLegacyPhone(_ phone: String, signedInUser user: User) {
-        Firestore.firestore()
-            .collection("drivers")
-            .whereField("phoneNumber", isEqualTo: phone)
-            .limit(to: 1)
-            .getDocuments { snapshot, error in
-                Task { @MainActor in
-                    if let error {
-                        try? Auth.auth().signOut()
-                        errorMessage = "Unable to load phone account: \(error.localizedDescription)"
-                        return
-                    }
-
-                    guard let document = snapshot?.documents.first else {
+                    guard let mappedUid = snapshot?.data()?["uid"] as? String else {
                         try? Auth.auth().signOut()
                         errorMessage = "No driver account was found for this phone number. Please sign up or use email login."
                         return
                     }
 
-                    handlePhoneMatchedDriver(documentID: document.documentID, data: document.data(), user: user)
+                    fetchDriverDocument(uid: mappedUid, signedInUser: user)
+                }
+            }
+    }
+
+    /// Self-heals accounts created before the driverPhoneIndex pointer existed, so future
+    /// phone-based lookups for this driver don't need to fall back to a blocked query.
+    private func backfillPhoneIndexIfNeeded(phone: String, uid: String) {
+        let index = Firestore.firestore().collection("driverPhoneIndex").document(phone)
+        index.getDocument { snapshot, _ in
+            guard snapshot?.exists != true else { return }
+            index.setData(["uid": uid, "createdAt": FieldValue.serverTimestamp()])
+        }
+    }
+
+    private func fetchDriverDocument(uid: String, signedInUser user: User) {
+        Firestore.firestore()
+            .collection("drivers")
+            .document(uid)
+            .getDocument { snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        try? Auth.auth().signOut()
+                        errorMessage = "Unable to load driver account: \(error.localizedDescription)"
+                        return
+                    }
+
+                    guard let snapshot, snapshot.exists else {
+                        try? Auth.auth().signOut()
+                        errorMessage = "No driver account was found for this phone number. Please sign up or use email login."
+                        return
+                    }
+
+                    handlePhoneMatchedDriver(documentID: snapshot.documentID, data: snapshot.data() ?? [:], user: user)
                 }
             }
     }
@@ -418,167 +569,6 @@ struct DriverLoginView: View {
 
         let email = profile["email"] as? String ?? user.email ?? fallbackEmail
         return DriverLoginProfile(name: name, email: email)
-    }
-}
-
-private struct DriverPhoneVerificationSession: Identifiable, Hashable {
-    let verificationID: String
-    let phoneNumber: String
-
-    var id: String { verificationID }
-}
-
-private struct DriverVerificationCodeView: View {
-    let verificationID: String
-    let phoneNumber: String
-    var onSuccess: (User) -> Void
-    var onResendCode: () -> Void
-
-    @State private var verificationCode = ""
-    @State private var isVerifying = false
-    @State private var errorMessage = ""
-    @State private var canResend = false
-    @State private var countdown = 30
-    @State private var progress: CGFloat = 1.0
-    @State private var timer: Timer?
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        VStack(spacing: 30) {
-            VStack(spacing: 10) {
-                Text("Verify Your Phone")
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .multilineTextAlignment(.center)
-
-                Text("We sent a code to:")
-                    .foregroundColor(.gray)
-
-                Text(phoneNumber)
-                    .font(.headline)
-            }
-
-            TextField("Enter 6-digit code", text: Binding(
-                get: { verificationCode },
-                set: { verificationCode = String($0.filter { $0.isNumber }.prefix(6)) }
-            ))
-            .keyboardType(.numberPad)
-            .textFieldStyle(.roundedBorder)
-            .focused($isFocused)
-            .onAppear {
-                isFocused = true
-                startCountdown()
-            }
-
-            if !canResend {
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.gray.opacity(0.2))
-                            .frame(height: 6)
-
-                        Capsule()
-                            .fill(Styles.rydrGradient)
-                            .frame(width: progress * proxy.size.width, height: 6)
-                            .animation(.linear(duration: 1), value: progress)
-                    }
-                }
-                .frame(height: 6)
-            }
-
-            if !errorMessage.isEmpty {
-                Text(errorMessage)
-                    .foregroundColor(.red)
-                    .font(.caption)
-                    .multilineTextAlignment(.center)
-            }
-
-            Button(action: verifyCode) {
-                Text(isVerifying ? "Verifying..." : "Continue")
-                    .bold()
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(verificationCode.count == 6 ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.gray))
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-            }
-            .disabled(isVerifying || verificationCode.count != 6)
-
-            if canResend {
-                Button("Resend Code") {
-                    onResendCode()
-                    startCountdown()
-                }
-                .foregroundColor(.blue)
-            } else {
-                Text("You can resend in \(countdown)s")
-                    .foregroundColor(.gray)
-                    .font(.footnote)
-            }
-
-            Spacer()
-        }
-        .padding()
-        .onDisappear {
-            timer?.invalidate()
-        }
-    }
-
-    private func verifyCode() {
-        isVerifying = true
-        errorMessage = ""
-        let trimmedVerificationID = verificationID.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !trimmedVerificationID.isEmpty else {
-            isVerifying = false
-            errorMessage = "Verification session is missing. Please resend the code and try again."
-            return
-        }
-
-        let credential = PhoneAuthProvider.provider().credential(
-            withVerificationID: trimmedVerificationID,
-            verificationCode: verificationCode
-        )
-
-        Auth.auth().signIn(with: credential) { result, error in
-            Task { @MainActor in
-                isVerifying = false
-                if let error {
-                    if let authCode = AuthErrorCode(rawValue: (error as NSError).code),
-                       authCode == .credentialAlreadyInUse || authCode == .providerAlreadyLinked {
-                        errorMessage = "That phone number is already attached to another sign-in. Sign in with the original account or remove the duplicate test phone user in Firebase, then try again."
-                    } else {
-                        errorMessage = "Verification failed: \(error.localizedDescription)"
-                    }
-                    return
-                }
-
-                guard let user = result?.user else {
-                    errorMessage = "Verification failed: missing user."
-                    return
-                }
-
-                onSuccess(user)
-            }
-        }
-    }
-
-    private func startCountdown() {
-        canResend = false
-        countdown = 30
-        progress = 1.0
-        timer?.invalidate()
-
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { t in
-            if countdown > 0 {
-                countdown -= 1
-                progress = CGFloat(countdown) / 30.0
-            } else {
-                canResend = true
-                progress = 0.0
-                t.invalidate()
-            }
-        }
     }
 }
 
