@@ -108,4 +108,4 @@ export interface VehicleImageResult {
 }
 
 export type VehicleImageStatus = "matched" | "fallback" | "missing";
-export type VinDecodeStatus = "pending" | "decoded" | "failed";
+export type VinDecodeStatus = "pending" | "decoded" | "failed" | "manual";

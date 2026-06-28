@@ -3,7 +3,27 @@ import { setGlobalOptions } from "firebase-functions/v2";
 import { db, FieldValue } from "./admin";
 import { vehicleDecoderService, VinDecodeError } from "./services/vehicleDecoderService";
 import { vehicleImageService } from "./services/vehicleImageService";
-import { VEHICLE_COLORS, type VehicleColor } from "./types";
+import { VEHICLE_COLORS, type VehicleColor, type VehicleBodyStyle } from "./types";
+
+const VEHICLE_BODY_STYLES: readonly VehicleBodyStyle[] = [
+  "sedan",
+  "suv",
+  "truck",
+  "coupe",
+  "hatchback",
+  "minivan",
+  "crossover",
+  "wagon",
+  "convertible",
+  "van",
+  "unknown"
+];
+
+function asBodyStyle(value: unknown): VehicleBodyStyle | null {
+  return typeof value === "string" && (VEHICLE_BODY_STYLES as readonly string[]).includes(value)
+    ? (value as VehicleBodyStyle)
+    : null;
+}
 
 setGlobalOptions({ region: "us-central1", maxInstances: 20 });
 
@@ -156,4 +176,77 @@ export const submitVehicleVin = onCall(async (request) => {
   );
 
   return { vehicle: vehicleFields, vinDecodeStatus: "decoded", vehicleImageStatus: lookup.status };
+});
+
+/**
+ * Fallback entry point for the driver app's "Decode Vehicle" flow when VIN
+ * decoding fails (NHTSA has no data for the VIN, the VIN is unreadable on
+ * the registration, etc.). The driver types in make/model/year (and
+ * optionally trim/body style) themselves instead of having them pulled from
+ * NHTSA; everything downstream (image matching, eligibility, the written
+ * `drivers/{uid}.vehicle` record) is identical to the VIN path, just with
+ * `vinDecodeStatus: "manual"` so Mission Control can flag manually-entered
+ * vehicles for a quick human review.
+ *
+ * Request:  { vin?: string, make, model, year, color, trim?, bodyStyle?, driveType?, fuelType? }
+ * Response: { vehicle: {...fields written...}, vinDecodeStatus, vehicleImageStatus }
+ */
+export const submitVehicleManual = onCall(async (request) => {
+  const auth = requireAuth(request.auth);
+  const data = request.data ?? {};
+  const make = typeof data.make === "string" ? data.make.trim() : "";
+  const model = typeof data.model === "string" ? data.model.trim() : "";
+  const yearNum = Number(data.year);
+  const color = data.color;
+
+  if (!make || !model || !Number.isFinite(yearNum) || yearNum < 1980) {
+    throw new HttpsError("invalid-argument", "Valid `make`, `model`, and `year` are required.");
+  }
+  if (!isValidColor(color)) {
+    throw new HttpsError("invalid-argument", `A valid \`color\` is required (one of: ${VEHICLE_COLORS.join(", ")}).`);
+  }
+
+  const trim = typeof data.trim === "string" && data.trim.trim().length > 0 ? data.trim.trim() : null;
+  const bodyStyle = asBodyStyle(data.bodyStyle);
+  const driveType = typeof data.driveType === "string" && data.driveType.trim().length > 0 ? data.driveType.trim() : null;
+  const fuelType = typeof data.fuelType === "string" && data.fuelType.trim().length > 0 ? data.fuelType.trim() : null;
+  const vin = typeof data.vin === "string" && data.vin.trim().length > 0 ? data.vin.trim().toUpperCase() : null;
+
+  const driverRef = db.collection("drivers").doc(auth.uid);
+
+  const lookup = await vehicleImageService.getImage({
+    make,
+    model,
+    year: yearNum,
+    trim,
+    bodyStyle,
+    color
+  });
+
+  const vehicleFields = {
+    vin,
+    make,
+    model,
+    year: yearNum,
+    trim,
+    bodyStyle,
+    driveType,
+    fuelType,
+    color,
+    imagePath: lookup.result?.storagePath ?? null,
+    imageUrl: lookup.result?.imageUrl ?? null,
+    imageMatchTier: lookup.result?.tier ?? null
+  };
+
+  await driverRef.set(
+    {
+      vehicle: vehicleFields,
+      vinDecodeStatus: "manual",
+      vehicleImageStatus: lookup.status,
+      updatedAt: FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
+
+  return { vehicle: vehicleFields, vinDecodeStatus: "manual", vehicleImageStatus: lookup.status };
 });

@@ -115,28 +115,34 @@ export class VehicleDecoderService {
       }
     }
 
-    let payload: { Results?: Array<Record<string, unknown>> };
+    let raw: Record<string, string>;
     try {
-      const res = await fetch(`${NHTSA_BASE}/DecodeVinValuesExtended/${encodeURIComponent(vin)}?format=json`, {
-        method: "GET"
-      });
-      if (!res.ok) {
-        throw new Error(`NHTSA responded with HTTP ${res.status}`);
+      raw = await this.fetchAndExtract("DecodeVinValuesExtended", vin);
+      // Extended endpoint can occasionally come back with a hard error code
+      // and no make/model even for a perfectly valid VIN (NHTSA's Extended
+      // dataset is less complete than the basic one for some manufacturers).
+      // Before giving up, retry against the plain DecodeVinValues endpoint,
+      // which covers a broader set of VINs even though it returns fewer
+      // fields.
+      if (raw.ErrorCode && raw.ErrorCode !== "0" && !raw.Make && !raw.Model) {
+        try {
+          const fallbackRaw = await this.fetchAndExtract("DecodeVinValues", vin);
+          if (fallbackRaw.Make || fallbackRaw.Model) {
+            raw = fallbackRaw;
+          }
+        } catch {
+          // Ignore fallback failures — we still have the original `raw`
+          // (and its error info) to fall through to the check below.
+        }
       }
-      payload = (await res.json()) as { Results?: Array<Record<string, unknown>> };
     } catch (err) {
+      if (err instanceof VinDecodeError) throw err;
       throw new VinDecodeError(
         `Could not reach the NHTSA VIN decoder: ${err instanceof Error ? err.message : String(err)}`,
         "nhtsa_unavailable"
       );
     }
 
-    const result = payload.Results?.[0];
-    if (!result) {
-      throw new VinDecodeError("NHTSA returned no decode result for this VIN.", "decode_failed");
-    }
-
-    const raw = extractRaw(result);
     const errorCode = raw.ErrorCode ?? "0";
     // NHTSA error code "0" means a clean decode. Non-zero codes still
     // often carry usable data (warnings), so only hard-fail when there's
@@ -148,6 +154,32 @@ export class VehicleDecoderService {
     const entry = toEntry(vin, raw);
     await cacheRef.set(entry, { merge: false });
     return entry;
+  }
+
+  /** Fetches a given NHTSA decode endpoint for `vin` with an 8s timeout
+   * (the free vPIC API can hang under load — without a timeout, a slow
+   * response looks identical to a genuine decode failure) and returns the
+   * trimmed field set via `extractRaw`. */
+  private async fetchAndExtract(endpoint: string, vin: string): Promise<Record<string, string>> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch(`${NHTSA_BASE}/${endpoint}/${encodeURIComponent(vin)}?format=json`, {
+        method: "GET",
+        signal: controller.signal as never
+      });
+      if (!res.ok) {
+        throw new Error(`NHTSA responded with HTTP ${res.status}`);
+      }
+      const payload = (await res.json()) as { Results?: Array<Record<string, unknown>> };
+      const result = payload.Results?.[0];
+      if (!result) {
+        throw new VinDecodeError("NHTSA returned no decode result for this VIN.", "decode_failed");
+      }
+      return extractRaw(result);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
 
