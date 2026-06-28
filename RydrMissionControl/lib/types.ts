@@ -39,6 +39,18 @@ export interface DriverVehicle {
   vin?: string;
   registrationImageUrl?: string;
   insuranceImageUrl?: string;
+
+  // Vehicle Library System (VIN decode + managed image library) — written
+  // by the `submitVehicleVin` Cloud Function when a driver decodes their
+  // VIN and picks a color. See Rydr_Firebase/functions and
+  // VEHICLE_LIBRARY_README.md.
+  trim?: string | null;
+  bodyStyle?: string | null;
+  driveType?: string | null;
+  color?: string | null;
+  imagePath?: string | null;
+  imageUrl?: string | null;
+  imageMatchTier?: number | null;
 }
 
 export interface DriverRecord {
@@ -70,6 +82,10 @@ export interface DriverRecord {
   stripeConnectStatus?: "not_started" | "pending" | "completed";
   stripeIdentityStatus?: "not_started" | "pending" | "verified" | "failed";
   isApproved?: boolean;
+
+  // Vehicle Library System
+  vinDecodeStatus?: "pending" | "decoded" | "failed";
+  vehicleImageStatus?: "matched" | "fallback" | "missing";
 }
 
 export interface DriverApprovalRequest {
@@ -112,7 +128,7 @@ export interface AuditLogEntry {
   adminUid: string;
   adminEmail?: string;
   action: string;
-  targetType: "driver" | "rider" | "report";
+  targetType: "driver" | "rider" | "report" | "vehicleLibrary";
   targetId: string;
   reason?: string;
   createdAt: unknown;

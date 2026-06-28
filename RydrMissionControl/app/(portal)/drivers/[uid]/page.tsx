@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { evaluateDriverRequirements, type DriverRecord } from "@/lib/types";
 import { toDateSafe, fullName } from "@/lib/format";
@@ -64,13 +65,59 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
 
           <Section title="Vehicle Information">
             <Grid>
+              <Field label="Decoded VIN" value={driver.vehicle?.vin} />
+              <Field label="Year" value={driver.vehicle?.year} />
               <Field label="Make" value={driver.vehicle?.make} />
               <Field label="Model" value={driver.vehicle?.model} />
-              <Field label="Year" value={driver.vehicle?.year} />
-              <Field label="VIN" value={driver.vehicle?.vin} />
+              <Field label="Trim" value={driver.vehicle?.trim} />
+              <Field label="Selected color" value={driver.vehicle?.color} />
               <Field label="Plate" value={driver.vehicle?.plate} />
               <Field label="Vehicle class" value={driver.vehicle?.class} />
+              <Field
+                label="VIN decode status"
+                value={
+                  driver.vinDecodeStatus === "decoded"
+                    ? "Decoded"
+                    : driver.vinDecodeStatus === "failed"
+                      ? "Failed"
+                      : "Pending"
+                }
+              />
+              <Field
+                label="Vehicle image status"
+                value={
+                  driver.vehicleImageStatus === "matched"
+                    ? "Matched"
+                    : driver.vehicleImageStatus === "fallback"
+                      ? "Fallback image"
+                      : "Missing"
+                }
+              />
             </Grid>
+
+            <div className="mt-3">
+              <p className="mb-1.5 text-[11px] font-medium text-muted">Generic Vehicle Image</p>
+              {driver.vehicle?.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={driver.vehicle.imageUrl}
+                  alt={`${driver.vehicle?.color ?? ""} ${driver.vehicle?.make ?? ""} ${driver.vehicle?.model ?? ""}`}
+                  className="h-32 w-48 rounded-md border border-line object-cover"
+                />
+              ) : (
+                <div className="flex h-32 w-48 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-line bg-grouped text-center">
+                  <p className="text-xs font-medium text-muted">Vehicle image not yet available.</p>
+                  {driver.vehicle?.make && driver.vehicle?.model && (
+                    <Link
+                      href={`/vehicle-library?make=${encodeURIComponent(driver.vehicle.make)}&model=${encodeURIComponent(driver.vehicle.model)}`}
+                      className="text-[11px] font-semibold text-rydr-burgundy hover:underline"
+                    >
+                      Add Vehicle Image →
+                    </Link>
+                  )}
+                </div>
+              )}
+            </div>
           </Section>
 
           <Section title="Insurance Information">

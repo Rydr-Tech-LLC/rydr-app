@@ -57,11 +57,12 @@ struct DriverSignupCoordinator: View {
     @State private var licenseFront: PhotosPickerItem?
     @State private var licenseBack: PhotosPickerItem?
 
-    // Vehicle
-    @State private var vehicleMake: String = ""
-    @State private var vehicleModel: String = ""
-    @State private var vehicleYear: String = ""
-    @State private var vehicleFuelType: String = DriverVehicleFuelType.gas.rawValue
+    // Vehicle — VIN-decoded (Vehicle Library System) instead of manual entry.
+    // See VehicleLibraryClient.swift and VehicleInfoView.swift.
+    @State private var vehicleVIN: String = ""
+    @State private var decodedVehicle: DecodedVehicleInfo?
+    @State private var selectedVehicleColor: VehicleColor?
+    @State private var vehicleImageInfo: VehicleImageInfo?
     @State private var plateNumber: String = ""
     @State private var registrationDoc: PhotosPickerItem?
     @State private var insuranceCard: PhotosPickerItem?
@@ -186,20 +187,32 @@ struct DriverSignupCoordinator: View {
                     }
 
                 case .vehicle:
+                    // The authoritative vehicle write (vin, make, model, trim, bodyStyle,
+                    // driveType, fuelType, color, image path/url/tier, decode + image
+                    // status) already happened server-side inside VehicleInfoView's
+                    // `submitVehicleVin` call before this closure runs. Here we only need
+                    // to write the fields that call requires client-side knowledge of:
+                    // ride-type eligibility (derived from the decoded vehicle) and the
+                    // plate/document fields, both merged onto the same `vehicle` map
+                    // without clobbering what the Cloud Function just wrote.
                     VehicleInfoView(
-                        make: $vehicleMake,
-                        model: $vehicleModel,
-                        year: $vehicleYear,
-                        fuelType: $vehicleFuelType,
+                        vin: $vehicleVIN,
+                        decoded: $decodedVehicle,
+                        selectedColor: $selectedVehicleColor,
+                        imageInfo: $vehicleImageInfo,
                         plate: $plateNumber,
                         registrationDoc: $registrationDoc,
                         insuranceCard: $insuranceCard
                     ) {
+                        guard let decodedVehicle else {
+                            path.append(.identity)
+                            return
+                        }
                         let eligibility = DriverVehicleEligibility.evaluate(
-                            make: vehicleMake,
-                            model: vehicleModel,
-                            year: vehicleYear,
-                            fuelType: vehicleFuelType
+                            make: decodedVehicle.make,
+                            model: decodedVehicle.model,
+                            year: decodedVehicle.year,
+                            fuelType: decodedVehicle.fuelType.rawValue
                         )
                         let eligibleRideTypes = eligibility.eligibleRideTypes
                         var tierRates: [String: Any] = [:]
@@ -209,10 +222,6 @@ struct DriverSignupCoordinator: View {
                         }
                         upsertDriver([
                             "vehicle": [
-                                "make": vehicleMake,
-                                "model": vehicleModel,
-                                "year": vehicleYear,
-                                "fuelType": vehicleFuelType,
                                 "class": eligibility.vehicleClass,
                                 "plate": plateNumber
                             ],

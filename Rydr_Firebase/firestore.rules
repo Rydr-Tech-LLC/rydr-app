@@ -650,6 +650,22 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // Vehicle Library System: the managed library of generic factory-style
+    // vehicle images (see Rydr_Firebase/functions and VEHICLE_LIBRARY_README.md).
+    // Every app reads this to display a vehicle's image; only the Admin SDK
+    // (Cloud Functions + Mission Control) ever writes it.
+    match /vehicleLibrary/{vehicleId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Cached NHTSA VIN decode responses. Never exposed to clients directly —
+    // drivers/riders only ever see the result via the `decodeVin` /
+    // `submitVehicleVin` Cloud Functions, which run with Admin SDK privileges.
+    match /vinDecodeCache/{vin} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

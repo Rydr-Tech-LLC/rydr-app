@@ -43,6 +43,13 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var statusMessage: String = "Ready to receive standard Rydr requests."
     @Published var profilePhotoURL: String?
     @Published var pendingProfilePhotoURL: String?
+    // Vehicle Library System — generic factory-style vehicle image info, kept
+    // in sync from drivers/{uid}.vehicle so it can be republished onto
+    // publicDriverProfiles/{uid} for the rider app to display. Never a photo
+    // of the driver's actual vehicle.
+    @Published var vehicleImageURL: String?
+    @Published var vehicleColor: String?
+    @Published var vehicleSummaryText: String?
     @Published var profilePhotoReviewStatus: String = "approved"
     @Published var isUploadingProfilePhoto: Bool = false
     @Published var profilePhotoMessage: String?
@@ -287,68 +294,33 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     #endif
 
     func submitProfilePhotoForReview(_ image: UIImage) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             profilePhotoMessage = "Sign in before updating your profile photo."
-            return
-        }
-        guard let data = image.jpegData(compressionQuality: 0.82) else {
-            profilePhotoMessage = "Could not prepare that image."
             return
         }
 
         isUploadingProfilePhoto = true
         profilePhotoMessage = nil
-        let path = "driverProfilePhotos/\(uid)/pending-\(Int(Date().timeIntervalSince1970)).jpg"
-        let ref = Storage.storage().reference().child(path)
-        let metadata = StorageMetadata()
-        metadata.contentType = "image/jpeg"
+        profilePhotoReviewStatus = "pending"
 
-        ref.putData(data, metadata: metadata) { [weak self] _, error in
+        Task { [weak self] in
             guard let self else { return }
-            if let error {
-                DispatchQueue.main.async {
+            do {
+                let url = try await DriverImageModerationService.shared.submitProfilePhoto(image)
+                await MainActor.run {
                     self.isUploadingProfilePhoto = false
-                    self.profilePhotoMessage = "Photo upload failed: \(error.localizedDescription)"
+                    self.pendingProfilePhotoURL = nil
+                    self.profilePhotoURL = url.absoluteString
+                    self.profilePhotoReviewStatus = "approved"
+                    self.profilePhotoMessage = "Profile photo updated."
                 }
-                return
-            }
-
-            ref.downloadURL { url, error in
-                if let error {
-                    DispatchQueue.main.async {
-                        self.isUploadingProfilePhoto = false
-                        self.profilePhotoMessage = "Photo upload failed: \(error.localizedDescription)"
-                    }
-                    return
-                }
-
-                guard let url else {
-                    DispatchQueue.main.async {
-                        self.isUploadingProfilePhoto = false
-                        self.profilePhotoMessage = "Photo upload failed."
-                    }
-                    return
-                }
-
-                let payload: [String: Any] = [
-                    "pendingProfilePhotoURL": url.absoluteString,
-                    "pendingProfilePhotoPath": path,
-                    "profilePhotoReviewStatus": "pending",
-                    "profilePhotoSubmittedAt": FieldValue.serverTimestamp(),
-                    "profilePhotoUpdatedAt": FieldValue.serverTimestamp()
-                ]
-
-                self.db.collection("drivers").document(uid).setData(payload, merge: true) { error in
-                    DispatchQueue.main.async {
-                        self.isUploadingProfilePhoto = false
-                        if let error {
-                            self.profilePhotoMessage = "Photo review submission failed: \(error.localizedDescription)"
-                        } else {
-                            self.pendingProfilePhotoURL = url.absoluteString
-                            self.profilePhotoReviewStatus = "pending"
-                            self.profilePhotoMessage = "Profile photo submitted for approval."
-                        }
-                    }
+            } catch {
+                RydrCrashReporter.record(error, context: "submit_driver_profile_photo")
+                await MainActor.run {
+                    self.isUploadingProfilePhoto = false
+                    self.pendingProfilePhotoURL = nil
+                    self.profilePhotoReviewStatus = "approved"
+                    self.profilePhotoMessage = error.localizedDescription
                 }
             }
         }
@@ -1353,7 +1325,12 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             "uid": uid,
             "displayName": displayName,
             "profilePhotoURL": profilePhotoURL ?? "",
-            "vehicleSummary": publicVehicleSummary(),
+            "vehicleSummary": vehicleSummaryText ?? publicVehicleSummary(),
+            // Generic factory-style vehicle image (Vehicle Library System) —
+            // never a photo of the driver's actual car. Riders see this in
+            // place of a vehicle photo upload.
+            "vehicleImageURL": vehicleImageURL ?? "",
+            "vehicleColor": vehicleColor ?? "",
             "isOnline": online,
             "eligibleRideTypes": Array(selectedRideTypes).sorted(),
             "tierRates": tierRatesPayload(),
@@ -1380,13 +1357,41 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         (value * 1000).rounded() / 1000
     }
 
+    /// `vehicle.year` is written by the `submitVehicleVin` Cloud Function as
+    /// NHTSA's decoded `modelYear`, a number — not the String the old
+    /// manual-entry form used to write. Handles both so eligibility/summary
+    /// text keep working regardless of which form wrote the record.
+    private static func vehicleYearString(_ raw: Any?) -> String {
+        if let year = raw as? String { return year }
+        if let year = raw as? Int { return String(year) }
+        if let year = raw as? NSNumber { return year.stringValue }
+        return ""
+    }
+
     private func applyVehicleEligibility(from data: [String: Any]) {
         let vehicle = data["vehicle"] as? [String: Any]
+
+        // Vehicle Library System fields, written server-side by the
+        // `submitVehicleVin` Cloud Function (see VehicleLibraryClient.swift /
+        // VehicleInfoView.swift). Mirrored here so they can be republished
+        // onto publicDriverProfiles/{uid} for the rider app.
+        vehicleImageURL = vehicle?["imageUrl"] as? String
+        vehicleColor = vehicle?["color"] as? String
+        if let vehicle {
+            let make = vehicle["make"] as? String ?? ""
+            let model = vehicle["model"] as? String ?? ""
+            let year = Self.vehicleYearString(vehicle["year"])
+            let summary = [year, make, model].filter { !$0.isEmpty }.joined(separator: " ")
+            vehicleSummaryText = summary.isEmpty ? nil : summary
+        } else {
+            vehicleSummaryText = nil
+        }
+
         let vehicleEligibility = vehicle.map {
             DriverVehicleEligibility.evaluate(
                 make: $0["make"] as? String ?? "",
                 model: $0["model"] as? String ?? "",
-                year: $0["year"] as? String ?? "",
+                year: Self.vehicleYearString($0["year"]),
                 fuelType: $0["fuelType"] as? String ?? DriverVehicleFuelType.gas.rawValue
             )
         }
@@ -1410,7 +1415,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             let eligibility = DriverVehicleEligibility.evaluate(
                 make: vehicle["make"] as? String ?? "",
                 model: vehicle["model"] as? String ?? "",
-                year: vehicle["year"] as? String ?? "",
+                year: Self.vehicleYearString(vehicle["year"]),
                 fuelType: vehicle["fuelType"] as? String ?? DriverVehicleFuelType.gas.rawValue
             )
             baseRideTypes = eligibility.eligibleRideTypes.isEmpty ? ["Rydr Go"] : eligibility.eligibleRideTypes

@@ -67,18 +67,8 @@ struct DriverCardView: View {
                     }
                 }
 
-                // Car image (if any)
-                if let imgName = driver.carImage, !imgName.isEmpty, UIImage(named: imgName) != nil {
-                    Image(imgName)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(height: 140)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.black.opacity(0.06), lineWidth: 1)
-                        )
-                } else {
+                // Car image (generic Vehicle Library image, or local asset fallback)
+                VehicleOrDriverImage(source: driver.carImage, contentMode: .fill) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 14).fill(.thinMaterial)
                         HStack(spacing: 8) {
@@ -89,6 +79,12 @@ struct DriverCardView: View {
                     }
                     .frame(height: 90)
                 }
+                .frame(height: 140)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                )
 
                 // Car details + estimate snippet
                 VStack(alignment: .leading, spacing: 4) {
@@ -157,18 +153,13 @@ struct DriverCardView: View {
     // MARK: - Pieces
 
     @ViewBuilder private var avatar: some View {
-        if let imgName = driver.profileImage, !imgName.isEmpty, UIImage(named: imgName) != nil {
-            Image(imgName)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 48, height: 48)
-                .clipShape(Circle())
-        } else {
+        VehicleOrDriverImage(source: driver.profileImage, contentMode: .fill) {
             Circle()
                 .fill(.gray.opacity(0.2))
-                .frame(width: 48, height: 48)
                 .overlay(Text(String(driver.name.prefix(1))).font(.headline))
         }
+        .frame(width: 48, height: 48)
+        .clipShape(Circle())
     }
 
     private func label(value: Double, unit: String) -> some View {

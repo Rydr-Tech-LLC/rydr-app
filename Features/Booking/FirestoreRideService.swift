@@ -178,7 +178,13 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             id: document.documentID,
             name: driverName(from: data),
             profileImage: data["profilePhotoURL"] as? String ?? data["profileImage"] as? String,
-            carImage: data["carImage"] as? String,
+            // "vehicleImageURL" is written by the Vehicle Library System
+            // (RydrDriver's DriverDashboardVM.publishPublicDriverProfile) —
+            // the generic factory-style image matched from the driver's
+            // decoded VIN + chosen color, never a photo of their actual car.
+            // "carImage" is kept for backward compatibility with any older
+            // writer of this field.
+            carImage: data["carImage"] as? String ?? data["vehicleImageURL"] as? String,
             carMakeModel: vehicleName(from: data),
             rating: rating,
             compliments: data["compliments"] as? [String] ?? ["Professional", "Clean Car", "Reliable"],

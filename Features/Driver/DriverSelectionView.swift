@@ -362,17 +362,12 @@ private struct DriverCard: View {
 
     @ViewBuilder
     private var vehicleImage: some View {
-        if let imgName = driver.carImage, !imgName.isEmpty, UIImage(named: imgName) != nil {
-            Image(imgName)
-                .resizable()
-                .scaledToFit()
-                .padding(.horizontal, 12)
-        } else {
+        VehicleOrDriverImage(source: driver.carImage, contentMode: .fit) {
             Image(defaultVehicleAssetName)
                 .resizable()
                 .scaledToFit()
-                .padding(.horizontal, 12)
         }
+        .padding(.horizontal, 12)
     }
 
     private var rideBadge: some View {

@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: "/drivers/all", label: "Drivers" },
   { href: "/riders", label: "Riders" },
   { href: "/reports", label: "Reports" },
+  { href: "/vehicle-library", label: "Vehicle Library" },
   { href: "/beta-testers", label: "Beta Testers" },
   { href: "/search", label: "Search" },
   { href: "/settings", label: "Settings" }

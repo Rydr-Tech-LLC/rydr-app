@@ -2,6 +2,7 @@ import "server-only";
 import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getAuth, type Auth } from "firebase-admin/auth";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import { getStorage, type Storage } from "firebase-admin/storage";
 
 /**
  * Server-only Firebase Admin SDK singleton. This is what every privileged
@@ -74,3 +75,4 @@ function lazy<T extends object>(factory: () => T): T {
 
 export const adminAuth: Auth = lazy(() => getAuth(getAdminApp()));
 export const adminDb: Firestore = lazy(() => getFirestore(getAdminApp()));
+export const adminStorage: Storage = lazy(() => getStorage(getAdminApp()));

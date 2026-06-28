@@ -141,6 +141,19 @@ enum DriverVehicleFuelType: String, CaseIterable, Identifiable {
     case electric = "Electric"
 
     var id: String { rawValue }
+
+    /// Maps NHTSA's free-text `FuelTypePrimary` (e.g. "Gasoline",
+    /// "Flexible Fuel Vehicle (FFV)", "Electric", "Compressed Natural Gas
+    /// (CNG)") onto our three-way eligibility fuel type. Used when a
+    /// vehicle's fuel type comes from a VIN decode instead of manual entry
+    /// — see VehicleInfoView's VIN decode flow.
+    static func fromNHTSA(_ raw: String?) -> DriverVehicleFuelType {
+        guard let raw else { return .gas }
+        let normalized = raw.lowercased()
+        if normalized.contains("electric") { return .electric }
+        if normalized.contains("hybrid") { return .hybrid }
+        return .gas
+    }
 }
 
 struct DriverVehicleEligibility {

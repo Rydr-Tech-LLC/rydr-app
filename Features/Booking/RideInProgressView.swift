@@ -206,14 +206,17 @@ struct RideInProgressView: View {
                 Circle()
                     .stroke(driverRingStyle, lineWidth: 3)
                     .frame(width: 68, height: 68)
-                Circle()
-                    .fill(Color(.secondarySystemGroupedBackground))
-                    .frame(width: 58, height: 58)
-                    .overlay(
-                        Text(String(rideManager.currentRide?.driver.name.prefix(1) ?? "D"))
-                            .font(.title3.weight(.black))
-                            .foregroundStyle(.primary)
-                    )
+                VehicleOrDriverImage(source: rideManager.currentRide?.driver.profileImage, contentMode: .fill) {
+                    Circle()
+                        .fill(Color(.secondarySystemGroupedBackground))
+                        .overlay(
+                            Text(String(rideManager.currentRide?.driver.name.prefix(1) ?? "D"))
+                                .font(.title3.weight(.black))
+                                .foregroundStyle(.primary)
+                        )
+                }
+                .frame(width: 58, height: 58)
+                .clipShape(Circle())
             }
 
             VStack(alignment: .leading, spacing: 5) {
@@ -232,9 +235,15 @@ struct RideInProgressView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
-                Text(rideManager.currentRide?.driver.carMakeModel ?? "Vehicle details pending")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    VehicleOrDriverImage(source: rideManager.currentRide?.driver.carImage, contentMode: .fit) {
+                        Image(systemName: "car.fill").foregroundStyle(.secondary)
+                    }
+                    .frame(width: 20, height: 20)
+                    Text(rideManager.currentRide?.driver.carMakeModel ?? "Vehicle details pending")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer()

@@ -52,6 +52,31 @@ service firebase.storage {
       allow delete: if isSelf(uid) || isAdmin();
     }
 
+    // Permanent, SafeSearch-approved driver profile photo — mirrors
+    // profilePhotos/{fileName} above. Distinct path depth from the pending
+    // rule directly above (driverProfilePhotos/{uid}/{fileName} is two
+    // segments after the prefix; this is one), so the two rules don't
+    // overlap. Only ever written by DriverImageModerationService after an
+    // "approved" verdict from POST /moderation/check-image.
+    match /driverProfilePhotos/{fileName} {
+      allow read: if true;
+      allow create, update: if signedIn()
+        && fileName == request.auth.uid + ".jpg"
+        && validImageUpload();
+      allow delete: if signedIn()
+        && fileName == request.auth.uid + ".jpg";
+    }
+
+    // Vehicle Library System: generic factory-style vehicle images, keyed by
+    // make/model/year/color (vehicle-library/{Make}/{Model}/{Year}/{color}.webp
+    // and .../default.webp). Publicly readable like profilePhotos/ — drivers'
+    // apps and riders' apps both display these directly. Only ever written by
+    // the Admin SDK (Mission Control uploads, via VehicleLibraryService).
+    match /vehicle-library/{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

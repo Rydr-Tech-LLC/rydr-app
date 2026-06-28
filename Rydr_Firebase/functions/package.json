@@ -1,0 +1,30 @@
+{
+  "name": "rydr-functions",
+  "version": "1.0.0",
+  "description": "Rydr Cloud Functions backend — Vehicle Library System (VIN decoding + managed vehicle image library). Shared backend layer called by RydrDriver, RydrPlayground, and Mission Control.",
+  "private": true,
+  "main": "lib/index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "shell": "npm run build && firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.10.0",
+    "firebase-functions": "^5.1.1",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "@types/node-fetch": "^2.6.11",
+    "typescript": "^5.5.4"
+  }
+}
