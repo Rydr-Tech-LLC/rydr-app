@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { adminDb } from "@/lib/firebaseAdmin";
 import type { RiderRecord } from "@/lib/types";
 import { fullName } from "@/lib/format";
@@ -30,7 +31,11 @@ export default async function RidersPage() {
           <tbody className="divide-y divide-line">
             {riders.map((rider) => (
               <tr key={rider.uid} className="hover:bg-grouped/60">
-                <td className="px-4 py-2.5 font-medium text-ink">{fullName(rider.firstName, rider.lastName)}</td>
+                <td className="px-4 py-2.5 font-medium text-ink">
+                  <Link href={`/riders/${rider.uid}`} className="hover:underline">
+                    {fullName(rider.firstName, rider.lastName)}
+                  </Link>
+                </td>
                 <td className="px-4 py-2.5 text-muted">{rider.email ?? rider.phoneNumber ?? "—"}</td>
                 <td className="px-4 py-2.5 text-muted">{rider.rideCount ?? 0}</td>
                 <td className="px-4 py-2.5">
