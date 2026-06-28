@@ -378,10 +378,10 @@ struct DriverDashboardActionDock: View {
 
 /// The dock's center "Go Online / Go Offline" control. Instead of a flat,
 /// solid-filled circle ("bubble"), the power icon sits inside a soft,
-/// slowly-breathing glow: green while the driver is online and receiving
-/// ride requests, red while offline (signaling "ready to go online" /
-/// "tap to start"), and a dim, static gray when going online isn't
-/// available yet.
+/// slowly-breathing glow: green while offline (signaling "tap to go
+/// online"), red while the driver is online and receiving ride requests
+/// (signaling "tap to go offline"), and a dim, static gray when going
+/// online isn't available yet.
 private struct DriverGoOnlinePowerButton: View {
     @ObservedObject var vm: DriverDashboardVM
     var isCompact: Bool
@@ -393,7 +393,7 @@ private struct DriverGoOnlinePowerButton: View {
 
     private var glowColor: Color {
         guard canInteract else { return Color(.systemGray3) }
-        return vm.isOnline ? .green : .red
+        return vm.isOnline ? .red : .green
     }
 
     private var size: CGFloat { isCompact ? 54 : 58 }

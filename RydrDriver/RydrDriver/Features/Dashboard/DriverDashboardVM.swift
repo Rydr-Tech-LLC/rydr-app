@@ -23,6 +23,11 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var isOnline: Bool = false
     @Published var showMenu: Bool = false
     @Published var earningsToday: Decimal = 0
+    // Real Fare Insights data, computed from completed `rides` / `rideRequests`
+    // documents via DriverEarningsService — replaces all previously hardcoded
+    // weekly/monthly/acceptance/completion/recent-trip values.
+    @Published var earningsSummary: DriverEarningsSummary = .empty
+    @Published var isLoadingEarningsSummary: Bool = false
     @Published var mapRegion: MKCoordinateRegion = DriverMapDefaults.pilotRegion
     @Published var lastLocation: CLLocation? = DriverMapDefaults.pilotLocation
     @Published var locationPermissionDenied: Bool = false
@@ -625,27 +630,73 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         }
     }
 
+    /// Computes the real final fare at ride completion, using the driver's
+    /// saved per-mile/per-minute rate for the ride's tier together with the
+    /// actual elapsed ride time (rideStartedAt → now) rather than the
+    /// pre-ride duration estimate. Trip distance still comes from the
+    /// request's routed pickup→dropoff distance, since the app has no live
+    /// odometer/GPS-trace distance tracking during the ride; that distance
+    /// is real routing data, not a fabricated number, so this is the most
+    /// accurate fare achievable without adding live distance tracking.
+    /// Falls back to the original estimated fare if a rate or distance isn't
+    /// available, and returns nil only if there's no usable data at all.
+    private func computeFinalFare(for ride: DriverActiveRide) -> Decimal? {
+        guard let distanceMiles = ride.estimatedDistanceMiles else {
+            return ride.estimatedFare.map { Decimal($0) }
+        }
+
+        // tierRates/rate(for:) are keyed by the display-form ride type
+        // ("Rydr Go", "Rydr XL", etc.), not the lowercase canonical form, so
+        // map the ride's stored rideType onto the matching display string
+        // before looking up the rate.
+        let canonical = RydrRideTierCatalog.canonicalRideType(ride.rideType)
+        let rideTypeKey = DriverDashboardVM.availableRideTypes.first {
+            RydrRideTierCatalog.canonicalRideType($0) == canonical
+        } ?? ride.rideType
+        let rate = self.rate(for: rideTypeKey)
+
+        let actualDurationMinutes: Double
+        if let startedAt = ride.rideStartedAt {
+            actualDurationMinutes = max(0, Date().timeIntervalSince(startedAt) / 60)
+        } else {
+            actualDurationMinutes = ride.estimatedDurationMinutes ?? 0
+        }
+
+        let rawFare = (distanceMiles * rate.perMile) + (actualDurationMinutes * rate.perMinute)
+        guard rawFare > 0 else {
+            return ride.estimatedFare.map { Decimal($0) }
+        }
+
+        let roundedFare = (rawFare * 100).rounded() / 100
+        return Decimal(roundedFare)
+    }
+
     func completeActiveRide() {
         guard let ride = activeRide else { return }
         guard !isUpdatingActiveRide else { return }
         isUpdatingActiveRide = true
+
+        let finalFare = computeFinalFare(for: ride)
+
         let batch = db.batch()
         let rideRef = db.collection("rides").document(ride.id)
         let requestRef = db.collection("rideRequests").document(ride.id)
-        batch.setData([
+        var completionFields: [String: Any] = [
             "status": "completed",
             "completedAt": FieldValue.serverTimestamp(),
             "riderRideState": DriverRideLifecyclePolicy.riderState(forDriverStatus: "completed"),
             "riderStatusMessage": "Your ride is complete.",
             "updatedAt": FieldValue.serverTimestamp()
-        ], forDocument: rideRef, merge: true)
-        batch.setData([
-            "status": "completed",
-            "completedAt": FieldValue.serverTimestamp(),
-            "riderRideState": DriverRideLifecyclePolicy.riderState(forDriverStatus: "completed"),
-            "riderStatusMessage": "Your ride is complete.",
-            "updatedAt": FieldValue.serverTimestamp()
-        ], forDocument: requestRef, merge: true)
+        ]
+        if let finalFare {
+            // Real final fare, computed from the actual elapsed ride time and
+            // the driver's saved per-mile/per-minute rate — this is what
+            // DriverEarningsService and Fare Insights read going forward,
+            // rather than only ever the pre-ride estimate.
+            completionFields["fare"] = NSDecimalNumber(decimal: finalFare).doubleValue
+        }
+        batch.setData(completionFields, forDocument: rideRef, merge: true)
+        batch.setData(completionFields, forDocument: requestRef, merge: true)
         batch.commit { [weak self] error in
             DispatchQueue.main.async {
                 self?.isUpdatingActiveRide = false
@@ -666,6 +717,25 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     func dismissCompletedRideRating() {
         completedRideForRating = nil
         resumeStandbyIfWaiting(statusMessage: "Ride completed. You are ready for the next request.")
+    }
+
+    /// Loads real Fare Insights data (weekly/monthly earnings, acceptance rate,
+    /// completion rate, recent trips) from completed rides — call when Fare
+    /// Insights is opened or pulled-to-refresh. No hardcoded fallback values.
+    @MainActor
+    func refreshEarningsSummary() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        isLoadingEarningsSummary = true
+        Task {
+            defer { isLoadingEarningsSummary = false }
+            do {
+                earningsSummary = try await DriverEarningsService.shared.fetchSummary(uid: uid)
+                earningsToday = earningsSummary.todayEarnings
+            } catch {
+                // Leave earningsSummary at its last-known value rather than
+                // silently resetting to zero on a transient network error.
+            }
+        }
     }
 
     private func recordWaitTimeEvent(ride: DriverActiveRide, waitStage: String) {

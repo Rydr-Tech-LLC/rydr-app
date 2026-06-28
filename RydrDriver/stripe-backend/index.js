@@ -577,6 +577,87 @@ app.post("/connect/instant-payout", async (req, res) => {
   }
 });
 
+// Driver: Stripe Connect — Real payout history (replaces any client-side mock data)
+// Query: ?accountId=acct_xxx&limit=10
+app.get("/connect/payouts", async (req, res) => {
+  try {
+    const { accountId } = req.query;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+    if (!accountId) return res.status(400).json({ error: "missing_accountId" });
+
+    const payouts = await stripe.payouts.list(
+      { limit },
+      { stripeAccount: accountId }
+    );
+
+    res.json({
+      payouts: payouts.data.map((payout) => ({
+        id: payout.id,
+        amount: payout.amount,
+        currency: payout.currency,
+        status: payout.status,
+        method: payout.method,
+        arrivalDate: payout.arrival_date,
+        created: payout.created,
+      })),
+    });
+  } catch (err) {
+    console.error("connect/payouts error", err);
+    res.status(500).json({ error: "payouts_failed" });
+  }
+});
+
+// Driver: Stripe Connect — Real linked bank account / debit card on file
+// (replaces any client-side mock "Chase Checking •••• 4242" placeholder data)
+// Query: ?accountId=acct_xxx
+app.get("/connect/external-accounts", async (req, res) => {
+  try {
+    const { accountId } = req.query;
+    if (!accountId) return res.status(400).json({ error: "missing_accountId" });
+
+    const [banks, cards] = await Promise.all([
+      stripe.accounts.listExternalAccounts(accountId, { object: "bank_account", limit: 5 }),
+      stripe.accounts.listExternalAccounts(accountId, { object: "card", limit: 5 }),
+    ]);
+
+    res.json({
+      bankAccounts: banks.data.map((account) => ({
+        id: account.id,
+        bankName: account.bank_name || "Bank account",
+        last4: account.last4,
+        isDefault: !!account.default_for_currency,
+      })),
+      cards: cards.data.map((card) => ({
+        id: card.id,
+        brand: card.brand || "Card",
+        last4: card.last4,
+        isDefault: !!card.default_for_currency,
+      })),
+    });
+  } catch (err) {
+    console.error("connect/external-accounts error", err);
+    res.status(500).json({ error: "external_accounts_failed" });
+  }
+});
+
+// Driver: Stripe Connect — Express dashboard login link, used to add/manage
+// payout methods (bank accounts, debit cards) after onboarding. Stripe
+// Express accounts manage external accounts in the Express dashboard rather
+// than through another account-onboarding link.
+// Query: ?accountId=acct_xxx
+app.get("/connect/login-link", async (req, res) => {
+  try {
+    const { accountId } = req.query;
+    if (!accountId) return res.status(400).json({ error: "missing_accountId" });
+
+    const link = await stripe.accounts.createLoginLink(accountId);
+    res.json({ url: link.url });
+  } catch (err) {
+    console.error("connect/login-link error", err);
+    res.status(500).json({ error: "login_link_failed" });
+  }
+});
+
 // ============================================================================
 // Stripe Identity — Create verification session from configured Verification Flow
 // Body: { role: "driver" | "verified_rider" }

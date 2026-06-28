@@ -5,10 +5,12 @@ import FirebaseFirestore
 struct DriverWalletPayoutsView: View {
     @ObservedObject var vm: DriverDashboardVM
 
-    @State private var wallet = DriverWalletSnapshot.placeholder
+    @State private var wallet = DriverWalletSnapshot.empty
     @State private var message: String?
     @State private var isLoadingBalance = false
     @State private var isRequestingInstantPay = false
+    @State private var isOpeningPayoutMethodLink = false
+    @State private var payoutMethodLinkURL: IdentifiableURL?
 
     private let stripeBackendBase = URL(string: "https://rydr-stripe-backend.onrender.com")!
     private let instantPayoutFeeRate = Decimal(string: "0.01")!
@@ -32,6 +34,11 @@ struct DriverWalletPayoutsView: View {
         .task {
             await loadWallet()
             await refreshStripeBalance()
+            await refreshPayoutMethodsAndHistory()
+            vm.refreshEarningsSummary()
+        }
+        .sheet(item: $payoutMethodLinkURL) { wrapped in
+            SafariView(url: wrapped.url)
         }
     }
 
@@ -145,7 +152,7 @@ struct DriverWalletPayoutsView: View {
             HStack(spacing: 0) {
                 walletMetric(
                     title: "Earnings this week",
-                    value: currency(wallet.earningsThisWeek),
+                    value: currency(vm.earningsSummary.weekEarnings),
                     icon: "chart.line.uptrend.xyaxis",
                     tint: .rydrWalletRed
                 )
@@ -202,19 +209,35 @@ struct DriverWalletPayoutsView: View {
     private var payoutMethodsSection: some View {
         walletSection(title: "Payout Methods", trailing: "Manage") {
             VStack(spacing: 0) {
-                payoutMethodRow(icon: "building.columns.fill", title: wallet.bankName, detail: wallet.bankLast4, badge: "Default")
-                Divider().padding(.leading, 58)
-                payoutMethodRow(icon: "creditcard.fill", title: wallet.cardName, detail: wallet.cardLast4, badge: nil)
-                Divider().padding(.leading, 58)
+                if wallet.bankName == nil && wallet.cardName == nil {
+                    Text("No payout method on file yet. Add a bank account or debit card to receive payouts.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(14)
+                } else {
+                    if let bankName = wallet.bankName, let bankLast4 = wallet.bankLast4 {
+                        payoutMethodRow(icon: "building.columns.fill", title: bankName, detail: bankLast4, badge: "Default")
+                        Divider().padding(.leading, 58)
+                    }
+                    if let cardName = wallet.cardName, let cardLast4 = wallet.cardLast4 {
+                        payoutMethodRow(icon: "creditcard.fill", title: cardName, detail: cardLast4, badge: nil)
+                        Divider().padding(.leading, 58)
+                    }
+                }
                 Button {
-                    message = "Open Stripe onboarding to add or update payout methods."
+                    Task { await openPayoutMethodManagement() }
                 } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: "plus")
-                            .font(.headline.weight(.heavy))
-                            .foregroundStyle(Color.rydrWalletRed)
-                            .frame(width: 34, height: 34)
-                            .background(Circle().stroke(Color.rydrWalletRed.opacity(0.45), lineWidth: 1.2))
+                        if isOpeningPayoutMethodLink {
+                            ProgressView()
+                                .frame(width: 34, height: 34)
+                        } else {
+                            Image(systemName: "plus")
+                                .font(.headline.weight(.heavy))
+                                .foregroundStyle(Color.rydrWalletRed)
+                                .frame(width: 34, height: 34)
+                                .background(Circle().stroke(Color.rydrWalletRed.opacity(0.45), lineWidth: 1.2))
+                        }
                         Text("Add bank account or card")
                             .font(.subheadline.weight(.bold))
                         Spacer()
@@ -227,6 +250,7 @@ struct DriverWalletPayoutsView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(isOpeningPayoutMethodLink)
                 .padding(10)
             }
             .background(walletPanelBackground)
@@ -270,12 +294,18 @@ struct DriverWalletPayoutsView: View {
     private var quickActionsSection: some View {
         walletSection(title: "Quick Actions") {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
-                quickAction(icon: "building.columns.fill", title: "Add Bank\nAccount", fee: nil)
-                quickAction(icon: "creditcard.fill", title: "Add Debit\nCard", fee: nil)
+                quickAction(icon: "building.columns.fill", title: "Add Bank\nAccount", fee: nil) {
+                    Task { await openPayoutMethodManagement() }
+                }
+                quickAction(icon: "creditcard.fill", title: "Add Debit\nCard", fee: nil) {
+                    Task { await openPayoutMethodManagement() }
+                }
                 quickAction(icon: "bolt.fill", title: "Instant Pay", fee: "1% Fee") {
                     Task { await requestInstantPayout() }
                 }
-                quickAction(icon: "calendar", title: "Payout\nSchedule", fee: nil)
+                quickAction(icon: "calendar", title: "Payout\nSchedule", fee: nil) {
+                    Task { await openPayoutMethodManagement() }
+                }
             }
         }
     }
@@ -319,10 +349,17 @@ struct DriverWalletPayoutsView: View {
     private var payoutHistorySection: some View {
         walletSection(title: "Payout History", trailing: "View all") {
             VStack(spacing: 0) {
-                ForEach(wallet.history) { payout in
-                    payoutHistoryRow(payout)
-                    if payout.id != wallet.history.last?.id {
-                        Divider().padding(.leading, 58)
+                if wallet.history.isEmpty {
+                    Text("No payouts yet. Completed payouts will show up here.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(14)
+                } else {
+                    ForEach(wallet.history) { payout in
+                        payoutHistoryRow(payout)
+                        if payout.id != wallet.history.last?.id {
+                            Divider().padding(.leading, 58)
+                        }
                     }
                 }
             }
@@ -472,16 +509,112 @@ struct DriverWalletPayoutsView: View {
     @MainActor
     private func loadWallet() async {
         guard let uid = Auth.auth().currentUser?.uid else {
-            wallet = .placeholder
+            wallet = .empty
             return
         }
 
         do {
             let snapshot = try await Firestore.firestore().collection("drivers").document(uid).getDocument()
-            wallet = DriverWalletSnapshot(driverData: snapshot.data() ?? [:], fallbackDailyEarnings: vm.earningsToday)
+            wallet = DriverWalletSnapshot(driverData: snapshot.data() ?? [:])
         } catch {
-            wallet = .placeholder
+            wallet = .empty
             message = "Could not load wallet details."
+        }
+    }
+
+    /// Pulls real linked bank/card info and real payout history from Stripe
+    /// Connect via the backend — replaces the previously hardcoded
+    /// "Chase Checking •••• 4242" / fake 3-row history.
+    @MainActor
+    private func refreshPayoutMethodsAndHistory() async {
+        guard let accountId = wallet.stripeAccountId, !accountId.isEmpty else { return }
+
+        async let externalAccountsTask: ExternalAccountsResponse? = {
+            do {
+                var components = URLComponents(url: stripeBackendBase.appendingPathComponent("connect/external-accounts"), resolvingAgainstBaseURL: false)
+                components?.queryItems = [URLQueryItem(name: "accountId", value: accountId)]
+                guard let url = components?.url else { return nil }
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
+                return try JSONDecoder().decode(ExternalAccountsResponse.self, from: data)
+            } catch {
+                return nil
+            }
+        }()
+
+        async let payoutsTask: PayoutsResponse? = {
+            do {
+                var components = URLComponents(url: stripeBackendBase.appendingPathComponent("connect/payouts"), resolvingAgainstBaseURL: false)
+                components?.queryItems = [URLQueryItem(name: "accountId", value: accountId), URLQueryItem(name: "limit", value: "10")]
+                guard let url = components?.url else { return nil }
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
+                return try JSONDecoder().decode(PayoutsResponse.self, from: data)
+            } catch {
+                return nil
+            }
+        }()
+
+        let (externalAccounts, payouts) = await (externalAccountsTask, payoutsTask)
+
+        if let bank = externalAccounts?.bankAccounts.first {
+            wallet.bankName = bank.bankName
+            wallet.bankLast4 = bank.last4
+        }
+        if let card = externalAccounts?.cards.first {
+            wallet.cardName = card.brand
+            wallet.cardLast4 = card.last4
+        }
+
+        if let payouts {
+            wallet.history = payouts.payouts.map { payout in
+                DriverWalletPayout(
+                    title: "Payout to \(wallet.bankName ?? "your bank account")",
+                    subtitle: Self.formattedPayoutDate(payout.arrivalDate ?? payout.created),
+                    amount: Decimal(payout.amount) / 100,
+                    status: payout.status.capitalized
+                )
+            }
+        }
+    }
+
+    private static func formattedPayoutDate(_ unixSeconds: Int) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(unixSeconds))
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    /// Opens the Stripe Express dashboard (via a fresh login link) so the
+    /// driver can add or update a real linked bank account / debit card.
+    /// Express accounts manage external accounts in that dashboard rather
+    /// than through another onboarding link.
+    @MainActor
+    private func openPayoutMethodManagement() async {
+        guard let accountId = wallet.stripeAccountId, !accountId.isEmpty else {
+            message = "Finish Stripe payouts setup before adding a payout method."
+            return
+        }
+
+        isOpeningPayoutMethodLink = true
+        defer { isOpeningPayoutMethodLink = false }
+
+        do {
+            var components = URLComponents(url: stripeBackendBase.appendingPathComponent("connect/login-link"), resolvingAgainstBaseURL: false)
+            components?.queryItems = [URLQueryItem(name: "accountId", value: accountId)]
+            guard let url = components?.url else { throw URLError(.badURL) }
+
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+
+            let decoded = try JSONDecoder().decode(LoginLinkResponse.self, from: data)
+            guard let linkURL = URL(string: decoded.url) else { throw URLError(.badURL) }
+            payoutMethodLinkURL = IdentifiableURL(url: linkURL)
+        } catch {
+            message = "Could not open Stripe payout method management."
         }
     }
 
@@ -551,7 +684,7 @@ struct DriverWalletPayoutsView: View {
             wallet.pendingPayouts += paidAmount
             wallet.history.insert(
                 DriverWalletPayout(
-                    title: "Instant Pay to \(wallet.cardName)",
+                    title: "Instant Pay to \(wallet.cardName ?? wallet.bankName ?? "your account")",
                     subtitle: "Just now",
                     amount: paidAmount,
                     status: decoded.status.capitalized
@@ -569,15 +702,20 @@ struct DriverWalletPayoutsView: View {
     }
 }
 
+/// Driver wallet snapshot — every field is sourced from real data (the
+/// driver's Firestore doc and Stripe Connect) with no hardcoded prefill
+/// values. Fields with no real data yet (no linked bank/card, no payout
+/// history, no Stripe account at all) are left nil/empty and the UI shows an
+/// explicit "nothing here yet" state rather than a fabricated placeholder.
 private struct DriverWalletSnapshot {
     var availableBalance: Decimal
     var earningsThisWeek: Decimal
     var pendingPayouts: Decimal
     var balanceUpdatedText: String
-    var bankName: String
-    var bankLast4: String
-    var cardName: String
-    var cardLast4: String
+    var bankName: String?
+    var bankLast4: String?
+    var cardName: String?
+    var cardLast4: String?
     var stripeAccountId: String?
     var stripePayoutsEnabled: Bool
     var history: [DriverWalletPayout]
@@ -586,27 +724,22 @@ private struct DriverWalletSnapshot {
         stripePayoutsEnabled && availableBalance > 0
     }
 
-    init(driverData: [String: Any], fallbackDailyEarnings: Decimal) {
-        let daily = Self.decimal(driverData["earningsToday"]) ?? fallbackDailyEarnings
-        availableBalance = Self.decimal(driverData["availableBalance"]) ?? daily
-        earningsThisWeek = Self.decimal(driverData["earningsThisWeek"]) ?? max(daily, Decimal(842.78))
-        pendingPayouts = Self.decimal(driverData["pendingPayouts"]) ?? Decimal(150)
+    init(driverData: [String: Any]) {
+        availableBalance = Self.decimal(driverData["availableBalance"]) ?? 0
+        earningsThisWeek = Self.decimal(driverData["earningsThisWeek"]) ?? 0
+        pendingPayouts = Self.decimal(driverData["pendingPayouts"]) ?? 0
         balanceUpdatedText = "Updated just now"
-        bankName = Self.string(driverData["payoutBankName"]) ?? "Chase Checking"
-        bankLast4 = Self.string(driverData["payoutBankLast4"]) ?? "4242"
-        cardName = Self.string(driverData["payoutCardName"]) ?? "Visa Debit Card"
-        cardLast4 = Self.string(driverData["payoutCardLast4"]) ?? "7381"
+        bankName = Self.string(driverData["payoutBankName"])
+        bankLast4 = Self.string(driverData["payoutBankLast4"])
+        cardName = Self.string(driverData["payoutCardName"])
+        cardLast4 = Self.string(driverData["payoutCardLast4"])
         stripeAccountId = Self.string(driverData["stripeAccountId"])
         stripePayoutsEnabled = (driverData["stripePayoutsEnabled"] as? Bool) ?? false
-        history = [
-            DriverWalletPayout(title: "Payout to \(bankName)", subtitle: "May 24, 2024 · 10:32 AM", amount: Decimal(312.45), status: "Completed"),
-            DriverWalletPayout(title: "Payout to \(bankName)", subtitle: "May 17, 2024 · 10:15 AM", amount: Decimal(298.75), status: "Completed"),
-            DriverWalletPayout(title: "Payout to \(bankName)", subtitle: "May 10, 2024 · 9:45 AM", amount: Decimal(275.20), status: "Completed")
-        ]
+        history = []
     }
 
-    static var placeholder: DriverWalletSnapshot {
-        DriverWalletSnapshot(driverData: [:], fallbackDailyEarnings: Decimal(312.45))
+    static var empty: DriverWalletSnapshot {
+        DriverWalletSnapshot(driverData: [:])
     }
 
     private static func decimal(_ value: Any?) -> Decimal? {
@@ -634,6 +767,12 @@ private struct DriverWalletPayout: Identifiable, Equatable {
     let status: String
 }
 
+/// Wraps a URL so it can be used with SwiftUI's `.sheet(item:)`.
+private struct IdentifiableURL: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 private struct StripeConnectBalanceResponse: Decodable {
     let instantAvailableAmount: Int
     let pendingAmount: Int
@@ -652,6 +791,40 @@ private struct InstantPayoutResponse: Decodable {
     let amount: Int
     let currency: String
     let status: String
+}
+
+private struct ExternalAccountsResponse: Decodable {
+    struct Bank: Decodable {
+        let id: String
+        let bankName: String
+        let last4: String
+        let isDefault: Bool
+    }
+    struct Card: Decodable {
+        let id: String
+        let brand: String
+        let last4: String
+        let isDefault: Bool
+    }
+    let bankAccounts: [Bank]
+    let cards: [Card]
+}
+
+private struct PayoutsResponse: Decodable {
+    struct Payout: Decodable {
+        let id: String
+        let amount: Int
+        let currency: String
+        let status: String
+        let method: String
+        let arrivalDate: Int?
+        let created: Int
+    }
+    let payouts: [Payout]
+}
+
+private struct LoginLinkResponse: Decodable {
+    let url: String
 }
 
 private struct WalletWave: Shape {

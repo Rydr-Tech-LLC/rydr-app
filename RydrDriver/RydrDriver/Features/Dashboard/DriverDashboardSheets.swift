@@ -598,12 +598,21 @@ struct FareInsightsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                        InsightMetricCard(title: "Today's Earnings", value: currency(vm.earningsToday), icon: "dollarsign.circle.fill")
-                        InsightMetricCard(title: "Weekly Earnings", value: "$642.80", icon: "calendar")
-                        InsightMetricCard(title: "Monthly Earnings", value: "$2,846.50", icon: "chart.bar.fill")
-                        InsightMetricCard(title: "Acceptance Rate", value: "92%", icon: "checkmark.seal.fill")
-                        InsightMetricCard(title: "Completion Rate", value: "97%", icon: "flag.checkered")
-                        InsightMetricCard(title: "Demand Trend", value: "Rising", icon: "arrow.up.right")
+                        InsightMetricCard(title: "Today's Earnings", value: currency(vm.earningsSummary.todayEarnings), icon: "dollarsign.circle.fill")
+                        InsightMetricCard(title: "Weekly Earnings", value: currency(vm.earningsSummary.weekEarnings), icon: "calendar")
+                        InsightMetricCard(title: "Monthly Earnings", value: currency(vm.earningsSummary.monthEarnings), icon: "chart.bar.fill")
+                        InsightMetricCard(title: "Acceptance Rate", value: percent(vm.earningsSummary.acceptanceRate), icon: "checkmark.seal.fill")
+                        InsightMetricCard(title: "Completion Rate", value: percent(vm.earningsSummary.completionRate), icon: "flag.checkered")
+                        InsightMetricCard(title: "Demand Nearby", value: demandLabel(vm.demandSnapshot.level), icon: "arrow.up.right")
+                    }
+
+                    if vm.isLoadingEarningsSummary {
+                        HStack {
+                            ProgressView()
+                            Text("Updating earnings…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     dashboardSection("Ride Type Breakdown") {
@@ -619,11 +628,11 @@ struct FareInsightsView: View {
                         }
                     }
 
-                    dashboardSection("Heatmap Performance") {
+                    dashboardSection("Demand Near You") {
                         HStack {
                             Image(systemName: "flame.fill")
                                 .foregroundStyle(Styles.rydrGradient)
-                            Text("Airport corridor and downtown demand are strongest during evening commute windows.")
+                            Text("\(vm.demandSnapshot.nearbyRequestCount) request(s) within \(vm.demandSnapshot.radiusMiles, specifier: "%.0f") mi · \(vm.demandSnapshot.paceText)")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
@@ -649,21 +658,46 @@ struct FareInsightsView: View {
                     }
 
                     dashboardSection("Recent Trips") {
-                        ForEach(["Airport drop-off", "Downtown pickup", "Event district ride"], id: \.self) { trip in
-                            HStack {
-                                Text(trip)
-                                Spacer()
-                                Text("Completed")
-                                    .font(.caption)
-                                    .foregroundStyle(.green)
+                        if vm.earningsSummary.recentTrips.isEmpty {
+                            Text(vm.isLoadingEarningsSummary ? "Loading recent trips…" : "No completed trips yet.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(vm.earningsSummary.recentTrips) { trip in
+                                HStack {
+                                    Text("\(trip.pickup) → \(trip.dropoff)")
+                                    Spacer()
+                                    Text(currency(trip.fare))
+                                        .font(.caption)
+                                        .foregroundStyle(.green)
+                                }
+                                .font(.subheadline)
                             }
-                            .font(.subheadline)
                         }
                     }
                 }
                 .padding()
             }
             .navigationTitle("Fare Insights")
+            .task {
+                vm.refreshEarningsSummary()
+            }
+            .refreshable {
+                vm.refreshEarningsSummary()
+            }
+        }
+    }
+
+    private func percent(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        return "\(Int((value * 100).rounded()))%"
+    }
+
+    private func demandLabel(_ level: DriverDemandLevel) -> String {
+        switch level {
+        case .low: return "Low"
+        case .moderate: return "Moderate"
+        case .high: return "High"
         }
     }
 
