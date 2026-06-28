@@ -3,6 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
+import { cleanupStripeAccount } from "@/lib/stripeCleanup";
 import type { AccountDeletionRequestRecord } from "@/lib/types";
 
 type Action = "complete" | "reject";
@@ -33,45 +34,6 @@ function anonymizedFields(role: "rider" | "driver") {
     };
   }
   return common;
-}
-
-async function cleanupStripe(
-  role: "rider" | "driver",
-  profile: Record<string, unknown>,
-  adminUid: string,
-  requestId: string,
-  uid: string
-) {
-  const base = process.env.STRIPE_BACKEND_BASE_URL;
-  const secret = process.env.RYDR_INTERNAL_ADMIN_SECRET;
-  if (!base || !secret) {
-    // Not configured — surface this clearly in the audit trail rather than
-    // silently skipping Stripe cleanup. Firestore/Auth deletion still
-    // proceeds; an admin can re-run cleanup once env vars are set.
-    return { skipped: true, reason: "STRIPE_BACKEND_BASE_URL or RYDR_INTERNAL_ADMIN_SECRET not configured" };
-  }
-
-  const res = await fetch(`${base.replace(/\/+$/, "")}/admin/cleanup-account`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-internal-admin-secret": secret,
-      "x-admin-uid": adminUid
-    },
-    body: JSON.stringify({
-      role,
-      requestId,
-      uid,
-      stripeCustomerId: profile.stripeCustomerId ?? null,
-      stripeAccountId: profile.stripeAccountId ?? null
-    })
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(`stripe cleanup failed: ${body.error || res.status}`);
-  }
-  return res.json();
 }
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
@@ -114,7 +76,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const profileSnap = await profileRef.get();
     const profile = profileSnap.exists ? (profileSnap.data() as Record<string, unknown>) : {};
 
-    const stripeResult = await cleanupStripe(role, profile, session.uid, params.id, uid);
+    const stripeResult = await cleanupStripeAccount(role, profile, session.uid, params.id, uid);
 
     // Remove the Firebase Auth account so the person can no longer sign in,
     // then anonymize (not delete) the Firestore profile so historical ride

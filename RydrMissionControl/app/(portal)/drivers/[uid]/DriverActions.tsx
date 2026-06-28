@@ -16,6 +16,7 @@ export default function DriverActions({
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function submit(decision: "approved" | "needs_attention" | "rejected") {
     setLoading(decision);
@@ -29,6 +30,34 @@ export default function DriverActions({
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         setError(body.error ?? "Something went wrong.");
+        return;
+      }
+      router.push("/drivers");
+      router.refresh();
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function deleteDriver() {
+    const confirmed = window.confirm(
+      "This permanently deletes this driver's account, sign-in, and Stripe records. This cannot be undone and is separate from the account deletion request queue. Continue?"
+    );
+    if (!confirmed) return;
+    const typed = window.prompt('Type DELETE to confirm permanently deleting this driver.');
+    if (typed !== "DELETE") return;
+
+    setLoading("delete");
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/drivers/${uid}/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reason || undefined })
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setDeleteError(body.error ?? "Something went wrong.");
         return;
       }
       router.push("/drivers");
@@ -79,6 +108,21 @@ export default function DriverActions({
           className="rounded-md bg-rydr-red py-2 text-xs font-semibold text-white transition disabled:opacity-40"
         >
           {loading === "rejected" ? "Rejecting…" : "Reject Driver"}
+        </button>
+      </div>
+
+      <div className="mt-5 border-t border-line pt-4">
+        <p className="mb-2 text-[11px] font-medium text-muted">
+          Permanently delete this driver's account, sign-in, and Stripe records. No request from the driver
+          required — separate from and does not affect the account deletion request queue. This cannot be undone.
+        </p>
+        {deleteError && <p className="mb-2 text-xs text-rydr-red">{deleteError}</p>}
+        <button
+          disabled={loading !== null}
+          onClick={deleteDriver}
+          className="w-full rounded-md border border-rydr-red bg-white py-2 text-xs font-semibold text-rydr-red transition hover:bg-rydr-red/5 disabled:opacity-40"
+        >
+          {loading === "delete" ? "Deleting…" : "Delete Driver (Permanent)"}
         </button>
       </div>
     </div>
