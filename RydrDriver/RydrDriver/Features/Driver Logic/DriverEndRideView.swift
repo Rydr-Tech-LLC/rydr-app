@@ -20,6 +20,7 @@ struct DriverEndRideView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     completionHero
+                    paymentStatusBanner
                     tripSummary
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -115,6 +116,72 @@ struct DriverEndRideView: View {
                 }
         )
         .shadow(color: Color.red.opacity(0.24), radius: 20, y: 10)
+    }
+
+    /// Surfaces the backend's `paymentStatus` for this ride so the driver
+    /// never assumes a fare has settled just because the trip ended. The
+    /// rider gets a push notification ("Payment Failed") on the same
+    /// transition via the `onRideUpdated` Cloud Function trigger — this is
+    /// the driver's own view into the same state.
+    @ViewBuilder
+    private var paymentStatusBanner: some View {
+        switch ride.paymentStatus {
+        case "failed":
+            statusRow(
+                icon: "exclamationmark.triangle.fill",
+                tint: .red,
+                title: "Rider's payment failed",
+                subtitle: paymentFailureSubtitle
+            )
+        case "pending", "processing", .none:
+            statusRow(
+                icon: "clock.fill",
+                tint: .orange,
+                title: "Awaiting rider payment",
+                subtitle: "The fare hasn't settled yet — this updates automatically once payment clears."
+            )
+        case "succeeded":
+            statusRow(
+                icon: "checkmark.circle.fill",
+                tint: .green,
+                title: "Payment received",
+                subtitle: "The rider's fare has been charged successfully."
+            )
+        default:
+            EmptyView()
+        }
+    }
+
+    private var paymentFailureSubtitle: String {
+        let reason = ride.paymentFailureReason?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let reason, !reason.isEmpty {
+            return "Awaiting rider retry. Reason: \(reason)"
+        }
+        if ride.paymentRetryCount > 0 {
+            return "Awaiting rider retry after \(ride.paymentRetryCount) failed attempt\(ride.paymentRetryCount == 1 ? "" : "s")."
+        }
+        return "We've asked the rider to retry or update their card. No action needed from you."
+    }
+
+    private func statusRow(icon: String, tint: Color, title: String, subtitle: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(tint)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(tint.opacity(0.12)))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(tint.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(tint.opacity(0.18), lineWidth: 1))
     }
 
     private var tripSummary: some View {

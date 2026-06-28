@@ -7,6 +7,7 @@
 
 import Foundation
 import CoreLocation
+import CoreGraphics
 import FirebaseAuth
 import FirebaseFirestore
 
@@ -17,7 +18,9 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         pickup: String,
         dropoff: String,
         rideType: String,
-        near center: CLLocationCoordinate2D
+        near center: CLLocationCoordinate2D,
+        pickupCoordinate: CLLocationCoordinate2D?,
+        dropoffCoordinate: CLLocationCoordinate2D?
     ) async throws -> [Driver] {
         let snapshot = try await db.collection("publicDriverProfiles")
             .whereField("isOnline", isEqualTo: true)
@@ -25,7 +28,13 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
 
         return snapshot.documents
             .compactMap { document in
-                driver(from: document, rideType: rideType, near: center)
+                driver(
+                    from: document,
+                    rideType: rideType,
+                    near: center,
+                    pickupCoordinate: pickupCoordinate,
+                    dropoffCoordinate: dropoffCoordinate
+                )
             }
             .filter { $0.score > 0 }
             .sorted { lhs, rhs in
@@ -140,6 +149,35 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         }
     }
 
+    func rideLifecycleStream(rideId: String) -> AsyncThrowingStream<RideLifecycleSnapshot, Error> {
+        AsyncThrowingStream { continuation in
+            let listener = db.collection("rides").document(rideId)
+                .addSnapshotListener { snapshot, error in
+                    if let error {
+                        continuation.finish(throwing: error)
+                        return
+                    }
+
+                    guard let data = snapshot?.data() else { return }
+                    let snapshot = RideLifecycleSnapshot(
+                        status: Self.rideStatus(from: data["status"] as? String),
+                        driverCoordinate: Self.coordinate(from: data["driverLocation"]),
+                        pickupCoordinate: Self.coordinate(from: data["pickupCoordinate"]) ?? Self.coordinate(from: data["pickupGeoPoint"]),
+                        dropoffCoordinate: Self.coordinate(from: data["dropoffCoordinate"]) ?? Self.coordinate(from: data["dropoffGeoPoint"])
+                    )
+                    continuation.yield(snapshot)
+
+                    if snapshot.status == .completed || snapshot.status == .cancelled {
+                        continuation.finish()
+                    }
+                }
+
+            continuation.onTermination = { _ in
+                listener.remove()
+            }
+        }
+    }
+
     func cancelRide(rideId: String) async throws {
         let update: [String: Any] = [
             "status": "riderCancelled",
@@ -150,7 +188,13 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         try await db.collection("rides").document(rideId).setData(update, merge: true)
     }
 
-    private func driver(from document: QueryDocumentSnapshot, rideType: String, near center: CLLocationCoordinate2D) -> Driver? {
+    private func driver(
+        from document: QueryDocumentSnapshot,
+        rideType: String,
+        near center: CLLocationCoordinate2D,
+        pickupCoordinate: CLLocationCoordinate2D?,
+        dropoffCoordinate: CLLocationCoordinate2D?
+    ) -> Driver? {
         let data = document.data()
         let enabled = data["standardDispatchEnabled"] as? Bool ?? true
         guard enabled else { return nil }
@@ -168,6 +212,12 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         let distance = CLLocation(latitude: center.latitude, longitude: center.longitude)
             .distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)) / 1609.344
         guard distance <= 30 else { return nil }
+        guard matchesDriverRideFilters(
+            data["rideFilters"] as? [String: Any],
+            driverCoordinate: coordinate,
+            pickupCoordinate: pickupCoordinate ?? center,
+            dropoffCoordinate: dropoffCoordinate
+        ) else { return nil }
 
         let rating = data["rating"] as? Double ?? 4.85
         let pricing = RydrPricing.config(for: rideType)
@@ -195,6 +245,77 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             stripeAccountId: data["stripeAccountId"] as? String,
             stripeChargesEnabled: data["stripeChargesEnabled"] as? Bool ?? false
         )
+    }
+
+    private static func rideStatus(from rawStatus: String?) -> Ride.Status? {
+        switch rawStatus?.trimmingCharacters(in: .whitespacesAndNewlines) {
+        case "accepted", "enRouteToPickup", "navigatingToPickup":
+            return .enRouteToPickup
+        case "arrived", "arrivedAtPickup", "waitingForRider":
+            return .waitingForRider
+        case "inProgress", "navigatingToStop", "arrivedAtStop", "waitingAtStop":
+            return .enRouteToDropoff
+        case "completed":
+            return .completed
+        case "cancelled", "riderCancelled", "driverCancelled":
+            return .cancelled
+        default:
+            return nil
+        }
+    }
+
+    private static func coordinate(from raw: Any?) -> CLLocationCoordinate2D? {
+        if let geoPoint = raw as? GeoPoint {
+            return CLLocationCoordinate2D(latitude: geoPoint.latitude, longitude: geoPoint.longitude)
+        }
+        guard let data = raw as? [String: Any] else { return nil }
+        let lat = number(data["lat"] ?? data["latitude"])
+        let lng = number(data["lng"] ?? data["longitude"])
+        guard let lat, let lng else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    }
+
+    private static func number(_ raw: Any?) -> CLLocationDegrees? {
+        if let value = raw as? CLLocationDegrees { return value }
+        if let value = raw as? NSNumber { return value.doubleValue }
+        if let value = raw as? String { return Double(value) }
+        return nil
+    }
+
+    private func matchesDriverRideFilters(
+        _ filters: [String: Any]?,
+        driverCoordinate: CLLocationCoordinate2D,
+        pickupCoordinate: CLLocationCoordinate2D,
+        dropoffCoordinate: CLLocationCoordinate2D?
+    ) -> Bool {
+        guard let filters else { return true }
+
+        if (filters["workZoneEnabled"] as? Bool) == true {
+            let radiusMiles = doubleValue(filters["workZoneRadiusMiles"]) ?? 0
+            let pickupMiles = CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
+                .distance(from: CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)) / 1609.344
+            guard radiusMiles > 0, pickupMiles <= radiusMiles else { return false }
+        }
+
+        guard (filters["destinationModeEnabled"] as? Bool) == true,
+              let destinationCoordinate = coordinate(from: filters["destinationCoordinate"] ?? filters["destinationGeoPoint"]) else {
+            return true
+        }
+
+        guard let dropoffCoordinate else { return false }
+        let progress = projectedRouteProgress(point: dropoffCoordinate, start: driverCoordinate, end: destinationCoordinate)
+        guard progress >= 0, progress <= 1 else { return false }
+
+        let pickupLocation = CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)
+        let dropoffLocation = CLLocation(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)
+        let destinationLocation = CLLocation(latitude: destinationCoordinate.latitude, longitude: destinationCoordinate.longitude)
+        let pickupToDestinationMiles = pickupLocation.distance(from: destinationLocation) / 1609.344
+        let dropoffToDestinationMiles = dropoffLocation.distance(from: destinationLocation) / 1609.344
+        let corridorMiles = distanceFromPointToSegmentMiles(point: dropoffCoordinate, start: driverCoordinate, end: destinationCoordinate)
+        let allowedCorridorMiles = doubleValue(filters["destinationCorridorMiles"]) ?? 5
+
+        return dropoffToDestinationMiles <= pickupToDestinationMiles
+            && corridorMiles <= allowedCorridorMiles
     }
 
     private func driverRate(
@@ -233,6 +354,63 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             return CLLocationCoordinate2D(latitude: lat, longitude: lng)
         }
         return nil
+    }
+
+    private func coordinate(from value: Any?) -> CLLocationCoordinate2D? {
+        if let point = value as? GeoPoint {
+            return CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
+        }
+        guard let data = value as? [String: Any] else { return nil }
+        let lat = doubleValue(data["lat"] ?? data["latitude"])
+        let lng = doubleValue(data["lng"] ?? data["longitude"])
+        guard let lat, let lng else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    }
+
+    private func projectedRouteProgress(
+        point: CLLocationCoordinate2D,
+        start: CLLocationCoordinate2D,
+        end: CLLocationCoordinate2D
+    ) -> Double {
+        let centerLatitude = start.latitude * .pi / 180
+        func xy(_ coordinate: CLLocationCoordinate2D) -> CGPoint {
+            CGPoint(
+                x: coordinate.longitude * 69.0 * cos(centerLatitude),
+                y: coordinate.latitude * 69.0
+            )
+        }
+
+        let p = xy(point)
+        let a = xy(start)
+        let b = xy(end)
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        guard dx != 0 || dy != 0 else { return 0 }
+        return ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)
+    }
+
+    private func distanceFromPointToSegmentMiles(
+        point: CLLocationCoordinate2D,
+        start: CLLocationCoordinate2D,
+        end: CLLocationCoordinate2D
+    ) -> Double {
+        let progress = max(0, min(1, projectedRouteProgress(point: point, start: start, end: end)))
+        let centerLatitude = start.latitude * .pi / 180
+        func xy(_ coordinate: CLLocationCoordinate2D) -> CGPoint {
+            CGPoint(
+                x: coordinate.longitude * 69.0 * cos(centerLatitude),
+                y: coordinate.latitude * 69.0
+            )
+        }
+
+        let p = xy(point)
+        let a = xy(start)
+        let b = xy(end)
+        let projected = CGPoint(
+            x: a.x + (b.x - a.x) * progress,
+            y: a.y + (b.y - a.y) * progress
+        )
+        return hypot(p.x - projected.x, p.y - projected.y)
     }
 
     private func driverName(from data: [String: Any]) -> String {

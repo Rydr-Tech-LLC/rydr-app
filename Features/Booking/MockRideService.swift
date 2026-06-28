@@ -24,7 +24,14 @@ final class MockRideService: RideService, @unchecked Sendable {
 
     // MARK: - Nearby drivers
 
-    func fetchNearbyDrivers(pickup: String, dropoff: String, rideType: String, near center: CLLocationCoordinate2D) async throws -> [Driver] {
+    func fetchNearbyDrivers(
+        pickup: String,
+        dropoff: String,
+        rideType: String,
+        near center: CLLocationCoordinate2D,
+        pickupCoordinate: CLLocationCoordinate2D?,
+        dropoffCoordinate: CLLocationCoordinate2D?
+    ) async throws -> [Driver] {
         let names = ["Alex","Jamie","Taylor","Jordan","Riley","Morgan","Sam"]
         let cars = rideType.localizedCaseInsensitiveContains("eco")
             ? ["Tesla Model 3","Tesla Model Y","Ford Mustang Mach-E","Hyundai IONIQ 5","Kia EV6"]
@@ -100,6 +107,35 @@ final class MockRideService: RideService, @unchecked Sendable {
                     let lon = start.longitude * (1 - t) + end.longitude * t
                     continuation.yield(.init(latitude: lat, longitude: lon))
                     try? await Task.sleep(nanoseconds: tickNs)
+                }
+                continuation.finish()
+            }
+        }
+    }
+
+    func rideLifecycleStream(rideId: String) -> AsyncThrowingStream<RideLifecycleSnapshot, Error> {
+        AsyncThrowingStream { continuation in
+            Task.detached {
+                let start = CLLocationCoordinate2D(
+                    latitude: 33.7490 + Double.random(in: -0.01...0.01),
+                    longitude: -84.3880 + Double.random(in: -0.01...0.01)
+                )
+                let pickup = CLLocationCoordinate2D(latitude: start.latitude + 0.015, longitude: start.longitude + 0.015)
+                let dropoff = CLLocationCoordinate2D(latitude: pickup.latitude + 0.03, longitude: pickup.longitude + 0.03)
+                let snapshots: [RideLifecycleSnapshot] = [
+                    RideLifecycleSnapshot(status: .enRouteToPickup, driverCoordinate: start, pickupCoordinate: pickup, dropoffCoordinate: dropoff),
+                    RideLifecycleSnapshot(status: .waitingForRider, driverCoordinate: pickup, pickupCoordinate: pickup, dropoffCoordinate: dropoff),
+                    RideLifecycleSnapshot(status: .enRouteToDropoff, driverCoordinate: pickup, pickupCoordinate: pickup, dropoffCoordinate: dropoff),
+                    RideLifecycleSnapshot(status: .completed, driverCoordinate: dropoff, pickupCoordinate: pickup, dropoffCoordinate: dropoff)
+                ]
+
+                for snapshot in snapshots {
+                    if Task.isCancelled {
+                        continuation.finish()
+                        return
+                    }
+                    continuation.yield(snapshot)
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
                 }
                 continuation.finish()
             }

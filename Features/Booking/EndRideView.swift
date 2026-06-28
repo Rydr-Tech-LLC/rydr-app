@@ -10,6 +10,14 @@ struct EndRideView: View {
     let ride: Receipt?
     let onDone: () -> Void
     var onTipSelected: (Int) -> Void = { _ in }
+    /// The receipt screen observes `paymentStatus`/`paymentFailureReason`
+    /// and shows a "Payment Failed" card with a Retry action instead of
+    /// pretending the charge went through. Defaults to a fresh, disconnected
+    /// instance (paymentStatus == nil, card hidden) for legacy/preview call
+    /// sites that don't have a live RideManager on hand — `@ObservedObject`
+    /// requires a non-optional ObservableObject, so this is the cleanest way
+    /// to keep the parameter optional in spirit without breaking observation.
+    @ObservedObject var rideManager: RideManager = RideManager()
 
     @State private var phase: CompletionPhase = .rateAndTip
     @State private var rating: Int = 0
@@ -94,6 +102,7 @@ struct EndRideView: View {
                 tint: .green
             )
 
+            paymentStatusCard
             receiptCard
             driverSummaryCard
             receiptActions
@@ -372,6 +381,89 @@ struct EndRideView: View {
                 }
         }
         .cardStyle()
+    }
+
+    @ViewBuilder
+    private var paymentStatusCard: some View {
+        if rideManager.paymentStatus == "failed" {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.red.opacity(0.12))
+                            .frame(width: 42, height: 42)
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(.red)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Payment failed")
+                            .font(.headline.weight(.black))
+                            .foregroundStyle(.primary)
+                        Text(rideManager.paymentFailureReason ?? "We couldn't charge your card for this ride.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+
+                HStack(spacing: 10) {
+                    Button {
+                        retryPayment()
+                    } label: {
+                        if rideManager.isRetryingPayment {
+                            ProgressView().tint(.white)
+                        } else {
+                            Text("Retry Payment")
+                        }
+                    }
+                    .font(.subheadline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(Color.red, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .foregroundStyle(.white)
+                    .disabled(rideManager.isRetryingPayment)
+
+                    NavigationLink {
+                        PaymentMethodView()
+                    } label: {
+                        Text("Update Card")
+                            .font(.subheadline.weight(.bold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .foregroundStyle(.primary)
+                    }
+                }
+            }
+            .padding(14)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color.red.opacity(0.25), lineWidth: 1)
+            )
+        } else if rideManager.paymentStatus == "processing" {
+            HStack(spacing: 12) {
+                ProgressView()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Finishing up payment…")
+                        .font(.subheadline.weight(.semibold))
+                    Text("This usually only takes a few seconds.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .cardStyle()
+        }
+    }
+
+    private func retryPayment() {
+        guard let receipt = displayReceipt, let backendRideId = receipt.backendRideId else { return }
+        let amountCents = Int((receipt.chargeBreakdown.calculatedTotal * 100).rounded())
+        Task {
+            await rideManager.retryFailedPayment(rideId: backendRideId, amountCents: amountCents)
+        }
     }
 
     private var receiptCard: some View {

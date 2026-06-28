@@ -25,9 +25,17 @@ private final class RydrDriverAppCheckProviderFactory: NSObject, AppCheckProvide
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
   func application(_ application: UIApplication,
                    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-    #if targetEnvironment(simulator)
+    // App Attest only validates against Apple's *production* attestation
+    // environment, but a Debug-configuration build run from Xcode — even on
+    // a real device — is signed for the *development* App Attest
+    // environment. Firebase App Check's App Attest exchange rejects those
+    // with "App attestation failed" / 403, which then trips the SDK's local
+    // throttle ("Too many attempts"). So: any Debug build (simulator or real
+    // device) uses the Debug provider; only Release/TestFlight/App Store
+    // builds use real App Attest/DeviceCheck.
+    #if targetEnvironment(simulator) || DEBUG
     AppCheck.setAppCheckProviderFactory(AppCheckDebugProviderFactory())
-    print("AppCheck: Driver debug provider (simulator)")
+    print("AppCheck: Driver debug provider (debug build)")
     #else
     AppCheck.setAppCheckProviderFactory(RydrDriverAppCheckProviderFactory())
     print("AppCheck: Driver App Attest / DeviceCheck provider")

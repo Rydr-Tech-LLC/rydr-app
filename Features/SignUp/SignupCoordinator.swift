@@ -328,8 +328,6 @@ struct SignupCoordinator: View {
         backendBase: URL = URL(string: "https://rydr-stripe-backend.onrender.com")!
     ) {
         guard let user = Auth.auth().currentUser else { return }
-        let uid = user.uid
-
         user.getIDToken { token, _ in
             var req = URLRequest(url: backendBase.appendingPathComponent("create-customer"))
             req.httpMethod = "POST"
@@ -337,9 +335,7 @@ struct SignupCoordinator: View {
             if let token = token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
 
             let body: [String: Any] = [
-                "email": user.email ?? "user-\(uid)@example.com",
-                "name":  user.displayName ?? "Rydr User",
-                "uid":   uid
+                "name": user.displayName ?? "Rydr User"
             ]
             req.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
 

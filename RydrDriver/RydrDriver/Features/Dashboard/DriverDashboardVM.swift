@@ -262,6 +262,15 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         startMapRequestBlipListener()
     }
 
+    func refreshRideFilters() {
+        pendingRequests = pendingRequests.filter(canPresentAssignedRequest)
+        startMapRequestBlipListener()
+        resumeStandbyIfWaiting()
+        if isOnline {
+            updateDriverPresence(online: true)
+        }
+    }
+
     #if DEBUG
     private func applyAtlantaPilotLocation() {
         lastLocation = DriverMapDefaults.pilotLocation
@@ -1011,7 +1020,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                         self?.statusMessage = "Request listener error: \(error.localizedDescription)"
                         return
                     }
-                    let requests = snapshot?.documents.map(DriverRideRequest.init(document:)) ?? []
+                    let requests = snapshot?.documents
+                        .map(DriverRideRequest.init(document:))
+                        .filter { self?.canPresentAssignedRequest($0) == true } ?? []
                     self?.pendingRequests = (self?.isOnline == true && self?.activeRide == nil) ? requests : []
                     if self?.pendingRequests.isEmpty == false {
                         self?.isSearchingForRides = false
@@ -1227,9 +1238,16 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         }
 
         guard let dropoffCoordinate = request.dropoffCoordinate else { return false }
-        let dropoffLocation = CLLocation(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)
+        let routeProgress = projectedRouteProgress(
+            point: dropoffCoordinate,
+            start: driverCoordinate,
+            end: destinationCoordinate
+        )
+        guard routeProgress >= 0, routeProgress <= 1 else { return false }
+
         let destinationLocation = CLLocation(latitude: destinationCoordinate.latitude, longitude: destinationCoordinate.longitude)
         let pickupToDestinationMiles = pickupLocation.distance(from: destinationLocation) / 1609.344
+        let dropoffLocation = CLLocation(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)
         let dropoffToDestinationMiles = dropoffLocation.distance(from: destinationLocation) / 1609.344
         let corridorMiles = distanceFromPointToSegmentMiles(
             point: dropoffCoordinate,
@@ -1239,6 +1257,39 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
         return dropoffToDestinationMiles <= pickupToDestinationMiles
             && corridorMiles <= rideFilterPreferences.destinationCorridor.miles
+    }
+
+    private func canPresentAssignedRequest(_ request: DriverRideRequest) -> Bool {
+        let eligible = Set(eligibleRideTypes.map(RydrRideTierCatalog.canonicalRideType))
+        guard eligible.contains(RydrRideTierCatalog.canonicalRideType(request.rideType)) else { return false }
+
+        let selected = Set(selectedRideTypes.map(RydrRideTierCatalog.canonicalRideType))
+        guard selected.isEmpty || selected.contains(RydrRideTierCatalog.canonicalRideType(request.rideType)) else { return false }
+
+        guard rideFilterPreferences.workZoneEnabled || rideFilterPreferences.hasDestinationFilter else { return true }
+        return matchesRideFilters(request)
+    }
+
+    private func projectedRouteProgress(
+        point: CLLocationCoordinate2D,
+        start: CLLocationCoordinate2D,
+        end: CLLocationCoordinate2D
+    ) -> Double {
+        let centerLatitude = start.latitude * .pi / 180
+        func xy(_ coordinate: CLLocationCoordinate2D) -> CGPoint {
+            CGPoint(
+                x: coordinate.longitude * 69.0 * cos(centerLatitude),
+                y: coordinate.latitude * 69.0
+            )
+        }
+
+        let p = xy(point)
+        let a = xy(start)
+        let b = xy(end)
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        guard dx != 0 || dy != 0 else { return 0 }
+        return ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)
     }
 
     private func distanceFromPointToSegmentMiles(
@@ -1363,6 +1414,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             "updatedAt": FieldValue.serverTimestamp()
         ]
         var driverPayload = statusPayload
+        let filterPayload = rideFilterPayload()
+        statusPayload["rideFilters"] = filterPayload
+        driverPayload["rideFilters"] = filterPayload
 
         if let loc = lastLocation {
             let location: [String: Any] = [
@@ -1404,6 +1458,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             "isOnline": online,
             "eligibleRideTypes": Array(selectedRideTypes).sorted(),
             "tierRates": tierRatesPayload(),
+            "rideFilters": rideFilterPayload(),
             "updatedAt": FieldValue.serverTimestamp()
         ]
 
@@ -1551,6 +1606,26 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         return payload
     }
 
+    private func rideFilterPayload() -> [String: Any] {
+        var payload: [String: Any] = [
+            "workZoneEnabled": rideFilterPreferences.workZoneEnabled,
+            "workZoneRadiusMiles": rideFilterPreferences.effectivePickupMiles,
+            "destinationModeEnabled": rideFilterPreferences.hasDestinationFilter,
+            "destinationText": rideFilterPreferences.destinationText,
+            "destinationCorridorMiles": rideFilterPreferences.destinationCorridor.miles
+        ]
+
+        if let destination = rideFilterPreferences.destinationCoordinate {
+            payload["destinationCoordinate"] = [
+                "lat": destination.latitude,
+                "lng": destination.longitude
+            ]
+            payload["destinationGeoPoint"] = GeoPoint(latitude: destination.latitude, longitude: destination.longitude)
+        }
+
+        return payload
+    }
+
     private static func doubleValue(_ value: Any?) -> Double? {
         if let double = value as? Double { return double }
         if let int = value as? Int { return Double(int) }
@@ -1631,6 +1706,9 @@ struct DriverDashboardView: View {
                 }
                 .onReceive(session.$canGoOnline) { allowed in
                     vm.canGoOnline = allowed
+                }
+                .onChange(of: vm.rideFilterPreferences) { _, _ in
+                    vm.refreshRideFilters()
                 }
 
                 DriverTopBar(
@@ -1762,7 +1840,7 @@ struct DriverDashboardView: View {
         case .rideFilters:
             DriverRideFiltersView(preferences: $vm.rideFilterPreferences) {
                 activeSheet = nil
-                vm.refreshMapRequestBlips()
+                vm.refreshRideFilters()
             }
             .presentationDetents([.medium, .large])
         case .rideType(let rideType):

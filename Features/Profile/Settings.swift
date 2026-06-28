@@ -32,6 +32,7 @@ struct SettingsView: View {
             privacySection
             accessibilitySection
             supportSection
+            accountSection
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -202,6 +203,30 @@ struct SettingsView: View {
             )
         } header: {
             sectionHeader("Support")
+        }
+    }
+
+    private var accountSection: some View {
+        Section {
+            NavigationLink {
+                DeleteAccountView()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "trash.fill")
+                        .foregroundStyle(.red)
+                        .frame(width: 28)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Delete Account")
+                            .foregroundStyle(.red)
+                        Text("Permanently request deletion of your Rydr account and data.")
+                            .font(.caption)
+                            .foregroundStyle(secondaryText)
+                    }
+                }
+            }
+        } header: {
+            sectionHeader("Account")
         }
     }
 

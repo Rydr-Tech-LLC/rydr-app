@@ -155,12 +155,9 @@ struct PaymentScreenView: View {
     }
 
     private func ensureCustomer(for user: User, completion: @escaping (Result<String, Error>) -> Void) {
-        let uid = user.uid
-
-        let email = user.email ?? "user-\(uid)@example.com"
         let name  = user.displayName ?? "Rydr User"
 
-        requestJSON(path: "create-customer", body: ["email": email, "name": name, "uid": uid]) { (resp: CreateCustomerResponse_Signup?) in
+        requestJSON(path: "create-customer", body: ["name": name]) { (resp: CreateCustomerResponse_Signup?) in
             guard let cid = resp?.customerId, !cid.isEmpty else {
                 completion(.failure(NSError(domain: "Stripe", code: -1,
                                             userInfo: [NSLocalizedDescriptionKey: "No customerId from server"]))); return
@@ -218,19 +215,8 @@ struct PaymentScreenView: View {
         errorMessage = nil
         isLoading = true
 
-        var req = URLRequest(url: backendBase.appendingPathComponent("create-setup-intent"))
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["customerId": customerId])
-
-        URLSession.shared.dataTask(with: req) { data, _, err in
-            if let err = err {
-                finishCardSave(.failure(err))
-                return
-            }
-            guard let data,
-                  let setupIntent = try? JSONDecoder().decode(SetupIntentResponse_Signup.self, from: data)
-            else {
+        requestJSON(path: "create-setup-intent", body: ["requestId": UUID().uuidString]) { (setupIntent: SetupIntentResponse_Signup?) in
+            guard let setupIntent else {
                 finishCardSave(.failure(simple("Failed to create SetupIntent")))
                 return
             }
@@ -253,7 +239,7 @@ struct PaymentScreenView: View {
                     finishCardSave(.failure(simple("Unknown payment status")))
                 }
             }
-        }.resume()
+        }
     }
 
     private func finishCardSave(_ result: Result<Void, Error>) {

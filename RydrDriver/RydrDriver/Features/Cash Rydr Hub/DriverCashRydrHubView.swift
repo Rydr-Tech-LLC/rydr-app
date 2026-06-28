@@ -86,38 +86,80 @@ private final class DriverCashRydrHubVM: ObservableObject {
     @Published var isLoading = true
 
     private let db = Firestore.firestore()
-    private var requestListener: ListenerRegistration?
+    private var openRequestListener: ListenerRegistration?
+    private var scheduledRequestListener: ListenerRegistration?
     private var responseListeners: [String: ListenerRegistration] = [:]
+    private var publicOpenRequestBuffer: [DriverCashRideRequest] = []
+    private var driverScheduledRequestBuffer: [DriverCashRideRequest] = []
 
     func start() {
-        requestListener?.remove()
+        guard let uid = Auth.auth().currentUser?.uid else {
+            errorMessage = "Sign in before using Cash Rydr Hub."
+            isLoading = false
+            return
+        }
+        openRequestListener?.remove()
+        scheduledRequestListener?.remove()
         isLoading = true
-        requestListener = db.collection("cashRydrRequests")
+        openRequestListener = db.collection("cashRydrRequests")
+            .whereField("status", isEqualTo: "open")
+            .whereField("visibility", isEqualTo: "public")
             .addSnapshotListener { snapshot, error in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    self.isLoading = false
                     if let error {
+                        self.isLoading = false
                         self.errorMessage = error.localizedDescription
                         return
                     }
 
-                    let requests = (snapshot?.documents ?? [])
+                    self.publicOpenRequestBuffer = (snapshot?.documents ?? [])
                         .compactMap(Self.makeRequest)
                         .sorted { $0.scheduledTime < $1.scheduledTime }
+                    self.applyRequestBuffers()
+                }
+            }
 
-                    self.openRequests = requests.filter(\.isOpenForCurrentDriver)
-                    self.scheduledRequests = requests.filter(\.isScheduledForCurrentDriver)
-                    self.syncResponseListeners(for: self.openRequests + self.scheduledRequests)
+        scheduledRequestListener = db.collection("cashRydrRequests")
+            .whereField("connectedDriverUid", isEqualTo: uid)
+            .addSnapshotListener { snapshot, error in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if let error {
+                        self.isLoading = false
+                        self.errorMessage = error.localizedDescription
+                        return
+                    }
+
+                    self.driverScheduledRequestBuffer = (snapshot?.documents ?? [])
+                        .compactMap(Self.makeRequest)
+                        .sorted { $0.scheduledTime < $1.scheduledTime }
+                    self.applyRequestBuffers()
                 }
             }
     }
 
     func stop() {
-        requestListener?.remove()
-        requestListener = nil
+        openRequestListener?.remove()
+        openRequestListener = nil
+        scheduledRequestListener?.remove()
+        scheduledRequestListener = nil
         responseListeners.values.forEach { $0.remove() }
         responseListeners.removeAll()
+        publicOpenRequestBuffer = []
+        driverScheduledRequestBuffer = []
+    }
+
+    private func applyRequestBuffers() {
+        var mergedById: [String: DriverCashRideRequest] = [:]
+        for request in publicOpenRequestBuffer + driverScheduledRequestBuffer {
+            mergedById[request.id] = request
+        }
+        let requests = mergedById.values.sorted { $0.scheduledTime < $1.scheduledTime }
+        openRequests = requests.filter(\.isOpenForCurrentDriver)
+        scheduledRequests = requests.filter(\.isScheduledForCurrentDriver)
+        syncResponseListeners(for: openRequests + scheduledRequests)
+        isLoading = false
     }
 
     func sendMessage(to request: DriverCashRideRequest, text: String, driverName: String) -> Bool {

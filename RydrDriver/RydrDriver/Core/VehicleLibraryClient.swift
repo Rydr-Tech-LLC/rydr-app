@@ -168,4 +168,47 @@ enum VehicleLibraryClient {
             status: data["vehicleImageStatus"] as? String ?? "missing"
         )
     }
+
+    /// Fallback for when `decodeVin`/`submitVehicleVin` can't resolve a VIN
+    /// (NHTSA has no data for it, the VIN was mistyped/unreadable, etc.).
+    /// The driver types make/model/year themselves; this is the single
+    /// authoritative write for that path, mirroring `submitVehicleVin` but
+    /// skipping NHTSA entirely. Server marks the record `vinDecodeStatus:
+    /// "manual"` so Mission Control can flag it for a quick human check.
+    static func submitVehicleManual(_ info: ManualVehicleInfo, color: VehicleColor) async throws -> VehicleImageInfo {
+        var payload: [String: Any] = [
+            "make": info.make,
+            "model": info.model,
+            "year": Int(info.year) ?? info.year,
+            "color": color.rawValue
+        ]
+        if let vin = info.vin, !vin.isEmpty { payload["vin"] = vin }
+        if let trim = info.trim, !trim.isEmpty { payload["trim"] = trim }
+        payload["fuelType"] = info.fuelType.rawValue
+
+        let result = try await functions.httpsCallable("submitVehicleManual").call(payload)
+        guard let data = result.data as? [String: Any] else {
+            throw VehicleLibraryClientError.invalidResponse
+        }
+        let vehicle = data["vehicle"] as? [String: Any]
+        return VehicleImageInfo(
+            color: color.rawValue,
+            imageUrl: vehicle?["imageUrl"] as? String,
+            imagePath: vehicle?["imagePath"] as? String,
+            matchTier: vehicle?["imageMatchTier"] as? Int,
+            status: data["vehicleImageStatus"] as? String ?? "missing"
+        )
+    }
+}
+
+/// What the driver types in by hand when VIN decode fails. Mirrors
+/// `DecodedVehicleInfo` minus the fields only NHTSA can provide
+/// (bodyStyle/driveType are left for Mission Control's manual review).
+struct ManualVehicleInfo: Equatable {
+    var vin: String?
+    var make: String
+    var model: String
+    var year: String
+    var trim: String?
+    var fuelType: DriverVehicleFuelType
 }

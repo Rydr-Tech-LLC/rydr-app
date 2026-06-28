@@ -159,6 +159,15 @@ struct DriverActiveRide: Identifiable, Equatable {
     let arrivedAtStopAt: Date?
     let stopWaitStartedAt: Date?
     let headedToDropoffAt: Date?
+    /// Backend-owned (stripe-backend), never written by the driver app.
+    /// "pending" | "processing" | "succeeded" | "failed" | "refunded" — see
+    /// PAYMENT_STATUSES in stripe-backend/index.js. Lets the driver-facing
+    /// completion screen show "Awaiting Rider Payment" instead of implying
+    /// the fare has already settled.
+    let paymentStatus: String?
+    let paymentFailureReason: String?
+    let paymentFailureCode: String?
+    let paymentRetryCount: Int
 
     var normalizedStatus: String {
         DriverRideLifecyclePolicy.normalizedStatus(status)
@@ -199,6 +208,10 @@ struct DriverActiveRide: Identifiable, Equatable {
         arrivedAtStopAt = Self.dateValue(data["arrivedAtStopAt"])
         stopWaitStartedAt = Self.dateValue(data["stopWaitStartedAt"])
         headedToDropoffAt = Self.dateValue(data["headedToDropoffAt"])
+        paymentStatus = data["paymentStatus"] as? String
+        paymentFailureReason = data["failureReason"] as? String
+        paymentFailureCode = data["failureCode"] as? String
+        paymentRetryCount = Self.intValue(data["retryCount"]) ?? 0
     }
 
     nonisolated private static func coordinate(from value: Any?) -> CLLocationCoordinate2D? {
@@ -216,6 +229,13 @@ struct DriverActiveRide: Identifiable, Equatable {
         if let double = value as? Double { return double }
         if let int = value as? Int { return Double(int) }
         if let number = value as? NSNumber { return number.doubleValue }
+        return nil
+    }
+
+    nonisolated private static func intValue(_ value: Any?) -> Int? {
+        if let int = value as? Int { return int }
+        if let number = value as? NSNumber { return number.intValue }
+        if let double = value as? Double { return Int(double) }
         return nil
     }
 

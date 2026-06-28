@@ -527,14 +527,16 @@ struct DriverWalletPayoutsView: View {
     /// "Chase Checking •••• 4242" / fake 3-row history.
     @MainActor
     private func refreshPayoutMethodsAndHistory() async {
-        guard let accountId = wallet.stripeAccountId, !accountId.isEmpty else { return }
+        guard wallet.stripeAccountId?.isEmpty == false else { return }
+        let idToken = try? await Auth.auth().currentUser?.getIDToken()
 
         async let externalAccountsTask: ExternalAccountsResponse? = {
             do {
-                var components = URLComponents(url: stripeBackendBase.appendingPathComponent("connect/external-accounts"), resolvingAgainstBaseURL: false)
-                components?.queryItems = [URLQueryItem(name: "accountId", value: accountId)]
-                guard let url = components?.url else { return nil }
-                let (data, response) = try await URLSession.shared.data(from: url)
+                var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/external-accounts"))
+                if let idToken {
+                    request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+                }
+                let (data, response) = try await URLSession.shared.data(for: request)
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
                 return try JSONDecoder().decode(ExternalAccountsResponse.self, from: data)
             } catch {
@@ -545,9 +547,13 @@ struct DriverWalletPayoutsView: View {
         async let payoutsTask: PayoutsResponse? = {
             do {
                 var components = URLComponents(url: stripeBackendBase.appendingPathComponent("connect/payouts"), resolvingAgainstBaseURL: false)
-                components?.queryItems = [URLQueryItem(name: "accountId", value: accountId), URLQueryItem(name: "limit", value: "10")]
+                components?.queryItems = [URLQueryItem(name: "limit", value: "10")]
                 guard let url = components?.url else { return nil }
-                let (data, response) = try await URLSession.shared.data(from: url)
+                var request = URLRequest(url: url)
+                if let idToken {
+                    request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+                }
+                let (data, response) = try await URLSession.shared.data(for: request)
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
                 return try JSONDecoder().decode(PayoutsResponse.self, from: data)
             } catch {
@@ -592,7 +598,7 @@ struct DriverWalletPayoutsView: View {
     /// than through another onboarding link.
     @MainActor
     private func openPayoutMethodManagement() async {
-        guard let accountId = wallet.stripeAccountId, !accountId.isEmpty else {
+        guard wallet.stripeAccountId?.isEmpty == false else {
             message = "Finish Stripe payouts setup before adding a payout method."
             return
         }
@@ -601,11 +607,13 @@ struct DriverWalletPayoutsView: View {
         defer { isOpeningPayoutMethodLink = false }
 
         do {
-            var components = URLComponents(url: stripeBackendBase.appendingPathComponent("connect/login-link"), resolvingAgainstBaseURL: false)
-            components?.queryItems = [URLQueryItem(name: "accountId", value: accountId)]
-            guard let url = components?.url else { throw URLError(.badURL) }
+            let url = stripeBackendBase.appendingPathComponent("connect/login-link")
 
-            let (data, response) = try await URLSession.shared.data(from: url)
+            var request = URLRequest(url: url)
+            if let token = try await Auth.auth().currentUser?.getIDToken() {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                 throw URLError(.badServerResponse)
             }
@@ -620,17 +628,18 @@ struct DriverWalletPayoutsView: View {
 
     @MainActor
     private func refreshStripeBalance() async {
-        guard let accountId = wallet.stripeAccountId, !accountId.isEmpty else { return }
+        guard wallet.stripeAccountId?.isEmpty == false else { return }
 
         isLoadingBalance = true
         defer { isLoadingBalance = false }
 
         do {
-            var components = URLComponents(url: stripeBackendBase.appendingPathComponent("connect/balance"), resolvingAgainstBaseURL: false)
-            components?.queryItems = [URLQueryItem(name: "accountId", value: accountId)]
-            guard let url = components?.url else { throw URLError(.badURL) }
+            var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/balance"))
+            if let token = try await Auth.auth().currentUser?.getIDToken() {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
 
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                 throw URLError(.badServerResponse)
             }
@@ -647,7 +656,7 @@ struct DriverWalletPayoutsView: View {
 
     @MainActor
     private func requestInstantPayout() async {
-        guard let accountId = wallet.stripeAccountId, !accountId.isEmpty else {
+        guard wallet.stripeAccountId?.isEmpty == false else {
             message = "Finish Stripe payouts setup before using Instant Pay."
             return
         }
@@ -665,11 +674,13 @@ struct DriverWalletPayoutsView: View {
             var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/instant-payout"))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            if let token = try await Auth.auth().currentUser?.getIDToken() {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
             request.httpBody = try JSONEncoder().encode(InstantPayoutRequest(
-                accountId: accountId,
                 amount: amountCents,
                 currency: "usd",
-                uid: Auth.auth().currentUser?.uid
+                requestId: UUID().uuidString
             ))
 
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -780,10 +791,9 @@ private struct StripeConnectBalanceResponse: Decodable {
 }
 
 private struct InstantPayoutRequest: Encodable {
-    let accountId: String
     let amount: Int
     let currency: String
-    let uid: String?
+    let requestId: String
 }
 
 private struct InstantPayoutResponse: Decodable {

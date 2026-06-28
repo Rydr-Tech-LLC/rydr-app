@@ -304,15 +304,12 @@ private extension PaymentMethodView {
     }
 
     func ensureCustomer(for user: User, completion: @escaping (Result<String, Error>) -> Void) {
-        let uid = user.uid
-
-        let email = user.email ?? "user-\(uid)@example.com"
         let name  = user.displayName ?? "Rydr User"
 
         requestJSON(
             backendBase: backendBase,
             path: "create-customer",
-            body: ["email": email, "name": name, "uid": uid],
+            body: ["name": name],
             decode: CreateCustomerResponse.self
         ) { resp in
             guard let cid = resp?.customerId, !cid.isEmpty else {
@@ -327,7 +324,7 @@ private extension PaymentMethodView {
         requestJSON(
             backendBase: backendBase,
             path: "list-payment-methods",
-            body: ["customerId": customerId],
+            body: [:],
             decode: ListPMsResponse.self
         ) { resp in
             DispatchQueue.main.async {
@@ -349,7 +346,7 @@ private extension PaymentMethodView {
         requestJSON(
             backendBase: backendBase,
             path: "set-default-payment-method",
-            body: ["customerId": customerId ?? "", "paymentMethodId": pmId],
+            body: ["paymentMethodId": pmId],
             decode: SimpleOK.self
         ) { _ in completion(true) }
     }
@@ -842,16 +839,16 @@ private struct AddOrReplaceCardSheet: View {
         guard let pmParams = cardParams else { return }
         errorText = nil; isWorking = true
 
-        var req = URLRequest(url: backendBase.appendingPathComponent("create-setup-intent"))
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["customerId": customerId])
-
-        URLSession.shared.dataTask(with: req) { data, _, err in
-            if let err = err { finish(.failure(err)); return }
-            guard let data = data,
-                  let si = try? JSONDecoder().decode(SetupIntentResponse_Profile.self, from: data)
-            else { finish(.failure(simple("Failed to create SetupIntent"))); return }
+        requestJSON(
+            backendBase: backendBase,
+            path: "create-setup-intent",
+            body: ["requestId": UUID().uuidString],
+            decode: SetupIntentResponse_Profile.self
+        ) { si in
+            guard let si else {
+                finish(.failure(simple("Failed to create SetupIntent")))
+                return
+            }
 
             let confirm = STPSetupIntentConfirmParams(clientSecret: si.clientSecret)
             confirm.paymentMethodParams = pmParams
@@ -877,7 +874,7 @@ private struct AddOrReplaceCardSheet: View {
                     finish(.failure(simple("Unknown status")))
                 }
             }
-        }.resume()
+        }
     }
 
     private func finish(_ result: Result<String, Error>) {

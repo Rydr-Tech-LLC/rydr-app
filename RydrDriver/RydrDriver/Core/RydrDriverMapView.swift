@@ -17,6 +17,7 @@ struct RydrDriverMapView: View {
     /// movement so the work zone keeps following the driver instead of staying pinned
     /// to wherever it was first drawn.
     @State private var lastFittedCoordinate: CLLocationCoordinate2D?
+    @State private var returnToGroundCameraWorkItem: DispatchWorkItem?
 
     private var driverCoordinateKey: String? {
         driverCoordinate.map { "\($0.latitude),\($0.longitude)" }
@@ -62,11 +63,17 @@ struct RydrDriverMapView: View {
                 }
         )
         .onChange(of: filterPreferences.workZoneEnabled) { _, isEnabled in
-            guard isEnabled else { return }
+            guard isEnabled else {
+                returnToGroundCameraWorkItem?.cancel()
+                returnToGroundCameraWorkItem = nil
+                return
+            }
             fitWorkZoneInViewport()
+            scheduleReturnToGroundCamera()
         }
         .onChange(of: filterPreferences.effectivePickupMiles) { _, _ in
             fitWorkZoneInViewport()
+            scheduleReturnToGroundCamera()
         }
         .onChange(of: driverCoordinateKey) { _, _ in
             recenterWorkZoneIfDriverMoved()
@@ -74,6 +81,7 @@ struct RydrDriverMapView: View {
         .onAppear {
             if filterPreferences.workZoneEnabled {
                 fitWorkZoneInViewport()
+                scheduleReturnToGroundCamera()
             }
         }
     }
@@ -86,6 +94,7 @@ struct RydrDriverMapView: View {
 
         guard let lastFittedCoordinate else {
             fitWorkZoneInViewport()
+            scheduleReturnToGroundCamera()
             return
         }
 
@@ -93,7 +102,8 @@ struct RydrDriverMapView: View {
             .distance(from: CLLocation(latitude: lastFittedCoordinate.latitude, longitude: lastFittedCoordinate.longitude))
 
         if moved >= 30 {
-            fitWorkZoneInViewport()
+            lastFittedCoordinate = driverCoordinate
+            setGroundCamera()
         }
     }
 
@@ -164,6 +174,30 @@ struct RydrDriverMapView: View {
         let region = MKCoordinateRegion(
             center: biasedCenter,
             span: MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta)
+        )
+
+        position = .region(region)
+    }
+
+    private func scheduleReturnToGroundCamera() {
+        returnToGroundCameraWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem {
+            setGroundCamera()
+        }
+        returnToGroundCameraWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.15, execute: workItem)
+    }
+
+    private func setGroundCamera() {
+        guard let driverCoordinate else { return }
+
+        let region = MKCoordinateRegion(
+            center: CLLocationCoordinate2D(
+                latitude: driverCoordinate.latitude + 0.0028,
+                longitude: driverCoordinate.longitude
+            ),
+            span: MKCoordinateSpan(latitudeDelta: 0.018, longitudeDelta: 0.018)
         )
 
         position = .region(region)
@@ -503,18 +537,12 @@ private final class WorkZoneOverlayRenderer: MKOverlayRenderer {
     }
 
     override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
-        let centerPoint = point(for: MKMapPoint(circle.coordinate))
-        let metersToMapPoints = MKMapPointsPerMeterAtLatitude(circle.coordinate.latitude)
-        let radiusPoints = CGFloat(circle.radius * metersToMapPoints * Double(zoomScale))
+        let boundingRect = rect(for: circle.boundingMapRect)
+        let centerPoint = CGPoint(x: boundingRect.midX, y: boundingRect.midY)
+        let radiusPoints = min(boundingRect.width, boundingRect.height) / 2
         guard radiusPoints > 0 else { return }
 
         let brandRed = UIColor.systemRed
-        let boundingRect = CGRect(
-            x: centerPoint.x - radiusPoints,
-            y: centerPoint.y - radiusPoints,
-            width: radiusPoints * 2,
-            height: radiusPoints * 2
-        )
 
         // Soft outer glow — concentric translucent strokes that fall off with distance.
         context.saveGState()

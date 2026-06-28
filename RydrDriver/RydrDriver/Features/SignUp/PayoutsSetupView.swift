@@ -17,6 +17,7 @@
 //
 
 import SwiftUI
+import FirebaseAuth
 
 struct PayoutsSetupView: View {
     let uid: String
@@ -324,7 +325,7 @@ struct PayoutsSetupView: View {
                 accountId = resolvedAccountId
             }
 
-            let url = try await createAccountLink(accountId: resolvedAccountId)
+            let url = try await createAccountLink()
             onboardingURL = url
             isPresenting = true
         } catch {
@@ -337,8 +338,10 @@ struct PayoutsSetupView: View {
         var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/accounts"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token = try await Auth.auth().currentUser?.getIDToken() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "uid": uid,
             "email": email,
             "firstName": firstName,
             "lastName": lastName,
@@ -355,11 +358,14 @@ struct PayoutsSetupView: View {
         return decoded.accountId
     }
 
-    private func createAccountLink(accountId: String) async throws -> URL {
+    private func createAccountLink() async throws -> URL {
         var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/account-link"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["accountId": accountId])
+        if let token = try await Auth.auth().currentUser?.getIDToken() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["requestId": UUID().uuidString])
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
@@ -380,11 +386,11 @@ struct PayoutsSetupView: View {
         isCheckingStatus = true
         defer { isCheckingStatus = false }
 
-        var request = URLRequest(
-            url: stripeBackendBase.appendingPathComponent("connect/status")
-                .appending(queryItems: [URLQueryItem(name: "accountId", value: accountId)])
-        )
+        var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/status"))
         request.httpMethod = "GET"
+        if let token = try? await Auth.auth().currentUser?.getIDToken() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -392,7 +398,7 @@ struct PayoutsSetupView: View {
                 throw URLError(.badServerResponse)
             }
             let status = try JSONDecoder().decode(ConnectStatusResponse.self, from: data)
-            if status.payoutsEnabled || status.requirementsDue.isEmpty {
+            if status.payoutsEnabled {
                 withAnimation { connectOnboarded = true }
                 message = nil
                 isError = false
@@ -400,6 +406,14 @@ struct PayoutsSetupView: View {
                 // no manual confirmation required.
                 try? await Task.sleep(nanoseconds: 1_100_000_000)
                 onNext(accountId)
+            } else if status.requirementsDue.isEmpty {
+                // Nothing left for the driver to submit, but Stripe hasn't enabled payouts yet —
+                // most commonly an identity document is still under review. This is NOT the same
+                // as being done, so we must not advance the signup flow here: doing so would
+                // strand the driver in a state where payouts silently never finish enabling, with
+                // no way back into this step (see Phase 4 bug report).
+                message = "Stripe is verifying your information — this can take a little while. We'll let you know once it's done."
+                isError = false
             } else {
                 message = "We couldn't confirm your payout setup yet. Please finish your Stripe onboarding."
                 isError = false

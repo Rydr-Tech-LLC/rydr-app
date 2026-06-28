@@ -276,6 +276,12 @@ struct Receipt: Identifiable, Equatable {
     let fare: Double
     let cardMasked: String
     let chargeBreakdown: ReceiptChargeBreakdown
+    /// The backend (Firestore) ride document id — distinct from `rideId`,
+    /// which is the client-local UUID. Needed so the Payment Failed UI can
+    /// call `retryFailedPayment(rideId:...)` against the same ride the
+    /// backend tracks `paymentStatus` on. Optional/back-compat for any
+    /// existing call sites that don't have a backend id on hand.
+    let backendRideId: String?
 
     init(
         id: UUID = UUID(),
@@ -288,7 +294,8 @@ struct Receipt: Identifiable, Equatable {
         durationMinutes: Double,
         fare: Double,
         cardMasked: String,
-        chargeBreakdown: ReceiptChargeBreakdown? = nil
+        chargeBreakdown: ReceiptChargeBreakdown? = nil,
+        backendRideId: String? = nil
     ) {
         self.id = id
         self.rideId = rideId
@@ -301,6 +308,7 @@ struct Receipt: Identifiable, Equatable {
         self.fare = fare.currencyRounded
         self.cardMasked = cardMasked
         self.chargeBreakdown = chargeBreakdown ?? .legacy(total: fare)
+        self.backendRideId = backendRideId
     }
 
     func addingTip(cents: Int) -> Receipt {
@@ -317,7 +325,8 @@ struct Receipt: Identifiable, Equatable {
             durationMinutes: durationMinutes,
             fare: updatedBreakdown.calculatedTotal,
             cardMasked: cardMasked,
-            chargeBreakdown: updatedBreakdown
+            chargeBreakdown: updatedBreakdown,
+            backendRideId: backendRideId
         )
     }
 }
@@ -351,6 +360,13 @@ struct RideChatContext: Equatable {
 // MARK: - Service protocol
 enum DriverDecision { case accepted, declined }
 
+struct RideLifecycleSnapshot {
+    let status: Ride.Status?
+    let driverCoordinate: CLLocationCoordinate2D?
+    let pickupCoordinate: CLLocationCoordinate2D?
+    let dropoffCoordinate: CLLocationCoordinate2D?
+}
+
 enum RideRequestError: LocalizedError {
     case driverTimedOut
     case noDriversAvailable
@@ -366,7 +382,14 @@ enum RideRequestError: LocalizedError {
 }
 
 protocol RideService: AnyObject, Sendable {
-    func fetchNearbyDrivers(pickup: String, dropoff: String, rideType: String, near: CLLocationCoordinate2D) async throws -> [Driver]
+    func fetchNearbyDrivers(
+        pickup: String,
+        dropoff: String,
+        rideType: String,
+        near: CLLocationCoordinate2D,
+        pickupCoordinate: CLLocationCoordinate2D?,
+        dropoffCoordinate: CLLocationCoordinate2D?
+    ) async throws -> [Driver]
     func requestRide(
         driverId: String,
         pickup: String,
@@ -377,6 +400,7 @@ protocol RideService: AnyObject, Sendable {
         estimate: RideEstimate?
     ) async throws -> String // returns rideId
     func awaitDriverDecision(rideId: String) async throws -> DriverDecision
+    func rideLifecycleStream(rideId: String) -> AsyncThrowingStream<RideLifecycleSnapshot, Error>
     func driverLocationStream(rideId: String) -> AsyncStream<CLLocationCoordinate2D>
     func cancelRide(rideId: String) async throws
 }
@@ -399,12 +423,30 @@ final class RideManager: ObservableObject {
     @Published var hasRecoveredActiveRide = false
 
     // Payment
-    @Published var savedCards: [PaymentCard] = [
-        PaymentCard(last4: "4242", brand: "Visa"),
-        PaymentCard(last4: "1881", brand: "Mastercard")
-    ]
+    // Starts empty — no mock/placeholder cards. Populated only from the
+    // rider's real Stripe wallet via loadRealPaymentMethods(). A ride cannot
+    // be requested until at least one real card is on file (see
+    // `hasRealPaymentMethod` / the gate in `confirm(driver:)`).
+    @Published var savedCards: [PaymentCard] = []
     @Published var selectedCardIndex: Int = 0
     @Published var stripeCustomerId: String?
+    @Published var paymentStatus: String?           // "pending" | "processing" | "succeeded" | "failed" | "refunded"
+    @Published var paymentFailureReason: String?
+    @Published var isRetryingPayment = false
+
+    /// True once at least one real (non-mock) saved card is on file.
+    var hasRealPaymentMethod: Bool {
+        savedCards.contains { $0.stripePaymentMethodId != nil }
+    }
+
+    /// Safe accessor for the selected card — never indexes into an empty
+    /// array (can no longer happen in the real ride-request flow since
+    /// `confirm(driver:)` gates on `hasRealPaymentMethod`, but receipts
+    /// shouldn't crash even if state ever drifts).
+    private var selectedCard: PaymentCard? {
+        guard !savedCards.isEmpty else { return nil }
+        return savedCards[min(selectedCardIndex, savedCards.count - 1)]
+    }
 
     private let stripeBackendBase = URL(string: "https://rydr-stripe-backend.onrender.com")!
 
@@ -418,13 +460,10 @@ final class RideManager: ObservableObject {
     @Published var paidPickupWaitSeconds: Int = 0
     @Published var pickupWaitCharge: Double = 0
 
-    // Mock movement driver
-    private var movementTimer: Timer?
-
     // Dependencies & tasks
     private let rideService: RideService
     private var decisionTask: Task<Void, Never>?
-    private var locationTask: Task<Void, Never>?
+    private var rideLifecycleTask: Task<Void, Never>?
 
     // Internals used across steps
     private var attemptedDriverIDs: Set<String> = []
@@ -444,13 +483,15 @@ final class RideManager: ObservableObject {
     init(rideService: RideService = DebugFallbackRideService(primary: FirestoreRideService(), fallback: MockRideService())) {
         self.rideService = rideService
         restoreActiveRideIfNeeded()
+        if state == .inProgress {
+            observeActiveRideLifecycleIfNeeded()
+        }
         Task { await loadRealPaymentMethods() }
     }
 
     deinit {
         decisionTask?.cancel()
-        locationTask?.cancel()
-        // do NOT call stopMovement() here — deinit is not guaranteed on MainActor
+        rideLifecycleTask?.cancel()
     }
 
     // Remaining minutes (toy ETA for the chip)
@@ -521,7 +562,14 @@ final class RideManager: ObservableObject {
 
         Task {
             do {
-                let drivers = try await rideService.fetchNearbyDrivers(pickup: pickup, dropoff: dropoff, rideType: rideType, near: center)
+                let drivers = try await rideService.fetchNearbyDrivers(
+                    pickup: pickup,
+                    dropoff: dropoff,
+                    rideType: rideType,
+                    near: center,
+                    pickupCoordinate: pickupCoordinate,
+                    dropoffCoordinate: dropoffCoordinate
+                )
                 self.availableDrivers = drivers
                 self.isLoadingDrivers = false
                 if drivers.isEmpty {
@@ -537,6 +585,14 @@ final class RideManager: ObservableObject {
 
     /// Step 2: user taps a driver; send request, await accept/decline.
     func confirm(driver: Driver) {
+        // Part 6 (Payment Hardening): never let a ride be requested without a
+        // real, verified Stripe payment method on file — mock/placeholder
+        // cards can no longer reach the request flow.
+        guard hasRealPaymentMethod else {
+            rideRequestErrorMessage = "Add a payment method before requesting a ride."
+            return
+        }
+
         selectedDriver = driver
         attemptedDriverIDs.insert(driver.id)
         rideRequestErrorMessage = nil
@@ -573,7 +629,7 @@ final class RideManager: ObservableObject {
         }
     }
 
-    /// Driver accepted – seed an example route and start the mock movement.
+    /// Driver accepted – seed the ride from the request and observe backend lifecycle updates.
     func handleAccept() {
         guard let driver = selectedDriver else { return }
 
@@ -604,9 +660,9 @@ final class RideManager: ObservableObject {
         pickupWaitSecondsRemaining = 180
         paidPickupWaitSeconds = 0
         pickupWaitCharge = 0
-        startDriverMovement()
         state = .inProgress
         persistActiveRideSnapshot()
+        observeActiveRideLifecycleIfNeeded()
     }
 
     /// If driver declines, take user back to selection (remove that driver).
@@ -638,11 +694,11 @@ final class RideManager: ObservableObject {
 
     /// Complete ride -> create receipt + push to history.
     func completeRide() {
-        locationTask?.cancel()
-        locationTask = nil
+        rideLifecycleTask?.cancel()
+        rideLifecycleTask = nil
 
         guard let ride = currentRide else { return }
-        let card = savedCards[min(selectedCardIndex, savedCards.count - 1)]
+        let card = selectedCard
         let chargeBreakdown = receiptChargeBreakdown(for: ride, finalFare: ride.fare)
         let receipt = Receipt(
             rideId: ride.id,
@@ -653,8 +709,9 @@ final class RideManager: ObservableObject {
             distanceMiles: ride.estimate.distanceMiles,
             durationMinutes: ride.estimate.durationMinutes,
             fare: ride.fare,
-            cardMasked: "\(card.brand) ••\(card.last4)",
-            chargeBreakdown: chargeBreakdown
+            cardMasked: card.map { "\($0.brand) ••\($0.last4)" } ?? "No card on file",
+            chargeBreakdown: chargeBreakdown,
+            backendRideId: currentServiceRideId ?? ride.id.uuidString
         )
         lastReceipt = receipt
         history.insert(receipt, at: 0)
@@ -668,7 +725,6 @@ final class RideManager: ObservableObject {
         currentAppliedRydrBankCode = nil
         currentBaseFare = 0
         currentWaitChargePerMinute = 0
-        stopMovement()
         clearActiveRideSnapshot()
         state = .completed
         closeRideChatIfNeeded(chatContext)
@@ -682,7 +738,7 @@ final class RideManager: ObservableObject {
                 }
             }
             _ = try? await RydrBankAPI.rideComplete(rideId: backendRideId, distanceMi: distance, rideType: rideType)
-            await chargeRiderForRide(ride, totalAmount: chargeBreakdown.calculatedTotal)
+            await chargeRiderForRide(ride, rideId: backendRideId, totalAmount: chargeBreakdown.calculatedTotal)
         }
     }
 
@@ -697,9 +753,8 @@ final class RideManager: ObservableObject {
 
     func cancelAll() {
         decisionTask?.cancel()
-        locationTask?.cancel()
+        rideLifecycleTask?.cancel()
         let chatContext = activeRideChatContext
-        stopMovement()
         currentRide = nil
         selectedDriver = nil
         currentServiceRideId = nil
@@ -709,81 +764,6 @@ final class RideManager: ObservableObject {
         clearActiveRideSnapshot()
         state = .cancelled
         closeRideChatIfNeeded(chatContext)
-    }
-
-    // MARK: - Mock movement & helpers
-
-    /// Drive the marker along a two-leg route (start→pickup, pickup→dropoff).
-    private func startDriverMovement() {
-        stopMovement()
-        guard let ride = currentRide,
-              let pickup = pickupCoordinate,
-              let drop   = dropoffCoordinate else { return }
-
-        let start = ride.driver.coordinate
-        let pickupDurationTicks = 28
-        let waitDurationTicks = 8
-        let paidWaitDurationTicks = 6
-        let dropoffDurationTicks = 34
-        let pickupEtaStart = max(60, pickupEtaSecondsRemaining)
-        let destinationEtaStart = max(60, destinationEtaSecondsRemaining)
-        var tick = 0
-
-        movementTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
-            guard let self else { return }
-            tick += 1
-
-            // Ensure we mutate @Published state on the main actor.
-            Task { @MainActor in
-                if tick <= pickupDurationTicks {
-                    let progress = Double(tick) / Double(pickupDurationTicks)
-                    self.liveDriverCoordinate = self.interpolate(from: start, to: pickup, t: progress)
-                    self.pickupEtaSecondsRemaining = max(0, Int(Double(pickupEtaStart) * (1 - progress)))
-                } else if tick <= pickupDurationTicks + waitDurationTicks {
-                    self.liveDriverCoordinate = pickup
-                    self.pickupEtaSecondsRemaining = 0
-                    self.currentRide?.status = .waitingForRider
-                    let waitProgress = Double(tick - pickupDurationTicks) / Double(waitDurationTicks)
-                    self.pickupWaitSecondsRemaining = max(0, Int(180.0 * (1 - waitProgress)))
-                    self.updatePaidPickupWait(seconds: 0)
-                    self.persistActiveRideSnapshot()
-                } else if tick <= pickupDurationTicks + waitDurationTicks + paidWaitDurationTicks {
-                    self.liveDriverCoordinate = pickup
-                    self.pickupEtaSecondsRemaining = 0
-                    self.currentRide?.status = .waitingForRider
-                    self.pickupWaitSecondsRemaining = 0
-                    let paidProgress = Double(tick - pickupDurationTicks - waitDurationTicks) / Double(paidWaitDurationTicks)
-                    self.updatePaidPickupWait(seconds: Int((paidProgress * 120.0).rounded()))
-                    self.persistActiveRideSnapshot()
-                } else {
-                    if self.currentRide?.status == .waitingForRider {
-                        self.markRiderPickedUp()
-                    }
-                    let dropoffTick = tick - pickupDurationTicks - waitDurationTicks
-                    let progress = min(1.0, Double(dropoffTick) / Double(dropoffDurationTicks))
-                    self.liveDriverCoordinate = self.interpolate(from: pickup, to: drop, t: progress)
-                    self.destinationEtaSecondsRemaining = max(0, Int(Double(destinationEtaStart) * (1 - progress)))
-                    self.persistActiveRideSnapshot()
-                    if progress >= 1.0 {
-                        timer.invalidate()
-                        self.completeRide()
-                    }
-                }
-            }
-        }
-        if let movementTimer { RunLoop.main.add(movementTimer, forMode: .common) }
-    }
-
-    private func stopMovement() {
-        movementTimer?.invalidate()
-        movementTimer = nil
-    }
-
-    private func interpolate(from a: CLLocationCoordinate2D, to b: CLLocationCoordinate2D, t: Double) -> CLLocationCoordinate2D {
-        let clamped = max(0, min(1, t))
-        let lat = a.latitude * (1 - clamped) + b.latitude * clamped
-        let lon = a.longitude * (1 - clamped) + b.longitude * clamped
-        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
     }
 
     // MARK: - Estimation / Pricing
@@ -866,7 +846,6 @@ final class RideManager: ObservableObject {
 
     func markRiderPickedUp() {
         guard currentRide?.status == .waitingForRider else { return }
-        currentRide?.status = .enRouteToDropoff
         destinationEtaSecondsRemaining = max(60, Int(((currentRide?.estimate.durationMinutes ?? cachedEstimate.durationMinutes) * 0.6 * 60).rounded()))
         persistActiveRideSnapshot()
     }
@@ -879,10 +858,9 @@ final class RideManager: ObservableObject {
     }
 
     private func cancelBeforePickupAndReturnToSelection() {
-        locationTask?.cancel()
+        rideLifecycleTask?.cancel()
         decisionTask?.cancel()
         let chatContext = activeRideChatContext
-        stopMovement()
 
         if let selectedDriver {
             availableDrivers.removeAll { $0.id == selectedDriver.id }
@@ -917,17 +895,17 @@ final class RideManager: ObservableObject {
     private func cancelMidRideAndComplete() {
         guard let ride = currentRide else { return }
         let chatContext = activeRideChatContext
+        let backendRideId = currentServiceRideId ?? ride.id.uuidString
 
-        locationTask?.cancel()
+        rideLifecycleTask?.cancel()
         decisionTask?.cancel()
-        stopMovement()
 
         let totalSeconds = max(1, Int((ride.estimate.durationMinutes * 0.6 * 60).rounded()))
         let traveledFraction = max(0.1, min(0.95, 1.0 - (Double(destinationEtaSecondsRemaining) / Double(totalSeconds))))
         let proratedDistance = ((ride.estimate.distanceMiles * traveledFraction) * 10).rounded() / 10
         let proratedMinutes = max(1, (ride.estimate.durationMinutes * 0.6 * traveledFraction).rounded())
         let proratedFare = ((ride.fare * traveledFraction) * 100).rounded() / 100
-        let card = savedCards[min(selectedCardIndex, savedCards.count - 1)]
+        let card = selectedCard
         let chargeBreakdown = receiptChargeBreakdown(
             for: ride,
             finalFare: proratedFare,
@@ -943,8 +921,9 @@ final class RideManager: ObservableObject {
             distanceMiles: proratedDistance,
             durationMinutes: proratedMinutes,
             fare: proratedFare,
-            cardMasked: "\(card.brand) ••\(card.last4)",
-            chargeBreakdown: chargeBreakdown
+            cardMasked: card.map { "\($0.brand) ••\($0.last4)" } ?? "No card on file",
+            chargeBreakdown: chargeBreakdown,
+            backendRideId: backendRideId
         )
         if let lastReceipt {
             history.insert(lastReceipt, at: 0)
@@ -962,8 +941,64 @@ final class RideManager: ObservableObject {
         closeRideChatIfNeeded(chatContext)
 
         Task {
-            await chargeRiderForRide(ride, totalAmount: chargeBreakdown.calculatedTotal)
+            print("ℹ️ Mid-ride rider cancellation payment capture waits for backend cancellation adjudication (rideId: \(backendRideId)).")
         }
+    }
+
+    private func observeActiveRideLifecycleIfNeeded() {
+        guard let rideId = currentServiceRideId else { return }
+        rideLifecycleTask?.cancel()
+        rideLifecycleTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                for try await snapshot in rideService.rideLifecycleStream(rideId: rideId) {
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        self.applyLifecycleSnapshot(snapshot)
+                    }
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.rideRequestErrorMessage = "Ride updates paused: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func applyLifecycleSnapshot(_ snapshot: RideLifecycleSnapshot) {
+        guard currentRide != nil else { return }
+
+        if let driverCoordinate = snapshot.driverCoordinate {
+            liveDriverCoordinate = driverCoordinate
+        }
+        if let pickup = snapshot.pickupCoordinate {
+            pickupCoordinate = pickup
+            cachedPickupCoordinate = pickup
+        }
+        if let dropoff = snapshot.dropoffCoordinate {
+            dropoffCoordinate = dropoff
+            cachedDropoffCoordinate = dropoff
+        }
+        if let status = snapshot.status {
+            currentRide?.status = status
+            switch status {
+            case .enRouteToPickup:
+                pickupEtaSecondsRemaining = max(60, pickupEtaSecondsRemaining)
+            case .waitingForRider:
+                pickupEtaSecondsRemaining = 0
+            case .enRouteToDropoff:
+                pickupEtaSecondsRemaining = 0
+                pickupWaitSecondsRemaining = 0
+            case .completed:
+                completeRide()
+                return
+            case .cancelled:
+                cancelAll()
+                return
+            }
+        }
+        persistActiveRideSnapshot()
     }
 
     private func closeRideChatIfNeeded(_ context: RideChatContext?) {
@@ -1196,13 +1231,14 @@ final class RideManager: ObservableObject {
     }
 
     /// Looks up (or creates, idempotently) the signed-in rider's Stripe customerId.
+    /// The backend derives/owns this from the verified Firebase uid — only
+    /// `email`/`name` (display data, not an identity the server trusts) are sent.
     private func ensureStripeCustomerId() async -> String? {
         if let stripeCustomerId { return stripeCustomerId }
         guard let user = Auth.auth().currentUser else { return nil }
 
-        let email = user.email ?? "user-\(user.uid)@example.com"
         let name = user.displayName ?? "Rydr Rider"
-        guard let data = await stripeRequest("create-customer", body: ["email": email, "name": name, "uid": user.uid]),
+        guard let data = await stripeRequest("create-customer", body: ["name": name]),
               let response = try? JSONDecoder().decode(StripeCustomerResponse_Ride.self, from: data) else {
             return nil
         }
@@ -1210,11 +1246,13 @@ final class RideManager: ObservableObject {
         return response.customerId
     }
 
-    /// Replaces the placeholder saved cards with the rider's real Stripe wallet, if reachable.
-    /// On failure (offline, no real cards yet, etc.) the existing/mock cards are left untouched.
+    /// Loads the rider's real Stripe wallet. `savedCards` starts empty (no mock
+    /// cards) and stays empty if this fails or the rider has no real cards yet
+    /// — ride requests are blocked until at least one succeeds (see
+    /// `hasRealPaymentMethod`).
     func loadRealPaymentMethods() async {
-        guard let customerId = await ensureStripeCustomerId() else { return }
-        guard let data = await stripeRequest("list-payment-methods", body: ["customerId": customerId]),
+        guard await ensureStripeCustomerId() != nil else { return }
+        guard let data = await stripeRequest("list-payment-methods", body: [:]),
               let response = try? JSONDecoder().decode(StripePaymentMethodsResponse_Ride.self, from: data),
               !response.paymentMethods.isEmpty else {
             return
@@ -1230,52 +1268,58 @@ final class RideManager: ObservableObject {
         }
     }
 
-    /// Off-session charges the rider's saved card for a completed (or prorated-cancelled) ride.
-    /// When the driver has a Stripe Connect account, this is a destination charge: the driver
-    /// is transferred (amount - applicationFee), and Rydr keeps applicationFee
-    /// (30% of the per-mile/per-minute fare + 100% of the booking fee).
-    private func chargeRiderForRide(_ ride: Ride, totalAmount: Double) async {
+    /// Off-session charges the rider for a completed (or prorated-cancelled) ride.
+    /// The backend re-derives the customerId, the driver's Connect account, and the
+    /// platform's fee share server-side from `rideId` — this client never sends a
+    /// customerId/driverAccountId/applicationFeeAmount it could tamper with.
+    /// Publishes `paymentStatus`/`paymentFailureReason` so the UI can show
+    /// "Payment Failed — Retry Payment" per the Phase 2 spec.
+    private func chargeRiderForRide(_ ride: Ride, rideId: String, totalAmount: Double) async {
         guard totalAmount > 0 else { return }
-        guard let customerId = await ensureStripeCustomerId() else {
-            print("❌ Ride charge skipped: no Stripe customerId available")
-            return
-        }
-
-        let card = savedCards[min(selectedCardIndex, savedCards.count - 1)]
-        guard let paymentMethodId = card.stripePaymentMethodId else {
-            // Mock/placeholder card on file (e.g. debug build with no real wallet) — nothing to charge.
-            print("ℹ️ Ride charge skipped: no real saved payment method on file")
-            return
-        }
 
         let amountCents = Int((totalAmount * 100).rounded())
         guard amountCents > 0 else { return }
 
-        var body: [String: Any] = [
-            "amount": amountCents,
-            "currency": "usd",
-            "customerId": customerId,
-            "paymentMethodId": paymentMethodId,
-            "confirm": true,
-        ]
+        let body: [String: Any] = ["rideId": rideId, "amount": amountCents, "currency": "usd"]
+        await performChargeRequest(path: "create-payment-intent", body: body)
+    }
 
-        if let driverAccountId = ride.driver.stripeAccountId, ride.driver.stripeChargesEnabled {
-            let fareBreakdown = Self.fareBreakdown(estimate: ride.estimate, with: ride.driver, rideType: ride.rideType)
-            let applicationFeeCents = max(0, min(amountCents, Int((fareBreakdown.platformShare * 100).rounded())))
-            body["driverAccountId"] = driverAccountId
-            body["applicationFeeAmount"] = applicationFeeCents
-        }
+    /// Retries a ride whose payment previously failed (Phase 2: "retry failed
+    /// payment flow"). Optionally pass a different `paymentMethodId` if the
+    /// rider just updated their card. Backend rejects this unless the ride's
+    /// current `paymentStatus` is "failed", so it can never double-charge.
+    func retryFailedPayment(rideId: String, amountCents: Int, paymentMethodId: String? = nil) async {
+        guard !isRetryingPayment else { return }
+        isRetryingPayment = true
+        defer { isRetryingPayment = false }
 
-        guard let data = await stripeRequest("create-payment-intent", body: body) else {
-            print("❌ Ride charge failed: no response from backend")
+        var body: [String: Any] = ["rideId": rideId, "amount": amountCents, "currency": "usd"]
+        if let paymentMethodId { body["paymentMethodId"] = paymentMethodId }
+        await performChargeRequest(path: "payments/retry", body: body)
+    }
+
+    private func performChargeRequest(path: String, body: [String: Any]) async {
+        paymentStatus = "processing"
+        paymentFailureReason = nil
+
+        guard let data = await stripeRequest(path, body: body) else {
+            paymentStatus = "failed"
+            paymentFailureReason = "Couldn't reach the payment server. Please try again."
             return
         }
         if let response = try? JSONDecoder().decode(StripePaymentIntentResponse_Ride.self, from: data) {
             if let error = response.error {
+                paymentStatus = "failed"
+                paymentFailureReason = response.message ?? error
                 print("❌ Ride charge failed: \(error)")
             } else {
+                paymentStatus = response.status == "succeeded" ? "succeeded" : "processing"
+                paymentFailureReason = nil
                 print("✅ Ride charge succeeded: \(response.paymentIntentId ?? "") status=\(response.status ?? "")")
             }
+        } else {
+            paymentStatus = "failed"
+            paymentFailureReason = "Payment status could not be confirmed. Please try again."
         }
     }
 }
@@ -1300,4 +1344,5 @@ private struct StripePaymentIntentResponse_Ride: Decodable {
     let paymentIntentId: String?
     let status: String?
     let error: String?
+    let message: String?
 }

@@ -65,6 +65,52 @@ async function requireFirebaseUid(req, res) {
   }
 }
 
+// Admin-claim auth — mirrors the `isAdmin()` check in Rydr_Firebase's
+// Firestore rules and Mission Control's session role check. Used only by
+// the account-deletion cleanup endpoint below, which is the one place in
+// this service that needs to act on a Stripe customer/Connect account on
+// someone else's behalf (a human admin, not the account owner).
+//
+// Mission Control authenticates its admins with a session *cookie*, not a
+// Firebase ID token, so it has nothing to put in an `Authorization: Bearer`
+// header to satisfy `verifyIdToken`. Rather than minting custom tokens
+// across services (which still requires a client-side exchange step and
+// would NOT work from a server route), this also accepts a static shared
+// secret for trusted server-to-server calls between our own backends. The
+// secret is never exposed to a browser — only Mission Control's server-side
+// route handler holds it (see RYDR_INTERNAL_ADMIN_SECRET in both services'
+// env). A request still works the normal Firebase-admin-claim way for any
+// future direct-from-app admin tooling.
+async function requireAdminUid(req, res) {
+  try {
+    const sharedSecret = req.header("x-internal-admin-secret");
+    if (sharedSecret && process.env.RYDR_INTERNAL_ADMIN_SECRET && sharedSecret === process.env.RYDR_INTERNAL_ADMIN_SECRET) {
+      const onBehalfOf = req.header("x-admin-uid") || "mission-control";
+      return onBehalfOf;
+    }
+
+    const authorization = req.header("authorization") || "";
+    const match = authorization.match(/^Bearer (.+)$/);
+    if (!match) {
+      res.status(401).json({ error: "unauthorized" });
+      return null;
+    }
+
+    initializeFirebase();
+    const decoded = await admin.auth().verifyIdToken(match[1]);
+    const isAdminClaim = decoded.admin === true || decoded.role === "admin";
+    if (!isAdminClaim) {
+      res.status(403).json({ error: "admin_required" });
+      return null;
+    }
+    return decoded.uid;
+  } catch (err) {
+    console.warn("⚠️ Admin auth failed", err.message);
+    res.status(401).json({ error: "unauthorized" });
+    return null;
+  }
+}
+
 async function persistStripeCustomerId(uid, customerId) {
   if (!uid || !customerId) return;
   initializeFirebase();
@@ -87,6 +133,15 @@ async function updateRider(uid, payload) {
     },
     { merge: true }
   );
+}
+
+async function authUserProfile(uid) {
+  initializeFirebase();
+  const user = await admin.auth().getUser(uid);
+  return {
+    email: user.email || undefined,
+    name: user.displayName || undefined,
+  };
 }
 
 // --- Driver Connect helpers ---
@@ -198,6 +253,135 @@ async function updatePublicDriverConnectStatus(uid, { stripeAccountId, stripeCha
   );
 }
 
+// --- Payment ownership + idempotency helpers ---------------------------------
+//
+// Phase 2 (Payment Hardening) rule: never trust a client-provided
+// customerId / paymentMethodId / driverAccountId. Every payment-affecting
+// route below re-derives these from Firestore/Stripe using the verified
+// Firebase uid, and only ever falls back to a client value to detect +
+// reject a mismatch (defense in depth), never to authorize an action.
+
+/** The Stripe customerId actually on file for this rider, or null. */
+async function ownedCustomerId(uid) {
+  if (!uid) return null;
+  initializeFirebase();
+  const snap = await admin.firestore().collection("riders").doc(uid).get();
+  return snap.exists ? (snap.data().stripeCustomerId || null) : null;
+}
+
+function suppliedValue(req, key) {
+  const bodyValue = req.body && Object.prototype.hasOwnProperty.call(req.body, key)
+    ? req.body[key]
+    : undefined;
+  if (bodyValue !== undefined && bodyValue !== null && String(bodyValue).trim() !== "") {
+    return String(bodyValue);
+  }
+  const queryValue = req.query && Object.prototype.hasOwnProperty.call(req.query, key)
+    ? req.query[key]
+    : undefined;
+  if (queryValue !== undefined && queryValue !== null && String(queryValue).trim() !== "") {
+    return String(queryValue);
+  }
+  return null;
+}
+
+function requireRequestId(req, res, operation) {
+  const requestId = suppliedValue(req, "requestId");
+  if (!requestId || !/^[A-Za-z0-9_-]{8,80}$/.test(requestId)) {
+    res.status(400).json({ error: "requestId_required", operation });
+    return null;
+  }
+  return requestId;
+}
+
+function rejectIfSuppliedUidMismatch(req, res, uid) {
+  const suppliedUid = suppliedValue(req, "uid");
+  if (suppliedUid && suppliedUid !== uid) {
+    res.status(403).json({ error: "uid_mismatch" });
+    return true;
+  }
+  return false;
+}
+
+async function rejectIfSuppliedCustomerMismatch(req, res, uid) {
+  const suppliedCustomerId = suppliedValue(req, "customerId");
+  if (!suppliedCustomerId) return false;
+
+  const customerId = await ownedCustomerId(uid);
+  if (!customerId || suppliedCustomerId !== customerId) {
+    res.status(403).json({ error: "customer_not_owned" });
+    return true;
+  }
+  return false;
+}
+
+function rejectIfSuppliedAccountMismatch(req, res, accountId) {
+  const suppliedAccountId = suppliedValue(req, "accountId") || suppliedValue(req, "connectedAccountId");
+  if (suppliedAccountId && suppliedAccountId !== accountId) {
+    res.status(403).json({ error: "connect_account_not_owned" });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Loads a ride the authenticated rider owns. Returns null (and never
+ * throws) if the ride doesn't exist or belongs to someone else, so callers
+ * can respond 404/403 without leaking which case it was.
+ */
+async function ownedRide(uid, rideId) {
+  if (!uid || !rideId) return null;
+  initializeFirebase();
+  const snap = await admin.firestore().collection("rides").doc(rideId).get();
+  if (!snap.exists) return null;
+  const data = snap.data();
+  if (data.riderId !== uid) return null;
+  return { ref: snap.ref, data };
+}
+
+/** Driver's Connect account, looked up server-side from the ride's driverId — never from the client. */
+async function driverAccountForRide(rideData) {
+  if (!rideData?.driverId) return null;
+  const driver = await driverData(rideData.driverId);
+  if (!driver?.stripeAccountId || !driver?.stripeChargesEnabled) return null;
+  return driver.stripeAccountId;
+}
+
+// Matches RydrPricing.driverPayoutShare in Features/Booking/RideManager.swift —
+// the platform keeps 30% of the ride fare (plus, on the client's existing fare
+// breakdown, the full booking fee). Used as a safety ceiling so a tampered
+// applicationFeeAmount can never let a rider's full charge bypass the
+// platform's cut entirely.
+const PLATFORM_MIN_FEE_SHARE = 0.30;
+
+const PAYMENT_STATUSES = new Set(["pending", "processing", "succeeded", "failed", "refunded"]);
+const CHARGEABLE_RIDE_STATUSES = new Set(["completed"]);
+
+/** Persists payment state onto the ride document the rider/driver apps already listen to. */
+async function recordPaymentStatus(rideRef, status, fields = {}) {
+  if (!PAYMENT_STATUSES.has(status)) {
+    throw new Error(`invalid paymentStatus "${status}"`);
+  }
+  initializeFirebase();
+  await rideRef.set(
+    {
+      paymentStatus: status,
+      lastPaymentAttempt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...fields,
+    },
+    { merge: true }
+  );
+}
+
+async function rideByPaymentIntentMetadata(rideId) {
+  if (!rideId) return null;
+  initializeFirebase();
+  const ref = admin.firestore().collection("rides").doc(rideId);
+  const snap = await ref.get();
+  return snap.exists ? ref : null;
+}
+
 // --- CORS (optional; iOS native calls don't need it, web would) ---
 const allowed = (process.env.CORS_ORIGINS || "")
   .split(",").map(s => s.trim()).filter(Boolean);
@@ -225,12 +409,34 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
       case "setup_intent.succeeded":
         console.log("💳 setup_intent.succeeded:", event.data.object.id);
         break;
-      case "payment_intent.succeeded":
-        console.log("💰 payment_intent.succeeded:", event.data.object.id);
+      case "payment_intent.succeeded": {
+        const pi = event.data.object;
+        console.log("💰 payment_intent.succeeded:", pi.id);
+        const rideId = pi.metadata?.rideId;
+        const rideRef = await rideByPaymentIntentMetadata(rideId);
+        if (rideRef) {
+          await recordPaymentStatus(rideRef, "succeeded", {
+            stripePaymentIntentId: pi.id,
+            failureReason: null,
+            failureCode: null,
+          });
+        }
         break;
-      case "payment_intent.payment_failed":
-        console.log("⚠️ payment_intent.payment_failed:", event.data.object.id);
+      }
+      case "payment_intent.payment_failed": {
+        const pi = event.data.object;
+        console.log("⚠️ payment_intent.payment_failed:", pi.id);
+        const rideId = pi.metadata?.rideId;
+        const rideRef = await rideByPaymentIntentMetadata(rideId);
+        if (rideRef) {
+          await recordPaymentStatus(rideRef, "failed", {
+            stripePaymentIntentId: pi.id,
+            failureReason: pi.last_payment_error?.message || "Payment failed",
+            failureCode: pi.last_payment_error?.code || null,
+          });
+        }
         break;
+      }
       case "account.updated": {
         const acct = event.data.object;
         console.log("ℹ️ account.updated", acct.id, {
@@ -282,23 +488,29 @@ app.post("/identity/create-session", async (req, res) => {
     if (!uid) return;
 
     const { role } = req.body || {};
+    const requestId = requireRequestId(req, res, "identity_create_session");
+    if (!requestId) return;
     const verificationFlow = identityFlows[role];
     if (!verificationFlow) {
       return res.status(400).json({ error: "invalid_identity_role" });
     }
 
     const profile = await identityProfile(uid, role);
-    const session = await stripe.identity.verificationSessions.create({
-      verification_flow: verificationFlow,
-      provided_details: {
-        email: profile.email,
-      },
-      metadata: {
-        uid,
-        role,
+    const session = await stripe.identity.verificationSessions.create(
+      {
         verification_flow: verificationFlow,
+        provided_details: {
+          email: profile.email,
+        },
+        metadata: {
+          uid,
+          role,
+          verification_flow: verificationFlow,
+          requestId,
+        },
       },
-    });
+      { idempotencyKey: `identity_session_${role}_${uid}_${requestId}` }
+    );
 
     if (!session.client_secret) {
       return res.status(500).json({ error: "missing_client_secret" });
@@ -345,52 +557,64 @@ app.get("/identity/status", async (req, res) => {
 });
 
 // --- Create-or-get Customer (idempotent) ---
-// Body: { email?: string, name?: string, uid?: string } -> { customerId }
+// Auth required. Body: { email?: string, name?: string } -> { customerId }
+// The Stripe customer is always looked up/created against the *authenticated*
+// uid — a client can no longer hand us an arbitrary uid/customerId.
 app.post("/create-customer", async (req, res) => {
   try {
-    const { email, name, uid } = req.body || {};
-    const verifiedUid = await verifiedFirebaseUid(req);
-    const stripeMetadataUid = verifiedUid || uid;
+    const uid = await requireFirebaseUid(req, res);
+    if (!uid) return;
+    if (rejectIfSuppliedUidMismatch(req, res, uid)) return;
+    if (await rejectIfSuppliedCustomerMismatch(req, res, uid)) return;
 
-    // 1) Prefer lookup by metadata.firebase_uid (if provided)
-    if (stripeMetadataUid) {
-      const byUid = await stripe.customers.search({
-        query: `metadata['firebase_uid']:'${stripeMetadataUid}'`,
-      });
-      if (byUid.data.length) {
-        if (verifiedUid) {
-          await persistStripeCustomerId(verifiedUid, byUid.data[0].id);
-        }
-        return res.json({ customerId: byUid.data[0].id });
-      }
+    const { name } = req.body || {};
+    const authProfile = await authUserProfile(uid);
+    const customerEmail = authProfile.email;
+    const customerName = authProfile.name || name || undefined;
+
+    // 0) Already on file for this rider — fast path, no Stripe round trip.
+    const existing = await ownedCustomerId(uid);
+    if (existing) {
+      return res.json({ customerId: existing });
     }
 
-    // 2) Fallback by email (if present)
-    if (email) {
-      const byEmail = await stripe.customers.search({ query: `email:'${email}'` });
+    // 1) Lookup by metadata.firebase_uid
+    const byUid = await stripe.customers.search({
+      query: `metadata['firebase_uid']:'${uid}'`,
+    });
+    if (byUid.data.length) {
+      await persistStripeCustomerId(uid, byUid.data[0].id);
+      return res.json({ customerId: byUid.data[0].id });
+    }
+
+    // 2) Fallback by Firebase Auth email only — never by a client-supplied email.
+    if (customerEmail) {
+      const byEmail = await stripe.customers.search({ query: `email:'${customerEmail}'` });
       if (byEmail.data.length) {
-        // Backfill UID so future lookups use metadata
-        if (stripeMetadataUid && byEmail.data[0].metadata?.firebase_uid !== stripeMetadataUid) {
-          await stripe.customers.update(byEmail.data[0].id, {
-            metadata: { ...byEmail.data[0].metadata, firebase_uid: stripeMetadataUid },
-          });
+        if (byEmail.data[0].metadata?.firebase_uid !== uid) {
+          await stripe.customers.update(
+            byEmail.data[0].id,
+            {
+              metadata: { ...byEmail.data[0].metadata, firebase_uid: uid },
+            },
+            { idempotencyKey: `customer_backfill_uid_${uid}` }
+          );
         }
-        if (verifiedUid) {
-          await persistStripeCustomerId(verifiedUid, byEmail.data[0].id);
-        }
+        await persistStripeCustomerId(uid, byEmail.data[0].id);
         return res.json({ customerId: byEmail.data[0].id });
       }
     }
 
-    // 3) Create new customer (email optional)
-    const customer = await stripe.customers.create({
-      email: email || undefined,
-      name: name || undefined,
-      metadata: stripeMetadataUid ? { firebase_uid: stripeMetadataUid } : undefined,
-    });
-    if (verifiedUid) {
-      await persistStripeCustomerId(verifiedUid, customer.id);
-    }
+    // 3) Create new customer, keyed to this uid so retries can't create duplicates.
+    const customer = await stripe.customers.create(
+      {
+        email: customerEmail,
+        name: customerName,
+        metadata: { firebase_uid: uid },
+      },
+      { idempotencyKey: `customer_create_${uid}` }
+    );
+    await persistStripeCustomerId(uid, customer.id);
     return res.json({ customerId: customer.id });
   } catch (e) {
     console.error("❌ create-customer:", e);
@@ -399,13 +623,21 @@ app.post("/create-customer", async (req, res) => {
 });
 
 // --- Ephemeral Key ---
-// Headers: "Stripe-Version" required; Body: { customerId }
+// Auth required. Headers: "Stripe-Version" required.
+// The customerId is always the authenticated rider's own Stripe customer —
+// a client-supplied customerId is no longer accepted.
 app.post("/ephemeral-key", async (req, res) => {
   try {
-    const { customerId } = req.body || {};
+    const uid = await requireFirebaseUid(req, res);
+    if (!uid) return;
+    if (rejectIfSuppliedUidMismatch(req, res, uid)) return;
+    if (await rejectIfSuppliedCustomerMismatch(req, res, uid)) return;
+
     const apiVer = req.headers["stripe-version"];
-    if (!customerId) return res.status(400).json({ error: "customerId_required" });
-    if (!apiVer)    return res.status(400).json({ error: "stripe_version_required" });
+    if (!apiVer) return res.status(400).json({ error: "stripe_version_required" });
+
+    const customerId = await ownedCustomerId(uid);
+    if (!customerId) return res.status(404).json({ error: "no_stripe_customer_on_file" });
 
     const key = await stripe.ephemeralKeys.create(
       { customer: customerId },
@@ -419,17 +651,29 @@ app.post("/ephemeral-key", async (req, res) => {
 });
 
 // --- SetupIntent (save a card) ---
-// Body: { customerId } -> { clientSecret }
+// Auth required -> { clientSecret }. customerId is derived from the
+// authenticated rider, never accepted from the client.
 app.post("/create-setup-intent", async (req, res) => {
   try {
-    const { customerId } = req.body || {};
-    if (!customerId) return res.status(400).json({ error: "customerId_required" });
+    const uid = await requireFirebaseUid(req, res);
+    if (!uid) return;
+    if (rejectIfSuppliedUidMismatch(req, res, uid)) return;
+    if (await rejectIfSuppliedCustomerMismatch(req, res, uid)) return;
 
-    const si = await stripe.setupIntents.create({
-      customer: customerId,
-      payment_method_types: ["card"],
-      usage: "off_session",
-    });
+    const customerId = await ownedCustomerId(uid);
+    if (!customerId) return res.status(404).json({ error: "no_stripe_customer_on_file" });
+    const requestId = requireRequestId(req, res, "create_setup_intent");
+    if (!requestId) return;
+
+    const si = await stripe.setupIntents.create(
+      {
+        customer: customerId,
+        payment_method_types: ["card"],
+        usage: "off_session",
+        metadata: { firebase_uid: uid, requestId },
+      },
+      { idempotencyKey: `setup_intent_${uid}_${requestId}` }
+    );
     res.json({ clientSecret: si.client_secret });
   } catch (e) {
     console.error("❌ create-setup-intent:", e);
@@ -437,81 +681,215 @@ app.post("/create-setup-intent", async (req, res) => {
   }
 });
 
-// --- PaymentIntent (charge) ---
-// Body: { amount: <int cents>, currency: "usd", customerId?: "cus_...",
-//         driverAccountId?: "acct_...", applicationFeeAmount?: <int cents>,
-//         paymentMethodId?: "pm_...", confirm?: boolean }
+// --- PaymentIntent (charge a ride) ---------------------------------------
 //
-// If driverAccountId is provided, this becomes a Stripe Connect "destination
-// charge": the rider's card is charged the full `amount` on the platform
-// account, Stripe automatically transfers (amount - applicationFeeAmount) to
-// the driver's connected account, and the platform keeps applicationFeeAmount
-// (the driver's 70/30-split platform cut + the full booking fee).
-//
-// If paymentMethodId + confirm are provided, the PaymentIntent is confirmed
-// immediately off-session (used at ride completion, when the rider isn't
-// actively present in a payment UI to authenticate a new charge). Otherwise
-// this falls back to the original behavior of returning a clientSecret for
-// the client to confirm itself.
+// Shared by /create-payment-intent (first attempt) and /payments/retry
+// (subsequent attempts after a failure). Every identity used to build the
+// charge — customerId, driverAccountId, the application fee floor — is
+// re-derived server-side from the ride/rider/driver Firestore docs, never
+// taken from the request body. The only client inputs that actually affect
+// the charge are `amount` (must be > 0) and, optionally, which of the
+// rider's *own* saved payment methods to use.
+async function chargeRideAttempt({
+  uid,
+  rideId,
+  amount,
+  currency = "usd",
+  paymentMethodId,
+  suppliedCustomerId,
+  suppliedDriverAccountId,
+}) {
+  if (!Number.isInteger(amount) || amount <= 0) {
+    return { httpStatus: 400, body: { error: "invalid_amount" } };
+  }
+
+  const owned = await ownedRide(uid, rideId);
+  if (!owned) {
+    return { httpStatus: 404, body: { error: "ride_not_found_or_not_owned" } };
+  }
+  const { ref: rideRef, data: ride } = owned;
+  const attempt = (ride.retryCount || 0) + 1;
+
+  if (!CHARGEABLE_RIDE_STATUSES.has(ride.status)) {
+    return {
+      httpStatus: 409,
+      body: { error: "ride_not_completed", rideStatus: ride.status || "unknown" },
+    };
+  }
+
+  const customerId = await ownedCustomerId(uid);
+  if (!customerId) {
+    const message = "No Stripe customer is on file for this rider.";
+    await recordPaymentStatus(rideRef, "failed", {
+      retryCount: attempt,
+      failureReason: message,
+      failureCode: "no_stripe_customer_on_file",
+    });
+    return { httpStatus: 404, body: { error: "no_stripe_customer_on_file", message } };
+  }
+  if (suppliedCustomerId && suppliedCustomerId !== customerId) {
+    return { httpStatus: 403, body: { error: "customer_not_owned" } };
+  }
+
+  // Resolve which saved card to charge, and confirm it actually belongs to
+  // this rider's customer — a paymentMethodId is never trusted at face value.
+  let resolvedPaymentMethodId = paymentMethodId || null;
+  if (resolvedPaymentMethodId) {
+    const pm = await stripe.paymentMethods.retrieve(resolvedPaymentMethodId);
+    if (pm.customer !== customerId) {
+      return { httpStatus: 403, body: { error: "payment_method_not_owned" } };
+    }
+  } else {
+    const customer = await stripe.customers.retrieve(customerId);
+    resolvedPaymentMethodId = customer?.invoice_settings?.default_payment_method || null;
+  }
+  if (!resolvedPaymentMethodId) {
+    const message = "No default payment method is on file.";
+    await recordPaymentStatus(rideRef, "failed", {
+      retryCount: attempt,
+      failureReason: message,
+      failureCode: "no_payment_method_on_file",
+    });
+    return { httpStatus: 400, body: { error: "no_payment_method_on_file", message } };
+  }
+
+  const driverAccountId = await driverAccountForRide(ride);
+  if (suppliedDriverAccountId && suppliedDriverAccountId !== driverAccountId) {
+    return { httpStatus: 403, body: { error: "driver_account_not_owned" } };
+  }
+  let applicationFeeAmount;
+  if (driverAccountId) {
+    // Safety floor: the platform's cut can never be tampered down below its
+    // documented 30% share, even if a future client param tries to.
+    applicationFeeAmount = Math.round(amount * PLATFORM_MIN_FEE_SHARE);
+  }
+
+  const idempotencyKey = attempt === 1 ? rideId : `${rideId}_attempt${attempt}`;
+
+  await recordPaymentStatus(rideRef, "processing", {
+    retryCount: ride.retryCount || 0,
+    failureReason: null,
+    failureCode: null,
+  });
+
+  const params = {
+    amount,
+    currency,
+    customer: customerId,
+    payment_method: resolvedPaymentMethodId,
+    confirm: true,
+    off_session: true,
+    metadata: { rideId, riderId: uid, driverId: ride.driverId || "", attempt: String(attempt) },
+  };
+  if (driverAccountId) {
+    params.application_fee_amount = applicationFeeAmount;
+    params.transfer_data = { destination: driverAccountId };
+  }
+
+  try {
+    const pi = await stripe.paymentIntents.create(params, { idempotencyKey });
+    await recordPaymentStatus(rideRef, pi.status === "succeeded" ? "succeeded" : "processing", {
+      stripePaymentIntentId: pi.id,
+      retryCount: attempt,
+    });
+    return {
+      httpStatus: 200,
+      body: { clientSecret: pi.client_secret, paymentIntentId: pi.id, status: pi.status },
+    };
+  } catch (e) {
+    const code = e?.raw?.code || e?.code;
+    const message = e?.raw?.message || e.message || "payment_intent_failed";
+    await recordPaymentStatus(rideRef, "failed", {
+      retryCount: attempt,
+      failureReason: message,
+      failureCode: code || null,
+      stripePaymentIntentId: e?.raw?.payment_intent?.id || null,
+    });
+    if (code === "authentication_required") {
+      return {
+        httpStatus: 402,
+        body: { error: "authentication_required", paymentIntentId: e?.raw?.payment_intent?.id || null },
+      };
+    }
+    return { httpStatus: 402, body: { error: message } };
+  }
+}
+
+// Body: { rideId, amount: <int cents>, currency?, paymentMethodId? } -> { clientSecret, paymentIntentId, status }
+// Auth required. See chargeRideAttempt() above for what is/isn't trusted from the client.
 app.post("/create-payment-intent", async (req, res) => {
   try {
-    const {
-      amount,
-      currency = "usd",
-      customerId,
-      driverAccountId,
-      applicationFeeAmount,
-      paymentMethodId,
-      confirm,
-    } = req.body || {};
+    const uid = await requireFirebaseUid(req, res);
+    if (!uid) return;
+    if (rejectIfSuppliedUidMismatch(req, res, uid)) return;
 
-    if (!Number.isInteger(amount) || amount <= 0) {
-      return res.status(400).json({ error: "invalid_amount" });
-    }
+    const { rideId, amount, currency, paymentMethodId } = req.body || {};
+    if (!rideId) return res.status(400).json({ error: "rideId_required" });
 
-    const params = {
+    const result = await chargeRideAttempt({
+      uid,
+      rideId,
       amount,
       currency,
-      customer: customerId,
-    };
-
-    if (driverAccountId) {
-      if (!Number.isInteger(applicationFeeAmount) || applicationFeeAmount < 0 || applicationFeeAmount > amount) {
-        return res.status(400).json({ error: "invalid_application_fee_amount" });
-      }
-      params.application_fee_amount = applicationFeeAmount;
-      params.transfer_data = { destination: driverAccountId };
-    }
-
-    if (paymentMethodId && confirm) {
-      params.payment_method = paymentMethodId;
-      params.confirm = true;
-      params.off_session = true;
-    } else {
-      params.automatic_payment_methods = { enabled: true };
-    }
-
-    const pi = await stripe.paymentIntents.create(params);
-    res.json({ clientSecret: pi.client_secret, paymentIntentId: pi.id, status: pi.status });
+      paymentMethodId,
+      suppliedCustomerId: suppliedValue(req, "customerId"),
+      suppliedDriverAccountId: suppliedValue(req, "driverAccountId") || suppliedValue(req, "connectedAccountId"),
+    });
+    res.status(result.httpStatus).json(result.body);
   } catch (e) {
     console.error("❌ create-payment-intent:", e);
-    const code = e?.raw?.code || e?.code;
-    if (code === "authentication_required") {
-      return res.status(402).json({
-        error: "authentication_required",
-        paymentIntentId: e?.raw?.payment_intent?.id || null,
-      });
+    res.status(500).json({ error: "payment_intent_failed" });
+  }
+});
+
+// --- Retry a failed ride payment -----------------------------------------
+// Body: { rideId, amount: <int cents>, currency?, paymentMethodId? } (paymentMethodId
+// lets the rider pick a different saved card after updating their payment method).
+// Auth required. Only allowed when the ride's current paymentStatus is "failed",
+// so this can never be used to double-charge a ride that already succeeded.
+app.post("/payments/retry", async (req, res) => {
+  try {
+    const uid = await requireFirebaseUid(req, res);
+    if (!uid) return;
+    if (rejectIfSuppliedUidMismatch(req, res, uid)) return;
+
+    const { rideId, amount, currency, paymentMethodId } = req.body || {};
+    if (!rideId) return res.status(400).json({ error: "rideId_required" });
+
+    const owned = await ownedRide(uid, rideId);
+    if (!owned) return res.status(404).json({ error: "ride_not_found_or_not_owned" });
+    if (owned.data.paymentStatus !== "failed") {
+      return res.status(409).json({ error: "ride_not_in_failed_state", paymentStatus: owned.data.paymentStatus || "pending" });
     }
-    res.status(402).json({ error: e.message || "payment_intent_failed" });
+
+    const result = await chargeRideAttempt({
+      uid,
+      rideId,
+      amount,
+      currency,
+      paymentMethodId,
+      suppliedCustomerId: suppliedValue(req, "customerId"),
+      suppliedDriverAccountId: suppliedValue(req, "driverAccountId") || suppliedValue(req, "connectedAccountId"),
+    });
+    res.status(result.httpStatus).json(result.body);
+  } catch (e) {
+    console.error("❌ payments/retry:", e);
+    res.status(500).json({ error: "retry_failed" });
   }
 });
 
 // --- List saved card PaymentMethods (for wallet tiles) ---
-// Body: { customerId } -> { paymentMethods: [{id,brand,last4,expMonth,expYear,isDefault}] }
+// Auth required -> { paymentMethods: [{id,brand,last4,expMonth,expYear,isDefault}] }
+// customerId is always the authenticated rider's own customer.
 app.post("/list-payment-methods", async (req, res) => {
   try {
-    const { customerId } = req.body || {};
-    if (!customerId) return res.status(400).json({ error: "customerId_required" });
+    const uid = await requireFirebaseUid(req, res);
+    if (!uid) return;
+    if (rejectIfSuppliedUidMismatch(req, res, uid)) return;
+    if (await rejectIfSuppliedCustomerMismatch(req, res, uid)) return;
+
+    const customerId = await ownedCustomerId(uid);
+    if (!customerId) return res.json({ paymentMethods: [] });
 
     const [pms, customer] = await Promise.all([
       stripe.paymentMethods.list({ customer: customerId, type: "card" }),
@@ -537,16 +915,33 @@ app.post("/list-payment-methods", async (req, res) => {
 });
 
 // --- Set default card ---
-// Body: { customerId, paymentMethodId } -> { ok: true }
+// Auth required. Body: { paymentMethodId } -> { ok: true }
+// The paymentMethodId must belong to the authenticated rider's own customer.
 app.post("/set-default-payment-method", async (req, res) => {
   try {
-    const { customerId, paymentMethodId } = req.body || {};
-    if (!customerId || !paymentMethodId)
-      return res.status(400).json({ error: "required_params" });
+    const uid = await requireFirebaseUid(req, res);
+    if (!uid) return;
+    if (rejectIfSuppliedUidMismatch(req, res, uid)) return;
+    if (await rejectIfSuppliedCustomerMismatch(req, res, uid)) return;
 
-    await stripe.customers.update(customerId, {
-      invoice_settings: { default_payment_method: paymentMethodId },
-    });
+    const { paymentMethodId } = req.body || {};
+    if (!paymentMethodId) return res.status(400).json({ error: "paymentMethodId_required" });
+
+    const customerId = await ownedCustomerId(uid);
+    if (!customerId) return res.status(404).json({ error: "no_stripe_customer_on_file" });
+
+    const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+    if (pm.customer !== customerId) {
+      return res.status(403).json({ error: "payment_method_not_owned" });
+    }
+
+    await stripe.customers.update(
+      customerId,
+      {
+        invoice_settings: { default_payment_method: paymentMethodId },
+      },
+      { idempotencyKey: `set_default_payment_method_${uid}_${paymentMethodId}` }
+    );
     res.json({ ok: true });
   } catch (e) {
     console.error("❌ set-default-payment-method:", e);
@@ -555,14 +950,30 @@ app.post("/set-default-payment-method", async (req, res) => {
 });
 
 // --- Detach a card ---
-// Body: { paymentMethodId } -> { ok: true }
+// Auth required. Body: { paymentMethodId } -> { ok: true }
+// The paymentMethodId must belong to the authenticated rider's own customer.
 app.post("/detach-payment-method", async (req, res) => {
   try {
-    const { paymentMethodId } = req.body || {};
-    if (!paymentMethodId)
-      return res.status(400).json({ error: "paymentMethodId_required" });
+    const uid = await requireFirebaseUid(req, res);
+    if (!uid) return;
+    if (rejectIfSuppliedUidMismatch(req, res, uid)) return;
+    if (await rejectIfSuppliedCustomerMismatch(req, res, uid)) return;
 
-    await stripe.paymentMethods.detach(paymentMethodId);
+    const { paymentMethodId } = req.body || {};
+    if (!paymentMethodId) return res.status(400).json({ error: "paymentMethodId_required" });
+
+    const customerId = await ownedCustomerId(uid);
+    if (!customerId) return res.status(404).json({ error: "no_stripe_customer_on_file" });
+
+    const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+    if (pm.customer !== customerId) {
+      return res.status(403).json({ error: "payment_method_not_owned" });
+    }
+
+    await stripe.paymentMethods.detach(
+      paymentMethodId,
+      { idempotencyKey: `detach_payment_method_${uid}_${paymentMethodId}` }
+    );
     res.json({ ok: true });
   } catch (e) {
     console.error("❌ detach-payment-method:", e);
@@ -597,16 +1008,13 @@ app.get("/return/refresh", (_req, res) => {
 // Body: { uid, email, firstName, lastName, phone, dob:{day,month,year}, address:{ line1, city, state, postal_code, line2? } }
 app.post("/connect/accounts", async (req, res) => {
   try {
-    const { uid, email, firstName, lastName, phone, dob, address } =
-      req.body || {};
-    const verifiedUid = await verifiedFirebaseUid(req);
-    const driverUid = verifiedUid || uid;
+    const driverUid = await requireFirebaseUid(req, res);
+    if (!driverUid) return;
+    if (rejectIfSuppliedUidMismatch(req, res, driverUid)) return;
 
-    if (verifiedUid && uid && uid !== verifiedUid) {
-      return res.status(403).json({ error: "uid_mismatch" });
-    }
+    const { uid, email, firstName, lastName, phone, dob, address } = req.body || {};
 
-    if (!driverUid || !email || !firstName || !lastName || !phone || !dob || !address) {
+    if (!email || !firstName || !lastName || !phone || !dob || !address) {
       return res.status(400).json({ error: "missing_required_fields" });
     }
 
@@ -636,25 +1044,28 @@ app.post("/connect/accounts", async (req, res) => {
       }
     }
 
-    const account = await stripe.accounts.create({
-      type: "express",
-      country: "US",
-      email,
-      business_type: "individual",
-      capabilities: {
-        card_payments: { requested: true },
-        transfers: { requested: true },
-      },
-      individual: {
-        first_name: firstName,
-        last_name: lastName,
+    const account = await stripe.accounts.create(
+      {
+        type: "express",
+        country: "US",
         email,
-        phone,
-        dob, // { day, month, year }
-        address, // { line1, city, state, postal_code, line2? }
+        business_type: "individual",
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
+        individual: {
+          first_name: firstName,
+          last_name: lastName,
+          email,
+          phone,
+          dob, // { day, month, year }
+          address, // { line1, city, state, postal_code, line2? }
+        },
+        metadata: { uid: driverUid },
       },
-      metadata: { uid: driverUid },
-    });
+      { idempotencyKey: `connect_account_create_${driverUid}` }
+    );
 
     await updateDriver(driverUid, { stripeAccountId: account.id });
     await updatePublicDriverConnectStatus(driverUid, {
@@ -669,20 +1080,45 @@ app.post("/connect/accounts", async (req, res) => {
   }
 });
 
+/**
+ * Every driver-side Connect route below takes no accountId from the client.
+ * The accountId is always re-derived from `drivers/{uid}.stripeAccountId` —
+ * a driver can only ever act on their own Connect account.
+ */
+async function requireOwnAccountId(req, res) {
+  const uid = await requireFirebaseUid(req, res);
+  if (!uid) return null;
+  if (rejectIfSuppliedUidMismatch(req, res, uid)) return null;
+  const driver = await driverData(uid);
+  const accountId = driver?.stripeAccountId;
+  if (!accountId) {
+    res.status(404).json({ error: "no_connect_account_on_file" });
+    return null;
+  }
+  if (rejectIfSuppliedAccountMismatch(req, res, accountId)) return null;
+  return { uid, accountId };
+}
+
 // Driver: Stripe Connect — Create onboarding link
-// Body: { accountId }
+// Auth required.
 app.post("/connect/account-link", async (req, res) => {
   try {
-    const { accountId } = req.body || {};
-    if (!accountId) return res.status(400).json({ error: "missing_accountId" });
+    const owned = await requireOwnAccountId(req, res);
+    if (!owned) return;
+    const { accountId } = owned;
+    const requestId = requireRequestId(req, res, "connect_account_link");
+    if (!requestId) return;
 
     const base = appBaseURL();
-    const link = await stripe.accountLinks.create({
-      account: accountId,
-      type: "account_onboarding",
-      refresh_url: `${base}/return/refresh`,
-      return_url: `${base}/return/complete`,
-    });
+    const link = await stripe.accountLinks.create(
+      {
+        account: accountId,
+        type: "account_onboarding",
+        refresh_url: `${base}/return/refresh`,
+        return_url: `${base}/return/complete`,
+      },
+      { idempotencyKey: `account_link_${accountId}_${requestId}` }
+    );
 
     res.json({ url: link.url });
   } catch (err) {
@@ -692,13 +1128,13 @@ app.post("/connect/account-link", async (req, res) => {
 });
 
 // Driver: Stripe Connect — Status
-// Query: ?accountId=acct_xxx
+// Auth required.
 app.get("/connect/status", async (req, res) => {
   try {
-    const { accountId } = req.query;
-    if (!accountId) return res.status(400).json({ error: "missing_accountId" });
+    const owned = await requireOwnAccountId(req, res);
+    if (!owned) return;
 
-    const acct = await stripe.accounts.retrieve(accountId);
+    const acct = await stripe.accounts.retrieve(owned.accountId);
     res.json({
       charges_enabled: acct.charges_enabled,
       payouts_enabled: acct.payouts_enabled,
@@ -711,11 +1147,12 @@ app.get("/connect/status", async (req, res) => {
 });
 
 // Driver: Stripe Connect — Balance available for payouts
-// Query: ?accountId=acct_xxx
+// Auth required.
 app.get("/connect/balance", async (req, res) => {
   try {
-    const { accountId } = req.query;
-    if (!accountId) return res.status(400).json({ error: "missing_accountId" });
+    const owned = await requireOwnAccountId(req, res);
+    if (!owned) return;
+    const { accountId } = owned;
 
     const [acct, balance] = await Promise.all([
       stripe.accounts.retrieve(accountId),
@@ -739,12 +1176,99 @@ app.get("/connect/balance", async (req, res) => {
   }
 });
 
+// Driver: Stripe Connect — Linked payout methods
+// Auth required.
+app.get("/connect/external-accounts", async (req, res) => {
+  try {
+    const owned = await requireOwnAccountId(req, res);
+    if (!owned) return;
+    const { accountId } = owned;
+
+    const [bankAccounts, cards] = await Promise.all([
+      stripe.accounts.listExternalAccounts(accountId, { object: "bank_account", limit: 10 }),
+      stripe.accounts.listExternalAccounts(accountId, { object: "card", limit: 10 }),
+    ]);
+
+    res.json({
+      bankAccounts: bankAccounts.data.map((bank) => ({
+        id: bank.id,
+        bankName: bank.bank_name || "Bank account",
+        last4: bank.last4 || "",
+        isDefault: bank.default_for_currency === true,
+      })),
+      cards: cards.data.map((card) => ({
+        id: card.id,
+        brand: card.brand || "Debit card",
+        last4: card.last4 || "",
+        isDefault: card.default_for_currency === true,
+      })),
+    });
+  } catch (err) {
+    console.error("❌ connect/external-accounts error", err);
+    res.status(500).json({ error: "external_accounts_failed" });
+  }
+});
+
+// Driver: Stripe Connect — Recent payouts
+// Auth required.
+app.get("/connect/payouts", async (req, res) => {
+  try {
+    const owned = await requireOwnAccountId(req, res);
+    if (!owned) return;
+    const { accountId } = owned;
+    const rawLimit = Number.parseInt(String(req.query.limit || "10"), 10);
+    const limit = Math.max(1, Math.min(25, Number.isFinite(rawLimit) ? rawLimit : 10));
+
+    const payouts = await stripe.payouts.list(
+      { limit },
+      { stripeAccount: accountId }
+    );
+
+    res.json({
+      payouts: payouts.data.map((payout) => ({
+        id: payout.id,
+        amount: payout.amount,
+        currency: payout.currency,
+        status: payout.status,
+        method: payout.method,
+        arrivalDate: payout.arrival_date || null,
+        created: payout.created,
+      })),
+    });
+  } catch (err) {
+    console.error("❌ connect/payouts error", err);
+    res.status(500).json({ error: "payouts_failed" });
+  }
+});
+
+// Driver: Stripe Connect — Express dashboard login link
+// Auth required.
+app.get("/connect/login-link", async (req, res) => {
+  try {
+    const owned = await requireOwnAccountId(req, res);
+    if (!owned) return;
+
+    const link = await stripe.accounts.createLoginLink(owned.accountId);
+    res.json({ url: link.url });
+  } catch (err) {
+    console.error("❌ connect/login-link error", err);
+    res.status(500).json({ error: "login_link_failed" });
+  }
+});
+
 // Driver: Stripe Connect — Instant payout from ride-earnings balance
-// Body: { accountId, amount, currency?, uid? }
+// Auth required. Body: { amount, currency?, requestId }
+// requestId (a client-generated UUID per tap) is required and becomes part of
+// the idempotency key so a double-tap or retried request cannot trigger two payouts.
 app.post("/connect/instant-payout", async (req, res) => {
   try {
-    const { accountId, amount, currency = "usd", uid } = req.body || {};
-    if (!accountId) return res.status(400).json({ error: "missing_accountId" });
+    const owned = await requireOwnAccountId(req, res);
+    if (!owned) return;
+    const { uid, accountId } = owned;
+
+    const { amount, currency = "usd" } = req.body || {};
+    const payoutRequestId = requireRequestId(req, res, "connect_instant_payout");
+    if (!payoutRequestId) return;
     if (!Number.isInteger(amount) || amount <= 0) {
       return res.status(400).json({ error: "invalid_amount" });
     }
@@ -760,11 +1284,11 @@ app.post("/connect/instant-payout", async (req, res) => {
         currency,
         method: "instant",
         metadata: {
-          uid: uid || acct.metadata?.uid || "",
+          uid,
           source: "driver_wallet_instant_pay",
         },
       },
-      { stripeAccount: accountId }
+      { stripeAccount: accountId, idempotencyKey: `instant_payout_${accountId}_${payoutRequestId}` }
     );
 
     res.json({
@@ -776,6 +1300,83 @@ app.post("/connect/instant-payout", async (req, res) => {
   } catch (err) {
     console.error("❌ connect/instant-payout error", err);
     res.status(500).json({ error: "instant_payout_failed", detail: err.message });
+  }
+});
+
+// Admin: Account deletion cleanup (Part 12 — called from Mission Control's
+// /api/account-deletions/[id]/process route after a human reviews the
+// request). Detaches/removes the rider's saved payment methods and Stripe
+// customer record, and rejects/deactivates the driver's Connect account so
+// no further payouts or charges can occur. Idempotent: missing Stripe
+// records are treated as already-cleaned-up rather than errors, since this
+// can be safely re-run if a previous attempt partially failed.
+app.post("/admin/cleanup-account", async (req, res) => {
+  try {
+    const adminUid = await requireAdminUid(req, res);
+    if (!adminUid) return;
+
+    const { role, stripeCustomerId, stripeAccountId, uid } = req.body || {};
+    const requestId = requireRequestId(req, res, "admin_cleanup_account");
+    if (!requestId) return;
+    const cleanupKey = `${uid || role || "account"}_${requestId}`;
+    const result = { role: role || null, customer: "skipped", connectAccount: "skipped" };
+
+    if (stripeCustomerId) {
+      try {
+        await stripe.customers.del(
+          stripeCustomerId,
+          { idempotencyKey: `account_deletion_customer_${cleanupKey}` }
+        );
+        result.customer = "deleted";
+      } catch (err) {
+        if (err.code === "resource_missing") {
+          result.customer = "already_deleted";
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (stripeAccountId) {
+      try {
+        await stripe.accounts.update(
+          stripeAccountId,
+          {
+            metadata: { deactivated_by: adminUid, deactivated_reason: "account_deletion" },
+          },
+          { idempotencyKey: `account_deletion_connect_metadata_${cleanupKey}` }
+        );
+        await stripe.accounts.reject(
+          stripeAccountId,
+          { reason: "fraud" },
+          { idempotencyKey: `account_deletion_connect_reject_${cleanupKey}` }
+        ).catch(async () => {
+          // `accounts.reject` only succeeds for platform-initiated risk
+          // rejections; if Stripe declines it (e.g. account already has
+          // payout history), fall back to disabling payouts/charges
+          // directly so the account can no longer move money.
+          await stripe.accounts.update(
+            stripeAccountId,
+            {
+              capabilities: { transfers: { requested: false } },
+            },
+            { idempotencyKey: `account_deletion_connect_disable_${cleanupKey}` }
+          );
+        });
+        result.connectAccount = "deactivated";
+      } catch (err) {
+        if (err.code === "resource_missing") {
+          result.connectAccount = "already_removed";
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error("❌ admin/cleanup-account error", err);
+    res.status(500).json({ error: "cleanup_failed", detail: err.message });
   }
 });
 

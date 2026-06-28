@@ -1,26 +1,10 @@
 const express = require("express");
-const { admin, initializeFirebase } = require("../config/firebase");
 const moderationService = require("../services/moderationService");
+const { requireFirebaseAuth } = require("../middleware/firebaseAuth");
 
 const router = express.Router();
 
-async function requireFirebaseUser(req, res) {
-  const authorization = req.header("authorization") || "";
-  const match = authorization.match(/^Bearer (.+)$/);
-
-  if (!match) {
-    res.status(401).json({ error: "Firebase ID token is required" });
-    return null;
-  }
-
-  try {
-    initializeFirebase();
-    return await admin.auth().verifyIdToken(match[1]);
-  } catch {
-    res.status(401).json({ error: "Invalid Firebase ID token" });
-    return null;
-  }
-}
+router.use(requireFirebaseAuth);
 
 function storagePathBelongsToUser(storagePath, uid) {
   const safeSegment = "[A-Za-z0-9._-]+";
@@ -31,16 +15,13 @@ function storagePathBelongsToUser(storagePath, uid) {
 
 router.post("/check-image", async (req, res, next) => {
   try {
-    const decodedToken = await requireFirebaseUser(req, res);
-    if (!decodedToken) return;
-
     const { storagePath } = req.body || {};
 
     if (!storagePath || typeof storagePath !== "string") {
       return res.status(400).json({ error: "storagePath (string) is required" });
     }
 
-    if (!storagePathBelongsToUser(storagePath, decodedToken.uid)) {
+    if (!storagePathBelongsToUser(storagePath, req.firebaseUid)) {
       return res.status(403).json({ error: "storagePath is not allowed for this user" });
     }
 

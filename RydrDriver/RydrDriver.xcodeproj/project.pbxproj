@@ -518,7 +518,9 @@
 				INFOPLIST_FILE = RydrDriver/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Rydr Driver";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Rydr Driver uses your camera if you choose to capture driver documents or profile photos during onboarding.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Rydr Driver uses your location to show nearby ride requests and share trip progress with riders while you are online.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Rydr Driver lets you select profile photos and driver documents from your photo library during onboarding.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -557,7 +559,9 @@
 				INFOPLIST_FILE = RydrDriver/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Rydr Driver";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Rydr Driver uses your camera if you choose to capture driver documents or profile photos during onboarding.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Rydr Driver uses your location to show nearby ride requests and share trip progress with riders while you are online.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Rydr Driver lets you select profile photos and driver documents from your photo library during onboarding.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

@@ -53,7 +53,10 @@ final class DriverIdentityVerificationService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["role": "driver"])
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "role": "driver",
+            "requestId": UUID().uuidString
+        ])
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {

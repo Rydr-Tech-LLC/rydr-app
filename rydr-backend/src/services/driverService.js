@@ -75,9 +75,15 @@ async function createAccountDeletionRequest(payload) {
   }
 
   const db = getFirestore();
-  const ref = db.collection("accountDeletionRequests").doc();
+  // Keyed by uid (not a random doc id) so this call is idempotent with the
+  // driver app's own direct Firestore write to the same path
+  // (DriverDashboardVM.requestAccountDeletion), and so Mission Control's
+  // processing queue and Firestore rules (`requestId == request.auth.uid`)
+  // both have exactly one request document per account to act on.
+  const ref = db.collection("accountDeletionRequests").doc(uid);
   const request = {
     uid,
+    userId: uid,
     role: cleanOptionalString(payload.role) || "driver",
     email: cleanOptionalString(payload.email) || null,
     reason: cleanOptionalString(payload.reason) || null,
@@ -88,11 +94,12 @@ async function createAccountDeletionRequest(payload) {
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   };
 
-  await ref.set(request);
-
-  // TODO: Implement production deletion workflow:
-  // Firebase Auth deletion, Firestore cleanup/anonymization, legally allowed Stripe cleanup,
-  // required financial/legal retention, and confirmation email.
+  // The actual deletion (Firebase Auth user removal, Firestore
+  // anonymization, Stripe customer/Connect cleanup) is performed by Mission
+  // Control's admin-only processing route after human review — see
+  // RydrMissionControl/app/api/account-deletions/[id]/process/route.ts.
+  // This service only ever enqueues the request.
+  await ref.set(request, { merge: true });
 
   return ref.id;
 }

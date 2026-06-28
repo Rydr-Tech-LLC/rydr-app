@@ -5,6 +5,14 @@ import { vehicleDecoderService, VinDecodeError } from "./services/vehicleDecoder
 import { vehicleImageService } from "./services/vehicleImageService";
 import { VEHICLE_COLORS, type VehicleColor, type VehicleBodyStyle } from "./types";
 
+// Push notification sender architecture (Part 9 of the beta hardening
+// sprint). Each trigger below listens to the same Firestore documents the
+// rider/driver apps and Mission Control already write/read, so every
+// notification is a reflection of real, persisted server state.
+export { onRideUpdated } from "./triggers/rideNotifications";
+export { onSupportMessageCreated } from "./triggers/supportNotifications";
+export { onDriverApprovalDecision } from "./triggers/driverApprovalNotifications";
+
 const VEHICLE_BODY_STYLES: readonly VehicleBodyStyle[] = [
   "sedan",
   "suv",

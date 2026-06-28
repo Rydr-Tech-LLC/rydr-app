@@ -37,6 +37,18 @@ struct VehicleInfoView: View {
     @State private var imageError: String?
     @State private var isSubmitting = false
 
+    // Manual-entry fallback, used when VIN decode can't find the vehicle
+    // (NHTSA has no data for it, the VIN was mistyped/unreadable on the
+    // registration, etc.) so a driver is never fully blocked here.
+    @State private var isManualVehicle = false
+    @State private var showManualEntry = false
+    @State private var manualMake = ""
+    @State private var manualModel = ""
+    @State private var manualModelOther = ""
+    @State private var manualYear = ""
+    @State private var manualTrim = ""
+    @State private var manualFuelType: DriverVehicleFuelType = .gas
+
     private var eligibility: DriverVehicleEligibility? {
         guard let decoded else { return nil }
         return DriverVehicleEligibility.evaluate(
@@ -60,6 +72,19 @@ struct VehicleInfoView: View {
         vin.trimmingCharacters(in: .whitespacesAndNewlines).count == 17
     }
 
+    private var manualEntryIsValid: Bool {
+        !manualMake.isEmpty
+        && !manualModel.isEmpty
+        && (manualModel != ManualVehicleCatalog.otherOption || !manualModelOther.trimmingCharacters(in: .whitespaces).isEmpty)
+        && manualYear.count == 4 && Int(manualYear) != nil
+    }
+
+    private var resolvedManualModel: String {
+        manualModel == ManualVehicleCatalog.otherOption
+            ? manualModelOther.trimmingCharacters(in: .whitespaces)
+            : manualModel
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 22) {
@@ -76,6 +101,13 @@ struct VehicleInfoView: View {
                 }
 
                 vinEntrySection
+
+                if decoded == nil {
+                    manualEntryToggleSection
+                    if showManualEntry {
+                        manualEntrySection
+                    }
+                }
 
                 if let decoded {
                     decodedSummarySection(decoded)
@@ -178,15 +210,138 @@ struct VehicleInfoView: View {
                 }
             }
             Spacer()
-            Button("Re-decode") {
+            Button(isManualVehicle ? "Edit" : "Re-decode") {
                 self.decoded = nil
                 self.selectedColor = nil
                 self.imageInfo = nil
+                if isManualVehicle {
+                    showManualEntry = true
+                }
+                isManualVehicle = false
             }
             .font(.caption.weight(.semibold))
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.green.opacity(0.08)))
+    }
+
+    /// Shown beneath the VIN field whenever decode hasn't succeeded yet —
+    /// lets a driver skip decode entirely (or recover from a failed decode)
+    /// instead of being blocked from continuing signup.
+    private var manualEntryToggleSection: some View {
+        Button {
+            showManualEntry.toggle()
+        } label: {
+            Text(showManualEntry ? "Hide manual entry" : "Can't decode your VIN? Enter vehicle details manually")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(decodeError != nil ? Color.red : .secondary)
+                .underline()
+        }
+        .padding(.top, decodeError == nil ? 0 : 2)
+    }
+
+    private var manualEntrySection: some View {
+        VStack(spacing: 10) {
+            TextField("Year", text: $manualYear)
+                .keyboardType(.numberPad)
+                .onChange(of: manualYear) { _, newValue in
+                    manualYear = String(newValue.filter(\.isNumber).prefix(4))
+                }
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(14)
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+
+            dropdownField(
+                title: "Make",
+                selection: $manualMake,
+                options: ManualVehicleCatalog.makes,
+                placeholder: "Select make"
+            ) { newMake in
+                manualModel = ""
+                manualModelOther = ""
+            }
+
+            dropdownField(
+                title: "Model",
+                selection: $manualModel,
+                options: ManualVehicleCatalog.models(for: manualMake),
+                placeholder: manualMake.isEmpty ? "Select make first" : "Select model"
+            )
+            .disabled(manualMake.isEmpty)
+
+            if manualModel == ManualVehicleCatalog.otherOption {
+                TextField("Model name", text: $manualModelOther)
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(14)
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+            }
+
+            TextField("Trim (optional)", text: $manualTrim)
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(14)
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+
+            Picker("Fuel type", selection: $manualFuelType) {
+                ForEach(DriverVehicleFuelType.allCases) { type in
+                    Text(type.rawValue).tag(type)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Button("Use these details") {
+                useManualEntry()
+            }
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(manualEntryIsValid ? Color.black : Color.gray.opacity(0.4)))
+            .foregroundStyle(.white)
+            .disabled(!manualEntryIsValid)
+
+            Text("We'll have this vehicle reviewed since the details weren't pulled automatically.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.top, 4)
+    }
+
+    /// A text-field-styled dropdown (native iOS Menu picker) used for the
+    /// manual-entry Make/Model fields — keeps manual entries constrained to
+    /// a known list instead of free-typed strings that could break
+    /// eligibility matching or image lookups.
+    private func dropdownField(
+        title: String,
+        selection: Binding<String>,
+        options: [String],
+        placeholder: String,
+        onSelect: ((String) -> Void)? = nil
+    ) -> some View {
+        Menu {
+            ForEach(options, id: \.self) { option in
+                Button(option) {
+                    selection.wrappedValue = option
+                    onSelect?(option)
+                }
+            }
+        } label: {
+            HStack {
+                Text(selection.wrappedValue.isEmpty ? placeholder : selection.wrappedValue)
+                    .foregroundStyle(selection.wrappedValue.isEmpty ? .secondary : .primary)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(14)
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+        }
+        .accessibilityLabel(title)
     }
 
     private var colorPickerSection: some View {
@@ -318,6 +473,25 @@ struct VehicleInfoView: View {
         }
     }
 
+    private func useManualEntry() {
+        guard manualEntryIsValid else { return }
+        decoded = DecodedVehicleInfo(
+            vin: vin.trimmingCharacters(in: .whitespacesAndNewlines),
+            make: manualMake,
+            model: resolvedManualModel,
+            year: manualYear,
+            trim: manualTrim.trimmingCharacters(in: .whitespaces).isEmpty ? nil : manualTrim.trimmingCharacters(in: .whitespaces),
+            bodyStyle: nil,
+            driveType: nil,
+            fuelType: manualFuelType
+        )
+        isManualVehicle = true
+        showManualEntry = false
+        decodeError = nil
+        selectedColor = nil
+        imageInfo = nil
+    }
+
     private func selectColor(_ color: VehicleColor) {
         selectedColor = color
         guard let decoded else { return }
@@ -340,11 +514,24 @@ struct VehicleInfoView: View {
     }
 
     private func handleContinue() {
-        guard let selectedColor else { return }
+        guard let selectedColor, let decoded else { return }
         isSubmitting = true
         Task {
             do {
-                let result = try await VehicleLibraryClient.submitVehicleVin(vin: vin, color: selectedColor)
+                let result: VehicleImageInfo
+                if isManualVehicle {
+                    let manualInfo = ManualVehicleInfo(
+                        vin: decoded.vin.isEmpty ? nil : decoded.vin,
+                        make: decoded.make,
+                        model: decoded.model,
+                        year: decoded.year,
+                        trim: decoded.trim,
+                        fuelType: decoded.fuelType
+                    )
+                    result = try await VehicleLibraryClient.submitVehicleManual(manualInfo, color: selectedColor)
+                } else {
+                    result = try await VehicleLibraryClient.submitVehicleVin(vin: vin, color: selectedColor)
+                }
                 await MainActor.run {
                     imageInfo = result
                     isSubmitting = false
@@ -357,6 +544,50 @@ struct VehicleInfoView: View {
                 }
             }
         }
+    }
+}
+
+/// Backs the manual-entry Make/Model dropdowns. Covers the makes/models
+/// `DriverVehicleEligibility` already recognizes (so a manually-entered
+/// vehicle's eligibility matches what a decoded one would get) plus an
+/// "Other" escape hatch for anything not listed.
+private enum ManualVehicleCatalog {
+    static let otherOption = "Other"
+
+    static let makes: [String] = [
+        "Acura", "Audi", "BMW", "Buick", "Cadillac", "Chevrolet", "Chrysler",
+        "Dodge", "Ford", "Genesis", "GMC", "Honda", "Hyundai", "INFINITI",
+        "Jeep", "Kia", "Lexus", "Lincoln", "Mazda", "Mercedes-Benz",
+        "Mitsubishi", "Nissan", "Subaru", "Tesla", "Toyota", "Volkswagen",
+        "Volvo", otherOption
+    ]
+
+    private static let modelsByMake: [String: [String]] = [
+        "Honda": ["Accord", "Civic", "CR-V", "HR-V", "Odyssey", "Pilot"],
+        "Toyota": ["Camry", "Corolla", "RAV4", "Highlander", "Sienna", "Prius"],
+        "Nissan": ["Altima", "Sentra", "Rogue", "Maxima", "Armada"],
+        "Hyundai": ["Elantra", "Sonata", "Tucson", "Santa Fe", "Palisade"],
+        "Kia": ["Soul", "Sportage", "Sorento", "Telluride", "EV6"],
+        "Chevrolet": ["Malibu", "Equinox", "Tahoe", "Suburban", "Bolt"],
+        "Ford": ["Fusion", "Escape", "Explorer", "Expedition", "Mustang Mach-E"],
+        "Tesla": ["Model 3", "Model Y", "Model S", "Model X"],
+        "Mazda": ["Mazda3", "CX-5", "CX-30", "CX-9"],
+        "Subaru": ["Impreza", "Forester", "Outback", "Ascent"],
+        "Volkswagen": ["Jetta", "Passat", "Tiguan", "Atlas"],
+        "Buick": ["Enclave", "Encore"],
+        "GMC": ["Yukon", "Acadia"],
+        "Cadillac": ["Escalade"],
+        "Lincoln": ["Navigator"],
+        "Dodge": ["Grand Caravan"],
+        "Chrysler": ["Pacifica"]
+    ]
+
+    /// Returns the curated model list for `make` with "Other" always
+    /// appended, or just `["Other"]` if no make is selected yet / the make
+    /// has no curated list.
+    static func models(for make: String) -> [String] {
+        guard !make.isEmpty else { return [otherOption] }
+        return (modelsByMake[make] ?? []) + [otherOption]
     }
 }
 

@@ -106,7 +106,8 @@ struct RideInProgressView: View {
                 EndRideView(
                     ride: rideManager.lastReceipt,
                     onDone: { dismiss() },
-                    onTipSelected: { rideManager.applyTipToLastReceipt(cents: $0) }
+                    onTipSelected: { rideManager.applyTipToLastReceipt(cents: $0) },
+                    rideManager: rideManager
                 )
             }
             .alert("Report an incident", isPresented: $showReportAlert) {

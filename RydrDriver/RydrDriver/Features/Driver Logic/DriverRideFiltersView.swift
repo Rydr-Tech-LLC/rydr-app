@@ -95,6 +95,7 @@ struct DriverRideFiltersView: View {
 
     @StateObject private var destinationSearch = DriverDestinationSearchModel()
     @State private var draft: DriverRideFilterPreferences
+    @State private var isResolvingDestination = false
 
     init(
         preferences: Binding<DriverRideFilterPreferences>,
@@ -161,19 +162,23 @@ struct DriverRideFiltersView: View {
 
             Spacer()
 
-            Button("Done", action: onClose)
+            Button {
+                Task { await commitAndClose() }
+            } label: {
+                Text("Done")
+            }
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(Color.red)
+                .disabled(isResolvingDestination)
         }
         .padding(.bottom, 4)
     }
 
     private var saveButton: some View {
         Button {
-            preferences = draft
-            onClose()
+            Task { await commitAndClose() }
         } label: {
-            Label("Save Filters", systemImage: "slider.horizontal.3")
+            Label(isResolvingDestination ? "Saving Filters" : "Save Filters", systemImage: "slider.horizontal.3")
                 .font(.headline.weight(.black))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 17)
@@ -182,9 +187,43 @@ struct DriverRideFiltersView: View {
                 .shadow(color: Color.red.opacity(0.30), radius: 18, y: 8)
         }
         .buttonStyle(.plain)
+        .disabled(isResolvingDestination)
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .background(Color(.systemBackground))
+    }
+
+    @MainActor
+    private func commitAndClose() async {
+        guard !isResolvingDestination else { return }
+        isResolvingDestination = true
+        defer { isResolvingDestination = false }
+
+        await resolveTypedDestinationIfNeeded()
+        preferences = draft
+        onClose()
+    }
+
+    @MainActor
+    private func resolveTypedDestinationIfNeeded() async {
+        let trimmed = draft.destinationText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard draft.destinationModeEnabled,
+              draft.destinationCoordinate == nil,
+              !trimmed.isEmpty else { return }
+
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = trimmed
+        request.region = DriverMapDefaults.pilotRegion
+
+        do {
+            let response = try await MKLocalSearch(request: request).start()
+            guard let item = response.mapItems.first else { return }
+            draft.destinationText = item.name ?? trimmed
+            draft.destinationCoordinate = item.location.coordinate
+            draft.destinationModeEnabled = true
+        } catch {
+            draft.destinationCoordinate = nil
+        }
     }
 }
 

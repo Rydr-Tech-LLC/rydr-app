@@ -128,10 +128,75 @@ export interface AuditLogEntry {
   adminUid: string;
   adminEmail?: string;
   action: string;
-  targetType: "driver" | "rider" | "report" | "vehicleLibrary";
+  targetType: "driver" | "rider" | "report" | "vehicleLibrary" | "accountDeletion" | "payment" | "supportTicket";
   targetId: string;
   reason?: string;
   createdAt: unknown;
+}
+
+// --- Account deletion (Part 12 of the beta hardening sprint) -------------
+// Written by riders/drivers directly (rules: `accountDeletionRequests/{uid}`)
+// or by rydr-backend's /driver/account-deletion-requests route — both key
+// the document by uid so there is exactly one request per account.
+// Mission Control's admin-only process route is the only thing that ever
+// transitions `status` to "processing"/"completed"/"rejected".
+export type AccountDeletionStatus = "requested" | "processing" | "completed" | "rejected";
+
+export interface AccountDeletionRequestRecord {
+  id: string;
+  uid: string;
+  userId?: string;
+  role: "rider" | "driver";
+  email?: string | null;
+  reason?: string | null;
+  status: AccountDeletionStatus;
+  source?: string;
+  processedAt?: { toDate?: () => Date } | null;
+  processedBy?: string;
+  rejectionReason?: string;
+  requestedAt?: { toDate?: () => Date } | null;
+  createdAt?: { toDate?: () => Date } | null;
+  updatedAt?: { toDate?: () => Date } | null;
+}
+
+// --- Ride payment status (Part 2/5 — written by stripe-backend) ----------
+export type RidePaymentStatus = "pending" | "processing" | "succeeded" | "failed" | "refunded";
+
+export interface RideRecord {
+  id: string;
+  riderId?: string;
+  driverId?: string;
+  riderName?: string;
+  driverName?: string;
+  pickup?: string;
+  dropoff?: string;
+  status?: string;
+  paymentStatus?: RidePaymentStatus;
+  failureReason?: string | null;
+  failureCode?: string | null;
+  retryCount?: number;
+  lastPaymentAttempt?: { toDate?: () => Date } | null;
+  updatedAt?: { toDate?: () => Date } | null;
+}
+
+// --- Support tickets (Part 9 "support reply" notification trigger) -------
+export interface SupportTicketRecord {
+  id: string;
+  userId?: string;
+  userRole?: "rider" | "driver";
+  subject?: string;
+  category?: string;
+  status?: "open" | "closed";
+  createdAt?: { toDate?: () => Date } | null;
+  updatedAt?: { toDate?: () => Date } | null;
+}
+
+export interface SupportMessageRecord {
+  id: string;
+  senderId?: string;
+  senderRole?: "rider" | "driver" | "admin";
+  text?: string;
+  createdAt?: { toDate?: () => Date } | null;
 }
 
 export const DRIVER_APPROVAL_REQUIREMENTS: { key: string; label: string }[] = [

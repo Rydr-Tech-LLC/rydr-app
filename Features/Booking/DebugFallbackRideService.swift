@@ -22,7 +22,9 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
         pickup: String,
         dropoff: String,
         rideType: String,
-        near center: CLLocationCoordinate2D
+        near center: CLLocationCoordinate2D,
+        pickupCoordinate: CLLocationCoordinate2D?,
+        dropoffCoordinate: CLLocationCoordinate2D?
     ) async throws -> [Driver] {
         #if DEBUG
         if shouldUseMockRidesImmediately {
@@ -30,7 +32,9 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 pickup: pickup,
                 dropoff: dropoff,
                 rideType: rideType,
-                near: center
+                near: center,
+                pickupCoordinate: pickupCoordinate,
+                dropoffCoordinate: dropoffCoordinate
             )
         }
 
@@ -39,7 +43,9 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 pickup: pickup,
                 dropoff: dropoff,
                 rideType: rideType,
-                near: center
+                near: center,
+                pickupCoordinate: pickupCoordinate,
+                dropoffCoordinate: dropoffCoordinate
             )
             if !drivers.isEmpty { return drivers }
         } catch {
@@ -49,14 +55,18 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
             pickup: pickup,
             dropoff: dropoff,
             rideType: rideType,
-            near: center
+            near: center,
+            pickupCoordinate: pickupCoordinate,
+            dropoffCoordinate: dropoffCoordinate
         )
         #else
         return try await primary.fetchNearbyDrivers(
             pickup: pickup,
             dropoff: dropoff,
             rideType: rideType,
-            near: center
+            near: center,
+            pickupCoordinate: pickupCoordinate,
+            dropoffCoordinate: dropoffCoordinate
         )
         #endif
     }
@@ -145,6 +155,15 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
         }
         #endif
         return primary.driverLocationStream(rideId: rideId)
+    }
+
+    func rideLifecycleStream(rideId: String) -> AsyncThrowingStream<RideLifecycleSnapshot, Error> {
+        #if DEBUG
+        if shouldUseMockRidesImmediately || isFallbackRide(rideId) {
+            return fallback.rideLifecycleStream(rideId: rideId)
+        }
+        #endif
+        return primary.rideLifecycleStream(rideId: rideId)
     }
 
     func cancelRide(rideId: String) async throws {

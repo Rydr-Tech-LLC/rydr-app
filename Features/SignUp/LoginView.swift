@@ -340,43 +340,7 @@ struct LoginView: View {
     }
 
     private var socialLoginSection: some View {
-        VStack(spacing: 14) {
-            Button(action: {
-                // TODO: Handle Apple Sign-In
-            }) {
-                Label("Sign in with Apple", systemImage: "apple.logo")
-                    .font(.headline.weight(.bold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 62)
-            }
-            .background(Color(red: 0.05, green: 0.06, blue: 0.08))
-            .foregroundColor(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: Color.black.opacity(0.18), radius: 14, x: 0, y: 8)
-            .accessibilityLabel("Sign in with Apple")
-
-            Button(action: {
-                // TODO: Handle Google Sign-In
-            }) {
-                HStack(spacing: 12) {
-                    GoogleGlyph()
-                        .frame(width: 24, height: 24)
-                    Text("Sign in with Google")
-                        .font(.headline.weight(.bold))
-                }
-                .foregroundColor(Palette.googleInk)
-                .frame(maxWidth: .infinity)
-                .frame(height: 62)
-            }
-            .background(Palette.inputFill)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Palette.divider, lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.05), radius: 12, x: 0, y: 8)
-            .accessibilityLabel("Sign in with Google")
-        }
+        EmptyView()
     }
     
     // MARK: - Password Reset

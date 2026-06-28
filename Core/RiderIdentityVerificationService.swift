@@ -55,7 +55,10 @@ final class RiderIdentityVerificationService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["role": "verified_rider"])
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "role": "verified_rider",
+            "requestId": UUID().uuidString
+        ])
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {

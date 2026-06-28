@@ -226,6 +226,19 @@ service cloud.firestore {
       );
     }
 
+    function cashHubPublicOpenRequest(data) {
+      return signedIn()
+        && data.status == "open"
+        && data.visibility == "public";
+    }
+
+    function cashHubRequestReadable(data) {
+      return cashHubRequestOwner(data)
+        || cashHubConnectedDriver(data)
+        || cashHubPublicOpenRequest(data)
+        || isAdmin();
+    }
+
     function validCashHubRequestCreate() {
       return signedIn()
         && request.resource.data.riderUid == request.auth.uid
@@ -299,6 +312,7 @@ service cloud.firestore {
     function validCashHubResponseCreate(requestId) {
       let requestDoc = get(/databases/$(database)/documents/cashRydrRequests/$(requestId));
       return signedIn()
+        && cashHubRequestReadable(requestDoc.data)
         && requestDoc.data.status in ["open", "connected"]
         && request.resource.data.authorUid == request.auth.uid
         && request.resource.data.authorRole in ["rider", "driver"];
@@ -314,6 +328,13 @@ service cloud.firestore {
         && affectedKeys().hasOnly(["status", "updatedAt"]);
     }
 
+    function cashHubResponseReadable(requestId) {
+      let requestDoc = get(/databases/$(database)/documents/cashRydrRequests/$(requestId));
+      return cashHubRequestReadable(requestDoc.data)
+        || resource.data.authorUid == request.auth.uid
+        || isAdmin();
+    }
+
     function supportOwner(data) {
       return signedIn() && data.userId == request.auth.uid;
     }
@@ -325,6 +346,7 @@ service cloud.firestore {
         "eligibleRideTypes",
         "isOnline",
         "profilePhotoURL",
+        "rideFilters",
         "tierRates",
         "uid",
         "updatedAt",
@@ -402,7 +424,7 @@ service cloud.firestore {
     }
 
     match /driver_status/{uid} {
-      allow read: if signedIn();
+      allow read: if isSelf(uid) || isAdmin();
       allow create, update: if isSelf(uid)
         && request.resource.data.keys().hasOnly([
           "availabilityStatus",
@@ -414,6 +436,7 @@ service cloud.firestore {
           "location",
           "online",
           "qualifiedRideTypes",
+          "rideFilters",
           "rideTypes",
           "selectedRideTypes",
           "speed",
@@ -490,13 +513,13 @@ service cloud.firestore {
     }
 
     match /cashRydrRequests/{requestId} {
-      allow read: if signedIn();
+      allow read: if cashHubRequestReadable(resource.data);
       allow create: if validCashHubRequestCreate();
       allow update: if validCashHubOwnerUpdate() || validCashHubDriverConnect() || validCashHubConnectedDriverUpdate() || isAdmin();
       allow delete: if cashHubRequestOwner(resource.data) || isAdmin();
 
       match /responses/{responseId} {
-        allow read: if signedIn();
+        allow read: if cashHubResponseReadable(requestId);
         allow create: if validCashHubResponseCreate(requestId);
         allow update: if validCashHubResponseUpdate(requestId) || isAdmin();
         allow delete: if isAdmin();
