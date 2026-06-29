@@ -306,6 +306,10 @@ struct PhoneVerificationView: View {
             Task { @MainActor in
                 sending = false
                 if let error = error {
+                    let nsError = error as NSError
+                    #if DEBUG
+                    print("🔥 verifyPhoneNumber failed — domain: \(nsError.domain), code: \(nsError.code), localizedDescription: \(nsError.localizedDescription), userInfo: \(nsError.userInfo)")
+                    #endif
                     errorMessage = "Failed to send code: \(error.localizedDescription)"
                     return
                 }

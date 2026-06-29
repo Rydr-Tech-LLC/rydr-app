@@ -385,7 +385,7 @@ private func requestJSON<T: Decodable>(
     }
 
     if let user = Auth.auth().currentUser {
-        user.getIDToken { token, _ in
+        user.getIDTokenForcingRefresh(true) { token, _ in
             var r = req
             if let token { r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
             send(r)

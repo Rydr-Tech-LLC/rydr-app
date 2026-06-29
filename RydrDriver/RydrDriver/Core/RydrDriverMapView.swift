@@ -182,8 +182,8 @@ struct RydrDriverMapView: View {
     private func scheduleReturnToGroundCamera() {
         returnToGroundCameraWorkItem?.cancel()
 
-        let workItem = DispatchWorkItem {
-            setGroundCamera()
+        let workItem = DispatchWorkItem { [self] in
+            self.setGroundCamera()
         }
         returnToGroundCameraWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.15, execute: workItem)

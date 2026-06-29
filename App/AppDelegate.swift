@@ -44,6 +44,23 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // ✅ Firebase
     FirebaseApp.configure()
 
+    // Sanity-check FirebaseOptions immediately after configure(). A missing
+    // CLIENT_ID (sourced from GoogleService-Info.plist) silently breaks
+    // Phone Auth's reCAPTCHA fallback flow with the backend error "The
+    // request does not contain a client identifier," and also breaks Google
+    // Sign-In. Surface that loudly in DEBUG instead of failing mysteriously
+    // at verifyPhoneNumber() time.
+    #if DEBUG
+    if let options = FirebaseApp.app()?.options {
+      print("🔥 Firebase options — googleAppID: \(options.googleAppID), bundleID: \(options.bundleID), projectID: \(options.projectID ?? "nil"), gcmSenderID: \(options.gcmSenderID), clientID: \(options.clientID ?? "nil")")
+      if options.clientID == nil {
+        print("⚠️ FirebaseOptions.clientID is nil — Phone Auth reCAPTCHA fallback and Google Sign-In will fail. Re-download GoogleService-Info.plist for this bundle ID from the Firebase console (ensure Google Sign-In is enabled for the iOS app) and replace the bundled file.")
+      }
+    } else {
+      assertionFailure("FirebaseApp.app() is nil immediately after FirebaseApp.configure() — Firebase did not initialize.")
+    }
+    #endif
+
     UNUserNotificationCenter.current().delegate = self
     Messaging.messaging().delegate = self
     NotificationManager.shared.configureForLaunch(application: application)

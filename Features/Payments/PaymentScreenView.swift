@@ -157,19 +157,24 @@ struct PaymentScreenView: View {
     private func ensureCustomer(for user: User, completion: @escaping (Result<String, Error>) -> Void) {
         let name  = user.displayName ?? "Rydr User"
 
-        requestJSON(path: "create-customer", body: ["name": name]) { (resp: CreateCustomerResponse_Signup?) in
-            guard let cid = resp?.customerId, !cid.isEmpty else {
-                completion(.failure(NSError(domain: "Stripe", code: -1,
-                                            userInfo: [NSLocalizedDescriptionKey: "No customerId from server"]))); return
+        requestJSON(path: "create-customer", body: ["name": name]) { (result: Result<CreateCustomerResponse_Signup, Error>) in
+            switch result {
+            case .success(let resp):
+                guard !resp.customerId.isEmpty else {
+                    completion(.failure(simple("No customerId from server")))
+                    return
+                }
+                completion(.success(resp.customerId))
+            case .failure(let error):
+                completion(.failure(error))
             }
-            completion(.success(cid))
         }
     }
 
     private func requestJSON<T: Decodable>(
         path: String,
         body: [String: Any],
-        completion: @escaping (T?) -> Void
+        completion: @escaping (Result<T, Error>) -> Void
     ) {
         var req = URLRequest(url: backendBase.appendingPathComponent(path))
         req.httpMethod = "POST"
@@ -177,21 +182,49 @@ struct PaymentScreenView: View {
         req.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
 
         func send(_ r: URLRequest) {
-            URLSession.shared.dataTask(with: r) { data, _, _ in
-                guard let data = data else { completion(nil); return }
-                let obj = try? JSONDecoder().decode(T.self, from: data)
-                completion(obj)
+            URLSession.shared.dataTask(with: r) { data, response, requestError in
+                if let requestError {
+                    completion(.failure(requestError))
+                    return
+                }
+
+                guard let http = response as? HTTPURLResponse else {
+                    completion(.failure(simple("Payment server did not return a valid response.")))
+                    return
+                }
+
+                let responseData = data ?? Data()
+                if (200..<300).contains(http.statusCode) {
+                    do {
+                        completion(.success(try JSONDecoder().decode(T.self, from: responseData)))
+                    } catch {
+                        completion(.failure(simple("Payment server returned an unexpected response.")))
+                    }
+                    return
+                }
+
+                let backendError = (try? JSONDecoder().decode(BackendErrorResponse_Signup.self, from: responseData))?.error
+                let message = backendError.map { "Payment server error (\(http.statusCode)): \($0)" }
+                    ?? "Payment server error (\(http.statusCode))."
+                completion(.failure(simple(message)))
             }.resume()
         }
 
-        if let user = Auth.auth().currentUser {
-            user.getIDToken { token, _ in
-                var r = req
-                if let token { r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-                send(r)
+        guard let user = Auth.auth().currentUser else {
+            completion(.failure(simple("You must be logged in.")))
+            return
+        }
+
+        user.getIDTokenForcingRefresh(true) { token, tokenError in
+            guard let token, tokenError == nil else {
+                let message = tokenError?.localizedDescription ?? "Could not get a Firebase session token."
+                completion(.failure(simple(message)))
+                return
             }
-        } else {
-            send(req)
+
+            var r = req
+            r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            send(r)
         }
     }
 
@@ -215,9 +248,13 @@ struct PaymentScreenView: View {
         errorMessage = nil
         isLoading = true
 
-        requestJSON(path: "create-setup-intent", body: ["requestId": UUID().uuidString]) { (setupIntent: SetupIntentResponse_Signup?) in
-            guard let setupIntent else {
-                finishCardSave(.failure(simple("Failed to create SetupIntent")))
+        requestJSON(path: "create-setup-intent", body: ["requestId": UUID().uuidString]) { (result: Result<SetupIntentResponse_Signup, Error>) in
+            let setupIntent: SetupIntentResponse_Signup
+            switch result {
+            case .success(let response):
+                setupIntent = response
+            case .failure(let error):
+                finishCardSave(.failure(error))
                 return
             }
 
@@ -642,5 +679,6 @@ private struct PresenterResolver_Signup: UIViewControllerRepresentable {
 }
 
 // DTOs with unique names in this file
+private struct BackendErrorResponse_Signup: Decodable { let error: String }
 private struct CreateCustomerResponse_Signup: Decodable { let customerId: String }
 private struct SetupIntentResponse_Signup: Decodable { let clientSecret: String }

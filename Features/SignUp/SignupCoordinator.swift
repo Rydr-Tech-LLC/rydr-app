@@ -328,7 +328,7 @@ struct SignupCoordinator: View {
         backendBase: URL = URL(string: "https://rydr-stripe-backend.onrender.com")!
     ) {
         guard let user = Auth.auth().currentUser else { return }
-        user.getIDToken { token, _ in
+        user.getIDTokenForcingRefresh(true) { token, _ in
             var req = URLRequest(url: backendBase.appendingPathComponent("create-customer"))
             req.httpMethod = "POST"
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")

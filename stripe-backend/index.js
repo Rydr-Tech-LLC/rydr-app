@@ -22,7 +22,12 @@ const identityFlows = {
 };
 
 function firebaseCredential() {
-  const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = process.env;
+  const FIREBASE_PROJECT_ID =
+    process.env.FIREBASE_PROJECT_ID || process.env.FIREBASE_ADMIN_PROJECT_ID;
+  const FIREBASE_CLIENT_EMAIL =
+    process.env.FIREBASE_CLIENT_EMAIL || process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+  const FIREBASE_PRIVATE_KEY =
+    process.env.FIREBASE_PRIVATE_KEY || process.env.FIREBASE_ADMIN_PRIVATE_KEY;
 
   if (FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY) {
     return admin.credential.cert({
@@ -38,6 +43,17 @@ function firebaseCredential() {
 function initializeFirebase() {
   if (admin.apps.length > 0) return admin.app();
   return admin.initializeApp({ credential: firebaseCredential() });
+}
+
+function isFirebaseAdminConfigError(err) {
+  const message = String(err?.message || "");
+  return (
+    message.includes("Could not load the default credentials") ||
+    message.includes("Failed to parse private key") ||
+    message.includes("Invalid PEM formatted message") ||
+    message.includes("Service account object must contain") ||
+    message.includes("app/invalid-credential")
+  );
 }
 
 async function verifiedFirebaseUid(req) {
@@ -60,6 +76,10 @@ async function requireFirebaseUid(req, res) {
     return uid;
   } catch (err) {
     console.warn("⚠️ Firebase auth failed", err.message);
+    if (isFirebaseAdminConfigError(err)) {
+      res.status(500).json({ error: "firebase_admin_misconfigured" });
+      return null;
+    }
     res.status(401).json({ error: "unauthorized" });
     return null;
   }
