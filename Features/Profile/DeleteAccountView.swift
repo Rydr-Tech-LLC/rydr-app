@@ -168,7 +168,7 @@ struct DeleteAccountView: View {
             let snapshot = try await Firestore.firestore()
                 .collection("accountDeletionRequests")
                 .document(uid)
-                .get()
+                .getDocument()
             if snapshot.exists, let status = snapshot.data()?["status"] as? String, status != "rejected" {
                 existingRequestStatus = status
             }
@@ -205,7 +205,7 @@ struct DeleteAccountView: View {
             try await Firestore.firestore()
                 .collection("accountDeletionRequests")
                 .document(user.uid)
-                .set(payload, merge: true)
+                .setData(payload, merge: true)
             existingRequestStatus = "requested"
         } catch {
             submissionError = "We couldn't submit your request: \(error.localizedDescription). Please try again or contact support."

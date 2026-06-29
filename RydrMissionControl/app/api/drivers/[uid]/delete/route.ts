@@ -19,6 +19,17 @@ import { cleanupStripeAccount } from "@/lib/stripeCleanup";
 // insurance images are driver-specific, but vehicle imagery is sourced
 // from the shared vehicleLibrary collection and must not be touched here.
 //
+// Also cleans up the two satellite collections that live outside
+// drivers/{uid} and would otherwise survive a hard delete:
+//   - driverPhoneIndex/{phone}: a phone -> uid pointer doc used pre-auth to
+//     check "does a driver already exist for this number" (see
+//     DriverSignupCoordinator.driverExists / writePhoneIndex in the iOS
+//     app). Leaving it behind would permanently block that phone number
+//     from signing up again, since the pointer doc would still exist even
+//     though the driver record it points to is gone.
+//   - driver_status/{uid}: live availability/course/active-ride status,
+//     keyed directly by uid. Orphaned once the driver doc is gone.
+//
 // Irreversible. Any ride/ledger rows referencing this uid will be left
 // pointing at a uid that no longer resolves to a driver record — that
 // tradeoff is intentional for this action and is why it's separate from
@@ -33,6 +44,7 @@ export async function POST(request: NextRequest, { params }: { params: { uid: st
   const driverSnap = await driverRef.get();
   if (!driverSnap.exists) return NextResponse.json({ error: "Driver not found" }, { status: 404 });
   const profile = driverSnap.data() as Record<string, unknown>;
+  const phone = (profile.phoneE164 ?? profile.phoneNumber) as string | undefined;
 
   try {
     const stripeResult = await cleanupStripeAccount("driver", profile, session.uid, randomUUID(), params.uid);
@@ -44,7 +56,19 @@ export async function POST(request: NextRequest, { params }: { params: { uid: st
     const tokensSnap = await driverRef.collection("notificationTokens").get();
     const batch = adminDb.batch();
     tokensSnap.docs.forEach((doc) => batch.delete(doc.ref));
-    if (!tokensSnap.empty) await batch.commit();
+    batch.delete(adminDb.collection("driver_status").doc(params.uid));
+    if (phone) {
+      const phoneIndexRef = adminDb.collection("driverPhoneIndex").doc(phone);
+      const phoneIndexSnap = await phoneIndexRef.get();
+      // Only remove the pointer if it actually points at this driver — a
+      // mismatched uid here would mean the number was reassigned to a
+      // different account already, and we must not delete someone else's
+      // pointer doc.
+      if (phoneIndexSnap.exists && phoneIndexSnap.data()?.uid === params.uid) {
+        batch.delete(phoneIndexRef);
+      }
+    }
+    await batch.commit();
 
     await driverRef.delete();
 
