@@ -203,7 +203,7 @@ struct PaymentScreenView: View {
     }
 
     private func addCard() {
-        guard let customerId else {
+        guard customerId != nil else {
             error("Payment setup is still loading.")
             return
         }

@@ -35,6 +35,7 @@
 		666BC62A2B155A9F28FCB284 /* AnimatedLogo.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = FB1460DFAF8FFE937FE8B65D /* AnimatedLogo.mp4 */; };
 		68727367461BA89E6CDEF557 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D99FB1A4CEA99CB2FBD3FD66 /* ProfileView.swift */; };
 		68988803139FE311F018A213 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80DFFA0B31FD7C4AC0B88A0 /* AppDelegate.swift */; };
+		68B71E7A2E9A100100C0D3F1 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 68B71E792E9A100100C0D3F1 /* GoogleService-Info.plist */; };
 		6A450C8076DC87897C6F6F00 /* HelpSupportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27D744BC0BE096DB8C00A73B /* HelpSupportView.swift */; };
 		6A9FE600DB0F709B0F10C5D0 /* TermsModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E0F1A6BDC25A2302FCD46A8 /* TermsModalView.swift */; };
 		6B7D35B5794BF6685E0224F7 /* FirestoreRideService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53FE95B67E113FB2FBC7AE64 /* FirestoreRideService.swift */; };
@@ -167,6 +168,7 @@
 		5C8C5EC4F4A1D3D902A609C3 /* DriverCardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DriverCardView.swift; sourceTree = "<group>"; };
 		5EC99D72C84F6C0F12687F1C /* SupportTicketService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SupportTicketService.swift; sourceTree = "<group>"; };
 		5F6BE46F6F6C5FE5CA4622A9 /* RydrRideProgressMapView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RydrRideProgressMapView.swift; sourceTree = "<group>"; };
+		68B71E792E9A100100C0D3F1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		69EB15B8CD81D6C4D18B4448 /* UploadBox.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UploadBox.swift; sourceTree = "<group>"; };
 		6CD7CE10B7D1AB994E052AB7 /* PaymentMethodView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaymentMethodView.swift; sourceTree = "<group>"; };
 		726DA696E0CD7332230DF1C5 /* MailComposerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MailComposerView.swift; sourceTree = "<group>"; };
@@ -305,6 +307,7 @@
 			children = (
 				FB1460DFAF8FFE937FE8B65D /* AnimatedLogo.mp4 */,
 				E568C2DF59088F0C336CD06C /* Assets.xcassets */,
+				68B71E792E9A100100C0D3F1 /* GoogleService-Info.plist */,
 				4434A644C09A9A53FE0A8D7E /* Info.plist */,
 				FDACAA1662B485F084C0140B /* RydrPlayground.entitlements */,
 			);
@@ -647,6 +650,7 @@
 			files = (
 				62A9F73246DA56F16620ADF3 /* Assets.xcassets in Resources */,
 				666BC62A2B155A9F28FCB284 /* AnimatedLogo.mp4 in Resources */,
+				68B71E7A2E9A100100C0D3F1 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
