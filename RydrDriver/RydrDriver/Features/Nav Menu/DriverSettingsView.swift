@@ -172,7 +172,7 @@ private struct DriverLinkPhoneView: View {
                     .padding(.top, 12)
 
                 HStack(spacing: 8) {
-                    Text("+1")
+                    Text(verbatim: "+1")
                         .fontWeight(.semibold)
                         .foregroundStyle(Styles.rydrGradient)
                     Divider().frame(height: 20)
@@ -294,4 +294,3 @@ private struct DriverLinkPhoneView: View {
             .setData(["uid": uid, "createdAt": FieldValue.serverTimestamp()], merge: true)
     }
 }
-

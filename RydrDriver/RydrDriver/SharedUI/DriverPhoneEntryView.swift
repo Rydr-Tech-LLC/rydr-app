@@ -39,11 +39,11 @@ struct DriverPhoneEntryView: View {
                 VStack(spacing: 10) {
                     iconBadge(systemName: "lock.shield.fill")
 
-                    (
+                    HStack(spacing: 0) {
                         Text("Verify ").foregroundColor(.primary)
-                        + Text("your").foregroundStyle(Styles.rydrGradient)
-                        + Text(" phone").foregroundColor(.primary)
-                    )
+                        Text("your").foregroundStyle(Styles.rydrGradient)
+                        Text(" phone").foregroundColor(.primary)
+                    }
                     .font(.system(size: 28, weight: .heavy, design: .rounded))
 
                     Text("Enter your mobile number and we'll send you a code to get started.")
@@ -157,7 +157,7 @@ struct DriverPhoneEntryView: View {
         HStack(spacing: 0) {
             HStack(spacing: 4) {
                 Text("🇺🇸")
-                Text("+1").fontWeight(.semibold)
+                Text(verbatim: "+1").fontWeight(.semibold)
                 Image(systemName: "chevron.down")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)

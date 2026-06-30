@@ -40,12 +40,12 @@ struct DriverLoginView: View {
                     .padding(.top, 12)
 
                 VStack(spacing: 6) {
-                    (
+                    HStack(spacing: 0) {
                         Text("Driver ")
                             .foregroundColor(.primary)
-                        + Text("Sign In")
+                        Text("Sign In")
                             .foregroundStyle(Styles.rydrGradient)
-                    )
+                    }
                     .font(.system(size: 32, weight: .heavy, design: .rounded))
 
                     Text("Access your dashboard and manage your rides.")

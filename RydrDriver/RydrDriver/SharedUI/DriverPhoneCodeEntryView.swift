@@ -108,11 +108,11 @@ struct DriverPhoneCodeEntryView: View {
                     .foregroundStyle(Styles.rydrGradient)
             }
 
-            (
+            HStack(spacing: 0) {
                 Text("Verify ").foregroundColor(.primary)
-                + Text("your").foregroundStyle(Styles.rydrGradient)
-                + Text(" phone").foregroundColor(.primary)
-            )
+                Text("your").foregroundStyle(Styles.rydrGradient)
+                Text(" phone").foregroundColor(.primary)
+            }
             .font(.system(size: 26, weight: .heavy, design: .rounded))
 
             VStack(spacing: 4) {
@@ -260,12 +260,13 @@ struct DriverPhoneCodeEntryView: View {
         canResend = false
         secondsRemaining = 30
         countdownTimer?.invalidate()
-        countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
+        countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             Task { @MainActor in
                 if secondsRemaining <= 1 {
                     secondsRemaining = 0
                     canResend = true
-                    timer.invalidate()
+                    countdownTimer?.invalidate()
+                    countdownTimer = nil
                 } else {
                     secondsRemaining -= 1
                 }

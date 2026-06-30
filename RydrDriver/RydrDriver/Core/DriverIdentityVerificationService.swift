@@ -5,6 +5,7 @@ import UIKit
 enum DriverIdentityVerificationError: LocalizedError {
     case notSignedIn
     case invalidResponse
+    case server(String)
     case unsupportedOS
 
     var errorDescription: String? {
@@ -13,6 +14,8 @@ enum DriverIdentityVerificationError: LocalizedError {
             return "Sign in before starting identity verification."
         case .invalidResponse:
             return "The identity service returned an invalid response. Please try again."
+        case .server(let message):
+            return message
         case .unsupportedOS:
             return "Identity verification requires iOS 14.3 or newer."
         }
@@ -36,6 +39,10 @@ private struct DriverIdentitySessionResponse: Decodable {
     }
 }
 
+private struct DriverIdentityBackendError: Decodable {
+    let error: String
+}
+
 final class DriverIdentityVerificationService {
     static let shared = DriverIdentityVerificationService()
 
@@ -48,7 +55,7 @@ final class DriverIdentityVerificationService {
         guard let user = Auth.auth().currentUser else {
             throw DriverIdentityVerificationError.notSignedIn
         }
-        let token = try await user.getIDToken()
+        let token = try await refreshedIDToken(for: user)
         var request = URLRequest(url: backendBase.appendingPathComponent("identity/create-session"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -60,7 +67,7 @@ final class DriverIdentityVerificationService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw DriverIdentityVerificationError.invalidResponse
+            throw backendError(from: data, response: response)
         }
         let decoded = try JSONDecoder().decode(DriverIdentitySessionResponse.self, from: data)
         return decoded.clientSecret
@@ -70,7 +77,7 @@ final class DriverIdentityVerificationService {
         guard let user = Auth.auth().currentUser else {
             throw DriverIdentityVerificationError.notSignedIn
         }
-        let token = try await user.getIDToken()
+        let token = try await refreshedIDToken(for: user)
         var components = URLComponents(url: backendBase.appendingPathComponent("identity/status"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "role", value: "driver")]
         guard let url = components.url else { throw DriverIdentityVerificationError.invalidResponse }
@@ -81,9 +88,31 @@ final class DriverIdentityVerificationService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw DriverIdentityVerificationError.invalidResponse
+            throw backendError(from: data, response: response)
         }
         return try JSONDecoder().decode(DriverIdentityStatus.self, from: data)
+    }
+
+    private func backendError(from data: Data, response: URLResponse) -> DriverIdentityVerificationError {
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        if let decoded = try? JSONDecoder().decode(DriverIdentityBackendError.self, from: data) {
+            return .server("Identity service error (\(statusCode)): \(decoded.error)")
+        }
+        return .invalidResponse
+    }
+
+    private func refreshedIDToken(for user: User) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            user.getIDTokenForcingRefresh(true) { token, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let token {
+                    continuation.resume(returning: token)
+                } else {
+                    continuation.resume(throwing: DriverIdentityVerificationError.notSignedIn)
+                }
+            }
+        }
     }
 
     @MainActor

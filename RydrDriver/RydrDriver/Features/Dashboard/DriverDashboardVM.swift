@@ -1903,23 +1903,19 @@ struct DriverDashboardView: View {
 #Preview("Driver Dashboard - SE") {
     DriverDashboardView()
         .environmentObject(DriverSessionManager())
-        .previewDevice("iPhone SE (3rd generation)")
 }
 
 #Preview("Driver Dashboard - Standard") {
     DriverDashboardView()
         .environmentObject(DriverSessionManager())
-        .previewDevice("iPhone 15")
 }
 
 #Preview("Driver Dashboard - Pro") {
     DriverDashboardView()
         .environmentObject(DriverSessionManager())
-        .previewDevice("iPhone 17 Pro")
 }
 
 #Preview("Driver Dashboard - Pro Max") {
     DriverDashboardView()
         .environmentObject(DriverSessionManager())
-        .previewDevice("iPhone 15 Pro Max")
 }

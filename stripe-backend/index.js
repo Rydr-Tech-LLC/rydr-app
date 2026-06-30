@@ -17,9 +17,18 @@ if (!process.env.STRIPE_SECRET_KEY) {
 const app = express();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 const identityFlows = {
-  driver: "vf_1TmzHIBOkTOLtDHQffuNJGj8",
-  verified_rider: "vf_1TmyroBOkTOLtDHQ6iv0Ojxc",
+  driver: process.env.STRIPE_DRIVER_VERIFICATION_FLOW_ID,
+  verified_rider: process.env.STRIPE_RIDER_VERIFICATION_FLOW_ID,
 };
+
+function isValidIdentityRole(role) {
+  return role === "driver" || role === "verified_rider";
+}
+
+function identityFlowForRole(role) {
+  if (!isValidIdentityRole(role)) return null;
+  return identityFlows[role] || null;
+}
 
 function firebaseCredential() {
   const FIREBASE_PROJECT_ID =
@@ -510,9 +519,13 @@ app.post("/identity/create-session", async (req, res) => {
     const { role } = req.body || {};
     const requestId = requireRequestId(req, res, "identity_create_session");
     if (!requestId) return;
-    const verificationFlow = identityFlows[role];
-    if (!verificationFlow) {
+    if (!isValidIdentityRole(role)) {
       return res.status(400).json({ error: "invalid_identity_role" });
+    }
+
+    const verificationFlow = identityFlowForRole(role);
+    if (!verificationFlow) {
+      return res.status(500).json({ error: "identity_flow_not_configured" });
     }
 
     const profile = await identityProfile(uid, role);
@@ -555,7 +568,7 @@ app.get("/identity/status", async (req, res) => {
     if (!uid) return;
 
     const role = String(req.query.role || "");
-    if (!identityFlows[role]) {
+    if (!isValidIdentityRole(role)) {
       return res.status(400).json({ error: "invalid_identity_role" });
     }
 

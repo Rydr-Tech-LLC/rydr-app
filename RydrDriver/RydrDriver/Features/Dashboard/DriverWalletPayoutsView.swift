@@ -530,38 +530,37 @@ struct DriverWalletPayoutsView: View {
         guard wallet.stripeAccountId?.isEmpty == false else { return }
         let idToken = try? await Auth.auth().currentUser?.getIDToken()
 
-        async let externalAccountsTask: ExternalAccountsResponse? = {
-            do {
-                var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/external-accounts"))
-                if let idToken {
-                    request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
-                }
-                let (data, response) = try await URLSession.shared.data(for: request)
-                guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
-                return try JSONDecoder().decode(ExternalAccountsResponse.self, from: data)
-            } catch {
-                return nil
+        var externalAccounts: ExternalAccountsResponse?
+        do {
+            var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/external-accounts"))
+            if let idToken {
+                request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
             }
-        }()
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
+                externalAccounts = try JSONDecoder().decode(ExternalAccountsResponse.self, from: data)
+            }
+        } catch {
+            externalAccounts = nil
+        }
 
-        async let payoutsTask: PayoutsResponse? = {
-            do {
-                var components = URLComponents(url: stripeBackendBase.appendingPathComponent("connect/payouts"), resolvingAgainstBaseURL: false)
-                components?.queryItems = [URLQueryItem(name: "limit", value: "10")]
-                guard let url = components?.url else { return nil }
+        var payouts: PayoutsResponse?
+        do {
+            var components = URLComponents(url: stripeBackendBase.appendingPathComponent("connect/payouts"), resolvingAgainstBaseURL: false)
+            components?.queryItems = [URLQueryItem(name: "limit", value: "10")]
+            if let url = components?.url {
                 var request = URLRequest(url: url)
                 if let idToken {
                     request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
                 }
                 let (data, response) = try await URLSession.shared.data(for: request)
-                guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
-                return try JSONDecoder().decode(PayoutsResponse.self, from: data)
-            } catch {
-                return nil
+                if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
+                    payouts = try JSONDecoder().decode(PayoutsResponse.self, from: data)
+                }
             }
-        }()
-
-        let (externalAccounts, payouts) = await (externalAccountsTask, payoutsTask)
+        } catch {
+            payouts = nil
+        }
 
         if let bank = externalAccounts?.bankAccounts.first {
             wallet.bankName = bank.bankName

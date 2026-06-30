@@ -92,14 +92,14 @@ struct RydrDriverMapView: View {
     private func recenterWorkZoneIfDriverMoved() {
         guard filterPreferences.workZoneEnabled, let driverCoordinate else { return }
 
-        guard let lastFittedCoordinate else {
+        guard let previousFittedCoordinate = lastFittedCoordinate else {
             fitWorkZoneInViewport()
             scheduleReturnToGroundCamera()
             return
         }
 
         let moved = CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
-            .distance(from: CLLocation(latitude: lastFittedCoordinate.latitude, longitude: lastFittedCoordinate.longitude))
+            .distance(from: CLLocation(latitude: previousFittedCoordinate.latitude, longitude: previousFittedCoordinate.longitude))
 
         if moved >= 30 {
             lastFittedCoordinate = driverCoordinate
