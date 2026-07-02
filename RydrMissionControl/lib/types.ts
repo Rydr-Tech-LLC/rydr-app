@@ -128,7 +128,15 @@ export interface AuditLogEntry {
   adminUid: string;
   adminEmail?: string;
   action: string;
-  targetType: "driver" | "rider" | "report" | "vehicleLibrary" | "accountDeletion" | "payment" | "supportTicket";
+  targetType:
+    | "driver"
+    | "rider"
+    | "report"
+    | "vehicleLibrary"
+    | "accountDeletion"
+    | "payment"
+    | "supportTicket"
+    | "platformConfig";
   targetId: string;
   reason?: string;
   createdAt: unknown;
