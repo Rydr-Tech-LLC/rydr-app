@@ -24,7 +24,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
         rideType: String,
         near center: CLLocationCoordinate2D,
         pickupCoordinate: CLLocationCoordinate2D?,
-        dropoffCoordinate: CLLocationCoordinate2D?
+        dropoffCoordinate: CLLocationCoordinate2D?,
+        riderPreferences: RiderRidePreferences?
     ) async throws -> [Driver] {
         #if DEBUG
         if shouldUseMockRidesImmediately {
@@ -34,7 +35,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 rideType: rideType,
                 near: center,
                 pickupCoordinate: pickupCoordinate,
-                dropoffCoordinate: dropoffCoordinate
+                dropoffCoordinate: dropoffCoordinate,
+                riderPreferences: riderPreferences
             )
         }
 
@@ -45,7 +47,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 rideType: rideType,
                 near: center,
                 pickupCoordinate: pickupCoordinate,
-                dropoffCoordinate: dropoffCoordinate
+                dropoffCoordinate: dropoffCoordinate,
+                riderPreferences: riderPreferences
             )
             if !drivers.isEmpty { return drivers }
         } catch {
@@ -57,7 +60,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
             rideType: rideType,
             near: center,
             pickupCoordinate: pickupCoordinate,
-            dropoffCoordinate: dropoffCoordinate
+            dropoffCoordinate: dropoffCoordinate,
+            riderPreferences: riderPreferences
         )
         #else
         return try await primary.fetchNearbyDrivers(
@@ -66,7 +70,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
             rideType: rideType,
             near: center,
             pickupCoordinate: pickupCoordinate,
-            dropoffCoordinate: dropoffCoordinate
+            dropoffCoordinate: dropoffCoordinate,
+            riderPreferences: riderPreferences
         )
         #endif
     }
@@ -79,7 +84,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
-        pricingSnapshot: RidePricingSnapshot
+        pricingSnapshot: RidePricingSnapshot,
+        riderPreferences: RiderRidePreferences?
     ) async throws -> String {
         #if DEBUG
         if shouldUseMockRidesImmediately {
@@ -91,7 +97,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 pickupCoordinate: pickupCoordinate,
                 dropoffCoordinate: dropoffCoordinate,
                 estimate: estimate,
-                pricingSnapshot: pricingSnapshot
+                pricingSnapshot: pricingSnapshot,
+                riderPreferences: riderPreferences
             )
             markFallbackRide(rideId)
             return rideId
@@ -106,7 +113,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 pickupCoordinate: pickupCoordinate,
                 dropoffCoordinate: dropoffCoordinate,
                 estimate: estimate,
-                pricingSnapshot: pricingSnapshot
+                pricingSnapshot: pricingSnapshot,
+                riderPreferences: riderPreferences
             )
         } catch {
             print("Using mock ride request after primary request failed:", error.localizedDescription)
@@ -118,7 +126,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 pickupCoordinate: pickupCoordinate,
                 dropoffCoordinate: dropoffCoordinate,
                 estimate: estimate,
-                pricingSnapshot: pricingSnapshot
+                pricingSnapshot: pricingSnapshot,
+                riderPreferences: riderPreferences
             )
             markFallbackRide(rideId)
             return rideId
@@ -132,7 +141,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
             pickupCoordinate: pickupCoordinate,
             dropoffCoordinate: dropoffCoordinate,
             estimate: estimate,
-            pricingSnapshot: pricingSnapshot
+            pricingSnapshot: pricingSnapshot,
+            riderPreferences: riderPreferences
         )
         #endif
     }

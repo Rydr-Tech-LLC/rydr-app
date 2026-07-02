@@ -171,6 +171,14 @@ struct SignupCoordinator: View {
 
     // MARK: - Firestore helpers
 
+    private func normalizedE164Phone(_ value: String) -> String {
+        let digits = value.filter { $0.isNumber }
+        if digits.count == 11, digits.first == "1" {
+            return "+\(digits)"
+        }
+        return "+1\(String(digits.suffix(10)))"
+    }
+
     /// Merge-writes into `riders/{uid}` so the document exists early and stays current.
     private func upsertRider(_ fields: [String: Any]) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
@@ -231,14 +239,17 @@ struct SignupCoordinator: View {
     }
 
     private func finishAuthAccountSetup(for user: User) {
+        let e164Phone = normalizedE164Phone(phoneNumber)
         upsertRider([
             "uid": user.uid,
             "email": email,
             "firstName": firstName,
             "lastName": lastName,
             "preferredName": preferredName,
-            "phoneNumber": phoneNumber
+            "phoneNumber": e164Phone,
+            "phoneE164": e164Phone
         ])
+        writePhoneIndex(phoneE164: e164Phone, uid: user.uid)
 
         provisionStripeCustomerIfNeeded()
 
@@ -253,6 +264,7 @@ struct SignupCoordinator: View {
             print("❌ No authenticated user to save.")
             return
         }
+        let e164Phone = normalizedE164Phone(phoneNumber)
 
         let riderData: [String: Any] = [
             "uid": uid,
@@ -260,7 +272,8 @@ struct SignupCoordinator: View {
             "lastName": lastName,
             "preferredName": preferredName,
             "email": email,
-            "phoneNumber": phoneNumber,
+            "phoneNumber": e164Phone,
+            "phoneE164": e164Phone,
             "address": [
                 "street": streetAddress,
                 "line2": addressLine2,
@@ -282,6 +295,7 @@ struct SignupCoordinator: View {
                     print("❌ Error saving rider: \(error.localizedDescription)")
                 } else {
                     print("✅ Rider saved to Firestore.")
+                    writePhoneIndex(phoneE164: e164Phone, uid: uid)
                     Task { @MainActor in
                         // 🔁 Pull name/preferred so Profile greeting updates immediately
                         session.login(
@@ -320,6 +334,20 @@ struct SignupCoordinator: View {
                 hasLoadedExistingProfile = true
             }
         }
+    }
+
+    private func writePhoneIndex(phoneE164: String, uid: String) {
+        Firestore.firestore()
+            .collection("riderPhoneIndex")
+            .document(phoneE164)
+            .setData([
+                "uid": uid,
+                "createdAt": FieldValue.serverTimestamp()
+            ]) { err in
+                if let err = err {
+                    print("⚠️ writePhoneIndex failed: \(err.localizedDescription)")
+                }
+            }
     }
 
     // MARK: - Stripe customer provisioning (as requested)

@@ -476,9 +476,32 @@ struct LoginView: View {
 
         Firestore.firestore()
             .collection("riders")
-            .whereField("phoneNumber", isEqualTo: phone)
-            .limit(to: 2)
-            .getDocuments { snapshot, error in
+            .document(user.uid)
+            .getDocument { snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        try? Auth.auth().signOut()
+                        errorMessage = "Unable to load rider account: \(error.localizedDescription)"
+                        return
+                    }
+
+                    if let snapshot, snapshot.exists {
+                        let profile = makeLoginProfile(from: snapshot.data() ?? [:], user: user, fallbackEmail: user.email ?? "")
+                        session.login(name: profile.name, email: profile.email)
+                        backfillPhoneIndexIfNeeded(phone: phone, uid: user.uid)
+                        return
+                    }
+
+                    lookupRiderByPhone(phone, signedInUser: user, credential: credential)
+                }
+            }
+    }
+
+    private func lookupRiderByPhone(_ phone: String, signedInUser user: User, credential: AuthCredential?) {
+        Firestore.firestore()
+            .collection("riderPhoneIndex")
+            .document(phone)
+            .getDocument { snapshot, error in
                 Task { @MainActor in
                     if let error {
                         try? Auth.auth().signOut()
@@ -486,44 +509,75 @@ struct LoginView: View {
                         return
                     }
 
-                    let matchingProfiles = snapshot?.documents ?? []
-                    if let profile = matchingProfiles.first(where: { $0.documentID != user.uid }) {
-                        let loginProfile = makeLoginProfile(
-                            from: profile.data(),
-                            user: user,
-                            fallbackEmail: profile.data()["email"] as? String ?? ""
-                        )
-
-                        if let credential {
-                            pendingPhoneLoginRepair = PhoneLoginRepair(
-                                profile: loginProfile,
-                                credential: credential,
-                                duplicatePhoneUser: user
-                            )
-                            phoneRepairPassword = ""
-                            errorMessage = "This phone number belongs to \(loginProfile.email). Confirm your password to link phone login."
-                        } else {
-                            try? Auth.auth().signOut()
-                            errorMessage = "This phone number is saved on \(loginProfile.email). Sign in with email first, then verify this phone number to link phone login."
-                        }
+                    guard let mappedUid = snapshot?.data()?["uid"] as? String else {
+                        try? Auth.auth().signOut()
+                        errorMessage = "No rider account was found for this phone number. Please sign up or use email login."
                         return
                     }
 
-                    let profile = matchingProfiles.first?.data() ?? [:]
-                    let first = profile["firstName"] as? String ?? ""
-                    let last = profile["lastName"] as? String ?? ""
-                    let preferred = profile["preferredName"] as? String ?? ""
-                    let displayName = preferred.isEmpty
-                        ? [first, last].joined(separator: " ").trimmingCharacters(in: .whitespaces)
-                        : preferred
-                    let email = profile["email"] as? String ?? user.email ?? ""
+                    fetchRiderDocument(uid: mappedUid, signedInUser: user, credential: credential)
+                }
+            }
+    }
 
-                    session.login(
-                        name: displayName.isEmpty ? user.displayName ?? "Rydr User" : displayName,
-                        email: email
+    private func fetchRiderDocument(uid: String, signedInUser user: User, credential: AuthCredential?) {
+        Firestore.firestore()
+            .collection("riders")
+            .document(uid)
+            .getDocument { snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        try? Auth.auth().signOut()
+                        errorMessage = "Unable to load rider account: \(error.localizedDescription)"
+                        return
+                    }
+
+                    guard let snapshot, snapshot.exists else {
+                        try? Auth.auth().signOut()
+                        errorMessage = "No rider account was found for this phone number. Please sign up or use email login."
+                        return
+                    }
+
+                    handlePhoneMatchedRider(
+                        documentID: snapshot.documentID,
+                        data: snapshot.data() ?? [:],
+                        user: user,
+                        credential: credential
                     )
                 }
             }
+    }
+
+    private func handlePhoneMatchedRider(documentID: String, data: [String: Any], user: User, credential: AuthCredential?) {
+        guard documentID == user.uid else {
+            let loginProfile = makeLoginProfile(from: data, user: user, fallbackEmail: data["email"] as? String ?? "")
+
+            if let credential {
+                pendingPhoneLoginRepair = PhoneLoginRepair(
+                    profile: loginProfile,
+                    credential: credential,
+                    duplicatePhoneUser: user
+                )
+                phoneRepairPassword = ""
+                errorMessage = "This phone number belongs to \(loginProfile.email). Confirm your password to link phone login."
+            } else {
+                try? Auth.auth().signOut()
+                errorMessage = "This phone number is saved on \(loginProfile.email). Sign in with email first, then verify this phone number to link phone login."
+            }
+            return
+        }
+
+        let profile = makeLoginProfile(from: data, user: user, fallbackEmail: user.email ?? "")
+        session.login(name: profile.name, email: profile.email)
+        backfillPhoneIndexIfNeeded(phone: user.phoneNumber ?? formattedPhoneNumber, uid: user.uid)
+    }
+
+    private func backfillPhoneIndexIfNeeded(phone: String, uid: String) {
+        let index = Firestore.firestore().collection("riderPhoneIndex").document(phone)
+        index.getDocument { snapshot, _ in
+            guard snapshot?.exists != true else { return }
+            index.setData(["uid": uid, "createdAt": FieldValue.serverTimestamp()])
+        }
     }
 
     private func repairPhoneLogin() {

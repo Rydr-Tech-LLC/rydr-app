@@ -22,7 +22,9 @@ private enum DriverRideLifecyclePhase {
 
 struct DriverRideInProgressView: View {
     let ride: DriverActiveRide
+    let currentDriverId: String
     let driverCoordinate: CLLocationCoordinate2D?
+    let driverSpeedMetersPerSecond: CLLocationSpeed?
     let isUpdatingRide: Bool
     let onStartNavigation: () -> Void
     let onArrivedAtPickup: () -> Void
@@ -33,6 +35,7 @@ struct DriverRideInProgressView: View {
     let onPickupPaidWaitStarted: () -> Void
     let onCancel: () -> Void
     let onReportIncident: () -> Void
+    let onRidePreferencesDismissed: (_ preferences: DriverVisibleRidePreferences) -> Void
     let onSendMessage: (_ text: String) async throws -> Void
     #if DEBUG
     let onDebugMoveToDestination: () -> Void
@@ -58,6 +61,8 @@ struct DriverRideInProgressView: View {
     @State private var isMockDrivingRoute = false
     @State private var now = Date()
     @State private var didPublishPickupPaidWait = false
+    @State private var pendingRidePreferences: DriverVisibleRidePreferences?
+    @State private var presentedRidePreferencesRideId: String?
 
     private let arrivalThresholdMeters: CLLocationDistance = 250
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -79,10 +84,16 @@ struct DriverRideInProgressView: View {
         }
         .onAppear {
             camera = .region(region)
+            presentRidePreferencesIfNeeded()
         }
         .onChange(of: ride.id) { _, _ in
             isNavigationStarted = false
+            presentedRidePreferencesRideId = nil
             camera = .region(region)
+            presentRidePreferencesIfNeeded()
+        }
+        .onChange(of: ride.ridePreferences) { _, _ in
+            presentRidePreferencesIfNeeded()
         }
         .onChange(of: ride.normalizedStatus) { _, newStatus in
             if ["inProgress", "navigatingToStop"].contains(newStatus) {
@@ -132,10 +143,38 @@ struct DriverRideInProgressView: View {
         }
         .sheet(isPresented: $showMessageSheet) {
             DriverRideMessageSheet(
+                rideId: ride.id,
+                riderId: ride.riderId,
+                driverId: currentDriverId,
                 riderName: ride.riderName,
+                driverSpeedMetersPerSecond: driverSpeedMetersPerSecond,
                 onSend: onSendMessage
             )
             .presentationDetents([.medium])
+        }
+        .sheet(item: $pendingRidePreferences) { preferences in
+            DriverRidePreferencesPopup(
+                riderName: ride.riderName,
+                preferences: preferences,
+                onDismiss: {
+                    onRidePreferencesDismissed(preferences)
+                    pendingRidePreferences = nil
+                }
+            )
+            .presentationDetents([.medium])
+            .interactiveDismissDisabled()
+        }
+    }
+
+    private func presentRidePreferencesIfNeeded() {
+        guard presentedRidePreferencesRideId != ride.id,
+              let preferences = ride.ridePreferences,
+              !preferences.isEmpty else {
+            return
+        }
+        presentedRidePreferencesRideId = ride.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            pendingRidePreferences = preferences
         }
     }
 
@@ -1096,66 +1135,232 @@ private struct DriverIncidentReportSheet: View {
     }
 }
 
-private struct DriverRideMessageSheet: View {
+private struct DriverRidePreferencesPopup: View {
     let riderName: String
+    let preferences: DriverVisibleRidePreferences
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 22) {
+            ZStack {
+                Circle()
+                    .fill(Styles.rydrGradient.opacity(0.18))
+                    .frame(width: 72, height: 72)
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 32, weight: .black))
+                    .foregroundStyle(Styles.rydrGradient)
+            }
+
+            VStack(spacing: 8) {
+                Text("Rider Preferences")
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(.primary)
+                Text("\(riderName) shared these ride preferences.")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(preferences.summaryItems, id: \.self) { item in
+                    Label(item, systemImage: "checkmark.circle.fill")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(16)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color(.secondarySystemBackground)))
+
+            Button(action: onDismiss) {
+                Text("Dismiss")
+                    .font(.headline.weight(.black))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 15)
+                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Styles.rydrGradient))
+                    .foregroundStyle(.white)
+            }
+        }
+        .padding(24)
+        .presentationBackground(.regularMaterial)
+    }
+}
+
+private struct DriverRideMessageSheet: View {
+    let rideId: String
+    let riderId: String
+    let driverId: String
+    let riderName: String
+    let driverSpeedMetersPerSecond: CLLocationSpeed?
     let onSend: (_ text: String) async throws -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var messages: [DriverRideChatMessage] = []
     @State private var message = ""
     @State private var isSending = false
+    @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var listener: DriverRideChatListener?
+    @State private var privateListener: DriverRideChatListener?
+    @State private var privateMessages: [DriverRideChatMessage] = []
+    @State private var setupTask: Task<Void, Never>?
+
+    private let service = DriverRideChatService()
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Message \(riderName)")
-                    .font(.headline)
+            VStack(spacing: 0) {
+                chatList
 
-                VStack(alignment: .leading, spacing: 8) {
-                    quickMessage("I am on my way.")
-                    quickMessage("I have arrived.")
-                    quickMessage("I am looking for you.")
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    if isDriverMoving {
+                        Label("Messaging is locked while motion is detected.", systemImage: "car.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        quickReplies
+
+                        TextEditor(text: $message)
+                            .frame(minHeight: 84, maxHeight: 110)
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.black.opacity(0.06), lineWidth: 1))
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    Button {
+                        send()
+                    } label: {
+                        Label("Send Message", systemImage: "paperplane.fill")
+                            .font(.headline.weight(.bold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(RoundedRectangle(cornerRadius: 14).fill(canSend ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.systemGray4))))
+                            .foregroundStyle(.white)
+                    }
+                    .disabled(!canSend)
                 }
-
-                TextEditor(text: $message)
-                    .frame(minHeight: 110)
-                    .padding(8)
-                    .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.black.opacity(0.06), lineWidth: 1))
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-
-                Button {
-                    send()
-                } label: {
-                    Label("Send Message", systemImage: "paperplane.fill")
-                        .font(.headline.weight(.bold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(RoundedRectangle(cornerRadius: 14).fill(canSend ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.systemGray4))))
-                        .foregroundStyle(.white)
-                }
-                .disabled(!canSend)
-
-                Spacer()
+                .padding()
+                .background(Color(.systemBackground))
             }
-            .padding()
-            .navigationTitle("Ride Message")
+            .navigationTitle("Message \(riderName)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
             }
+            .onAppear(perform: startChat)
+            .onDisappear(perform: stopChat)
+        }
+    }
+
+    private var chatList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    if isLoading {
+                        ProgressView("Loading chat...")
+                            .padding(.top, 30)
+                    } else if combinedMessages.isEmpty {
+                        ContentUnavailableView(
+                            "No messages yet",
+                            systemImage: "message",
+                            description: Text("Use quick updates when stopped.")
+                        )
+                        .padding(.top, 36)
+                    } else {
+                        ForEach(combinedMessages) { chatMessage in
+                            chatBubble(chatMessage)
+                                .id(chatMessage.id)
+                        }
+                    }
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+            .onChange(of: combinedMessages.count, initial: false) { _, _ in
+                guard let latest = combinedMessages.last else { return }
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo(latest.id, anchor: .bottom)
+                    }
+                }
+            }
+        }
+    }
+
+    private var quickReplies: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                quickMessage("I am on my way.")
+                quickMessage("I have arrived.")
+                quickMessage("I am looking for you.")
+            }
+        }
+    }
+
+    private var combinedMessages: [DriverRideChatMessage] {
+        (messages + privateMessages).sorted { lhs, rhs in
+            if lhs.createdAt == rhs.createdAt { return lhs.id < rhs.id }
+            return lhs.createdAt < rhs.createdAt
         }
     }
 
     private var canSend: Bool {
-        !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
+        !isDriverMoving && !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
+    }
+
+    private var isDriverMoving: Bool {
+        guard let speed = driverSpeedMetersPerSecond, speed >= 0 else { return false }
+        return speed >= 2.7
+    }
+
+    private func chatBubble(_ chatMessage: DriverRideChatMessage) -> some View {
+        if chatMessage.isPrivateDriverNote {
+            return AnyView(
+                HStack {
+                    Label(chatMessage.text, systemImage: "lock.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.systemBackground)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                        )
+                }
+            )
+        }
+        let isDriverMessage = chatMessage.senderId == driverId || chatMessage.senderRole == "driver"
+
+        return AnyView(HStack {
+            if isDriverMessage { Spacer(minLength: 48) }
+
+            Text(chatMessage.text)
+                .font(.body)
+                .foregroundStyle(isDriverMessage ? .white : .primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(isDriverMessage ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.systemBackground)))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(isDriverMessage ? Color.clear : Color.black.opacity(0.06), lineWidth: 1)
+                )
+
+            if !isDriverMessage { Spacer(minLength: 48) }
+        })
     }
 
     private func quickMessage(_ text: String) -> some View {
@@ -1171,7 +1376,80 @@ private struct DriverRideMessageSheet: View {
         .buttonStyle(.plain)
     }
 
+    private func startChat() {
+        guard setupTask == nil, listener == nil else { return }
+        isLoading = true
+
+        setupTask = Task {
+            do {
+                try await service.createOrInitializeChat(rideId: rideId, riderId: riderId, driverId: driverId)
+                let registration = try await service.listenToMessages(
+                    rideId: rideId,
+                    riderId: riderId,
+                    driverId: driverId
+                ) { result in
+                    Task { @MainActor in
+                        switch result {
+                        case .success(let newMessages):
+                            messages = newMessages
+                            isLoading = false
+                            errorMessage = nil
+                        case .failure(let error):
+                            isLoading = false
+                            errorMessage = error.localizedDescription
+                        }
+                    }
+                }
+                let privateRegistration = try await service.listenToDriverPrivateMessages(
+                    rideId: rideId,
+                    riderId: riderId,
+                    driverId: driverId
+                ) { result in
+                    Task { @MainActor in
+                        switch result {
+                        case .success(let newMessages):
+                            privateMessages = newMessages
+                            errorMessage = nil
+                        case .failure(let error):
+                            errorMessage = error.localizedDescription
+                        }
+                    }
+                }
+
+                guard !Task.isCancelled else {
+                    service.stopListening(registration)
+                    service.stopListening(privateRegistration)
+                    return
+                }
+
+                await MainActor.run {
+                    listener = registration
+                    privateListener = privateRegistration
+                    isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func stopChat() {
+        setupTask?.cancel()
+        setupTask = nil
+        service.stopListening(listener)
+        service.stopListening(privateListener)
+        listener = nil
+        privateListener = nil
+    }
+
     private func send() {
+        guard !isDriverMoving else {
+            errorMessage = "Stop the vehicle before sending a message."
+            return
+        }
         isSending = true
         errorMessage = nil
         let outgoing = message

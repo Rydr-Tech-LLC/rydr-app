@@ -29,6 +29,7 @@ export async function POST(request: NextRequest, { params }: { params: { uid: st
   const riderSnap = await riderRef.get();
   if (!riderSnap.exists) return NextResponse.json({ error: "Rider not found" }, { status: 404 });
   const profile = riderSnap.data() as Record<string, unknown>;
+  const phone = (profile.phoneE164 ?? profile.phoneNumber) as string | undefined;
 
   try {
     const stripeResult = await cleanupStripeAccount("rider", profile, session.uid, randomUUID(), params.uid);
@@ -39,8 +40,18 @@ export async function POST(request: NextRequest, { params }: { params: { uid: st
 
     const tokensSnap = await riderRef.collection("notificationTokens").get();
     const batch = adminDb.batch();
+    let hasBatchDeletes = false;
     tokensSnap.docs.forEach((doc) => batch.delete(doc.ref));
-    if (!tokensSnap.empty) await batch.commit();
+    if (!tokensSnap.empty) hasBatchDeletes = true;
+    if (phone) {
+      const phoneIndexRef = adminDb.collection("riderPhoneIndex").doc(phone);
+      const phoneIndexSnap = await phoneIndexRef.get();
+      if (phoneIndexSnap.exists && phoneIndexSnap.data()?.uid === params.uid) {
+        batch.delete(phoneIndexRef);
+        hasBatchDeletes = true;
+      }
+    }
+    if (hasBatchDeletes) await batch.commit();
 
     await riderRef.delete();
 

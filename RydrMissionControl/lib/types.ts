@@ -106,7 +106,21 @@ export interface RiderRecord {
   rideCount?: number;
   verifiedRider?: boolean;
   accountStatus?: "active" | "suspended" | "removed";
+  badges?: Partial<Record<RiderBadgeKey, RiderBadgeAssignment>>;
   createdAt?: { toDate?: () => Date } | null;
+}
+
+export type RiderBadgeKey = "studentAmbassador";
+
+export interface RiderBadgeAssignment {
+  active?: boolean;
+  label?: string;
+  description?: string;
+  assetName?: string;
+  missionControlAssetPath?: string;
+  assignedAt?: { toDate?: () => Date } | null;
+  assignedBy?: string;
+  assignedByEmail?: string;
 }
 
 export type SafetyReportStatus = "open" | "dismissed" | "escalated";

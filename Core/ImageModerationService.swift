@@ -25,7 +25,8 @@ enum ImageModerationError: LocalizedError {
     case imageEncodingFailed
     case uploadFailed(Error)
     case requestFailed(Error)
-    case invalidServerResponse
+    case authenticationTokenUnavailable
+    case invalidServerResponse(status: Int, body: String?)
     case missingBackendConfiguration
     case rejected(reason: String?)
     case needsReview
@@ -40,6 +41,8 @@ enum ImageModerationError: LocalizedError {
             return "The photo couldn't be uploaded. Check your connection and try again."
         case .requestFailed:
             return "Couldn't reach Rydr to verify that photo. Try again in a moment."
+        case .authenticationTokenUnavailable:
+            return "Your session expired. Sign in again before uploading a photo."
         case .invalidServerResponse:
             return "Rydr couldn't verify that photo right now. Try again in a moment."
         case .missingBackendConfiguration:
@@ -137,14 +140,27 @@ final class ImageModerationService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["storagePath": storagePath])
 
-        if let user = Auth.auth().currentUser, let token = try? await user.getIDToken() {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let user = Auth.auth().currentUser else {
+            throw ImageModerationError.notSignedIn
         }
+        let token: String
+        do {
+            token = try await user.getIDToken()
+        } catch {
+            print("Rydr image moderation auth token failed:", error.localizedDescription)
+            throw ImageModerationError.authenticationTokenUnavailable
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse, (200..<300).contains(httpResponse.statusCode) else {
-            throw ImageModerationError.invalidServerResponse
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ImageModerationError.invalidServerResponse(status: -1, body: nil)
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            let body = String(data: data, encoding: .utf8)
+            print("Rydr image moderation failed:", httpResponse.statusCode, body ?? "<empty body>")
+            throw ImageModerationError.invalidServerResponse(status: httpResponse.statusCode, body: body)
         }
 
         return try JSONDecoder().decode(ModerationCheckResponse.self, from: data)

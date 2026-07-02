@@ -1,8 +1,8 @@
 //
-//  RideChatService.swift
-//  RydrPlayground
+//  DriverRideChatService.swift
+//  RydrDriver
 //
-//  Firestore-backed rider-driver chat for active rides.
+//  Firestore-backed encrypted ride chat for active driver-rider trips.
 //
 
 import Foundation
@@ -10,49 +10,35 @@ import CryptoKit
 import FirebaseAuth
 import FirebaseFirestore
 
-struct RideChat: Identifiable, Equatable {
-    let id: String
-    let rideId: String
-    let riderId: String
-    let driverId: String
-    let status: String
-    let createdAt: Date?
-    let updatedAt: Date?
-}
+typealias DriverRideChatListener = ListenerRegistration
 
-struct ChatMessage: Identifiable, Equatable {
+struct DriverRideChatMessage: Identifiable, Equatable {
     let id: String
     let senderId: String
     let senderRole: String
     let text: String
     let createdAt: Date
-    let isRead: Bool
+    var isPrivateDriverNote: Bool = false
 }
 
-enum RideChatServiceError: LocalizedError {
+enum DriverRideChatError: LocalizedError {
     case notSignedIn
     case unauthorized
-    case emptyMessage
-    case closed
     case missingChat
 
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
-            return "You must be signed in to use ride chat."
+            return "Sign in before using ride chat."
         case .unauthorized:
             return "You do not have access to this ride chat."
-        case .emptyMessage:
-            return "Enter a message first."
-        case .closed:
-            return "This ride chat is closed."
         case .missingChat:
             return "This ride chat could not be found."
         }
     }
 }
 
-final class RideChatService {
+final class DriverRideChatService {
     private let db = Firestore.firestore()
 
     func createOrInitializeChat(rideId: String, riderId: String, driverId: String) async throws {
@@ -79,13 +65,13 @@ final class RideChatService {
         rideId: String,
         riderId: String,
         driverId: String,
-        onChange: @escaping (Result<[ChatMessage], Error>) -> Void
+        onChange: @escaping (Result<[DriverRideChatMessage], Error>) -> Void
     ) async throws -> ListenerRegistration {
         try requireParticipant(riderId: riderId, driverId: driverId)
 
         let chatRef = db.collection("rideChats").document(rideId)
         let snapshot = try await getDocument(chatRef)
-        guard snapshot.exists else { throw RideChatServiceError.missingChat }
+        guard snapshot.exists else { throw DriverRideChatError.missingChat }
         try validateChat(snapshot: snapshot, riderId: riderId, driverId: driverId)
 
         return chatRef
@@ -103,59 +89,73 @@ final class RideChatService {
             }
     }
 
-    func sendMessage(rideId: String, riderId: String, driverId: String, text: String) async throws {
-        let senderId = try requireParticipant(riderId: riderId, driverId: driverId)
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw RideChatServiceError.emptyMessage }
-
-        let chatRef = db.collection("rideChats").document(rideId)
-        let chatSnapshot = try await getDocument(chatRef)
-        guard chatSnapshot.exists else { throw RideChatServiceError.missingChat }
-        let data = try validateChat(snapshot: chatSnapshot, riderId: riderId, driverId: driverId)
-        guard (data["status"] as? String) != "closed" else {
-            throw RideChatServiceError.closed
-        }
-
-        let senderRole = senderId == riderId ? "rider" : "driver"
-        let encrypted = try RideChatCrypto.encrypt(trimmed, rideId: rideId, riderId: riderId, driverId: driverId)
-        try await addData([
-            "senderId": senderId,
-            "senderRole": senderRole,
-            "ciphertext": encrypted.ciphertext,
-            "nonce": encrypted.nonce,
-            "algorithm": encrypted.algorithm,
-            "keyVersion": encrypted.keyVersion,
-            "recipientKeyIds": encrypted.recipientKeyIds,
-            "createdAt": FieldValue.serverTimestamp(),
-            "isRead": false
-        ], collection: chatRef.collection("messages"))
-
-        try await setData([
-            "updatedAt": FieldValue.serverTimestamp()
-        ], document: chatRef, merge: true)
+    func stopListening(_ listener: DriverRideChatListener?) {
+        listener?.remove()
     }
 
-    func closeChat(rideId: String, riderId: String, driverId: String) async throws {
-        try requireParticipant(riderId: riderId, driverId: driverId)
+    func listenToDriverPrivateMessages(
+        rideId: String,
+        riderId: String,
+        driverId: String,
+        onChange: @escaping (Result<[DriverRideChatMessage], Error>) -> Void
+    ) async throws -> ListenerRegistration {
+        try requireDriver(driverId: driverId)
 
         let chatRef = db.collection("rideChats").document(rideId)
         let snapshot = try await getDocument(chatRef)
-        guard snapshot.exists else { return }
-        _ = try validateChat(snapshot: snapshot, riderId: riderId, driverId: driverId)
+        guard snapshot.exists else { throw DriverRideChatError.missingChat }
+        try validateChat(snapshot: snapshot, riderId: riderId, driverId: driverId)
 
-        try await setData([
-            "status": "closed",
-            "updatedAt": FieldValue.serverTimestamp()
-        ], document: chatRef, merge: true)
+        return chatRef
+            .collection("driverPrivateMessages")
+            .order(by: "createdAt", descending: false)
+            .addSnapshotListener { snapshot, error in
+                if let error {
+                    onChange(.failure(error))
+                    return
+                }
+                let messages = (snapshot?.documents ?? []).compactMap { Self.makePrivateMessage(from: $0, driverId: driverId) }
+                onChange(.success(messages))
+            }
+    }
+
+    func addDriverPrivatePreferenceNote(
+        rideId: String,
+        riderId: String,
+        driverId: String,
+        summaryText: String
+    ) async throws {
+        try requireDriver(driverId: driverId)
+        let trimmed = summaryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        try await createOrInitializeChat(rideId: rideId, riderId: riderId, driverId: driverId)
+        try await addData([
+            "senderId": driverId,
+            "senderRole": "system",
+            "text": "Rider preferences:\n\(trimmed)",
+            "visibility": "driverOnly",
+            "createdAt": FieldValue.serverTimestamp()
+        ], collection: db.collection("rideChats").document(rideId).collection("driverPrivateMessages"))
     }
 
     @discardableResult
     private func requireParticipant(riderId: String, driverId: String) throws -> String {
         guard let uid = Auth.auth().currentUser?.uid else {
-            throw RideChatServiceError.notSignedIn
+            throw DriverRideChatError.notSignedIn
         }
         guard uid == riderId || uid == driverId else {
-            throw RideChatServiceError.unauthorized
+            throw DriverRideChatError.unauthorized
+        }
+        return uid
+    }
+
+    @discardableResult
+    private func requireDriver(driverId: String) throws -> String {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw DriverRideChatError.notSignedIn
+        }
+        guard uid == driverId else {
+            throw DriverRideChatError.unauthorized
         }
         return uid
     }
@@ -165,7 +165,7 @@ final class RideChatService {
         let data = snapshot.data() ?? [:]
         guard (data["riderId"] as? String) == riderId,
               (data["driverId"] as? String) == driverId else {
-            throw RideChatServiceError.unauthorized
+            throw DriverRideChatError.unauthorized
         }
         return data
     }
@@ -175,16 +175,17 @@ final class RideChatService {
         rideId: String,
         riderId: String,
         driverId: String
-    ) -> ChatMessage? {
+    ) -> DriverRideChatMessage? {
         let data = document.data()
         guard let senderId = data["senderId"] as? String,
               let senderRole = data["senderRole"] as? String else {
             return nil
         }
+
         let text: String
         if let ciphertext = data["ciphertext"] as? String,
            let nonce = data["nonce"] as? String {
-            text = RideChatCrypto.decryptBestEffort(
+            text = DriverRideChatCrypto.decryptBestEffort(
                 ciphertext: ciphertext,
                 nonce: nonce,
                 rideId: rideId,
@@ -196,14 +197,26 @@ final class RideChatService {
         } else {
             return nil
         }
-        let createdAt = (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
-        return ChatMessage(
+
+        return DriverRideChatMessage(
             id: document.documentID,
             senderId: senderId,
             senderRole: senderRole,
             text: text,
-            createdAt: createdAt,
-            isRead: data["isRead"] as? Bool ?? false
+            createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date()
+        )
+    }
+
+    private static func makePrivateMessage(from document: QueryDocumentSnapshot, driverId: String) -> DriverRideChatMessage? {
+        let data = document.data()
+        guard let text = data["text"] as? String else { return nil }
+        return DriverRideChatMessage(
+            id: "driver-private-\(document.documentID)",
+            senderId: data["senderId"] as? String ?? driverId,
+            senderRole: data["senderRole"] as? String ?? "system",
+            text: text,
+            createdAt: (data["createdAt"] as? Timestamp)?.dateValue() ?? Date(),
+            isPrivateDriverNote: true
         )
     }
 
@@ -215,7 +228,7 @@ final class RideChatService {
                 } else if let snapshot {
                     continuation.resume(returning: snapshot)
                 } else {
-                    continuation.resume(throwing: RideChatServiceError.missingChat)
+                    continuation.resume(throwing: DriverRideChatError.missingChat)
                 }
             }
         }
@@ -246,7 +259,7 @@ final class RideChatService {
     }
 }
 
-private struct EncryptedRideMessage {
+struct DriverEncryptedRideMessage {
     let ciphertext: String
     let nonce: String
     let algorithm: String
@@ -254,14 +267,14 @@ private struct EncryptedRideMessage {
     let recipientKeyIds: [String]
 }
 
-private enum RideChatCrypto {
-    static func encrypt(_ plaintext: String, rideId: String, riderId: String, driverId: String) throws -> EncryptedRideMessage {
+enum DriverRideChatCrypto {
+    static func encrypt(_ plaintext: String, rideId: String, riderId: String, driverId: String) throws -> DriverEncryptedRideMessage {
         let nonce = AES.GCM.Nonce()
         let sealedBox = try AES.GCM.seal(Data(plaintext.utf8), using: chatKey(rideId: rideId, riderId: riderId, driverId: driverId), nonce: nonce)
         guard let combined = sealedBox.combined else {
-            throw RideChatServiceError.emptyMessage
+            throw DriverRideChatError.missingChat
         }
-        return EncryptedRideMessage(
+        return DriverEncryptedRideMessage(
             ciphertext: combined.base64EncodedString(),
             nonce: Data(nonce).base64EncodedString(),
             algorithm: "AES.GCM.v1",
@@ -272,11 +285,8 @@ private enum RideChatCrypto {
 
     static func decryptBestEffort(ciphertext: String, nonce: String, rideId: String, riderId: String, driverId: String) -> String? {
         guard let combined = Data(base64Encoded: ciphertext),
-              Data(base64Encoded: nonce) != nil else {
-            return nil
-        }
-
-        guard let sealedBox = try? AES.GCM.SealedBox(combined: combined),
+              Data(base64Encoded: nonce) != nil,
+              let sealedBox = try? AES.GCM.SealedBox(combined: combined),
               let opened = try? AES.GCM.open(sealedBox, using: chatKey(rideId: rideId, riderId: riderId, driverId: driverId)) else {
             return nil
         }

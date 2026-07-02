@@ -30,7 +30,8 @@ final class MockRideService: RideService, @unchecked Sendable {
         rideType: String,
         near center: CLLocationCoordinate2D,
         pickupCoordinate: CLLocationCoordinate2D?,
-        dropoffCoordinate: CLLocationCoordinate2D?
+        dropoffCoordinate: CLLocationCoordinate2D?,
+        riderPreferences: RiderRidePreferences?
     ) async throws -> [Driver] {
         let names = ["Alex","Jamie","Taylor","Jordan","Riley","Morgan","Sam"]
         let cars = rideType.localizedCaseInsensitiveContains("eco")
@@ -42,6 +43,8 @@ final class MockRideService: RideService, @unchecked Sendable {
         return (0..<3).map { _ in
             let coord = CLLocationCoordinate2D(latitude: center.latitude + jitter(0.01),
                                                longitude: center.longitude + jitter(0.01))
+            let gender = Bool.random() ? "Female" : "Male"
+            let preferenceBoost = gender == riderPreferences?.genderPreference ? 28 : 0
             return Driver(
                 id: UUID().uuidString,
                 name: names.randomElement()!,
@@ -53,9 +56,11 @@ final class MockRideService: RideService, @unchecked Sendable {
                 perMinute: [0.45,0.55,0.65].randomElement()!,
                 perMile:   [1.10,1.25,1.35].randomElement()!,
                 coordinate: coord,
-                score: Int.random(in: 85...98)
+                score: Int.random(in: 85...98) + preferenceBoost,
+                gender: gender
             )
         }
+        .sorted { $0.score > $1.score }
     }
 
     // MARK: - Ride lifecycle
@@ -68,7 +73,8 @@ final class MockRideService: RideService, @unchecked Sendable {
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
-        pricingSnapshot: RidePricingSnapshot
+        pricingSnapshot: RidePricingSnapshot,
+        riderPreferences: RiderRidePreferences?
     ) async throws -> String {
         let id = UUID().uuidString
         queue.sync {

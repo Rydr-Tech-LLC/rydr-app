@@ -374,6 +374,12 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         if let duration = request.estimatedDurationMinutes {
             rideData["estimatedDurationMinutes"] = duration
         }
+        if let ridePreferences = request.ridePreferences {
+            rideData["ridePreferences"] = [
+                "summaryItems": ridePreferences.summaryItems,
+                "summaryText": ridePreferences.summaryText
+            ]
+        }
         if let pickupCoordinate = request.pickupCoordinate {
             rideData["pickupCoordinate"] = [
                 "lat": pickupCoordinate.latitude,
@@ -913,6 +919,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let encrypted = try DriverRideChatCrypto.encrypt(trimmed, rideId: ride.id, riderId: ride.riderId, driverId: uid)
 
         let chatRef = db.collection("rideChats").document(ride.id)
         try await chatRef.setData([
@@ -925,10 +932,33 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         try await chatRef.collection("messages").addDocument(data: [
             "senderId": uid,
             "senderRole": "driver",
-            "text": trimmed,
+            "ciphertext": encrypted.ciphertext,
+            "nonce": encrypted.nonce,
+            "algorithm": encrypted.algorithm,
+            "keyVersion": encrypted.keyVersion,
+            "recipientKeyIds": encrypted.recipientKeyIds,
             "createdAt": FieldValue.serverTimestamp(),
             "isRead": false
         ])
+    }
+
+    func recordDriverOnlyRidePreferenceNote(ride: DriverActiveRide, preferences: DriverVisibleRidePreferences) {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        Task { [weak self] in
+            do {
+                try await DriverRideChatService().addDriverPrivatePreferenceNote(
+                    rideId: ride.id,
+                    riderId: ride.riderId,
+                    driverId: uid,
+                    summaryText: preferences.summaryText
+                )
+            } catch {
+                await MainActor.run {
+                    RydrCrashReporter.record(error, context: "record_driver_private_preference_note")
+                    self?.statusMessage = "Preferences shown, but the driver-only note was not saved."
+                }
+            }
+        }
     }
 
     #if DEBUG
@@ -1816,7 +1846,9 @@ struct DriverDashboardView: View {
                 #if DEBUG
                 DriverRideInProgressView(
                     ride: ride,
+                    currentDriverId: Auth.auth().currentUser?.uid ?? "",
                     driverCoordinate: vm.lastLocation?.coordinate,
+                    driverSpeedMetersPerSecond: vm.lastLocation?.speed,
                     isUpdatingRide: vm.isUpdatingActiveRide,
                     onStartNavigation: vm.startActiveRideNavigation,
                     onArrivedAtPickup: vm.markArrivedAtPickup,
@@ -1827,6 +1859,9 @@ struct DriverDashboardView: View {
                     onPickupPaidWaitStarted: vm.markPickupPaidWaitActive,
                     onCancel: vm.cancelActiveRide,
                     onReportIncident: { activeSheet = .menu(.safety) },
+                    onRidePreferencesDismissed: { preferences in
+                        vm.recordDriverOnlyRidePreferenceNote(ride: ride, preferences: preferences)
+                    },
                     onSendMessage: { text in
                         try await vm.sendMessageToRider(ride: ride, text: text)
                     },
@@ -1836,7 +1871,9 @@ struct DriverDashboardView: View {
                 #else
                 DriverRideInProgressView(
                     ride: ride,
+                    currentDriverId: Auth.auth().currentUser?.uid ?? "",
                     driverCoordinate: vm.lastLocation?.coordinate,
+                    driverSpeedMetersPerSecond: vm.lastLocation?.speed,
                     isUpdatingRide: vm.isUpdatingActiveRide,
                     onStartNavigation: vm.startActiveRideNavigation,
                     onArrivedAtPickup: vm.markArrivedAtPickup,
@@ -1847,6 +1884,9 @@ struct DriverDashboardView: View {
                     onPickupPaidWaitStarted: vm.markPickupPaidWaitActive,
                     onCancel: vm.cancelActiveRide,
                     onReportIncident: { activeSheet = .menu(.safety) },
+                    onRidePreferencesDismissed: { preferences in
+                        vm.recordDriverOnlyRidePreferenceNote(ride: ride, preferences: preferences)
+                    },
                     onSendMessage: { text in
                         try await vm.sendMessageToRider(ride: ride, text: text)
                     }

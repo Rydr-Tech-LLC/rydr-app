@@ -2,6 +2,26 @@ import CoreLocation
 import FirebaseFirestore
 import MapKit
 
+struct DriverVisibleRidePreferences: Equatable, Identifiable {
+    let summaryItems: [String]
+    let summaryText: String
+
+    var id: String { summaryText }
+
+    nonisolated var isEmpty: Bool {
+        summaryItems.isEmpty && summaryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    nonisolated init?(data: Any?) {
+        guard let data = data as? [String: Any] else { return nil }
+        let items = data["summaryItems"] as? [String] ?? []
+        let text = data["summaryText"] as? String ?? items.joined(separator: "\n")
+        summaryItems = items
+        summaryText = text
+        if isEmpty { return nil }
+    }
+}
+
 struct DriverRideRequest: Identifiable, Equatable {
     let id: String
     let riderId: String
@@ -19,6 +39,7 @@ struct DriverRideRequest: Identifiable, Equatable {
     let stopCoordinate: CLLocationCoordinate2D?
     let dropoffCoordinate: CLLocationCoordinate2D?
     let createdAt: Date?
+    let ridePreferences: DriverVisibleRidePreferences?
 
     init(
         id: String,
@@ -36,7 +57,8 @@ struct DriverRideRequest: Identifiable, Equatable {
         stop: String? = nil,
         stopCoordinate: CLLocationCoordinate2D? = nil,
         dropoffCoordinate: CLLocationCoordinate2D? = nil,
-        createdAt: Date? = nil
+        createdAt: Date? = nil,
+        ridePreferences: DriverVisibleRidePreferences? = nil
     ) {
         self.id = id
         self.riderId = riderId
@@ -54,6 +76,7 @@ struct DriverRideRequest: Identifiable, Equatable {
         self.stopCoordinate = stopCoordinate
         self.dropoffCoordinate = dropoffCoordinate
         self.createdAt = createdAt
+        self.ridePreferences = ridePreferences
     }
 
     nonisolated init(document: QueryDocumentSnapshot) {
@@ -74,6 +97,7 @@ struct DriverRideRequest: Identifiable, Equatable {
         stopCoordinate = Self.coordinate(from: data["stopCoordinate"] ?? data["addedStopCoordinate"] ?? data["stopLocation"] ?? data["stopGeoPoint"])
         dropoffCoordinate = Self.coordinate(from: data["dropoffCoordinate"] ?? data["dropoffLocation"] ?? data["dropoffGeoPoint"])
         createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
+        ridePreferences = DriverVisibleRidePreferences(data: data["ridePreferences"])
     }
 
     static func == (lhs: DriverRideRequest, rhs: DriverRideRequest) -> Bool {
@@ -168,6 +192,7 @@ struct DriverActiveRide: Identifiable, Equatable {
     let paymentFailureReason: String?
     let paymentFailureCode: String?
     let paymentRetryCount: Int
+    let ridePreferences: DriverVisibleRidePreferences?
 
     var normalizedStatus: String {
         DriverRideLifecyclePolicy.normalizedStatus(status)
@@ -212,6 +237,7 @@ struct DriverActiveRide: Identifiable, Equatable {
         paymentFailureReason = data["failureReason"] as? String
         paymentFailureCode = data["failureCode"] as? String
         paymentRetryCount = Self.intValue(data["retryCount"]) ?? 0
+        ridePreferences = DriverVisibleRidePreferences(data: data["ridePreferences"])
     }
 
     nonisolated private static func coordinate(from value: Any?) -> CLLocationCoordinate2D? {

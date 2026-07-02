@@ -24,6 +24,7 @@ struct Driver: Identifiable, Equatable {
     var score: Int                 // proximity/quality score
     var stripeAccountId: String? = nil       // Stripe Connect account, for destination-charge payouts
     var stripeChargesEnabled: Bool = false   // Connect account has completed onboarding
+    var gender: String? = nil
 
     static func == (lhs: Driver, rhs: Driver) -> Bool { lhs.id == rhs.id }
 }
@@ -437,7 +438,8 @@ protocol RideService: AnyObject, Sendable {
         rideType: String,
         near: CLLocationCoordinate2D,
         pickupCoordinate: CLLocationCoordinate2D?,
-        dropoffCoordinate: CLLocationCoordinate2D?
+        dropoffCoordinate: CLLocationCoordinate2D?,
+        riderPreferences: RiderRidePreferences?
     ) async throws -> [Driver]
     func requestRide(
         driverId: String,
@@ -447,7 +449,8 @@ protocol RideService: AnyObject, Sendable {
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
-        pricingSnapshot: RidePricingSnapshot
+        pricingSnapshot: RidePricingSnapshot,
+        riderPreferences: RiderRidePreferences?
     ) async throws -> String // returns rideId
     func awaitDriverDecision(rideId: String) async throws -> DriverDecision
     func rideLifecycleStream(rideId: String) -> AsyncThrowingStream<RideLifecycleSnapshot, Error>
@@ -528,6 +531,7 @@ final class RideManager: ObservableObject {
     private var cachedDropoffCoordinate: CLLocationCoordinate2D?
     private var currentServiceRideId: String?
     private var currentAppliedRydrBankCode: String?
+    private var cachedRidePreferences: RiderRidePreferences?
     private var currentBaseFare: Double = 0
     private var currentWaitChargePerMinute: Double = 0
     private let activeRideSnapshotKey = "rydr.activeRideSnapshot.v1"
@@ -588,6 +592,16 @@ final class RideManager: ObservableObject {
         return ""
     }
 
+    private func loadSavedRidePreferences() async -> RiderRidePreferences? {
+        guard let uid = Auth.auth().currentUser?.uid else { return nil }
+        do {
+            let preferences = try await RiderRidePreferenceStore().load(uid: uid)
+            return preferences.isDefault ? nil : preferences
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - Public API used by the UI
 
     /// Step 1: fetch nearest drivers (via service)
@@ -605,6 +619,7 @@ final class RideManager: ObservableObject {
         cachedRideType = rideType
         cachedPickupCoordinate = pickupCoordinate
         cachedDropoffCoordinate = dropoffCoordinate
+        cachedRidePreferences = nil
         guard let estimate else {
             availableDrivers = []
             selectedDriver = nil
@@ -629,13 +644,16 @@ final class RideManager: ObservableObject {
         driverSearchTask = Task { [weak self] in
             guard let self else { return }
             do {
+                let preferences = await self.loadSavedRidePreferences()
+                self.cachedRidePreferences = preferences
                 let drivers = try await rideService.fetchNearbyDrivers(
                     pickup: pickup,
                     dropoff: dropoff,
                     rideType: rideType,
                     near: center,
                     pickupCoordinate: pickupCoordinate,
-                    dropoffCoordinate: dropoffCoordinate
+                    dropoffCoordinate: dropoffCoordinate,
+                    riderPreferences: preferences
                 )
 
                 guard !Task.isCancelled else { return }
@@ -705,7 +723,8 @@ final class RideManager: ObservableObject {
                     pickupCoordinate: cachedPickupCoordinate,
                     dropoffCoordinate: cachedDropoffCoordinate,
                     estimate: cachedEstimate,
-                    pricingSnapshot: pricingSnapshot
+                    pricingSnapshot: pricingSnapshot,
+                    riderPreferences: cachedRidePreferences
                 )
                 self.currentServiceRideId = rideId
 

@@ -238,7 +238,22 @@ service cloud.firestore {
         && chatParticipant(get(/databases/$(database)/documents/rideChats/$(chatId)).data)
         && request.resource.data.senderId == request.auth.uid
         && request.resource.data.senderRole in ["rider", "driver", "support"]
-        && request.resource.data.text is string;
+        && request.resource.data.ciphertext is string
+        && request.resource.data.nonce is string
+        && request.resource.data.algorithm == "AES.GCM.v1"
+        && request.resource.data.keyVersion == 1
+        && request.resource.data.recipientKeyIds is list
+        && request.resource.data.keys().hasOnly([
+          "algorithm",
+          "ciphertext",
+          "createdAt",
+          "isRead",
+          "keyVersion",
+          "nonce",
+          "recipientKeyIds",
+          "senderId",
+          "senderRole"
+        ]);
     }
 
     function cashHubRequestOwner(data) {
@@ -414,6 +429,10 @@ service cloud.firestore {
         allow read, create, update, delete: if isSelf(uid);
       }
 
+      match /ridePreferences/{preferenceId} {
+        allow read, create, update, delete: if isSelf(uid);
+      }
+
       match /documentReviews/{reviewId} {
         allow read: if isSelf(uid) || isAdmin();
         allow write: if false;
@@ -449,6 +468,19 @@ service cloud.firestore {
     // disabled there to prevent phone-number enumeration). The document only
     // ever contains a uid pointer, never profile data, so a public `get` is safe.
     match /driverPhoneIndex/{phone} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(["uid", "createdAt"]);
+      allow update: if isSelf(resource.data.uid)
+        && request.resource.data.uid == resource.data.uid;
+      allow delete: if isAdmin();
+    }
+
+    // Rider phone -> uid pointer used for phone login without allowing
+    // collection queries against /riders.
+    match /riderPhoneIndex/{phone} {
       allow get: if true;
       allow list: if false;
       allow create: if signedIn()
@@ -538,6 +570,29 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read: if chatParticipant(get(/databases/$(database)/documents/rideChats/$(rideId)).data) || isAdmin();
         allow create: if validChatMessageCreate(rideId) || isAdmin();
+        allow update, delete: if isAdmin();
+      }
+
+      match /driverPrivateMessages/{messageId} {
+        allow read: if (
+          signedIn()
+          && get(/databases/$(database)/documents/rideChats/$(rideId)).data.driverId == request.auth.uid
+        ) || isAdmin();
+        allow create: if (
+          signedIn()
+          && get(/databases/$(database)/documents/rideChats/$(rideId)).data.driverId == request.auth.uid
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.senderRole in ["driver", "system"]
+          && request.resource.data.text is string
+          && request.resource.data.visibility == "driverOnly"
+          && request.resource.data.keys().hasOnly([
+            "createdAt",
+            "senderId",
+            "senderRole",
+            "text",
+            "visibility"
+          ])
+        ) || isAdmin();
         allow update, delete: if isAdmin();
       }
     }

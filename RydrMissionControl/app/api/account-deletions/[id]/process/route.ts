@@ -75,6 +75,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const profileRef = adminDb.collection(role === "driver" ? "drivers" : "riders").doc(uid);
     const profileSnap = await profileRef.get();
     const profile = profileSnap.exists ? (profileSnap.data() as Record<string, unknown>) : {};
+    const phone = (profile.phoneE164 ?? profile.phoneNumber) as string | undefined;
 
     const stripeResult = await cleanupStripeAccount(role, profile, session.uid, params.id, uid);
 
@@ -86,6 +87,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     });
     if (profileSnap.exists) {
       await profileRef.set(anonymizedFields(role), { merge: true });
+    }
+    if (phone) {
+      const phoneIndexRef = adminDb.collection(role === "driver" ? "driverPhoneIndex" : "riderPhoneIndex").doc(phone);
+      const phoneIndexSnap = await phoneIndexRef.get();
+      if (phoneIndexSnap.exists && phoneIndexSnap.data()?.uid === uid) {
+        await phoneIndexRef.delete();
+      }
     }
 
     // Disable any lingering push notification tokens rather than leaving

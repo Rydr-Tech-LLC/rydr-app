@@ -19,6 +19,7 @@ export default async function BetaTestersPage() {
   const removedDrivers = drivers.filter((d) => d.driverApprovalStatus === "rejected");
   const approvedRiders = riders.filter((r) => (r.accountStatus ?? "active") === "active");
   const verifiedRiders = riders.filter((r) => r.verifiedRider);
+  const studentAmbassadors = riders.filter((r) => r.badges?.studentAmbassador?.active);
 
   return (
     <div className="space-y-8">
@@ -27,14 +28,16 @@ export default async function BetaTestersPage() {
         <p className="mt-1 text-sm text-muted">Cohort breakdown across drivers and riders.</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Tile label="Approved Beta Drivers" value={approvedDrivers.length} />
         <Tile label="Pending Drivers" value={pendingDrivers.length} />
         <Tile label="Removed Drivers" value={removedDrivers.length} />
         <Tile label="Approved Riders" value={approvedRiders.length} />
         <Tile label="Verified Riders" value={verifiedRiders.length} />
+        <Tile label="Student Ambassadors" value={studentAmbassadors.length} />
       </div>
 
+      <Group title="Student Ambassadors" rows={studentAmbassadors.map((r) => ({ id: r.uid, name: fullName(r.firstName, r.lastName), meta: r.email }))} />
       <Group title="Approved Drivers" rows={approvedDrivers.map((d) => ({ id: d.uid, name: fullName(d.firstName, d.lastName), meta: d.email }))} />
       <Group title="Pending Drivers" rows={pendingDrivers.map((d) => ({ id: d.uid, name: fullName(d.firstName, d.lastName), meta: d.email }))} />
     </div>

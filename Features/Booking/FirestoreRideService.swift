@@ -20,7 +20,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         rideType: String,
         near center: CLLocationCoordinate2D,
         pickupCoordinate: CLLocationCoordinate2D?,
-        dropoffCoordinate: CLLocationCoordinate2D?
+        dropoffCoordinate: CLLocationCoordinate2D?,
+        riderPreferences: RiderRidePreferences?
     ) async throws -> [Driver] {
         let snapshot = try await db.collection("publicDriverProfiles")
             .whereField("isOnline", isEqualTo: true)
@@ -33,7 +34,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                     rideType: rideType,
                     near: center,
                     pickupCoordinate: pickupCoordinate,
-                    dropoffCoordinate: dropoffCoordinate
+                    dropoffCoordinate: dropoffCoordinate,
+                    riderPreferences: riderPreferences
                 )
             }
             .filter { $0.score > 0 }
@@ -53,7 +55,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
-        pricingSnapshot: RidePricingSnapshot
+        pricingSnapshot: RidePricingSnapshot,
+        riderPreferences: RiderRidePreferences?
     ) async throws -> String {
         guard let user = Auth.auth().currentUser else {
             throw RideDispatchError.notSignedIn
@@ -95,6 +98,9 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         }
         payload.merge(pricingSnapshot.asFirestoreFields) { _, new in new }
         payload["fareEstimateCreatedAt"] = FieldValue.serverTimestamp()
+        if let preferencePayload = riderPreferences?.rideRequestPayload {
+            payload["ridePreferences"] = preferencePayload
+        }
 
         try await db.collection("rideRequests").document(id).setData(payload)
         return id
@@ -196,7 +202,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         rideType: String,
         near center: CLLocationCoordinate2D,
         pickupCoordinate: CLLocationCoordinate2D?,
-        dropoffCoordinate: CLLocationCoordinate2D?
+        dropoffCoordinate: CLLocationCoordinate2D?,
+        riderPreferences: RiderRidePreferences?
     ) -> Driver? {
         let data = document.data()
         let enabled = data["standardDispatchEnabled"] as? Bool ?? true
@@ -225,7 +232,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         let rating = data["rating"] as? Double ?? 4.85
         let pricing = RydrPricing.config(for: rideType)
         let rate = driverRate(from: data, rideType: rideType, pricing: pricing)
-        let score = max(1, min(100, Int(100 - (distance * 6) + ((rating - 4.5) * 18))))
+        let gender = driverGender(from: data)
+        let score = max(1, min(100, Int(100 - (distance * 6) + ((rating - 4.5) * 18) + genderPreferenceBoost(driverGender: gender, riderPreferences: riderPreferences))))
 
         return Driver(
             id: document.documentID,
@@ -246,7 +254,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             coordinate: coordinate,
             score: score,
             stripeAccountId: data["stripeAccountId"] as? String,
-            stripeChargesEnabled: data["stripeChargesEnabled"] as? Bool ?? false
+            stripeChargesEnabled: data["stripeChargesEnabled"] as? Bool ?? false,
+            gender: gender
         )
     }
 
@@ -441,6 +450,25 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         let model = vehicle["model"] as? String ?? ""
         let combined = "\(year) \(make) \(model)".trimmingCharacters(in: .whitespacesAndNewlines)
         return combined.isEmpty ? "Verified Rydr vehicle" : combined
+    }
+
+    private func driverGender(from data: [String: Any]) -> String? {
+        let raw = data["gender"] as? String
+            ?? data["driverGender"] as? String
+            ?? data["genderIdentity"] as? String
+        let normalized = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == "male" { return "Male" }
+        if normalized == "female" { return "Female" }
+        return nil
+    }
+
+    private func genderPreferenceBoost(driverGender: String?, riderPreferences: RiderRidePreferences?) -> Double {
+        guard let preference = riderPreferences?.genderPreference,
+              preference != RiderRidePreferences.defaultValue.genderPreference,
+              let driverGender else {
+            return 0
+        }
+        return driverGender.caseInsensitiveCompare(preference) == .orderedSame ? 28 : 0
     }
 
     private func matches(_ supported: String, _ requested: String) -> Bool {

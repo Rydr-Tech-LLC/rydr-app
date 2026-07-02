@@ -665,29 +665,19 @@ struct CashHubSignupView: View {
     }
 
     private func checkContactAvailability(completion: @escaping (String?) -> Void) {
-        let riders = Firestore.firestore().collection("riders")
-
-        riders.whereField("email", isEqualTo: normalizedEmail).limit(to: 1).getDocuments { snapshot, error in
-            if let error {
-                completion("Unable to verify email availability: \(error.localizedDescription)")
-                return
-            }
-            if snapshot?.documents.isEmpty == false {
-                completion("That email address is already in use.")
-                return
-            }
-
-            riders.whereField("phoneNumber", isEqualTo: normalizedPhone).limit(to: 1).getDocuments { snapshot, error in
+        Firestore.firestore()
+            .collection("riderPhoneIndex")
+            .document(normalizedPhone)
+            .getDocument { snapshot, error in
                 if let error {
                     completion("Unable to verify phone number availability: \(error.localizedDescription)")
                     return
                 }
-                if snapshot?.documents.isEmpty == false {
+                if snapshot?.exists == true {
                     completion("That phone number is already in use.")
                     return
                 }
                 completion(nil)
-            }
         }
     }
 
@@ -753,6 +743,7 @@ struct CashHubSignupView: View {
             "preferredName": displayName,
             "email": normalizedEmail,
             "phoneNumber": normalizedPhone,
+            "phoneE164": normalizedPhone,
             "cashHubTermsAccepted": true,
             "cashHubTermsAcceptedAt": FieldValue.serverTimestamp(),
             "cashHubRole": CashHubRole.rider.rawValue,
@@ -768,6 +759,7 @@ struct CashHubSignupView: View {
                         errorMessage = error.localizedDescription
                         return
                     }
+                    writePhoneIndex(phoneE164: normalizedPhone, uid: uid)
                     session.login(
                         name: displayName,
                         email: normalizedEmail,
@@ -812,6 +804,20 @@ struct CashHubSignupView: View {
                 writeProfile()
             }
         }
+    }
+
+    private func writePhoneIndex(phoneE164: String, uid: String) {
+        Firestore.firestore()
+            .collection("riderPhoneIndex")
+            .document(phoneE164)
+            .setData([
+                "uid": uid,
+                "createdAt": FieldValue.serverTimestamp()
+            ]) { err in
+                if let err {
+                    print("⚠️ writePhoneIndex failed: \(err.localizedDescription)")
+                }
+            }
     }
 }
 

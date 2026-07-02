@@ -25,11 +25,15 @@ struct ProfileView: View {
     @State private var riderVerificationMessage: String?
     @State private var riderVerificationIsError = false
 
-    // Preferences (local for now; wire to Firestore later)
     @State private var musicType: String = "No preference"
     @State private var climate: String = "Neutral"
     @State private var conversation: String = "Light"
     @State private var driverPref: String = "No preference"
+    @State private var isSavingPreferences = false
+    @State private var preferenceSaveError: String?
+    @State private var showPreferencesSavedPopup = false
+
+    private let preferenceStore = RiderRidePreferenceStore()
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
@@ -55,6 +59,13 @@ struct ProfileView: View {
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.inline)
         .background(profileBackground.ignoresSafeArea())
+        .overlay(alignment: .center) {
+            if showPreferencesSavedPopup {
+                preferencesSavedPopup
+                    .transition(.scale(scale: 0.88).combined(with: .opacity))
+                    .zIndex(2)
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -81,6 +92,7 @@ struct ProfileView: View {
             session.loadUserProfile()
             loadExistingProfilePhoto()
             loadRiderIdentityStatus()
+            loadRidePreferences()
             if !session.isCashHubOnly { bankVM.start() }
         }
         .onDisappear { bankVM.stop() }
@@ -101,6 +113,17 @@ struct ProfileView: View {
             Button("OK", role: .cancel) { photoErrorMessage = nil }
         } message: {
             Text(photoErrorMessage ?? "")
+        }
+        .alert(
+            "Preferences Not Saved",
+            isPresented: Binding(
+                get: { preferenceSaveError != nil },
+                set: { if !$0 { preferenceSaveError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { preferenceSaveError = nil }
+        } message: {
+            Text(preferenceSaveError ?? "")
         }
     }
 
@@ -146,6 +169,15 @@ struct ProfileView: View {
                                 .padding(.horizontal, 9)
                                 .padding(.vertical, 4)
                                 .background(Styles.rydrGradient.opacity(0.11), in: Capsule())
+
+                            if session.studentAmbassadorBadge {
+                                Label("Student Ambassador", systemImage: "graduationcap.fill")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(Color.red)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4)
+                                    .background(Color.red.opacity(0.10), in: Capsule())
+                            }
 
                             if session.verifiedBadge || isVerifiedRider {
                                 Label("Verified", systemImage: "checkmark.seal.fill")
@@ -306,6 +338,9 @@ struct ProfileView: View {
             settingsRow
 
             SectionHeader(title: "Features")
+            if session.studentAmbassadorBadge {
+                studentAmbassadorCard
+            }
             verifiedRiderCard
             TileGrid(tiles: [
                 .init(title: "Cash Rydr Hub",
@@ -326,6 +361,38 @@ struct ProfileView: View {
                       destination: AnyView(CommunityView()))
             ])
         }
+    }
+
+    private var studentAmbassadorCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
+                Image("StudentAmbassadorBadge")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 92, height: 92)
+                    .shadow(color: Color.red.opacity(0.24), radius: 14, x: 0, y: 8)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Student Ambassador")
+                        .font(.headline.weight(.heavy))
+                        .foregroundStyle(primaryText)
+                    Text("Recognized as a campus liaison helping Rydr build a student beta testing community.")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(16)
+        .background(adaptiveCardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.red.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: softShadow, radius: 14, x: 0, y: 8)
+        .padding(.horizontal, 24)
     }
 
     private var verifiedRiderCard: some View {
@@ -500,19 +567,24 @@ struct ProfileView: View {
                                  subtitle: "How much would you like to chat?",
                                  icon: "bubble.left.and.bubble.right",
                                  options: ["Silence", "Light", "Talkative"])
-                PreferencePicker(title: "Driver Preference", selection: $driverPref,
-                                 subtitle: "Choose your driver preference",
-                                 icon: "steeringwheel",
+                PreferencePicker(title: "Gender Preference", selection: $driverPref,
+                                 subtitle: "Prioritize driver cards by gender",
+                                 icon: "person.2",
                                  options: ["No preference", "Male", "Female"])
             }
 
             Button {
-                // TODO: Persist to Firestore (users/{uid}/preferences)
+                saveRidePreferences()
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "checkmark")
-                        .font(.subheadline.weight(.bold))
-                    Text("Save Preferences")
+                    if isSavingPreferences {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "checkmark")
+                            .font(.subheadline.weight(.bold))
+                    }
+                    Text(isSavingPreferences ? "Saving" : "Save Preferences")
                         .font(.subheadline.weight(.bold))
                 }
                 .frame(maxWidth: .infinity)
@@ -521,6 +593,7 @@ struct ProfileView: View {
                 .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
+            .disabled(isSavingPreferences)
         }
         .padding(16)
         .background(
@@ -529,6 +602,105 @@ struct ProfileView: View {
                 .shadow(color: softShadow, radius: 18, x: 0, y: 10)
         )
         .padding(.horizontal, 24)
+    }
+
+    private var currentRidePreferences: RiderRidePreferences {
+        RiderRidePreferences(
+            musicType: musicType,
+            climate: climate,
+            conversation: conversation,
+            genderPreference: driverPref
+        )
+    }
+
+    private var preferencesSavedPopup: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Styles.rydrGradient)
+                    .frame(width: 66, height: 66)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 28, weight: .black))
+                    .foregroundStyle(.white)
+            }
+
+            Text("Preferences Saved!")
+                .font(.title3.weight(.black))
+
+            Text("Your preferences will be shared with your driver.")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 22)
+        .frame(maxWidth: 320)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.65), lineWidth: 1)
+        )
+        .shadow(color: Color.red.opacity(0.25), radius: 24, y: 12)
+        .padding(.horizontal, 24)
+        .onTapGesture {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                showPreferencesSavedPopup = false
+            }
+        }
+    }
+
+    private func loadRidePreferences() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        Task {
+            do {
+                let preferences = try await preferenceStore.load(uid: uid)
+                await MainActor.run {
+                    musicType = preferences.musicType
+                    climate = preferences.climate
+                    conversation = preferences.conversation
+                    driverPref = preferences.genderPreference
+                }
+            } catch {
+                await MainActor.run {
+                    preferenceSaveError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func saveRidePreferences() {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            preferenceSaveError = "Sign in before saving ride preferences."
+            return
+        }
+        let preferences = currentRidePreferences
+        isSavingPreferences = true
+        preferenceSaveError = nil
+
+        Task {
+            do {
+                try await preferenceStore.save(preferences, uid: uid)
+                await MainActor.run {
+                    isSavingPreferences = false
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                        showPreferencesSavedPopup = true
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 2_200_000_000)
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        showPreferencesSavedPopup = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isSavingPreferences = false
+                    preferenceSaveError = error.localizedDescription
+                }
+            }
+        }
     }
 
     private var profileBackground: Color {

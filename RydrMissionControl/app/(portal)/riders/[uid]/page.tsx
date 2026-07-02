@@ -29,6 +29,8 @@ export default async function RiderReviewPage({ params }: { params: { uid: strin
   const rider = { ...(snap.data() as RiderRecord), uid: snap.id };
   const createdAt = toDateSafe(rider.createdAt);
   const accountStatus = rider.accountStatus ?? "active";
+  const studentAmbassadorBadge = rider.badges?.studentAmbassador;
+  const hasStudentAmbassadorBadge = studentAmbassadorBadge?.active === true;
   const rydrBank = (userSnap.data()?.rydrBank ?? {}) as {
     codesAvailable?: number;
     codesEarned?: number;
@@ -117,8 +119,35 @@ export default async function RiderReviewPage({ params }: { params: { uid: strin
             </Grid>
           </Section>
 
+          <Section title="Beta Badges">
+            {hasStudentAmbassadorBadge ? (
+              <div className="space-y-3">
+                <img
+                  src="/badges/student-ambassador-badge.svg"
+                  alt="Student Ambassador badge"
+                  className="mx-auto h-auto w-40"
+                />
+                <div>
+                  <p className="text-sm font-semibold text-ink">
+                    {studentAmbassadorBadge?.label ?? "Student Ambassador"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">
+                    {studentAmbassadorBadge?.description ??
+                      "Campus liaison helping Rydr build a student beta testing community."}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted">No beta badges assigned.</p>
+            )}
+          </Section>
+
           <RydrBankMintPanel uid={rider.uid} />
-          <RiderActions uid={rider.uid} accountStatus={accountStatus} />
+          <RiderActions
+            uid={rider.uid}
+            accountStatus={accountStatus}
+            hasStudentAmbassadorBadge={hasStudentAmbassadorBadge}
+          />
         </div>
       </div>
     </div>

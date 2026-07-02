@@ -55,9 +55,18 @@ class UserSessionManager: ObservableObject {
     @Published var selectedTab: MainAppTab = .ride
     @Published private(set) var accountAccess: RydrAccountAccess?
     @Published var verifiedBadge: Bool = false
+    @Published var studentAmbassadorBadge: Bool = false
 
     var hasRiderAccess: Bool { accountAccess == .rider }
     var isCashHubOnly: Bool { accountAccess == .cashHubOnly }
+
+    private func normalizedE164Phone(_ value: String) -> String {
+        let digits = value.filter { $0.isNumber }
+        if digits.count == 11, digits.first == "1" {
+            return "+\(digits)"
+        }
+        return "+1\(String(digits.suffix(10)))"
+    }
 
     func login(
         name: String,
@@ -70,6 +79,7 @@ class UserSessionManager: ObservableObject {
         selectedTab = startingTab
         accountAccess = access
         verifiedBadge = false
+        studentAmbassadorBadge = false
         isLoggedIn = true
         Task {
             await NotificationManager.shared.saveCurrentTokenForAuthenticatedUser()
@@ -89,6 +99,7 @@ class UserSessionManager: ObservableObject {
         selectedTab = .ride
         accountAccess = nil
         verifiedBadge = false
+        studentAmbassadorBadge = false
         isLoggedIn = false
     }
 
@@ -125,6 +136,10 @@ class UserSessionManager: ObservableObject {
                 let completedRiderTerms = data["agreedToTerms"] as? Bool ?? false
                 let explicitRiderAccess = data["hasRydrRiderAccess"] as? Bool ?? false
                 let hasVerifiedBadge = data["verifiedBadge"] as? Bool ?? data["verifiedRider"] as? Bool ?? false
+                let badges = data["badges"] as? [String: Any] ?? [:]
+                let studentAmbassador = badges["studentAmbassador"] as? [String: Any] ?? [:]
+                let hasStudentAmbassadorBadge =
+                    (studentAmbassador["active"] as? Bool) ?? ((data["betaRole"] as? String) == "studentAmbassador")
                 let address = data["address"] as? [String: Any] ?? [:]
                 let hasRiderAddress = ["street", "city", "state", "zip"].contains { key in
                     !(address[key] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -143,6 +158,7 @@ class UserSessionManager: ObservableObject {
                     if let emailFromDb { self.userEmail = emailFromDb }
                     self.accountAccess = hasRiderAccess ? .rider : .cashHubOnly
                     self.verifiedBadge = hasVerifiedBadge
+                    self.studentAmbassadorBadge = hasStudentAmbassadorBadge
                     if !hasRiderAccess && self.selectedTab != .profile {
                         self.selectedTab = .cashHub
                     }
@@ -170,11 +186,13 @@ class UserSessionManager: ObservableObject {
             completion(NSError(domain: "NoUser", code: 0))
             return
         }
+        let e164Phone = normalizedE164Phone(phone)
 
         let payload: [String: Any] = [
             "preferredName": preferredName,
             "email": email,
-            "phoneNumber": phone,
+            "phoneNumber": e164Phone,
+            "phoneE164": e164Phone,
             "address": [
                 "street": street,
                 "line2": line2,
@@ -190,10 +208,33 @@ class UserSessionManager: ObservableObject {
             self.userEmail = email
         }
 
-        Firestore.firestore()
-            .collection("riders").document(uid)
-            .setData(payload, merge: true) { err in
+        let riderRef = Firestore.firestore().collection("riders").document(uid)
+        riderRef.getDocument { snapshot, _ in
+            let existingPhone = snapshot?.data()?["phoneE164"] as? String
+                ?? snapshot?.data()?["phoneNumber"] as? String
+
+            riderRef.setData(payload, merge: true) { err in
+                if err == nil {
+                    Firestore.firestore().collection("riderPhoneIndex")
+                        .document(e164Phone)
+                        .setData([
+                            "uid": uid,
+                            "createdAt": FieldValue.serverTimestamp()
+                        ], merge: true)
+
+                    if let existingPhone,
+                       !existingPhone.isEmpty,
+                       existingPhone != e164Phone {
+                        Firestore.firestore().collection("riderPhoneIndex")
+                            .document(existingPhone)
+                            .getDocument { indexSnapshot, _ in
+                                guard indexSnapshot?.data()?["uid"] as? String == uid else { return }
+                                indexSnapshot?.reference.delete()
+                            }
+                    }
+                }
                 completion(err)
             }
+        }
     }
 }

@@ -29,6 +29,7 @@
 		59A9FEB85DB2B4E58840DD9E /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14DCF0CAE4BE04F4D655FE75 /* WelcomeView.swift */; };
 		5C6119715553F55493648AE5 /* HelpArticle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28E8A22C2AAEA01003C7B799 /* HelpArticle.swift */; };
 		614DAEA8D22F98C5D45155BE /* RideManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C37386ECFDD05C2CD2310CB /* RideManager.swift */; };
+		61C1E1A78C2D4C2B91287131 /* RiderRidePreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61C1E1A68C2D4C2B91287131 /* RiderRidePreferences.swift */; };
 		62A9F73246DA56F16620ADF3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E568C2DF59088F0C336CD06C /* Assets.xcassets */; };
 		63260A9DDD914621326730FD /* HelpArticleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DA0227D9397736750F182A1 /* HelpArticleDetailView.swift */; };
 		654AA5510C7DD6E8F93B5910 /* RideTypeSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25A6FAE0FDE63CFC16C5C73D /* RideTypeSelectionView.swift */; };
@@ -168,6 +169,7 @@
 		5C8C5EC4F4A1D3D902A609C3 /* DriverCardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DriverCardView.swift; sourceTree = "<group>"; };
 		5EC99D72C84F6C0F12687F1C /* SupportTicketService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SupportTicketService.swift; sourceTree = "<group>"; };
 		5F6BE46F6F6C5FE5CA4622A9 /* RydrRideProgressMapView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RydrRideProgressMapView.swift; sourceTree = "<group>"; };
+		61C1E1A68C2D4C2B91287131 /* RiderRidePreferences.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RiderRidePreferences.swift; sourceTree = "<group>"; };
 		68B71E792E9A100100C0D3F1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		69EB15B8CD81D6C4D18B4448 /* UploadBox.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UploadBox.swift; sourceTree = "<group>"; };
 		6CD7CE10B7D1AB994E052AB7 /* PaymentMethodView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaymentMethodView.swift; sourceTree = "<group>"; };
@@ -210,7 +212,7 @@
 		E568C2DF59088F0C336CD06C /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E7E9B5FC68DA5B86A187C2CD /* PrivacyModalView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PrivacyModalView.swift; sourceTree = "<group>"; };
 		F4EE10E8E09CF14A81A05647 /* CommunityView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommunityView.swift; sourceTree = "<group>"; };
-		FB1460DFAF8FFE937FE8B65D /* AnimatedLogo.mp4 */ = {isa = PBXFileReference; includeInIndex = 1; path = AnimatedLogo.mp4; sourceTree = "<group>"; };
+		FB1460DFAF8FFE937FE8B65D /* AnimatedLogo.mp4 */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = AnimatedLogo.mp4; sourceTree = "<group>"; };
 		FDACAA1662B485F084C0140B /* RydrPlayground.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = RydrPlayground.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -269,7 +271,6 @@
 				A9D3B59B7136722D9EB30D2A /* RydrPlaygroundTests.swift */,
 				3279600FD2CC20D64785128C /* Untitled.swift */,
 			);
-			name = RydrPlaygroundTests;
 			path = RydrPlaygroundTests;
 			sourceTree = "<group>";
 		};
@@ -280,7 +281,6 @@
 				C7FCD751A4AFFD8DBC81FB34 /* SplashVideoView.swift */,
 				7E432533BDB70BE7A5E1A0A8 /* VideoPlayerView.swift */,
 			);
-			name = Splash;
 			path = Splash;
 			sourceTree = "<group>";
 		};
@@ -292,13 +292,13 @@
 				09C32831495CD5DA9E4FB049 /* LocationSearchService.swift */,
 				25FF86D04887DC18C6318715 /* NotificationManager.swift */,
 				A823F3EC96FAD1F8AC3CA2E0 /* RiderIdentityVerificationService.swift */,
+				61C1E1A68C2D4C2B91287131 /* RiderRidePreferences.swift */,
 				57F389897522773F5954E49F /* RydrBankAPIError.swift */,
 				E14E9F10554D229ABE7394E4 /* UserSessionManager.swift */,
 				8A235A9CB9FE9B96E954E779 /* UserViewModel.swift */,
 				CC47D4E054870E30C12456B5 /* VehicleImageView.swift */,
 				AE7F150DACBCB949A66F8EE5 /* View+Extension.swift */,
 			);
-			name = Core;
 			path = Core;
 			sourceTree = "<group>";
 		};
@@ -311,7 +311,6 @@
 				4434A644C09A9A53FE0A8D7E /* Info.plist */,
 				FDACAA1662B485F084C0140B /* RydrPlayground.entitlements */,
 			);
-			name = RydrPlayground;
 			path = RydrPlayground;
 			sourceTree = "<group>";
 		};
@@ -322,7 +321,6 @@
 				B7F8485368A217A2C4E6007A /* MainTabView.swift */,
 				8F7A9EE4B2242D6C047E0DAF /* RydrPlaygroundApp.swift */,
 			);
-			name = App;
 			path = App;
 			sourceTree = "<group>";
 		};
@@ -331,7 +329,6 @@
 			children = (
 				4537986A22068F1DDB6C87DC /* CashRydrHubView.swift */,
 			);
-			name = Settings;
 			path = Settings;
 			sourceTree = "<group>";
 		};
@@ -341,7 +338,6 @@
 				5C8C5EC4F4A1D3D902A609C3 /* DriverCardView.swift */,
 				38FCAAD75C6C33288D219665 /* DriverSelectionView.swift */,
 			);
-			name = Driver;
 			path = Driver;
 			sourceTree = "<group>";
 		};
@@ -363,7 +359,6 @@
 				850F4A849DEA82B46153FB77 /* RydrMapView.swift */,
 				5F6BE46F6F6C5FE5CA4622A9 /* RydrRideProgressMapView.swift */,
 			);
-			name = Booking;
 			path = Booking;
 			sourceTree = "<group>";
 		};
@@ -384,7 +379,6 @@
 				1E0F1A6BDC25A2302FCD46A8 /* TermsModalView.swift */,
 				69EB15B8CD81D6C4D18B4448 /* UploadBox.swift */,
 			);
-			name = SharedUI;
 			path = SharedUI;
 			sourceTree = "<group>";
 		};
@@ -401,7 +395,6 @@
 				0B92C31DB5B3DA8B1C10F230 /* Splash */,
 				FBA2334B8FF91A9DFEB02B20 /* Support */,
 			);
-			name = Features;
 			path = Features;
 			sourceTree = "<group>";
 		};
@@ -412,7 +405,6 @@
 				A729798422E72CCD06AF8641 /* RydrPlaygroundUITests.swift */,
 				265FF09425ED61B5DA8936B2 /* RydrPlaygroundUITestsLaunchTests.swift */,
 			);
-			name = RydrPlaygroundUITests;
 			path = RydrPlaygroundUITests;
 			sourceTree = "<group>";
 		};
@@ -421,7 +413,6 @@
 			children = (
 				7A3DC279138870D7F319633A /* PaymentScreenView.swift */,
 			);
-			name = Payments;
 			path = Payments;
 			sourceTree = "<group>";
 		};
@@ -432,7 +423,6 @@
 				7C755BB9A84F880B4178786F /* VerificationCodeView.swift */,
 				14DCF0CAE4BE04F4D655FE75 /* WelcomeView.swift */,
 			);
-			name = Auth;
 			path = Auth;
 			sourceTree = "<group>";
 		};
@@ -448,7 +438,6 @@
 				AEB6F289F9BBFFB1D2FD10ED /* RydrBankSummary.swift */,
 				2D38C00E7B9801520603E966 /* Settings.swift */,
 			);
-			name = Profile;
 			path = Profile;
 			sourceTree = "<group>";
 		};
@@ -488,7 +477,6 @@
 				B4E1E7A9EE7AA353BF662043 /* SignupCoordinator.swift */,
 				02F57963D5A8B8EC4332266F /* TermsAndVerificationView.swift */,
 			);
-			name = SignUp;
 			path = SignUp;
 			sourceTree = "<group>";
 		};
@@ -508,7 +496,6 @@
 				4EDA34C5CB2B348AA5695906 /* SupportChatView.swift */,
 				5EC99D72C84F6C0F12687F1C /* SupportTicketService.swift */,
 			);
-			name = Support;
 			path = Support;
 			sourceTree = "<group>";
 		};
@@ -704,6 +691,7 @@
 				C84D7080BB7D7B2C49C6B72E /* RideInProgressView.swift in Sources */,
 				614DAEA8D22F98C5D45155BE /* RideManager.swift in Sources */,
 				654AA5510C7DD6E8F93B5910 /* RideTypeSelectionView.swift in Sources */,
+				61C1E1A78C2D4C2B91287131 /* RiderRidePreferences.swift in Sources */,
 				E70A2D574B5EA42DEAC1A05C /* RydrMapView.swift in Sources */,
 				A96FDDF8F8E31985FE66A32A /* RydrRideProgressMapView.swift in Sources */,
 				A977218877B64CD80867CE9B /* DriverCardView.swift in Sources */,

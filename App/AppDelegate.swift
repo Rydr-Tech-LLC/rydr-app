@@ -65,10 +65,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     Messaging.messaging().delegate = self
     NotificationManager.shared.configureForLaunch(application: application)
 
-    // (Optional) Easier phone auth in DEBUG on simulator
-    #if DEBUG
-    Auth.auth().settings?.isAppVerificationDisabledForTesting = true
-    #endif
+    // Keep Firebase Phone Auth on the real verification path. If test phone
+    // numbers are needed later, enable Firebase's testing bypass only in a
+    // dedicated local/debug harness so production-like builds still send and
+    // verify real SMS codes.
 
     // ✅ Stripe publishable key
     if let configuredKey = Bundle.main.object(forInfoDictionaryKey: "STRIPE_PUBLISHABLE_KEY") as? String,
@@ -146,4 +146,3 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     completionHandler()
   }
 }
-
