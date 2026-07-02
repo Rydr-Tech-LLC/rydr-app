@@ -19,6 +19,8 @@
 	<true/>
 	<key>RYDR_BACKEND_BASE_URL</key>
 	<string>https://rydr-backend-2cl9.onrender.com</string>
+	<key>RYDR_STRIPE_BACKEND_BASE_URL</key>
+	<string>https://rydr-stripe-backend.onrender.com</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

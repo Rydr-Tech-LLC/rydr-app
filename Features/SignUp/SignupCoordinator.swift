@@ -346,7 +346,7 @@ struct SignupCoordinator: View {
     // MARK: - Stripe customer provisioning (as requested)
 
     func provisionStripeCustomerIfNeeded(
-        backendBase: URL = URL(string: "https://rydr-stripe-backend.onrender.com")!
+        backendBase: URL = RydrStripeBackendConfig.baseURL
     ) {
         guard let user = Auth.auth().currentUser else { return }
         user.getIDTokenForcingRefresh(true) { token, _ in

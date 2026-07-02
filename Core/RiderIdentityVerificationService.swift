@@ -2,6 +2,17 @@ import FirebaseAuth
 import StripeIdentity
 import UIKit
 
+enum RydrStripeBackendConfig {
+    static var baseURL: URL {
+        if let raw = Bundle.main.object(forInfoDictionaryKey: "RYDR_STRIPE_BACKEND_BASE_URL") as? String,
+           let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return url
+        }
+        return URL(string: "https://rydr-stripe-backend.onrender.com")!
+    }
+}
+
 enum RiderIdentityVerificationError: LocalizedError {
     case notSignedIn
     case invalidResponse
@@ -49,7 +60,7 @@ private struct RiderIdentityBackendError: Decodable {
 final class RiderIdentityVerificationService {
     static let shared = RiderIdentityVerificationService()
 
-    private let backendBase = URL(string: "https://rydr-stripe-backend.onrender.com")!
+    private let backendBase = RydrStripeBackendConfig.baseURL
     private var verificationSheet: IdentityVerificationSheet?
 
     private init() {}

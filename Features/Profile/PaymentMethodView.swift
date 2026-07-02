@@ -43,7 +43,7 @@ struct PaymentMethodView: View {
     // If you present this view standalone and want it to draw its own title, set true.
     var showsHeader: Bool = false
 
-    private let backendBase = URL(string: "https://rydr-stripe-backend.onrender.com")!
+    private let backendBase = RydrStripeBackendConfig.baseURL
 
     @State private var customerId: String?
     @State private var cards: [CardPM] = []

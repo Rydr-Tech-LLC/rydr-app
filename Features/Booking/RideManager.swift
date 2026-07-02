@@ -504,7 +504,7 @@ final class RideManager: ObservableObject {
         return savedCards[min(selectedCardIndex, savedCards.count - 1)]
     }
 
-    private let stripeBackendBase = URL(string: "https://rydr-stripe-backend.onrender.com")!
+    private let stripeBackendBase = RydrStripeBackendConfig.baseURL
 
     // Live locations for in-progress map/route
     @Published var liveDriverCoordinate: CLLocationCoordinate2D = .init(latitude: 33.7490, longitude: -84.3880)

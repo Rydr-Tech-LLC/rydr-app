@@ -11,7 +11,7 @@ struct PaymentScreenView: View {
     var showSkip: Bool = false   // ⬅️ default OFF; pass true only during signup
 
     // Backend base
-    private let backendBase = URL(string: "https://rydr-stripe-backend.onrender.com")!
+    private let backendBase = RydrStripeBackendConfig.baseURL
 
     // State
     @State private var customerId: String?
