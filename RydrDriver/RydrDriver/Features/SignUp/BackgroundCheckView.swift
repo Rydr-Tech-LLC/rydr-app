@@ -180,9 +180,8 @@ struct BackgroundCheckView: View {
         do {
             let snapshot = try await Firestore.firestore().collection("drivers").document(uid).getDocument()
             let data = snapshot.data() ?? [:]
-            let status = (data["backgroundCheckStatus"] as? String)?.lowercased()
             let alreadyAcknowledged = data["backgroundCheckAcknowledged"] as? Bool ?? false
-            if alreadyAcknowledged && status == "beta_deferred" {
+            if alreadyAcknowledged {
                 acknowledged = true
             }
         } catch {
@@ -205,7 +204,6 @@ struct BackgroundCheckView: View {
 
         Firestore.firestore().collection("drivers").document(uid).setData([
             "backgroundCheckAcknowledged": true,
-            "backgroundCheckStatus": "beta_deferred",
             "backgroundAcknowledgedAt": FieldValue.serverTimestamp(),
             "backgroundAcknowledgementVersion": 1
         ], merge: true) { error in

@@ -728,7 +728,7 @@ private struct EmptyDriverState: View {
             Text(message)
                 .font(.headline)
                 .multilineTextAlignment(.center)
-            Text("For testing, this keeps the ride request from looking stuck when no driver is available or the mock service fails.")
+            Text("No available drivers matched this request yet. Try again in a moment.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

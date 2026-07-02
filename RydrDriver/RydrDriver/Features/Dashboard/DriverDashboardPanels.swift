@@ -566,7 +566,7 @@ struct DriverLocationPermissionBanner: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Location needed")
                     .font(.subheadline.weight(.black))
-                Text("Enable location to receive and complete rides. Alpha mock controls remain available.")
+                Text("Enable location to receive and complete rides.")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .lineLimit(2)

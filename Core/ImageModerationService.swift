@@ -26,6 +26,7 @@ enum ImageModerationError: LocalizedError {
     case uploadFailed(Error)
     case requestFailed(Error)
     case invalidServerResponse
+    case missingBackendConfiguration
     case rejected(reason: String?)
     case needsReview
 
@@ -41,6 +42,8 @@ enum ImageModerationError: LocalizedError {
             return "Couldn't reach Rydr to verify that photo. Try again in a moment."
         case .invalidServerResponse:
             return "Rydr couldn't verify that photo right now. Try again in a moment."
+        case .missingBackendConfiguration:
+            return "Rydr photo verification is missing its backend configuration."
         case .rejected:
             return "That photo doesn't meet Rydr's photo guidelines. Please choose a different one."
         case .needsReview:
@@ -67,13 +70,13 @@ final class ImageModerationService {
 
     private init() {}
 
-    private var backendBase: URL {
+    private func resolvedBackendBase() throws -> URL {
         if let raw = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
-           let url = URL(string: raw) {
+           let url = URL(string: raw),
+           !raw.isEmpty {
             return url
         }
-        // Falls back to the known production backend if the Info.plist key is ever missing.
-        return URL(string: "https://rydr-backend-2c19.onrender.com")!
+        throw ImageModerationError.missingBackendConfiguration
     }
 
     /// Uploads `image` as the rider's profile photo, moderates it, and on
@@ -128,6 +131,7 @@ final class ImageModerationService {
     // MARK: - Backend call
 
     private func checkImage(storagePath: String) async throws -> ModerationCheckResponse {
+        let backendBase = try resolvedBackendBase()
         var request = URLRequest(url: backendBase.appendingPathComponent("moderation/check-image"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

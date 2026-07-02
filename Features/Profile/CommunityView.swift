@@ -396,12 +396,14 @@ private final class CommunityEventsViewModel: ObservableObject {
 }
 
 private struct CommunityEventsService {
-    private var baseURL: URL {
+    private func resolvedBaseURL() throws -> URL {
+        #if DEBUG
         if let override = UserDefaults.standard.string(forKey: "communityBackendBaseURL"),
            let url = URL(string: override),
            !override.isEmpty {
             return url
         }
+        #endif
 
         if let value = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
            let url = URL(string: value),
@@ -409,10 +411,11 @@ private struct CommunityEventsService {
             return url
         }
 
-        return URL(string: "http://localhost:3000")!
+        throw CommunityEventsError.missingBackendConfiguration
     }
 
     func fetchEvents(category: CommunityEventCategory) async throws -> [CommunityEvent] {
+        let baseURL = try resolvedBaseURL()
         var components = URLComponents(url: baseURL.appendingPathComponent("events"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "category", value: category.apiValue),
@@ -457,6 +460,7 @@ private enum CommunityEventsError: LocalizedError {
     case badResponse
     case decoding
     case httpStatus(Int, String?, URL)
+    case missingBackendConfiguration
     case server(String, URL)
 
     var errorDescription: String? {
@@ -467,6 +471,8 @@ private enum CommunityEventsError: LocalizedError {
             return "The events service returned an unexpected response."
         case .decoding:
             return "The events service returned data Rydr could not read."
+        case .missingBackendConfiguration:
+            return "Rydr Community is missing its backend configuration."
         case .httpStatus(let status, let body, let url):
             if let body, !body.isEmpty {
                 return "Events request failed with HTTP \(status): \(body) (\(url.host ?? "backend"))"

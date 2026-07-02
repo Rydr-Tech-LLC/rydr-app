@@ -1069,6 +1069,7 @@ private final class DriverCommunityHubVM: ObservableObject {
     }
 
     private static func fetchEvents() async throws -> [DriverCommunityEvent] {
+        let backendBaseURL = try resolvedBackendBaseURL()
         var components = URLComponents(url: backendBaseURL.appendingPathComponent("events"), resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "category", value: "featured"),
@@ -1087,18 +1088,22 @@ private final class DriverCommunityHubVM: ObservableObject {
         return try JSONDecoder().decode(DriverCommunityEventsResponse.self, from: data).events
     }
 
-    private static var backendBaseURL: URL {
+    private static func resolvedBackendBaseURL() throws -> URL {
+        #if DEBUG
         if let override = UserDefaults.standard.string(forKey: "communityBackendBaseURL"),
            let url = URL(string: override),
            !override.isEmpty {
             return url
         }
+        #endif
+
         if let value = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
            let url = URL(string: value),
            !value.isEmpty {
             return url
         }
-        return URL(string: "http://localhost:3000")!
+
+        throw DriverCommunityBackendError.missingConfiguration
     }
 
     private static func demandLevel(requests: Int, drivers: Int) -> DriverCommunityDemandLevel {
@@ -1122,6 +1127,17 @@ private final class DriverCommunityHubVM: ObservableObject {
     private static func isAirportCoordinate(_ coordinate: CLLocationCoordinate2D) -> Bool {
         let airport = CLLocationCoordinate2D(latitude: 33.6407, longitude: -84.4277)
         return distanceMiles(from: coordinate, to: airport) <= 2.0
+    }
+}
+
+private enum DriverCommunityBackendError: LocalizedError {
+    case missingConfiguration
+
+    var errorDescription: String? {
+        switch self {
+        case .missingConfiguration:
+            return "Rydr Community is missing its backend configuration."
+        }
     }
 }
 

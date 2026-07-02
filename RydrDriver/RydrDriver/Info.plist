@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleGetInfoString</key>
 	<string></string>
+	<key>RYDR_BACKEND_BASE_URL</key>
+	<string>https://rydr-backend-2cl9.onrender.com</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

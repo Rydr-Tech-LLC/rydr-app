@@ -332,9 +332,9 @@ private final class CashRydrHubVM: ObservableObject {
         let configRef = db.collection("platformConfig").document("cashRydrHub")
         let riderRef = db.collection("riders").document(uid)
 
-        configRef.getDocument { [weak self] configSnap, _ in
-            riderRef.getDocument { snap, error in
-                Task { @MainActor in
+        configRef.getDocument { configSnap, _ in
+            riderRef.getDocument { [weak self] snap, error in
+                Task { @MainActor [weak self] in
                     guard let self else { return }
                     self.isCheckingTerms = false
                     if let error {
