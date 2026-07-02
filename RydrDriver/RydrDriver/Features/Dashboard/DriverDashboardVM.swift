@@ -428,6 +428,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 return nil
             }
 
+            var transactionRideData = rideData
+            Self.copyAuthoritativePricingFields(from: data, into: &transactionRideData)
+
             transaction.updateData([
                 "status": "accepted",
                 "acceptedAt": FieldValue.serverTimestamp(),
@@ -435,8 +438,8 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 "rideId": request.id,
                 "updatedAt": FieldValue.serverTimestamp()
             ], forDocument: requestRef)
-            transaction.setData(rideData, forDocument: rideRef, merge: true)
-            return rideData
+            transaction.setData(transactionRideData, forDocument: rideRef, merge: true)
+            return transactionRideData
         }) { [weak self] result, error in
             DispatchQueue.main.async {
                 self?.respondingRequestIDs.remove(request.id)
@@ -454,6 +457,37 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 self?.activeRide = DriverActiveRide(id: request.id, data: (result as? [String: Any]) ?? rideData)
                 self?.statusMessage = "Ride accepted. Head to pickup."
                 self?.updateDriverPresence(online: true)
+            }
+        }
+    }
+
+    private static func copyAuthoritativePricingFields(from source: [String: Any], into destination: inout [String: Any]) {
+        let keys = [
+            "pricingVersion",
+            "fareEstimateSource",
+            "fareEstimateCreatedAt",
+            "driverRatePerMileCents",
+            "driverRatePerMinuteCents",
+            "distanceCostCents",
+            "timeCostCents",
+            "calculatedSubtotalCents",
+            "minimumFareAdjustmentCents",
+            "rideSubtotalCents",
+            "bookingFeeCents",
+            "estimatedRiderTotalCents",
+            "estimatedDriverPayoutCents",
+            "estimatedPlatformShareCents",
+            "promoDiscountCents",
+            "authorizedRiderChargeCents",
+            "finalRiderChargeCents",
+            "estimatedRiderTotal",
+            "bookingFee",
+            "upfrontFare",
+            "estimatedFare"
+        ]
+        for key in keys {
+            if let value = source[key] {
+                destination[key] = value
             }
         }
     }

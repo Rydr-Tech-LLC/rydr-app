@@ -78,7 +78,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
         rideType: String,
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
-        estimate: RideEstimate?
+        estimate: RideEstimate?,
+        pricingSnapshot: RidePricingSnapshot
     ) async throws -> String {
         #if DEBUG
         if shouldUseMockRidesImmediately {
@@ -89,7 +90,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 rideType: rideType,
                 pickupCoordinate: pickupCoordinate,
                 dropoffCoordinate: dropoffCoordinate,
-                estimate: estimate
+                estimate: estimate,
+                pricingSnapshot: pricingSnapshot
             )
             markFallbackRide(rideId)
             return rideId
@@ -103,7 +105,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 rideType: rideType,
                 pickupCoordinate: pickupCoordinate,
                 dropoffCoordinate: dropoffCoordinate,
-                estimate: estimate
+                estimate: estimate,
+                pricingSnapshot: pricingSnapshot
             )
         } catch {
             print("Using mock ride request after primary request failed:", error.localizedDescription)
@@ -114,7 +117,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 rideType: rideType,
                 pickupCoordinate: pickupCoordinate,
                 dropoffCoordinate: dropoffCoordinate,
-                estimate: estimate
+                estimate: estimate,
+                pricingSnapshot: pricingSnapshot
             )
             markFallbackRide(rideId)
             return rideId
@@ -127,7 +131,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
             rideType: rideType,
             pickupCoordinate: pickupCoordinate,
             dropoffCoordinate: dropoffCoordinate,
-            estimate: estimate
+            estimate: estimate,
+            pricingSnapshot: pricingSnapshot
         )
         #endif
     }

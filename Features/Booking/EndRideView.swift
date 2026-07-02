@@ -460,9 +460,8 @@ struct EndRideView: View {
 
     private func retryPayment() {
         guard let receipt = displayReceipt, let backendRideId = receipt.backendRideId else { return }
-        let amountCents = Int((receipt.chargeBreakdown.calculatedTotal * 100).rounded())
         Task {
-            await rideManager.retryFailedPayment(rideId: backendRideId, amountCents: amountCents)
+            await rideManager.retryFailedPayment(rideId: backendRideId)
         }
     }
 

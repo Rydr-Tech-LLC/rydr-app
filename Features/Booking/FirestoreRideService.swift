@@ -52,7 +52,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         rideType: String,
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
-        estimate: RideEstimate?
+        estimate: RideEstimate?,
+        pricingSnapshot: RidePricingSnapshot
     ) async throws -> String {
         guard let user = Auth.auth().currentUser else {
             throw RideDispatchError.notSignedIn
@@ -92,6 +93,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             payload["estimatedDistanceMiles"] = estimate.distanceMiles
             payload["estimatedDurationMinutes"] = estimate.durationMinutes
         }
+        payload.merge(pricingSnapshot.asFirestoreFields) { _, new in new }
+        payload["fareEstimateCreatedAt"] = FieldValue.serverTimestamp()
 
         try await db.collection("rideRequests").document(id).setData(payload)
         return id

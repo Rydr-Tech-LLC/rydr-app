@@ -386,6 +386,87 @@ const PLATFORM_MIN_FEE_SHARE = 0.30;
 const PAYMENT_STATUSES = new Set(["pending", "processing", "succeeded", "failed", "refunded"]);
 const CHARGEABLE_RIDE_STATUSES = new Set(["completed"]);
 
+function integerField(data, key) {
+  const value = data?.[key];
+  if (Number.isInteger(value)) return value;
+  if (typeof value === "number" && Number.isFinite(value)) return Math.round(value);
+  if (typeof value === "string" && /^-?\d+$/.test(value.trim())) return Number.parseInt(value, 10);
+  return null;
+}
+
+function positiveIntegerField(data, key) {
+  const value = integerField(data, key);
+  return value !== null && value > 0 ? value : null;
+}
+
+function nonNegativeIntegerField(data, key) {
+  const value = integerField(data, key);
+  return value !== null && value >= 0 ? value : null;
+}
+
+function authorizedRideChargeCents(ride) {
+  return nonNegativeIntegerField(ride, "finalRiderChargeCents")
+    ?? nonNegativeIntegerField(ride, "authorizedRiderChargeCents");
+}
+
+function timestampMillis(value) {
+  if (!value) return null;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") return value.toDate().getTime();
+  if (value instanceof Date) return value.getTime();
+  if (Number.isFinite(value?._seconds)) return value._seconds * 1000 + Math.round((value._nanoseconds || 0) / 1_000_000);
+  if (Number.isFinite(value?.seconds)) return value.seconds * 1000 + Math.round((value.nanoseconds || 0) / 1_000_000);
+  return null;
+}
+
+function pickupPaidWaitSeconds(ride) {
+  const explicitPaidStart = timestampMillis(ride?.pickupPaidWaitStartedAt);
+  const waitStart = timestampMillis(ride?.pickupWaitStartedAt) || timestampMillis(ride?.arrivedAtPickupAt);
+  const rideStart = timestampMillis(ride?.rideStartedAt) || timestampMillis(ride?.startedAt);
+  const completedAt = timestampMillis(ride?.completedAt);
+  const waitEnd = rideStart || completedAt;
+
+  if (explicitPaidStart && waitEnd && waitEnd > explicitPaidStart) {
+    return Math.floor((waitEnd - explicitPaidStart) / 1000);
+  }
+  if (waitStart && waitEnd && waitEnd > waitStart) {
+    const complimentarySeconds = positiveIntegerField(ride, "pickupComplimentaryWaitSeconds") ?? 180;
+    return Math.max(0, Math.floor((waitEnd - waitStart) / 1000) - complimentarySeconds);
+  }
+  return 0;
+}
+
+function pickupWaitChargeCents(ride) {
+  const seconds = pickupPaidWaitSeconds(ride);
+  if (seconds <= 0) return { seconds: 0, cents: 0 };
+  const perMinuteCents = positiveIntegerField(ride, "driverRatePerMinuteCents");
+  if (!perMinuteCents) return { seconds, cents: 0 };
+  return { seconds, cents: Math.round((seconds / 60) * perMinuteCents) };
+}
+
+function resolvedRideCharge(ride) {
+  const baseAmount = authorizedRideChargeCents(ride);
+  if (baseAmount === null) return null;
+  const wait = pickupWaitChargeCents(ride);
+  return {
+    amount: baseAmount + wait.cents,
+    baseAmount,
+    pickupPaidWaitSeconds: wait.seconds,
+    pickupWaitChargeCents: wait.cents,
+  };
+}
+
+function platformFeeCents(ride, chargeAmountCents, resolvedCharge = null) {
+  const explicitPlatformShare = nonNegativeIntegerField(ride, "estimatedPlatformShareCents");
+  const promoDiscount = nonNegativeIntegerField(ride, "promoDiscountCents") ?? 0;
+  const waitCharge = resolvedCharge?.pickupWaitChargeCents ?? 0;
+  const waitPlatformShare = Math.round(waitCharge * PLATFORM_MIN_FEE_SHARE);
+  if (explicitPlatformShare !== null) {
+    return Math.min(Math.max(0, explicitPlatformShare - promoDiscount) + waitPlatformShare, chargeAmountCents);
+  }
+  return Math.round(chargeAmountCents * PLATFORM_MIN_FEE_SHARE);
+}
+
 /** Persists payment state onto the ride document the rider/driver apps already listen to. */
 async function recordPaymentStatus(rideRef, status, fields = {}) {
   if (!PAYMENT_STATUSES.has(status)) {
@@ -717,12 +798,10 @@ app.post("/create-setup-intent", async (req, res) => {
 // --- PaymentIntent (charge a ride) ---------------------------------------
 //
 // Shared by /create-payment-intent (first attempt) and /payments/retry
-// (subsequent attempts after a failure). Every identity used to build the
-// charge — customerId, driverAccountId, the application fee floor — is
-// re-derived server-side from the ride/rider/driver Firestore docs, never
-// taken from the request body. The only client inputs that actually affect
-// the charge are `amount` (must be > 0) and, optionally, which of the
-// rider's *own* saved payment methods to use.
+// (subsequent attempts after a failure). Every identity and charge amount used
+// to build the PaymentIntent is re-derived server-side from Firestore/Stripe
+// using the verified Firebase uid. The app may still send `amount` as a stale
+// client-side consistency check, but it is never the source of truth.
 async function chargeRideAttempt({
   uid,
   rideId,
@@ -732,22 +811,75 @@ async function chargeRideAttempt({
   suppliedCustomerId,
   suppliedDriverAccountId,
 }) {
-  if (!Number.isInteger(amount) || amount <= 0) {
-    return { httpStatus: 400, body: { error: "invalid_amount" } };
-  }
-
   const owned = await ownedRide(uid, rideId);
   if (!owned) {
     return { httpStatus: 404, body: { error: "ride_not_found_or_not_owned" } };
   }
   const { ref: rideRef, data: ride } = owned;
   const attempt = (ride.retryCount || 0) + 1;
+  const resolvedCharge = resolvedRideCharge(ride);
 
   if (!CHARGEABLE_RIDE_STATUSES.has(ride.status)) {
     return {
       httpStatus: 409,
       body: { error: "ride_not_completed", rideStatus: ride.status || "unknown" },
     };
+  }
+  if (resolvedCharge === null) {
+    const message = "Ride is missing an authoritative fare. Payment was not attempted.";
+    await recordPaymentStatus(rideRef, "failed", {
+      retryCount: attempt,
+      failureReason: message,
+      failureCode: "fare_not_authoritative",
+    });
+    return { httpStatus: 409, body: { error: "fare_not_authoritative", message } };
+  }
+  const authoritativeAmount = resolvedCharge.amount;
+  if (authoritativeAmount <= 0) {
+    await recordPaymentStatus(rideRef, "succeeded", {
+      retryCount: attempt,
+      paymentFailureReason: null,
+      failureReason: null,
+      failureCode: null,
+      stripePaymentIntentId: null,
+      noCharge: true,
+      authorizedRiderChargeCents: resolvedCharge.baseAmount,
+      finalRiderChargeCents: 0,
+      pickupPaidWaitSeconds: resolvedCharge.pickupPaidWaitSeconds,
+      pickupWaitChargeCents: resolvedCharge.pickupWaitChargeCents,
+    });
+    return {
+      httpStatus: 200,
+      body: { clientSecret: null, paymentIntentId: null, status: "succeeded", noCharge: true },
+    };
+  }
+  if (amount !== undefined && amount !== null) {
+    const suppliedAmount = Number(amount);
+    if (!Number.isInteger(suppliedAmount) || suppliedAmount !== authoritativeAmount) {
+      const message = "Client fare does not match the authorized ride fare.";
+      await recordPaymentStatus(rideRef, "failed", {
+        retryCount: attempt,
+        failureReason: message,
+        failureCode: "amount_mismatch",
+        suppliedAmountCents: Number.isFinite(suppliedAmount) ? suppliedAmount : null,
+        authorizedAmountCents: authoritativeAmount,
+        authorizedBaseAmountCents: resolvedCharge.baseAmount,
+        pickupPaidWaitSeconds: resolvedCharge.pickupPaidWaitSeconds,
+        pickupWaitChargeCents: resolvedCharge.pickupWaitChargeCents,
+      });
+      return {
+        httpStatus: 409,
+        body: {
+          error: "amount_mismatch",
+          message,
+          suppliedAmountCents: Number.isFinite(suppliedAmount) ? suppliedAmount : null,
+          authorizedAmountCents: authoritativeAmount,
+          authorizedBaseAmountCents: resolvedCharge.baseAmount,
+          pickupPaidWaitSeconds: resolvedCharge.pickupPaidWaitSeconds,
+          pickupWaitChargeCents: resolvedCharge.pickupWaitChargeCents,
+        },
+      };
+    }
   }
 
   const customerId = await ownedCustomerId(uid);
@@ -792,9 +924,9 @@ async function chargeRideAttempt({
   }
   let applicationFeeAmount;
   if (driverAccountId) {
-    // Safety floor: the platform's cut can never be tampered down below its
-    // documented 30% share, even if a future client param tries to.
-    applicationFeeAmount = Math.round(amount * PLATFORM_MIN_FEE_SHARE);
+    // Prefer the pricing snapshot's platform share; fall back to the minimum
+    // documented 30% share so stale ride docs cannot bypass the platform cut.
+    applicationFeeAmount = platformFeeCents(ride, authoritativeAmount, resolvedCharge);
   }
 
   const idempotencyKey = attempt === 1 ? rideId : `${rideId}_attempt${attempt}`;
@@ -803,10 +935,14 @@ async function chargeRideAttempt({
     retryCount: ride.retryCount || 0,
     failureReason: null,
     failureCode: null,
+    authorizedRiderChargeCents: resolvedCharge.baseAmount,
+    finalRiderChargeCents: authoritativeAmount,
+    pickupPaidWaitSeconds: resolvedCharge.pickupPaidWaitSeconds,
+    pickupWaitChargeCents: resolvedCharge.pickupWaitChargeCents,
   });
 
   const params = {
-    amount,
+    amount: authoritativeAmount,
     currency,
     customer: customerId,
     payment_method: resolvedPaymentMethodId,
@@ -848,8 +984,9 @@ async function chargeRideAttempt({
   }
 }
 
-// Body: { rideId, amount: <int cents>, currency?, paymentMethodId? } -> { clientSecret, paymentIntentId, status }
-// Auth required. See chargeRideAttempt() above for what is/isn't trusted from the client.
+// Body: { rideId, amount?: <int cents>, currency?, paymentMethodId? } -> { clientSecret, paymentIntentId, status }
+// Auth required. The optional `amount` is only checked against Firestore's
+// authoritative fare; it never controls the PaymentIntent amount.
 app.post("/create-payment-intent", async (req, res) => {
   try {
     const uid = await requireFirebaseUid(req, res);
@@ -876,8 +1013,9 @@ app.post("/create-payment-intent", async (req, res) => {
 });
 
 // --- Retry a failed ride payment -----------------------------------------
-// Body: { rideId, amount: <int cents>, currency?, paymentMethodId? } (paymentMethodId
+// Body: { rideId, amount?: <int cents>, currency?, paymentMethodId? } (paymentMethodId
 // lets the rider pick a different saved card after updating their payment method).
+// `amount` is optional and only checked against the authoritative Firestore fare.
 // Auth required. Only allowed when the ride's current paymentStatus is "failed",
 // so this can never be used to double-charge a ride that already succeeded.
 app.post("/payments/retry", async (req, res) => {

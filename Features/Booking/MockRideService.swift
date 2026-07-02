@@ -67,7 +67,8 @@ final class MockRideService: RideService, @unchecked Sendable {
         rideType: String,
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
-        estimate: RideEstimate?
+        estimate: RideEstimate?,
+        pricingSnapshot: RidePricingSnapshot
     ) async throws -> String {
         let id = UUID().uuidString
         queue.sync {
