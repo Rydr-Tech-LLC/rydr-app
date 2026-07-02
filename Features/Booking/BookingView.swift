@@ -16,6 +16,7 @@ struct BookingView: View {
 
     // 🔹 Ride flow
     @EnvironmentObject var rideManager: RideManager
+    @EnvironmentObject private var session: UserSessionManager
     @State private var showDriverSheet = false
     @State private var showInProgress = false
 
@@ -229,6 +230,8 @@ struct BookingView: View {
                 dropoff: dropoffText,
                 estimate: currentEstimate,
                 routePolyline: routePolyline,
+                riderName: userName,
+                isVerifiedRider: session.verifiedBadge,
                 pickupCoordinate: pickupCoordinate,
                 dropoffCoordinate: dropoffCoordinate,
                 showsUserLocation: locationManager.authorization == .authorizedWhenInUse || locationManager.authorization == .authorizedAlways,
@@ -1191,7 +1194,8 @@ struct BookingView: View {
             near: pickupCoordinate ?? region.center,
             pickupCoordinate: pickupCoordinate,
             dropoffCoordinate: dropoffCoordinate,
-            estimate: currentEstimate
+            estimate: currentEstimate,
+            riderVerified: session.verifiedBadge
         )
         showDriverSheet = true
     }
@@ -1557,6 +1561,8 @@ private struct RoutePreviewSheet: View {
     let dropoff: String
     let estimate: RideEstimate
     let routePolyline: MKPolyline?
+    let riderName: String
+    let isVerifiedRider: Bool
     let pickupCoordinate: CLLocationCoordinate2D?
     let dropoffCoordinate: CLLocationCoordinate2D?
     let showsUserLocation: Bool
@@ -1652,6 +1658,8 @@ private struct RoutePreviewSheet: View {
             }
 
             bestRouteCard
+
+            riderProfileRow
 
             Button {
                 dismiss()
@@ -1755,6 +1763,45 @@ private struct RoutePreviewSheet: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private var riderProfileRow: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Styles.rydrGradient.opacity(0.12))
+                    .frame(width: 42, height: 42)
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Styles.rydrGradient)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(riderName)
+                    .font(.subheadline.weight(.bold))
+                    .lineLimit(1)
+                Text("Rider profile")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            if isVerifiedRider {
+                Label("Verified Rider", systemImage: "checkmark.seal.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color.green)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(Color.green.opacity(0.11), in: Capsule())
+            }
+        }
+        .padding(12)
+        .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.black.opacity(0.06), lineWidth: 1)
         )
     }

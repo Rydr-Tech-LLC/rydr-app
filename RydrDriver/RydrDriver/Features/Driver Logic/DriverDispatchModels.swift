@@ -28,6 +28,7 @@ struct DriverRideRequest: Identifiable, Equatable {
     let riderName: String
     let riderPhotoURL: String?
     let riderRating: Double?
+    let riderVerified: Bool
     let pickup: String
     let dropoff: String
     let rideType: String
@@ -47,6 +48,7 @@ struct DriverRideRequest: Identifiable, Equatable {
         riderName: String,
         riderPhotoURL: String? = nil,
         riderRating: Double? = nil,
+        riderVerified: Bool = false,
         pickup: String,
         dropoff: String,
         rideType: String,
@@ -65,6 +67,7 @@ struct DriverRideRequest: Identifiable, Equatable {
         self.riderName = riderName
         self.riderPhotoURL = riderPhotoURL
         self.riderRating = riderRating
+        self.riderVerified = riderVerified
         self.pickup = pickup
         self.dropoff = dropoff
         self.rideType = rideType
@@ -86,6 +89,7 @@ struct DriverRideRequest: Identifiable, Equatable {
         riderName = data["riderName"] as? String ?? "Rydr rider"
         riderPhotoURL = data["riderPhotoURL"] as? String ?? data["riderProfilePhotoURL"] as? String
         riderRating = Self.doubleValue(data["riderRating"] ?? data["riderAverageRating"])
+        riderVerified = data["riderVerified"] as? Bool ?? data["verifiedRider"] as? Bool ?? false
         pickup = data["pickup"] as? String ?? "Pickup location"
         dropoff = data["dropoff"] as? String ?? "Drop-off location"
         rideType = data["rideType"] as? String ?? "Rydr"

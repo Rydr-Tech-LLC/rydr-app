@@ -30,7 +30,11 @@ async function requireFirebaseAuth(req, res, next) {
     req.firebaseUid = decoded.uid;
     req.firebaseToken = decoded;
     return next();
-  } catch {
+  } catch (err) {
+    console.error("Firebase ID token verification failed", {
+      code: err.code,
+      message: err.message
+    });
     return res.status(401).json({ error: "Invalid Firebase ID token" });
   }
 }

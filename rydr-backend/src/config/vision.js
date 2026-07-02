@@ -8,7 +8,8 @@ let client;
  * credential in a project that has the Vision API enabled can call them.
  * So rather than requiring a brand-new dedicated key, this reuses the
  * same Firebase Admin SDK credentials already configured for Firestore
- * (FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY).
+ * (FIREBASE_ADMIN_PROJECT_ID / FIREBASE_ADMIN_CLIENT_EMAIL /
+ * FIREBASE_ADMIN_PRIVATE_KEY, with legacy FIREBASE_* fallbacks).
  *
  * If you ever want a separate, narrower-scoped key for Vision only, set
  * GOOGLE_VISION_CREDENTIALS_JSON (full key file contents) and it'll be
@@ -42,12 +43,16 @@ function getVisionClient() {
     return client;
   }
 
-  if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+  const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID || process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL || process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY || process.env.FIREBASE_PRIVATE_KEY;
+
+  if (projectId && clientEmail && privateKey) {
     client = new ImageAnnotatorClient({
-      projectId: process.env.FIREBASE_PROJECT_ID,
+      projectId,
       credentials: {
-        client_email: process.env.FIREBASE_CLIENT_EMAIL,
-        private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
+        client_email: clientEmail,
+        private_key: privateKey.replace(/\\n/g, "\n")
       }
     });
     return client;

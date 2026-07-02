@@ -11,13 +11,15 @@ services:
         value: production
       - key: PORT
         sync: false
-      - key: FIREBASE_PROJECT_ID
+      - key: FIREBASE_ADMIN_PROJECT_ID
         sync: false
-      - key: FIREBASE_CLIENT_EMAIL
+      - key: FIREBASE_ADMIN_CLIENT_EMAIL
         sync: false
-      - key: FIREBASE_PRIVATE_KEY
+      - key: FIREBASE_ADMIN_PRIVATE_KEY
         sync: false
       - key: FIREBASE_DATABASE_URL
+        sync: false
+      - key: FIREBASE_STORAGE_BUCKET
         sync: false
       - key: TICKETMASTER_API_KEY
         sync: false

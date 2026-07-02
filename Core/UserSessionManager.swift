@@ -135,7 +135,12 @@ class UserSessionManager: ObservableObject {
                 let emailFromDb = data["email"] as? String
                 let completedRiderTerms = data["agreedToTerms"] as? Bool ?? false
                 let explicitRiderAccess = data["hasRydrRiderAccess"] as? Bool ?? false
-                let hasVerifiedBadge = data["verifiedBadge"] as? Bool ?? data["verifiedRider"] as? Bool ?? false
+                let identityStatus = (data["identityStatus"] as? String ?? "").lowercased()
+                let hasVerifiedBadge =
+                    (data["verifiedBadge"] as? Bool)
+                    ?? (data["verifiedRider"] as? Bool)
+                    ?? (data["identityVerified"] as? Bool)
+                    ?? (identityStatus == "verified")
                 let badges = data["badges"] as? [String: Any] ?? [:]
                 let studentAmbassador = badges["studentAmbassador"] as? [String: Any] ?? [:]
                 let hasStudentAmbassadorBadge =

@@ -4,20 +4,20 @@
 //
 
 import SwiftUI
-import PhotosUI
+import StripeIdentity
 
 struct TermsAndVerificationView: View {
     @Binding var termsAccepted: Bool
     @Binding var wantsVerification: Bool
-    @Binding var idFront: PhotosPickerItem?
-    @Binding var idBack: PhotosPickerItem?
-    @Binding var selfie: PhotosPickerItem?
     var onSubmit: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var showTermsModal = false
     @State private var showPrivacyModal = false
     @State private var showError = false
+    @State private var isStartingIdentityVerification = false
+    @State private var verificationMessage: String?
+    @State private var verificationIsError = false
 
     var body: some View {
         ZStack {
@@ -39,21 +39,19 @@ struct TermsAndVerificationView: View {
                         SignupStepHeader(active: 3)
 
                         VStack(spacing: 8) {
-                            Text("Verify Your Identity")
+                            Text("Finish Your Account")
                                 .font(.system(size: 25, weight: .black, design: .rounded))
                                 .foregroundStyle(SignupPalette.ink)
                                 .multilineTextAlignment(.center)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.78)
 
-                            Text("This helps keep our community\nsafe and trusted.")
+                            Text("Verify now for a trusted rider badge,\nor skip and do it later.")
                                 .font(.system(size: 14, weight: .semibold, design: .rounded))
                                 .foregroundStyle(SignupPalette.muted)
                                 .multilineTextAlignment(.center)
                                 .lineSpacing(2)
                         }
-
-                        uploadSection
 
                         verifiedRiderSection
 
@@ -66,16 +64,47 @@ struct TermsAndVerificationView: View {
                                 .multilineTextAlignment(.center)
                         }
 
-                        Button("Create Account") {
-                            if termsAccepted {
-                                showError = false
-                                onSubmit()
-                            } else {
-                                withAnimation { showError = true }
+                        if let verificationMessage {
+                            Text(verificationMessage)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(verificationIsError ? SignupPalette.red : SignupPalette.success)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Button {
+                            startStripeIdentityVerification()
+                        } label: {
+                            HStack(spacing: 8) {
+                                if isStartingIdentityVerification {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Image(systemName: "person.text.rectangle.fill")
+                                }
+                                Text(isStartingIdentityVerification ? "Opening Stripe Identity..." : "Verify with Stripe Identity")
                             }
                         }
                         .buttonStyle(SignupPrimaryButtonStyle())
+                        .disabled(isStartingIdentityVerification)
                         .padding(.top, 4)
+
+                        Button {
+                            submitWithoutVerification()
+                        } label: {
+                            Text("Skip for Now")
+                                .font(.system(size: 15, weight: .black, design: .rounded))
+                                .foregroundStyle(SignupPalette.red)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 52)
+                                .background(SignupPalette.panel, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .stroke(SignupPalette.softLine, lineWidth: 1)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isStartingIdentityVerification)
 
                         SignupSecurityFooter(text: "Your information is secure and private.")
                     }
@@ -134,40 +163,34 @@ private extension TermsAndVerificationView {
     }
 
     var verifiedRiderSection: some View {
-        Button {
-            wantsVerification.toggle()
-        } label: {
-            HStack(spacing: 13) {
-                ZStack {
-                    Circle()
-                        .fill(SignupPalette.red.opacity(0.09))
-                        .frame(width: 42, height: 42)
-                    Image(systemName: wantsVerification ? "checkmark.seal.fill" : "checkmark.seal")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(SignupPalette.red)
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Verified Rider (Optional)")
-                        .font(.system(size: 14, weight: .black, design: .rounded))
-                        .foregroundStyle(SignupPalette.ink)
-                    Text("Get priority support and build trust\nin the community.")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(SignupPalette.muted)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.84)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 15, weight: .black))
+        HStack(spacing: 13) {
+            ZStack {
+                Circle()
+                    .fill(SignupPalette.red.opacity(0.09))
+                    .frame(width: 42, height: 42)
+                Image(systemName: wantsVerification ? "checkmark.seal.fill" : "checkmark.seal")
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(SignupPalette.red)
             }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Verified Rider (Optional)")
+                    .font(.system(size: 14, weight: .black, design: .rounded))
+                    .foregroundStyle(SignupPalette.ink)
+                Text("Stripe Identity handles your ID and selfie securely. You can skip this and verify from Profile later.")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(SignupPalette.muted)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.84)
+            }
+
+            Spacer()
+
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 18, weight: .black))
+                .foregroundStyle(SignupPalette.red)
         }
-        .buttonStyle(.plain)
         .padding(13)
-        .padding(15)
         .background(SignupPalette.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -176,61 +199,61 @@ private extension TermsAndVerificationView {
         .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 6)
     }
 
-    var uploadSection: some View {
-        VStack(spacing: 11) {
-            PhotosPicker(selection: $idFront, matching: .images) {
-                VerificationUploadRow(title: "State ID (Front)", subtitle: "Upload a clear photo", isSelected: idFront != nil)
-            }
-
-            PhotosPicker(selection: $idBack, matching: .images) {
-                VerificationUploadRow(title: "State ID (Back)", subtitle: "Upload a clear photo", isSelected: idBack != nil)
-            }
-
-            PhotosPicker(selection: $selfie, matching: .images) {
-                VerificationUploadRow(title: "Selfie", subtitle: "Take a clear selfie", isSelected: selfie != nil, icon: "person.crop.square.dashed")
-            }
+    func submitWithoutVerification() {
+        guard termsAccepted else {
+            withAnimation { showError = true }
+            return
         }
-        .transition(.opacity.combined(with: .move(edge: .top)))
+        wantsVerification = false
+        showError = false
+        verificationMessage = nil
+        onSubmit()
     }
-}
 
-private struct VerificationUploadRow: View {
-    let title: String
-    let subtitle: String
-    let isSelected: Bool
-    var icon: String = "person.text.rectangle"
+    func startStripeIdentityVerification() {
+        guard termsAccepted else {
+            withAnimation { showError = true }
+            return
+        }
+        guard !isStartingIdentityVerification else { return }
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 21, weight: .bold))
-                .foregroundStyle(isSelected ? SignupPalette.success : SignupPalette.muted)
-                .frame(width: 36, height: 36)
-                .background((isSelected ? SignupPalette.success : SignupPalette.muted).opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        wantsVerification = true
+        showError = false
+        verificationMessage = nil
+        verificationIsError = false
+        isStartingIdentityVerification = true
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13, weight: .black, design: .rounded))
-                    .foregroundStyle(SignupPalette.ink)
-                Text(subtitle)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(SignupPalette.muted)
+        Task {
+            do {
+                let clientSecret = try await RiderIdentityVerificationService.shared.createSession()
+                let result = try await RiderIdentityVerificationService.shared.presentVerification(clientSecret: clientSecret)
+                await MainActor.run {
+                    isStartingIdentityVerification = false
+                    handleStripeIdentityResult(result)
+                }
+            } catch {
+                await MainActor.run {
+                    isStartingIdentityVerification = false
+                    verificationIsError = true
+                    verificationMessage = error.localizedDescription
+                }
             }
-
-            Spacer()
-
-            Image(systemName: isSelected ? "checkmark.circle" : "icloud.and.arrow.up")
-                .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(isSelected ? SignupPalette.success : SignupPalette.red)
         }
-        .padding(.horizontal, 14)
-        .frame(height: 62)
-        .background(SignupPalette.field, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(SignupPalette.softLine, lineWidth: 1)
+    }
+
+    func handleStripeIdentityResult(_ result: IdentityVerificationSheet.VerificationFlowResult) {
+        switch result {
+        case .flowCompleted:
+            verificationIsError = false
+            verificationMessage = "Verification submitted. Stripe will confirm your verified rider badge."
+            onSubmit()
+        case .flowCanceled:
+            verificationIsError = true
+            verificationMessage = "Verification was canceled. You can try again or skip for now."
+        case .flowFailed(let error):
+            verificationIsError = true
+            verificationMessage = error.localizedDescription
         }
-        .shadow(color: Color.black.opacity(0.035), radius: 8, x: 0, y: 5)
     }
 }
 

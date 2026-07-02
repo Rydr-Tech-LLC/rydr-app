@@ -5,6 +5,7 @@ import UIKit
 enum RiderIdentityVerificationError: LocalizedError {
     case notSignedIn
     case invalidResponse
+    case serviceError(String)
     case unsupportedOS
 
     var errorDescription: String? {
@@ -13,6 +14,8 @@ enum RiderIdentityVerificationError: LocalizedError {
             return "Sign in before starting identity verification."
         case .invalidResponse:
             return "The identity service returned an invalid response. Please try again."
+        case .serviceError(let message):
+            return message
         case .unsupportedOS:
             return "Identity verification requires iOS 14.3 or newer."
         }
@@ -38,6 +41,11 @@ private struct RiderIdentitySessionResponse: Decodable {
     }
 }
 
+private struct RiderIdentityBackendError: Decodable {
+    let error: String?
+    let message: String?
+}
+
 final class RiderIdentityVerificationService {
     static let shared = RiderIdentityVerificationService()
 
@@ -50,7 +58,7 @@ final class RiderIdentityVerificationService {
         guard let user = Auth.auth().currentUser else {
             throw RiderIdentityVerificationError.notSignedIn
         }
-        let token = try await user.getIDToken()
+        let token = try await refreshedIDToken(for: user)
         var request = URLRequest(url: backendBase.appendingPathComponent("identity/create-session"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -61,9 +69,7 @@ final class RiderIdentityVerificationService {
         ])
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw RiderIdentityVerificationError.invalidResponse
-        }
+        try validate(response: response, data: data)
         let decoded = try JSONDecoder().decode(RiderIdentitySessionResponse.self, from: data)
         return decoded.clientSecret
     }
@@ -72,7 +78,7 @@ final class RiderIdentityVerificationService {
         guard let user = Auth.auth().currentUser else {
             throw RiderIdentityVerificationError.notSignedIn
         }
-        let token = try await user.getIDToken()
+        let token = try await refreshedIDToken(for: user)
         var components = URLComponents(url: backendBase.appendingPathComponent("identity/status"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "role", value: "verified_rider")]
         guard let url = components.url else { throw RiderIdentityVerificationError.invalidResponse }
@@ -82,9 +88,7 @@ final class RiderIdentityVerificationService {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw RiderIdentityVerificationError.invalidResponse
-        }
+        try validate(response: response, data: data)
         return try JSONDecoder().decode(RiderIdentityStatus.self, from: data)
     }
 
@@ -103,6 +107,51 @@ final class RiderIdentityVerificationService {
             sheet.present(from: presenter) { [weak self] result in
                 self?.verificationSheet = nil
                 continuation.resume(returning: result)
+            }
+        }
+    }
+
+    private func validate(response: URLResponse, data: Data) throws {
+        guard let http = response as? HTTPURLResponse else {
+            throw RiderIdentityVerificationError.invalidResponse
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw RiderIdentityVerificationError.serviceError(message(for: http.statusCode, data: data))
+        }
+    }
+
+    private func message(for statusCode: Int, data: Data) -> String {
+        let backendError = try? JSONDecoder().decode(RiderIdentityBackendError.self, from: data)
+        let rawMessage = backendError?.message ?? backendError?.error
+
+        switch rawMessage {
+        case "identity_flow_not_configured":
+            return "Rydr's Stripe Identity flow is not configured yet. Add STRIPE_RIDER_VERIFICATION_FLOW_ID on the Stripe backend, then redeploy."
+        case "identity_verification_flow_invalid":
+            return backendError?.message ?? "Stripe could not find the configured rider verification flow. Confirm STRIPE_RIDER_VERIFICATION_FLOW_ID in the Stripe backend environment."
+        case "stripe_identity_auth_failed":
+            return backendError?.message ?? "Stripe rejected the backend API key. Check STRIPE_SECRET_KEY on the Stripe backend."
+        case "firebase_admin_misconfigured":
+            return backendError?.message ?? "The Stripe backend Firebase Admin credentials are not configured correctly."
+        case "unauthorized":
+            return "Your session expired. Sign in again before starting verification."
+        case let message? where !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty:
+            return "Identity verification could not start: \(message)"
+        default:
+            return "Identity verification could not start. The service returned HTTP \(statusCode)."
+        }
+    }
+
+    private func refreshedIDToken(for user: User) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            user.getIDTokenForcingRefresh(true) { token, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let token {
+                    continuation.resume(returning: token)
+                } else {
+                    continuation.resume(throwing: RiderIdentityVerificationError.notSignedIn)
+                }
             }
         }
     }

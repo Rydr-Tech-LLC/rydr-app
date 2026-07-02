@@ -85,7 +85,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
         pricingSnapshot: RidePricingSnapshot,
-        riderPreferences: RiderRidePreferences?
+        riderPreferences: RiderRidePreferences?,
+        riderVerified: Bool
     ) async throws -> String {
         #if DEBUG
         if shouldUseMockRidesImmediately {
@@ -98,7 +99,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 dropoffCoordinate: dropoffCoordinate,
                 estimate: estimate,
                 pricingSnapshot: pricingSnapshot,
-                riderPreferences: riderPreferences
+                riderPreferences: riderPreferences,
+                riderVerified: riderVerified
             )
             markFallbackRide(rideId)
             return rideId
@@ -114,7 +116,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 dropoffCoordinate: dropoffCoordinate,
                 estimate: estimate,
                 pricingSnapshot: pricingSnapshot,
-                riderPreferences: riderPreferences
+                riderPreferences: riderPreferences,
+                riderVerified: riderVerified
             )
         } catch {
             print("Using mock ride request after primary request failed:", error.localizedDescription)
@@ -127,7 +130,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
                 dropoffCoordinate: dropoffCoordinate,
                 estimate: estimate,
                 pricingSnapshot: pricingSnapshot,
-                riderPreferences: riderPreferences
+                riderPreferences: riderPreferences,
+                riderVerified: riderVerified
             )
             markFallbackRide(rideId)
             return rideId
@@ -142,7 +146,8 @@ final class DebugFallbackRideService: RideService, @unchecked Sendable {
             dropoffCoordinate: dropoffCoordinate,
             estimate: estimate,
             pricingSnapshot: pricingSnapshot,
-            riderPreferences: riderPreferences
+            riderPreferences: riderPreferences,
+            riderVerified: riderVerified
         )
         #endif
     }

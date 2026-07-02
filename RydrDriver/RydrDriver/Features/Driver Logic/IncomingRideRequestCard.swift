@@ -41,7 +41,8 @@ struct IncomingRideRequestCard: View {
                 RiderMiniProfile(
                     name: request.riderName,
                     photoURL: request.riderPhotoURL,
-                    rating: request.riderRating
+                    rating: request.riderRating,
+                    isVerifiedRider: request.riderVerified
                 )
             }
 
@@ -591,6 +592,7 @@ private struct RiderMiniProfile: View {
     let name: String
     let photoURL: String?
     let rating: Double?
+    let isVerifiedRider: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -609,6 +611,12 @@ private struct RiderMiniProfile: View {
                     Text(rating.map { String(format: "%.2f", $0) } ?? "New")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
+                    if isVerifiedRider {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.green)
+                            .accessibilityLabel("Verified Rider")
+                    }
                 }
             }
         }

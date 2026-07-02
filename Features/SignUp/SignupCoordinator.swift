@@ -3,7 +3,6 @@
 //  RydrSignupFlow
 //
 import SwiftUI
-import PhotosUI
 import FirebaseFirestore
 import FirebaseAuth
 
@@ -38,9 +37,6 @@ struct SignupCoordinator: View {
     @State private var zip = ""
     @State private var agreedToTerms = false
     @State private var verificationRequested = false
-    @State private var stateIDFront: PhotosPickerItem?
-    @State private var stateIDBack: PhotosPickerItem?
-    @State private var selfieImage: PhotosPickerItem?
 
     // Navigate to main app
     @State private var showMainApp = false
@@ -150,9 +146,6 @@ struct SignupCoordinator: View {
                     TermsAndVerificationView(
                         termsAccepted: $agreedToTerms,
                         wantsVerification: $verificationRequested,
-                        idFront: $stateIDFront,
-                        idBack: $stateIDBack,
-                        selfie: $selfieImage,
                         onSubmit: {
                             saveUserToFirestore()
                         }

@@ -104,7 +104,7 @@ struct ProfileView: View {
                 .environmentObject(session)
         }
         .alert(
-            "Photo Not Approved",
+            "Profile Photo Not Saved",
             isPresented: Binding(
                 get: { photoErrorMessage != nil },
                 set: { if !$0 { photoErrorMessage = nil } }
@@ -180,7 +180,7 @@ struct ProfileView: View {
                             }
 
                             if session.verifiedBadge || isVerifiedRider {
-                                Label("Verified", systemImage: "checkmark.seal.fill")
+                                Label("Verified Rider", systemImage: "checkmark.seal.fill")
                                     .font(.caption2.weight(.bold))
                                     .foregroundStyle(.green)
                                     .padding(.horizontal, 9)
@@ -397,24 +397,39 @@ struct ProfileView: View {
 
     private var verifiedRiderCard: some View {
         VStack(alignment: .leading, spacing: 14) {
+            let verified = session.verifiedBadge || isVerifiedRider
+
             HStack(spacing: 13) {
-                Image(systemName: isVerifiedRider ? "checkmark.seal.fill" : "checkmark.seal")
+                Image(systemName: verified ? "checkmark.seal.fill" : "checkmark.seal")
                     .font(.title2.weight(.bold))
-                    .foregroundStyle(isVerifiedRider ? Color.green : Color.red)
+                    .foregroundStyle(verified ? Color.green : Color.red)
                     .frame(width: 46, height: 46)
-                    .background((isVerifiedRider ? Color.green : Color.red).opacity(0.10), in: Circle())
+                    .background((verified ? Color.green : Color.red).opacity(0.10), in: Circle())
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(isVerifiedRider ? "Verified Rider" : "Become a Verified Rider")
+                    Text(verified ? "Congratulations! You are a verified rider." : "Become a Verified Rider")
                         .font(.headline.weight(.heavy))
                         .foregroundStyle(primaryText)
-                    Text("Verify your identity to earn a Verified Badge that lets drivers know you've confirmed your identity through Rydr.")
+                    Text(verified ? "Your Verified Rider badge is active and will appear with your rider profile during trip requests." : "Verify your identity to earn a Verified Rider badge that lets drivers know you've confirmed your identity through Rydr.")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer()
+            }
+
+            if verified {
+                Label("Verified Rider", systemImage: "checkmark.seal.fill")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.green)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .background(Color.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.green.opacity(0.24), lineWidth: 1)
+                    )
             }
 
             if let riderVerificationMessage {
@@ -424,32 +439,28 @@ struct ProfileView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Button {
-                Task { await startRiderVerification() }
-            } label: {
-                HStack(spacing: 8) {
-                    if isCheckingRiderVerification {
-                        ProgressView().tint(isVerifiedRider ? .secondary : .white)
-                    } else {
-                        Image(systemName: isVerifiedRider ? "checkmark" : "shield.lefthalf.filled")
+            if !verified {
+                Button {
+                    Task { await startRiderVerification() }
+                } label: {
+                    HStack(spacing: 8) {
+                        if isCheckingRiderVerification {
+                            ProgressView().tint(.white)
+                        } else {
+                            Image(systemName: "shield.lefthalf.filled")
+                        }
+                        Text("Verify Identity")
                     }
-                    Text(isVerifiedRider ? "Verified Rider" : "Verify Identity")
+                    .font(.subheadline.weight(.bold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .background(Styles.rydrGradient)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                .font(.subheadline.weight(.bold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 13)
-                .background {
-                    if isVerifiedRider {
-                        Color(.secondarySystemBackground)
-                    } else {
-                        Styles.rydrGradient
-                    }
-                }
-                .foregroundStyle(isVerifiedRider ? .green : .white)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .buttonStyle(.plain)
+                .disabled(isCheckingRiderVerification)
             }
-            .buttonStyle(.plain)
-            .disabled(isVerifiedRider || isCheckingRiderVerification)
         }
         .padding(16)
         .background(adaptiveCardBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -815,7 +826,7 @@ struct ProfileView: View {
             do {
                 let status = try await RiderIdentityVerificationService.shared.fetchStatus()
                 await MainActor.run {
-                    isVerifiedRider = status.verifiedRider || status.verifiedBadge || status.identityStatus == "verified"
+                    isVerifiedRider = status.identityVerified || status.verifiedRider || status.verifiedBadge || status.identityStatus == "verified"
                 }
             } catch {
                 // Profile status refresh is best-effort; verification itself surfaces errors.
@@ -855,16 +866,16 @@ struct ProfileView: View {
     private func confirmRiderVerifiedStatus() async throws {
         for _ in 0..<8 {
             let status = try await RiderIdentityVerificationService.shared.fetchStatus()
-            if status.verifiedRider || status.verifiedBadge || status.identityStatus == "verified" {
+            if status.identityVerified || status.verifiedRider || status.verifiedBadge || status.identityStatus == "verified" {
                 isVerifiedRider = true
                 riderVerificationIsError = false
                 riderVerificationMessage = "Verified Badge added to your profile."
                 session.loadUserProfile()
                 return
             }
-            if status.identityStatus == "requires_input" || status.identityStatus == "canceled" {
+            if status.identityStatus == "canceled" {
                 riderVerificationIsError = true
-                riderVerificationMessage = "Stripe needs more information before verification can be completed."
+                riderVerificationMessage = "Verification was canceled. You can try again anytime."
                 return
             }
             try await Task.sleep(nanoseconds: 2_000_000_000)

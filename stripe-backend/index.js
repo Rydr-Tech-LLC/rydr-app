@@ -30,6 +30,60 @@ function identityFlowForRole(role) {
   return identityFlows[role] || null;
 }
 
+function identitySessionErrorPayload(err) {
+  const code = err?.code || err?.type || "identity_session_failed";
+  const message = String(err?.message || "");
+
+  if (code === "resource_missing" || message.includes("No such verification_flow")) {
+    return {
+      status: 500,
+      body: {
+        error: "identity_verification_flow_invalid",
+        message: "Stripe could not find the configured rider verification flow. Confirm STRIPE_RIDER_VERIFICATION_FLOW_ID in the Stripe backend environment.",
+      },
+    };
+  }
+
+  if (code === "parameter_unknown" || code === "parameter_invalid_empty") {
+    return {
+      status: 500,
+      body: {
+        error: "stripe_identity_request_invalid",
+        message: message || "Stripe rejected the Identity session request.",
+      },
+    };
+  }
+
+  if (code === "api_key_expired" || code === "authentication_error") {
+    return {
+      status: 500,
+      body: {
+        error: "stripe_identity_auth_failed",
+        message: "Stripe rejected the backend API key. Check STRIPE_SECRET_KEY on the Stripe backend.",
+      },
+    };
+  }
+
+  if (isFirebaseAdminConfigError(err)) {
+    return {
+      status: 500,
+      body: {
+        error: "firebase_admin_misconfigured",
+        message: "The Stripe backend Firebase Admin credentials are not configured correctly.",
+      },
+    };
+  }
+
+  return {
+    status: 500,
+    body: {
+      error: "identity_session_failed",
+      message: message || "Stripe Identity could not create a verification session.",
+      code,
+    },
+  };
+}
+
 function firebaseCredential() {
   const FIREBASE_PROJECT_ID =
     process.env.FIREBASE_PROJECT_ID || process.env.FIREBASE_ADMIN_PROJECT_ID;
@@ -639,7 +693,8 @@ app.post("/identity/create-session", async (req, res) => {
     });
   } catch (err) {
     console.error("❌ identity/create-session error", err);
-    res.status(500).json({ error: "identity_session_failed" });
+    const payload = identitySessionErrorPayload(err);
+    res.status(payload.status).json(payload.body);
   }
 });
 

@@ -37,14 +37,17 @@ enum ImageModerationError: LocalizedError {
             return "You need to be signed in to upload a photo."
         case .imageEncodingFailed:
             return "That image couldn't be processed. Try a different photo."
-        case .uploadFailed:
-            return "The photo couldn't be uploaded. Check your connection and try again."
-        case .requestFailed:
-            return "Couldn't reach Rydr to verify that photo. Try again in a moment."
+        case .uploadFailed(let error):
+            return "The photo couldn't be uploaded: \(error.localizedDescription)"
+        case .requestFailed(let error):
+            return "Couldn't reach Rydr to verify that photo: \(error.localizedDescription)"
         case .authenticationTokenUnavailable:
             return "Your session expired. Sign in again before uploading a photo."
-        case .invalidServerResponse:
-            return "Rydr couldn't verify that photo right now. Try again in a moment."
+        case .invalidServerResponse(let status, let body):
+            if let message = Self.backendMessage(from: body) {
+                return "Rydr couldn't verify that photo: \(message)"
+            }
+            return "Rydr couldn't verify that photo right now. The service returned HTTP \(status)."
         case .missingBackendConfiguration:
             return "Rydr photo verification is missing its backend configuration."
         case .rejected:
@@ -52,6 +55,22 @@ enum ImageModerationError: LocalizedError {
         case .needsReview:
             return "That photo is being reviewed and couldn't be auto-approved. Please choose a different one for now."
         }
+    }
+
+    private static func backendMessage(from body: String?) -> String? {
+        guard
+            let body,
+            let data = body.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+
+        if let message = object["message"] as? String, !message.isEmpty {
+            return message
+        }
+        if let error = object["error"] as? String, !error.isEmpty {
+            return error
+        }
+        return nil
     }
 }
 
@@ -145,7 +164,7 @@ final class ImageModerationService {
         }
         let token: String
         do {
-            token = try await user.getIDToken()
+            token = try await refreshedIDToken(for: user)
         } catch {
             print("Rydr image moderation auth token failed:", error.localizedDescription)
             throw ImageModerationError.authenticationTokenUnavailable
@@ -188,6 +207,20 @@ final class ImageModerationService {
     }
 
     // MARK: - Helpers
+
+    private func refreshedIDToken(for user: User) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            user.getIDTokenForcingRefresh(true) { token, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let token {
+                    continuation.resume(returning: token)
+                } else {
+                    continuation.resume(throwing: ImageModerationError.authenticationTokenUnavailable)
+                }
+            }
+        }
+    }
 
     private static func encodeForUpload(_ image: UIImage) -> Data? {
         let maxDimension: CGFloat = 1024

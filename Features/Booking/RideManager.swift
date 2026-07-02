@@ -450,7 +450,8 @@ protocol RideService: AnyObject, Sendable {
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
         pricingSnapshot: RidePricingSnapshot,
-        riderPreferences: RiderRidePreferences?
+        riderPreferences: RiderRidePreferences?,
+        riderVerified: Bool
     ) async throws -> String // returns rideId
     func awaitDriverDecision(rideId: String) async throws -> DriverDecision
     func rideLifecycleStream(rideId: String) -> AsyncThrowingStream<RideLifecycleSnapshot, Error>
@@ -532,6 +533,7 @@ final class RideManager: ObservableObject {
     private var currentServiceRideId: String?
     private var currentAppliedRydrBankCode: String?
     private var cachedRidePreferences: RiderRidePreferences?
+    private var cachedRiderVerified = false
     private var currentBaseFare: Double = 0
     private var currentWaitChargePerMinute: Double = 0
     private let activeRideSnapshotKey = "rydr.activeRideSnapshot.v1"
@@ -612,13 +614,15 @@ final class RideManager: ObservableObject {
         near center: CLLocationCoordinate2D,
         pickupCoordinate: CLLocationCoordinate2D? = nil,
         dropoffCoordinate: CLLocationCoordinate2D? = nil,
-        estimate: RideEstimate? = nil
+        estimate: RideEstimate? = nil,
+        riderVerified: Bool = false
     ) {
         cachedPickup = pickup
         cachedDropoff = dropoff
         cachedRideType = rideType
         cachedPickupCoordinate = pickupCoordinate
         cachedDropoffCoordinate = dropoffCoordinate
+        cachedRiderVerified = riderVerified
         cachedRidePreferences = nil
         guard let estimate else {
             availableDrivers = []
@@ -724,7 +728,8 @@ final class RideManager: ObservableObject {
                     dropoffCoordinate: cachedDropoffCoordinate,
                     estimate: cachedEstimate,
                     pricingSnapshot: pricingSnapshot,
-                    riderPreferences: cachedRidePreferences
+                    riderPreferences: cachedRidePreferences,
+                    riderVerified: cachedRiderVerified
                 )
                 self.currentServiceRideId = rideId
 
@@ -1013,7 +1018,7 @@ final class RideManager: ObservableObject {
         clearActiveRideSnapshot()
 
         if availableDrivers.isEmpty {
-            requestDrivers(pickup: cachedPickup, dropoff: cachedDropoff, rideType: cachedRideType, near: liveDriverCoordinate)
+            requestDrivers(pickup: cachedPickup, dropoff: cachedDropoff, rideType: cachedRideType, near: liveDriverCoordinate, riderVerified: cachedRiderVerified)
         } else {
             state = .selecting
         }

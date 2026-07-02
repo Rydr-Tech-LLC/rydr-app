@@ -108,10 +108,11 @@ Current feature routes:
 PORT=3000
 NODE_ENV=development
 
-FIREBASE_PROJECT_ID=your-firebase-project-id
-FIREBASE_CLIENT_EMAIL=firebase-adminsdk@example.iam.gserviceaccount.com
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
+FIREBASE_ADMIN_PROJECT_ID=your-firebase-project-id
+FIREBASE_ADMIN_CLIENT_EMAIL=firebase-adminsdk@example.iam.gserviceaccount.com
+FIREBASE_ADMIN_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY\n-----END PRIVATE KEY-----\n"
 FIREBASE_DATABASE_URL=
+FIREBASE_STORAGE_BUCKET=rydrapp-c7ec1.firebasestorage.app
 
 TICKETMASTER_API_KEY=
 ```
@@ -142,10 +143,11 @@ Render settings:
 Required Render environment variables:
 
 - `NODE_ENV=production`
-- `FIREBASE_PROJECT_ID`
-- `FIREBASE_CLIENT_EMAIL`
-- `FIREBASE_PRIVATE_KEY`
+- `FIREBASE_ADMIN_PROJECT_ID`
+- `FIREBASE_ADMIN_CLIENT_EMAIL`
+- `FIREBASE_ADMIN_PRIVATE_KEY`
 - `FIREBASE_DATABASE_URL`, if needed by your Firebase project
+- `FIREBASE_STORAGE_BUCKET=rydrapp-c7ec1.firebasestorage.app`, required for profile photo moderation
 
 Integration variables:
 

@@ -56,7 +56,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
         pricingSnapshot: RidePricingSnapshot,
-        riderPreferences: RiderRidePreferences?
+        riderPreferences: RiderRidePreferences?,
+        riderVerified: Bool
     ) async throws -> String {
         guard let user = Auth.auth().currentUser else {
             throw RideDispatchError.notSignedIn
@@ -70,6 +71,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             "riderId": user.uid,
             "riderName": riderName?.isEmpty == false ? riderName! : "Rydr rider",
             "riderPhotoURL": user.photoURL?.absoluteString ?? "",
+            "riderVerified": riderVerified,
+            "verifiedRider": riderVerified,
             "pickup": pickup,
             "dropoff": dropoff,
             "rideType": rideType,
