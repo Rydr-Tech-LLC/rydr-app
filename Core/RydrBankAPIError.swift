@@ -87,25 +87,12 @@ struct RydrBankAPI {
         ])
     }
 
-    /// Used by your ride pipeline (simulating completion in dev).
+    /// Used by the ride pipeline when a completed ride should count toward RydrBank.
     static func rideComplete(rideId: String, distanceMi: Double, rideType: String) async throws -> [String: Any] {
         try await authedRequest(path: "rides/complete", json: [
             "rideId": rideId,
             "distanceMi": distanceMi,
             "rideType": rideType
         ])
-    }
-
-    /// Optional helper to mint a batch in dev:
-    static func mintTenDevRides(rideType: String = "Rydr Go") async throws -> String? {
-        var minted: String?
-        let stamp = Int(Date().timeIntervalSince1970)
-
-        for i in 1...10 {
-            let id = "ios_dev_ride_\(stamp)_\(i)"   // always unique
-            let resp = try await rideComplete(rideId: id, distanceMi: 6.0, rideType: rideType)
-            if let m = resp["minted"] as? String { minted = m }
-        }
-        return minted
     }
 }

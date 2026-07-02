@@ -4,16 +4,37 @@ import type { RiderRecord } from "@/lib/types";
 import { toDateSafe, fullName } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
 import RiderActions from "./RiderActions";
+import RydrBankMintPanel from "./RydrBankMintPanel";
 
 export const dynamic = "force-dynamic";
 
+interface RydrBankCodeRecord {
+  id: string;
+  code?: string;
+  status?: string;
+  rewardLabel?: string;
+  maxMiles?: number;
+  createdAt?: { toDate?: () => Date } | null;
+  usedAt?: { toDate?: () => Date } | null;
+}
+
 export default async function RiderReviewPage({ params }: { params: { uid: string } }) {
-  const snap = await adminDb.collection("riders").doc(params.uid).get();
+  const [snap, userSnap, codesSnap] = await Promise.all([
+    adminDb.collection("riders").doc(params.uid).get(),
+    adminDb.collection("users").doc(params.uid).get(),
+    adminDb.collection("users").doc(params.uid).collection("rydrBankCodes").orderBy("createdAt", "desc").limit(20).get()
+  ]);
   if (!snap.exists) notFound();
 
   const rider = { ...(snap.data() as RiderRecord), uid: snap.id };
   const createdAt = toDateSafe(rider.createdAt);
   const accountStatus = rider.accountStatus ?? "active";
+  const rydrBank = (userSnap.data()?.rydrBank ?? {}) as {
+    codesAvailable?: number;
+    codesEarned?: number;
+    totalEligible?: number;
+  };
+  const codes = codesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as RydrBankCodeRecord[];
 
   return (
     <div className="space-y-6">
@@ -41,6 +62,51 @@ export default async function RiderReviewPage({ params }: { params: { uid: strin
               <Field label="Verified" value={rider.verifiedRider ? "Verified" : "Unverified"} />
             </Grid>
           </Section>
+
+          <Section title="RydrBank">
+            <Grid>
+              <Field label="Available codes" value={rydrBank.codesAvailable ?? 0} />
+              <Field label="Codes earned" value={rydrBank.codesEarned ?? 0} />
+              <Field label="Eligible rides" value={rydrBank.totalEligible ?? 0} />
+            </Grid>
+
+            <div className="mt-4 overflow-hidden rounded-md border border-line">
+              <table className="w-full text-sm">
+                <thead className="border-b border-line bg-grouped text-left text-xs font-medium text-muted">
+                  <tr>
+                    <th className="px-3 py-2">Code</th>
+                    <th className="px-3 py-2">Reward</th>
+                    <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">Created</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {codes.map((code) => {
+                    const codeCreatedAt = toDateSafe(code.createdAt);
+                    return (
+                      <tr key={code.id}>
+                        <td className="px-3 py-2 font-mono text-xs font-semibold text-ink">{code.code ?? "—"}</td>
+                        <td className="px-3 py-2 text-muted">{code.rewardLabel ?? "Rydr Go / Rydr Eco"}</td>
+                        <td className="px-3 py-2">
+                          <StatusPill status={code.status ?? "active"} />
+                        </td>
+                        <td className="px-3 py-2 text-muted">
+                          {codeCreatedAt ? codeCreatedAt.toLocaleDateString() : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {codes.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-6 text-center text-muted">
+                        No RydrBank codes yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Section>
         </div>
 
         <div className="space-y-6">
@@ -51,6 +117,7 @@ export default async function RiderReviewPage({ params }: { params: { uid: strin
             </Grid>
           </Section>
 
+          <RydrBankMintPanel uid={rider.uid} />
           <RiderActions uid={rider.uid} accountStatus={accountStatus} />
         </div>
       </div>

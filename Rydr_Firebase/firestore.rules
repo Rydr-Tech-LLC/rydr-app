@@ -61,6 +61,10 @@ service cloud.firestore {
         "cashHubWarnings",
         "debugApprovalBypassEnabled",
         "debugApprovalBypassUpdatedAt",
+        "documents",
+        "documentReviewStatus",
+        "identityStatus",
+        "identityVerified",
         "identityVerifiedAt",
         "isAdmin",
         "isApproved",
@@ -75,6 +79,9 @@ service cloud.firestore {
         "stripeCustomerId",
         "trustScore",
         "verificationStatus",
+        "verificationDocuments",
+        "verifiedBadge",
+        "verifiedRider",
         "verifiedAt",
         "walletBalance",
         "walletCents"
@@ -97,6 +104,25 @@ service cloud.firestore {
         && request.resource.data.app == appName
         && request.resource.data.fcmToken is string
         && request.resource.data.enabled is bool;
+    }
+
+    function cashHubTermsAcceptanceFields() {
+      return ["cashHubTermsAccepted", "cashHubTermsAcceptedAt"];
+    }
+
+    function cashHubTermsAcceptanceEnabled() {
+      return exists(/databases/$(database)/documents/platformConfig/cashRydrHub)
+        && get(/databases/$(database)/documents/platformConfig/cashRydrHub).data.termsAcceptanceEnabled == true;
+    }
+
+    function noCashHubTermsAcceptanceOnCreateWhenDisabled() {
+      return cashHubTermsAcceptanceEnabled()
+        || !request.resource.data.keys().hasAny(cashHubTermsAcceptanceFields());
+    }
+
+    function noCashHubTermsAcceptanceChangedWhenDisabled() {
+      return cashHubTermsAcceptanceEnabled()
+        || !affectedKeys().hasAny(cashHubTermsAcceptanceFields());
     }
 
     function rideParticipant(data) {
@@ -370,8 +396,8 @@ service cloud.firestore {
     match /riders/{uid} {
       allow get: if isSelf(uid) || phoneMatches(resource.data) || isAdmin();
       allow list: if false;
-      allow create: if isSelf(uid) && noBackendOwnedKeysOnCreate();
-      allow update: if isSelf(uid) && noBackendOwnedKeysChanged();
+      allow create: if isSelf(uid) && noBackendOwnedKeysOnCreate() && noCashHubTermsAcceptanceOnCreateWhenDisabled();
+      allow update: if isSelf(uid) && noBackendOwnedKeysChanged() && noCashHubTermsAcceptanceChangedWhenDisabled();
       allow delete: if isAdmin();
 
       match /notificationTokens/{tokenId} {
@@ -387,13 +413,18 @@ service cloud.firestore {
       match /cashHubBlockedDrivers/{driverUid} {
         allow read, create, update, delete: if isSelf(uid);
       }
+
+      match /documentReviews/{reviewId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow write: if false;
+      }
     }
 
     match /drivers/{uid} {
       allow get: if isSelf(uid) || phoneMatches(resource.data) || isAdmin();
       allow list: if false;
-      allow create: if isSelf(uid) && noBackendOwnedKeysOnCreate();
-      allow update: if isSelf(uid) && noBackendOwnedKeysChanged();
+      allow create: if isSelf(uid) && noBackendOwnedKeysOnCreate() && noCashHubTermsAcceptanceOnCreateWhenDisabled();
+      allow update: if isSelf(uid) && noBackendOwnedKeysChanged() && noCashHubTermsAcceptanceChangedWhenDisabled();
       allow delete: if isAdmin();
 
       match /notificationTokens/{tokenId} {
@@ -405,6 +436,11 @@ service cloud.firestore {
       match /cashHubPenaltyMarkers/{markerId} {
         allow read: if isSelf(uid) || isAdmin();
         allow create, update, delete: if isAdmin();
+      }
+
+      match /documentReviews/{reviewId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow write: if false;
       }
     }
 
@@ -588,6 +624,11 @@ service cloud.firestore {
       }
     }
 
+    match /platformConfig/{configId} {
+      allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
     match /codes_index/{codeId} {
       allow read, write: if false;
     }
@@ -628,6 +669,11 @@ service cloud.firestore {
 
     match /betaTesters/{uid} {
       allow read: if isSelf(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    match /documentReviews/{reviewId} {
+      allow read: if isAdmin();
       allow write: if false;
     }
 

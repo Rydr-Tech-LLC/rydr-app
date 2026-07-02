@@ -300,6 +300,7 @@ private final class CashRydrHubVM: ObservableObject {
     @Published var isSaving = false
     @Published var isCheckingTerms = true
     @Published var termsAccepted = false
+    @Published var termsAcceptanceEnabled = false
     @Published var onlineDriverCount = 0
 
     private let favoriteDriverLimit = 10
@@ -328,20 +329,28 @@ private final class CashRydrHubVM: ObservableObject {
             return
         }
 
-        db.collection("riders").document(uid).getDocument { [weak self] snap, error in
-            Task { @MainActor in
-                guard let self else { return }
-                self.isCheckingTerms = false
-                if let error {
-                    self.errorMessage = error.localizedDescription
-                    return
-                }
+        let configRef = db.collection("platformConfig").document("cashRydrHub")
+        let riderRef = db.collection("riders").document(uid)
 
-                let data = snap?.data() ?? [:]
-                self.termsAccepted = data["cashHubTermsAccepted"] as? Bool ?? false
-                if self.termsAccepted {
-                    self.startMarketplace()
-                    self.startFavoriteDrivers()
+        configRef.getDocument { [weak self] configSnap, _ in
+            riderRef.getDocument { snap, error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.isCheckingTerms = false
+                    if let error {
+                        self.errorMessage = error.localizedDescription
+                        return
+                    }
+
+                    let config = configSnap?.data() ?? [:]
+                    self.termsAcceptanceEnabled = config["termsAcceptanceEnabled"] as? Bool ?? false
+
+                    let data = snap?.data() ?? [:]
+                    self.termsAccepted = data["cashHubTermsAccepted"] as? Bool ?? false
+                    if self.termsAcceptanceEnabled && self.termsAccepted {
+                        self.startMarketplace()
+                        self.startFavoriteDrivers()
+                    }
                 }
             }
         }
@@ -350,6 +359,11 @@ private final class CashRydrHubVM: ObservableObject {
     func acceptTerms() {
         guard let uid = Auth.auth().currentUser?.uid else {
             errorMessage = "Please log in to continue."
+            return
+        }
+
+        guard termsAcceptanceEnabled else {
+            errorMessage = "Cash Rydr Hub is not available during the live beta."
             return
         }
 
@@ -1100,10 +1114,11 @@ struct CashRydrHubView: View {
         Group {
             if vm.isCheckingTerms {
                 ProgressView("Loading Cash Rydr Hub...")
-            } else if !vm.termsAccepted {
+            } else if !vm.termsAcceptanceEnabled || !vm.termsAccepted {
                 CashHubTermsView(
                     isConfirmed: $acceptedTermsCheckbox,
                     isSaving: vm.isSaving,
+                    canAcceptTerms: vm.termsAcceptanceEnabled,
                     onContinue: { vm.acceptTerms() }
                 )
             } else {
@@ -1359,35 +1374,331 @@ struct CashRydrHubView: View {
 private struct CashHubTermsView: View {
     @Binding var isConfirmed: Bool
     let isSaving: Bool
+    let canAcceptTerms: Bool
     let onContinue: () -> Void
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Cash Rydr Hub Terms")
-                    .font(.title.bold())
+        ZStack {
+            CashHubTermsBackground()
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 24) {
+                    CashHubTermsHero()
+
+                    CashHubTermsKnowledgeCard()
+
+                    CashHubResponsibilityCard()
+
+                    if !canAcceptTerms {
+                        CashHubBetaLockedNotice()
+                    }
+
+                    CashHubConfirmationToggle(
+                        isConfirmed: $isConfirmed,
+                        isEnabled: canAcceptTerms
+                    )
+
+                    Button(action: onContinue) {
+                        HStack(spacing: 12) {
+                            if isSaving {
+                                ProgressView()
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "shield.checkered")
+                                    .font(.title3.weight(.bold))
+                            }
+                            Text(isSaving ? "Saving..." : canAcceptTerms ? "I Understand and Continue" : "Unavailable During Live Beta")
+                                .font(.headline.weight(.bold))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 62)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(canAcceptTerms && isConfirmed && !isSaving ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.gray.opacity(0.45)))
+                        )
+                        .shadow(color: Color.red.opacity(canAcceptTerms && isConfirmed ? 0.24 : 0), radius: 18, y: 10)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canAcceptTerms || !isConfirmed || isSaving)
+                    .padding(.bottom, 24)
+                }
+                .padding(.horizontal, 22)
+                .padding(.top, 22)
+            }
+        }
+    }
+}
+
+private struct CashHubBetaLockedNotice: View {
+    var body: some View {
+        Label {
+            Text("Cash Rydr Hub terms acceptance is paused for the live beta.")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "lock.fill")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(Styles.rydrGradient)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color.red.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.red.opacity(0.12), lineWidth: 1)
+        )
+    }
+}
+
+private struct CashHubTermsBackground: View {
+    var body: some View {
+        LinearGradient(
+            colors: [
+                Color(.systemBackground),
+                Color(red: 1.0, green: 0.965, blue: 0.97),
+                Color(.secondarySystemBackground)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .ignoresSafeArea()
+        .overlay(alignment: .top) {
+            Circle()
+                .fill(Color.red.opacity(0.09))
+                .frame(width: 260, height: 260)
+                .blur(radius: 70)
+                .offset(y: 120)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+private struct CashHubTermsHero: View {
+    var body: some View {
+        VStack(spacing: 18) {
+            ZStack {
+                CashHubTermsArc()
+                    .stroke(Color.red.opacity(0.26), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [8, 8]))
+                    .frame(height: 88)
+                    .offset(y: 24)
+                    .accessibilityHidden(true)
+
+                HStack {
+                    CashHubHeroBubble(systemImage: "car.fill")
+                    Spacer()
+                    CashHubHeroBubble(systemImage: "person.fill")
+                }
+                .padding(.horizontal, 34)
+                .offset(y: 28)
+
+                ZStack {
+                    Image(systemName: "shield.fill")
+                        .font(.system(size: 96, weight: .black))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color.red.opacity(0.70), Color(red: 0.78, green: 0.04, blue: 0.13)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .shadow(color: Color.red.opacity(0.20), radius: 18, y: 10)
+                    Image(systemName: "person.2.fill")
+                        .font(.title.weight(.bold))
+                        .foregroundStyle(.white)
+                        .offset(y: -5)
+                }
+            }
+            .frame(height: 150)
+
+            VStack(spacing: 12) {
+                HStack(spacing: 0) {
+                    Text("Cash ")
+                        .foregroundStyle(.primary)
+                    Text("Rydr")
+                        .foregroundStyle(Styles.rydrGradient)
+                    Text(" Hub Terms")
+                        .foregroundStyle(.primary)
+                }
+                .font(.system(size: 36, weight: .black, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
 
                 Text("Cash Rydr Hub is a community marketplace that allows riders and independent drivers to connect directly. Cash Rydr Hub rides are not Rydr-dispatched rides.")
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Rydr does not dispatch Cash Hub rides.", systemImage: "checkmark.circle")
-                    Label("Rydr does not set Cash Hub prices or process Cash Hub payments.", systemImage: "checkmark.circle")
-                    Label("Rydr does not guarantee driver availability, ride completion, or user conduct.", systemImage: "checkmark.circle")
-                }
-                .font(.subheadline)
-                Text("By continuing, you understand that any ride arranged through Cash Rydr Hub is coordinated directly between you and the other user. You are responsible for confirming pickup, destination, timing, payment, and safety expectations before starting the ride.")
-
-                Toggle("I understand that Cash Rydr Hub is separate from standard Rydr rides.", isOn: $isConfirmed)
-                    .toggleStyle(.switch)
-
-                Button(isSaving ? "Saving..." : "I Understand and Continue", action: onContinue)
-                    .buttonStyle(GradientButtonStyle())
-                    .disabled(!isConfirmed || isSaving)
-                    .opacity(isConfirmed ? 1 : 0.55)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(5)
+                    .padding(.horizontal, 8)
             }
-            .font(.body)
-            .foregroundStyle(.primary)
-            .padding(22)
         }
+    }
+}
+
+private struct CashHubHeroBubble: View {
+    let systemImage: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.title2.weight(.black))
+            .foregroundStyle(Styles.rydrGradient)
+            .frame(width: 70, height: 70)
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay(Circle().stroke(Color.white.opacity(0.82), lineWidth: 2))
+            .shadow(color: Color.black.opacity(0.07), radius: 16, y: 9)
+            .accessibilityHidden(true)
+    }
+}
+
+private struct CashHubTermsArc: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.maxY),
+            control: CGPoint(x: rect.midX, y: rect.minY)
+        )
+        return path
+    }
+}
+
+private struct CashHubTermsKnowledgeCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label {
+                Text("What You Should Know")
+                    .font(.title3.weight(.black))
+                    .foregroundStyle(.primary)
+            } icon: {
+                Image(systemName: "shield.checkered")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(Styles.rydrGradient)
+            }
+
+            VStack(spacing: 0) {
+                CashHubTermsFactRow(systemImage: "paperplane.fill", text: "Rydr does not dispatch Cash Hub rides.")
+                Divider().padding(.leading, 82)
+                CashHubTermsFactRow(systemImage: "dollarsign.circle", text: "Rydr does not set Cash Hub prices or process Cash Hub payments.")
+                Divider().padding(.leading, 82)
+                CashHubTermsFactRow(systemImage: "shield", text: "Rydr does not guarantee driver availability, ride completion, or user conduct.")
+            }
+        }
+        .padding(18)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.06), radius: 18, y: 8)
+    }
+}
+
+private struct CashHubTermsFactRow: View {
+    let systemImage: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 18) {
+            Image(systemName: systemImage)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(Styles.rydrGradient)
+                .frame(width: 62, height: 62)
+                .background(Color.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            Text(text)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 14)
+    }
+}
+
+private struct CashHubResponsibilityCard: View {
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.red.opacity(0.08), Color(.systemBackground)],
+                        startPoint: .trailing,
+                        endPoint: .leading
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(Color.red.opacity(0.12), lineWidth: 1)
+                )
+
+            Image(systemName: "hands.sparkles")
+                .font(.system(size: 86, weight: .light))
+                .foregroundStyle(Color.red.opacity(0.16))
+                .padding(.trailing, 24)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 14) {
+                Label {
+                    Text("Your Responsibility")
+                        .font(.title3.weight(.black))
+                        .foregroundStyle(.primary)
+                } icon: {
+                    Image(systemName: "info.circle.fill")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(Styles.rydrGradient)
+                }
+
+                Text("By continuing, you understand that any ride arranged through Cash Rydr Hub is coordinated directly between you and the other user. You are responsible for confirming pickup, destination, timing, payment, and safety expectations before starting the ride.")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .shadow(color: Color.red.opacity(0.06), radius: 14, y: 8)
+    }
+}
+
+private struct CashHubConfirmationToggle: View {
+    @Binding var isConfirmed: Bool
+    let isEnabled: Bool
+
+    var body: some View {
+        Button {
+            guard isEnabled else { return }
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                isConfirmed.toggle()
+            }
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: isConfirmed ? "checkmark.circle.fill" : "circle")
+                    .font(.title.weight(.bold))
+                    .foregroundStyle(isConfirmed ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.secondary.opacity(0.45)))
+
+                Text("I understand that Cash Rydr Hub is separate from standard Rydr rides.")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Toggle("", isOn: $isConfirmed)
+                    .labelsHidden()
+                    .tint(.red)
+                    .disabled(!isEnabled)
+            }
+            .padding(18)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .shadow(color: Color.black.opacity(0.05), radius: 16, y: 8)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.62)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("I understand that Cash Rydr Hub is separate from standard Rydr rides")
+        .accessibilityValue(isConfirmed ? "Confirmed" : "Not confirmed")
     }
 }
 

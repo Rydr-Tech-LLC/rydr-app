@@ -1,5 +1,5 @@
 const { getVisionClient } = require("../config/vision");
-const { getStorageBucket } = require("../config/firebase");
+const { getStorageBucketsForReads } = require("../config/firebase");
 
 // SafeSearch returns a likelihood for each category: UNKNOWN, VERY_UNLIKELY,
 // UNLIKELY, POSSIBLE, LIKELY, VERY_LIKELY.
@@ -18,16 +18,22 @@ class NotFoundError extends Error {
 }
 
 async function fetchImageBytes(storagePath) {
-  const bucket = getStorageBucket();
-  const file = bucket.file(storagePath);
+  const buckets = getStorageBucketsForReads();
+  const checkedBuckets = [];
 
-  const [exists] = await file.exists();
-  if (!exists) {
-    throw new NotFoundError(`No file found at storage path: ${storagePath}`);
+  for (const bucket of buckets) {
+    checkedBuckets.push(bucket.name);
+    const file = bucket.file(storagePath);
+    const [exists] = await file.exists();
+    if (exists) {
+      const [buffer] = await file.download();
+      return buffer;
+    }
   }
 
-  const [buffer] = await file.download();
-  return buffer;
+  throw new NotFoundError(
+    `No file found at storage path: ${storagePath}. Checked buckets: ${checkedBuckets.join(", ")}`
+  );
 }
 
 function evaluateSafeSearch(safeSearchAnnotation = {}) {

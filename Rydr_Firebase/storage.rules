@@ -67,6 +67,18 @@ service firebase.storage {
         && fileName == request.auth.uid + ".jpg";
     }
 
+    match /driverDocuments/{uid}/{allPaths=**} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow create, update: if isSelf(uid) && validImageUpload();
+      allow delete: if isSelf(uid) || isAdmin();
+    }
+
+    match /riderVerificationDocuments/{uid}/{allPaths=**} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow create, update: if isSelf(uid) && validImageUpload();
+      allow delete: if isSelf(uid) || isAdmin();
+    }
+
     // Vehicle Library System: generic factory-style vehicle images, keyed by
     // make/model/year/color (vehicle-library/{Make}/{Model}/{Year}/{color}.webp
     // and .../default.webp). Publicly readable like profilePhotos/ — drivers'

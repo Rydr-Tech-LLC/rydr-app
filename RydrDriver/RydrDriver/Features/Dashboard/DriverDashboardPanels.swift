@@ -344,8 +344,8 @@ struct DriverDashboardActionDock: View {
             }
 
             DriverDockIcon(
-                title: "Cash Hub",
-                systemName: "building.columns",
+                title: "Community",
+                systemName: "person.3.fill",
                 isSelected: false,
                 isCompact: isCompact,
                 badge: nil,

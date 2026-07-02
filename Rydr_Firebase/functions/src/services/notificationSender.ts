@@ -11,8 +11,8 @@
 // client, which parse exactly those keys out of the notification's data
 // payload to route a tap to the right screen.
 
-import * as admin from "firebase-admin";
-import { db } from "../admin";
+import type * as admin from "firebase-admin";
+import { db, messaging } from "../admin";
 
 export type NotificationAudience = "rider" | "driver";
 
@@ -105,7 +105,7 @@ export async function sendPushToUser(args: SendPushArgs): Promise<void> {
       }
     };
 
-    const response = await admin.messaging().sendEachForMulticast(message);
+    const response = await messaging.sendEachForMulticast(message);
 
     const staleTokenDocs: FirebaseFirestore.DocumentReference[] = [];
     response.responses.forEach((result, index) => {

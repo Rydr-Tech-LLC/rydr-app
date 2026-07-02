@@ -25,6 +25,8 @@ struct CashHubSignupView: View {
     @State private var isPasswordVisible = false
     @State private var isPasswordConfirmationVisible = false
     @State private var acceptedTerms = false
+    @State private var termsAcceptanceEnabled = false
+    @State private var isCheckingTermsGate = true
     @State private var isSaving = false
     @State private var errorMessage = ""
     @State private var verificationSession: PhoneVerificationSession?
@@ -102,7 +104,7 @@ struct CashHubSignupView: View {
     }
 
     private var termsStepComplete: Bool {
-        acceptedTerms
+        acceptedTerms && termsAcceptanceEnabled
     }
 
     private var missingRequirements: [String] {
@@ -122,7 +124,9 @@ struct CashHubSignupView: View {
         if !meetsPasswordMinimum || !passwordsMatch {
             requirements.append("a password meeting every password rule")
         }
-        if !acceptedTerms {
+        if !termsAcceptanceEnabled {
+            requirements.append("CashRydr Hub live beta access")
+        } else if !acceptedTerms {
             requirements.append("terms acknowledgment")
         }
         return requirements
@@ -213,6 +217,7 @@ struct CashHubSignupView: View {
             withAnimation(.spring(response: 0.78, dampingFraction: 0.86).delay(0.06)) {
                 contentVisible = true
             }
+            loadCashHubTermsGate()
         }
         .onChange(of: selectedPhotoItem) { _, newItem in
             loadProfileImage(from: newItem)
@@ -568,6 +573,7 @@ struct CashHubSignupView: View {
             .background(CashHubGlassCard(cornerRadius: 24))
 
             Button {
+                guard termsAcceptanceEnabled else { return }
                 acceptedTerms.toggle()
             } label: {
                 HStack(spacing: 14) {
@@ -586,6 +592,22 @@ struct CashHubSignupView: View {
                 .background(CashHubGlassCard(cornerRadius: 22))
             }
             .buttonStyle(CashHubPressStyle())
+            .disabled(!termsAcceptanceEnabled)
+            .opacity(termsAcceptanceEnabled ? 1 : 0.62)
+
+            if isCheckingTermsGate {
+                CashHubInfoBanner(
+                    icon: "clock.fill",
+                    title: "Checking access",
+                    message: "Confirming CashRydr Hub beta availability."
+                )
+            } else if !termsAcceptanceEnabled {
+                CashHubInfoBanner(
+                    icon: "lock.fill",
+                    title: "Paused for live beta",
+                    message: "CashRydr Hub terms acceptance is currently disabled."
+                )
+            }
         }
     }
 
@@ -611,6 +633,10 @@ struct CashHubSignupView: View {
 
     private func createAccount() {
         guard canContinue else { return }
+        guard termsAcceptanceEnabled else {
+            errorMessage = "CashRydr Hub terms acceptance is currently disabled."
+            return
+        }
         errorMessage = ""
         isSaving = true
 
@@ -623,6 +649,18 @@ struct CashHubSignupView: View {
                 return
             }
             createFirebaseAccount()
+        }
+    }
+
+    private func loadCashHubTermsGate() {
+        Firestore.firestore().collection("platformConfig").document("cashRydrHub").getDocument { snapshot, _ in
+            Task { @MainActor in
+                termsAcceptanceEnabled = snapshot?.data()?["termsAcceptanceEnabled"] as? Bool ?? false
+                isCheckingTermsGate = false
+                if !termsAcceptanceEnabled {
+                    acceptedTerms = false
+                }
+            }
         }
     }
 

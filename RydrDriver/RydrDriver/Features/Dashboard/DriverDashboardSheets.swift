@@ -1,4 +1,8 @@
 import SwiftUI
+import Combine
+import CoreLocation
+import FirebaseFirestore
+import MapKit
 
 enum DriverDashboardSheet: Identifiable {
     case fareInsights
@@ -590,20 +594,27 @@ struct RideTypeConfigurationView: View {
     }
 }
 
-struct FareInsightsView: View {
+struct EarningsHubView: View {
     @ObservedObject var vm: DriverDashboardVM
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
+                    earningsHero
+
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                        InsightMetricCard(title: "Today's Earnings", value: currency(vm.earningsSummary.todayEarnings), icon: "dollarsign.circle.fill")
-                        InsightMetricCard(title: "Weekly Earnings", value: currency(vm.earningsSummary.weekEarnings), icon: "calendar")
-                        InsightMetricCard(title: "Monthly Earnings", value: currency(vm.earningsSummary.monthEarnings), icon: "chart.bar.fill")
-                        InsightMetricCard(title: "Acceptance Rate", value: percent(vm.earningsSummary.acceptanceRate), icon: "checkmark.seal.fill")
-                        InsightMetricCard(title: "Completion Rate", value: percent(vm.earningsSummary.completionRate), icon: "flag.checkered")
-                        InsightMetricCard(title: "Demand Nearby", value: demandLabel(vm.demandSnapshot.level), icon: "arrow.up.right")
+                        InsightMetricCard(title: "Today", value: currency(vm.earningsSummary.todayEarnings), icon: "sun.max.fill")
+                        InsightMetricCard(title: "This Week", value: currency(vm.earningsSummary.weekEarnings), icon: "calendar")
+                        InsightMetricCard(title: "This Month", value: currency(vm.earningsSummary.monthEarnings), icon: "chart.bar.fill")
+                        InsightMetricCard(title: "Recent Trips", value: "\(vm.earningsSummary.recentTrips.count)", icon: "car.fill")
+                    }
+
+                    dashboardSection("Performance") {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                            InsightMetricCard(title: "Acceptance Rate", value: percent(vm.earningsSummary.acceptanceRate), icon: "checkmark.seal.fill")
+                            InsightMetricCard(title: "Completion Rate", value: percent(vm.earningsSummary.completionRate), icon: "flag.checkered")
+                        }
                     }
 
                     if vm.isLoadingEarningsSummary {
@@ -615,48 +626,6 @@ struct FareInsightsView: View {
                         }
                     }
 
-                    dashboardSection("Ride Type Breakdown") {
-                        ForEach(DriverDashboardVM.availableRideTypes, id: \.self) { rideType in
-                            HStack {
-                                Text(rideType)
-                                Spacer()
-                                Text(vm.selectedRideTypes.contains(rideType) ? "Active" : "Inactive")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(vm.selectedRideTypes.contains(rideType) ? .green : .secondary)
-                            }
-                            .font(.subheadline)
-                        }
-                    }
-
-                    dashboardSection("Demand Near You") {
-                        HStack {
-                            Image(systemName: "flame.fill")
-                                .foregroundStyle(Styles.rydrGradient)
-                            Text("\(vm.demandSnapshot.nearbyRequestCount) request(s) within \(vm.demandSnapshot.radiusMiles, specifier: "%.0f") mi · \(vm.demandSnapshot.paceText)")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    dashboardSection("Current Rates") {
-                        ForEach(vm.selectedRideTypes.sorted(by: tierSort), id: \.self) { rideType in
-                            let rate = vm.rate(for: rideType)
-                            HStack {
-                                Text(rideType)
-                                Spacer()
-                                Text("$\(rate.perMile, specifier: "%.2f")/mi")
-                                Text("$\(rate.perMinute, specifier: "%.2f")/min")
-                            }
-                            .font(.caption.monospacedDigit())
-                        }
-                    }
-
-                    dashboardSection("Recommended Rate Adjustments") {
-                        Text("Stay near the middle of each approved range during normal demand. Move toward the upper end only during sustained high-demand periods.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-
                     dashboardSection("Recent Trips") {
                         if vm.earningsSummary.recentTrips.isEmpty {
                             Text(vm.isLoadingEarningsSummary ? "Loading recent trips…" : "No completed trips yet.")
@@ -664,21 +633,15 @@ struct FareInsightsView: View {
                                 .foregroundStyle(.secondary)
                         } else {
                             ForEach(vm.earningsSummary.recentTrips) { trip in
-                                HStack {
-                                    Text("\(trip.pickup) → \(trip.dropoff)")
-                                    Spacer()
-                                    Text(currency(trip.fare))
-                                        .font(.caption)
-                                        .foregroundStyle(.green)
-                                }
-                                .font(.subheadline)
+                                recentTripRow(trip)
                             }
                         }
                     }
                 }
                 .padding()
             }
-            .navigationTitle("Fare Insights")
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Earnings Hub")
             .task {
                 vm.refreshEarningsSummary()
             }
@@ -688,17 +651,68 @@ struct FareInsightsView: View {
         }
     }
 
+    private var earningsHero: some View {
+        ZStack(alignment: .trailing) {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(Styles.rydrGradient)
+
+            Image(systemName: "dollarsign.circle.fill")
+                .font(.system(size: 104, weight: .black))
+                .foregroundStyle(Color.white.opacity(0.18))
+                .offset(x: 18, y: 16)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Earnings Hub")
+                    .font(.title.weight(.black))
+                    .foregroundStyle(.white)
+                Text("Track money already earned from completed rides.")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                Text(currency(vm.earningsSummary.todayEarnings))
+                    .font(.system(size: 44, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+                Text("earned today")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.82))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(22)
+        }
+        .frame(minHeight: 190)
+        .shadow(color: Color.red.opacity(0.22), radius: 18, y: 10)
+    }
+
+    private func recentTripRow(_ trip: DriverRecentTrip) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.green)
+                .frame(width: 30)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("\(trip.pickup) → \(trip.dropoff)")
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let completedAt = trip.completedAt {
+                    Text(completedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            Text(currency(trip.fare))
+                .font(.headline.monospacedDigit().weight(.bold))
+                .foregroundStyle(.green)
+        }
+        .padding(.vertical, 8)
+    }
+
     private func percent(_ value: Double?) -> String {
         guard let value else { return "—" }
         return "\(Int((value * 100).rounded()))%"
-    }
-
-    private func demandLabel(_ level: DriverDemandLevel) -> String {
-        switch level {
-        case .low: return "Low"
-        case .moderate: return "Moderate"
-        case .high: return "High"
-        }
     }
 
     private func dashboardSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -713,11 +727,6 @@ struct FareInsightsView: View {
 
     private func currency(_ value: Decimal) -> String {
         currencyFormatter.string(from: value as NSDecimalNumber) ?? "$0.00"
-    }
-
-    private func tierSort(_ lhs: String, _ rhs: String) -> Bool {
-        let ordered = DriverDashboardVM.availableRideTypes
-        return (ordered.firstIndex(of: lhs) ?? ordered.endIndex) < (ordered.firstIndex(of: rhs) ?? ordered.endIndex)
     }
 }
 
@@ -742,6 +751,860 @@ struct InsightMetricCard: View {
     }
 }
 
+private enum DriverCommunityTab: String, CaseIterable, Identifiable {
+    case hotspots = "Hotspots"
+    case events = "Events"
+    case stadiums = "Stadiums"
+    case theaters = "Theaters"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .hotspots: return "flame.fill"
+        case .events: return "calendar.badge.clock"
+        case .stadiums: return "sportscourt.fill"
+        case .theaters: return "theatermasks.fill"
+        }
+    }
+}
+
+private enum DriverCommunityDemandLevel: Int, Comparable {
+    case low
+    case moderate
+    case high
+    case veryHigh
+
+    static func < (lhs: DriverCommunityDemandLevel, rhs: DriverCommunityDemandLevel) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .low: return "Low"
+        case .moderate: return "Moderate"
+        case .high: return "High"
+        case .veryHigh: return "Very high"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .low: return Color(red: 0.58, green: 0.59, blue: 0.68)
+        case .moderate: return Color(red: 1.0, green: 0.73, blue: 0.25)
+        case .high: return Color(red: 1.0, green: 0.49, blue: 0.22)
+        case .veryHigh: return Color(red: 1.0, green: 0.16, blue: 0.22)
+        }
+    }
+}
+
+private struct DriverCommunityEvent: Identifiable, Decodable {
+    let id: String
+    let title: String
+    let category: String
+    let genre: String?
+    let dateText: String?
+    let localDate: String?
+    let localTime: String?
+    let venueName: String
+    let city: String
+    let state: String
+    let address: String?
+    let latitude: Double?
+    let longitude: Double?
+    let imageURL: URL?
+    let ticketURL: URL?
+
+    var coordinate: CLLocationCoordinate2D? {
+        guard let latitude, let longitude else { return nil }
+        return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    var parsedDate: Date? {
+        guard let localDate else { return nil }
+        return Self.dateFormatter.date(from: localDate)
+    }
+
+    var displayDate: String {
+        guard let date = parsedDate else { return dateText ?? "Date TBA" }
+        return Self.displayDateFormatter.string(from: date).uppercased()
+    }
+
+    var displayTime: String {
+        guard let localTime else { return "Time TBA" }
+        return String(localTime.prefix(5))
+    }
+
+    var venueLine: String {
+        "\(venueName) • \(city), \(state)"
+    }
+
+    var isAirportRelated: Bool {
+        let text = [title, venueName, address, category, genre]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+        return text.contains("airport")
+            || text.contains("hartsfield")
+            || text.contains("atlanta int")
+            || text.contains("atl ")
+    }
+
+    var isStadiumOrArena: Bool {
+        let text = [venueName, category, genre]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+        return text.contains("stadium")
+            || text.contains("arena")
+            || text.contains("park")
+            || text.contains("field")
+            || text.contains("sports")
+    }
+
+    var isTheater: Bool {
+        let text = [venueName, category, genre]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+        return text.contains("theater")
+            || text.contains("theatre")
+            || text.contains("arts")
+            || text.contains("comedy")
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let displayDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEE MMM d"
+        return formatter
+    }()
+}
+
+private struct DriverCommunityEventsResponse: Decodable {
+    let events: [DriverCommunityEvent]
+}
+
+private struct DriverCommunityRideRequest {
+    let id: String
+    let coordinate: CLLocationCoordinate2D?
+    let createdAt: Date?
+    let status: String
+
+    init(document: QueryDocumentSnapshot) {
+        let data = document.data()
+        id = document.documentID
+        coordinate = Self.coordinate(from: data["pickupCoordinate"] ?? data["pickupLocation"] ?? data["pickupGeoPoint"])
+        createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
+        status = data["status"] as? String ?? ""
+    }
+
+    private static func coordinate(from value: Any?) -> CLLocationCoordinate2D? {
+        if let point = value as? GeoPoint {
+            return CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
+        }
+        guard let data = value as? [String: Any] else { return nil }
+        let lat = data["lat"] as? Double ?? data["latitude"] as? Double ?? (data["lat"] as? NSNumber)?.doubleValue
+        let lng = data["lng"] as? Double ?? data["longitude"] as? Double ?? (data["lng"] as? NSNumber)?.doubleValue
+        guard let lat, let lng else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    }
+}
+
+private struct DriverCommunitySupplyDriver {
+    let id: String
+    let coordinate: CLLocationCoordinate2D?
+
+    init(document: QueryDocumentSnapshot) {
+        let data = document.data()
+        id = document.documentID
+        coordinate = Self.coordinate(from: data["geoPoint"] ?? data["location"] ?? data["approximateLocation"])
+    }
+
+    private static func coordinate(from value: Any?) -> CLLocationCoordinate2D? {
+        if let point = value as? GeoPoint {
+            return CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
+        }
+        guard let data = value as? [String: Any] else { return nil }
+        let lat = data["lat"] as? Double ?? data["latitude"] as? Double ?? (data["lat"] as? NSNumber)?.doubleValue
+        let lng = data["lng"] as? Double ?? data["longitude"] as? Double ?? (data["lng"] as? NSNumber)?.doubleValue
+        guard let lat, let lng else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    }
+}
+
+private struct DriverCommunityHotspot: Identifiable {
+    let event: DriverCommunityEvent
+    let requestCount: Int
+    let availableDrivers: Int
+    let level: DriverCommunityDemandLevel
+
+    var id: String { event.id }
+    var coordinate: CLLocationCoordinate2D { event.coordinate ?? DriverMapDefaults.pilotCoordinate }
+    var requestRatePerMinute: Double { Double(requestCount) / 2.0 }
+    var supplyRatio: Double { Double(requestCount) / Double(max(availableDrivers, 1)) }
+}
+
+@MainActor
+private final class DriverCommunityHubVM: ObservableObject {
+    @Published var events: [DriverCommunityEvent] = []
+    @Published var rideRequests: [DriverCommunityRideRequest] = []
+    @Published var availableDrivers: [DriverCommunitySupplyDriver] = []
+    @Published var isLoadingEvents = false
+    @Published var errorMessage: String?
+
+    private let db = Firestore.firestore()
+    private var requestListener: ListenerRegistration?
+    private var driverListener: ListenerRegistration?
+
+    var hotspots: [DriverCommunityHotspot] {
+        events.compactMap { event in
+            guard !event.isAirportRelated, let eventCoordinate = event.coordinate else { return nil }
+            let requests = rideRequests.filter { request in
+                guard let coordinate = request.coordinate,
+                      !Self.isAirportCoordinate(coordinate),
+                      Self.isLiveDemandStatus(request.status) else { return false }
+                return Self.distanceMiles(from: coordinate, to: eventCoordinate) <= 1.35
+            }
+            let drivers = availableDrivers.filter { driver in
+                guard let coordinate = driver.coordinate else { return false }
+                return Self.distanceMiles(from: coordinate, to: eventCoordinate) <= 3.0
+            }
+            return DriverCommunityHotspot(
+                event: event,
+                requestCount: requests.count,
+                availableDrivers: drivers.count,
+                level: Self.demandLevel(requests: requests.count, drivers: drivers.count)
+            )
+        }
+        .sorted {
+            if $0.level != $1.level { return $0.level > $1.level }
+            if $0.requestCount != $1.requestCount { return $0.requestCount > $1.requestCount }
+            return ($0.event.parsedDate ?? .distantFuture) < ($1.event.parsedDate ?? .distantFuture)
+        }
+    }
+
+    var currentLevel: DriverCommunityDemandLevel {
+        hotspots.map(\.level).max() ?? .low
+    }
+
+    var activeRequestCount: Int {
+        rideRequests.filter { Self.isLiveDemandStatus($0.status) }.count
+    }
+
+    func start() {
+        loadEvents()
+        startDemandListeners()
+    }
+
+    func stop() {
+        requestListener?.remove()
+        requestListener = nil
+        driverListener?.remove()
+        driverListener = nil
+    }
+
+    func refresh() {
+        loadEvents()
+    }
+
+    private func loadEvents() {
+        isLoadingEvents = true
+        errorMessage = nil
+        Task {
+            do {
+                let events = try await Self.fetchEvents()
+                    .filter { !$0.isAirportRelated }
+                self.events = events
+                self.isLoadingEvents = false
+            } catch {
+                self.errorMessage = error.localizedDescription
+                self.isLoadingEvents = false
+            }
+        }
+    }
+
+    private func startDemandListeners() {
+        requestListener?.remove()
+        requestListener = db.collection("rideRequests")
+            .order(by: "createdAt", descending: true)
+            .limit(to: 120)
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if let error {
+                        self.errorMessage = error.localizedDescription
+                        return
+                    }
+                    let cutoff = Date().addingTimeInterval(-120)
+                    self.rideRequests = (snapshot?.documents ?? [])
+                        .map(DriverCommunityRideRequest.init(document:))
+                        .filter { ($0.createdAt ?? .distantPast) >= cutoff }
+                }
+            }
+
+        driverListener?.remove()
+        driverListener = db.collection("drivers")
+            .whereField("isOnline", isEqualTo: true)
+            .limit(to: 150)
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if let error {
+                        self.errorMessage = error.localizedDescription
+                        return
+                    }
+                    self.availableDrivers = (snapshot?.documents ?? [])
+                        .map(DriverCommunitySupplyDriver.init(document:))
+                }
+            }
+    }
+
+    private static func fetchEvents() async throws -> [DriverCommunityEvent] {
+        var components = URLComponents(url: backendBaseURL.appendingPathComponent("events"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [
+            URLQueryItem(name: "category", value: "featured"),
+            URLQueryItem(name: "city", value: "Atlanta"),
+            URLQueryItem(name: "stateCode", value: "GA"),
+            URLQueryItem(name: "size", value: "30")
+        ]
+        guard let url = components?.url else { throw URLError(.badURL) }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 18
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(DriverCommunityEventsResponse.self, from: data).events
+    }
+
+    private static var backendBaseURL: URL {
+        if let override = UserDefaults.standard.string(forKey: "communityBackendBaseURL"),
+           let url = URL(string: override),
+           !override.isEmpty {
+            return url
+        }
+        if let value = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
+           let url = URL(string: value),
+           !value.isEmpty {
+            return url
+        }
+        return URL(string: "http://localhost:3000")!
+    }
+
+    private static func demandLevel(requests: Int, drivers: Int) -> DriverCommunityDemandLevel {
+        let ratio = Double(requests) / Double(max(drivers, 1))
+        if requests >= 20 || ratio >= 4.0 { return .veryHigh }
+        if requests >= 10 || ratio >= 2.0 { return .high }
+        if requests >= 3 || ratio >= 1.0 { return .moderate }
+        return .low
+    }
+
+    private static func isLiveDemandStatus(_ status: String) -> Bool {
+        let normalized = status.lowercased()
+        return normalized.isEmpty || ["pending", "open", "searching", "requested"].contains(normalized)
+    }
+
+    private static func distanceMiles(from lhs: CLLocationCoordinate2D, to rhs: CLLocationCoordinate2D) -> Double {
+        CLLocation(latitude: lhs.latitude, longitude: lhs.longitude)
+            .distance(from: CLLocation(latitude: rhs.latitude, longitude: rhs.longitude)) / 1609.344
+    }
+
+    private static func isAirportCoordinate(_ coordinate: CLLocationCoordinate2D) -> Bool {
+        let airport = CLLocationCoordinate2D(latitude: 33.6407, longitude: -84.4277)
+        return distanceMiles(from: coordinate, to: airport) <= 2.0
+    }
+}
+
+private struct DriverCommunityHubView: View {
+    @StateObject private var vm = DriverCommunityHubVM()
+    @State private var selectedTab: DriverCommunityTab = .hotspots
+    @State private var mapPosition: MapCameraPosition = .region(
+        MKCoordinateRegion(
+            center: DriverMapDefaults.pilotCoordinate,
+            span: MKCoordinateSpan(latitudeDelta: 0.34, longitudeDelta: 0.42)
+        )
+    )
+
+    private var visibleHotspots: [DriverCommunityHotspot] {
+        switch selectedTab {
+        case .hotspots:
+            return vm.hotspots
+        case .events:
+            return vm.hotspots
+        case .stadiums:
+            return vm.hotspots.filter { $0.event.isStadiumOrArena }
+        case .theaters:
+            return vm.hotspots.filter { $0.event.isTheater }
+        }
+    }
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 20) {
+                communityHero
+                tabBar
+                demandSummaryCard
+                eventHotspotMap
+                upcomingEventsSection
+                proTipCard
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 30)
+        }
+        .background(
+            LinearGradient(
+                colors: [Color(.systemBackground), Color(red: 1.0, green: 0.965, blue: 0.97)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        )
+        .navigationTitle("Community")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { vm.start() }
+        .onDisappear { vm.stop() }
+        .refreshable { vm.refresh() }
+        .alert("Community", isPresented: Binding(
+            get: { vm.errorMessage != nil },
+            set: { if !$0 { vm.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(vm.errorMessage ?? "")
+        }
+    }
+
+    private var communityHero: some View {
+        ZStack(alignment: .trailing) {
+            DriverCommunityMapPattern()
+                .frame(width: 190, height: 150)
+                .opacity(0.65)
+                .accessibilityHidden(true)
+
+            Image(systemName: "mappin.circle.fill")
+                .font(.system(size: 92, weight: .black))
+                .foregroundStyle(Styles.rydrGradient)
+                .shadow(color: Color.red.opacity(0.22), radius: 18, y: 10)
+                .offset(x: -16, y: 2)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Atlanta, GA", systemImage: "mappin.circle.fill")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(Styles.rydrGradient)
+
+                Text("Go where the rides are")
+                    .font(.system(size: 34, weight: .black, design: .rounded))
+                    .foregroundStyle(Styles.rydrGradient)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("Real-time event hotspots and venue demand to help you position for more rides in Metro Atlanta.")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(4)
+                    .frame(maxWidth: 285, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, 96)
+        }
+        .frame(minHeight: 178)
+    }
+
+    private var tabBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(DriverCommunityTab.allCases) { tab in
+                    Button {
+                        withAnimation(.snappy(duration: 0.22)) {
+                            selectedTab = tab
+                        }
+                    } label: {
+                        Label(tab.rawValue, systemImage: tab.icon)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(selectedTab == tab ? Color.white : Color.primary)
+                            .padding(.horizontal, 16)
+                            .frame(height: 48)
+                            .background(
+                                Capsule()
+                                    .fill(selectedTab == tab ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.systemBackground)))
+                                    .shadow(color: selectedTab == tab ? Color.red.opacity(0.22) : Color.black.opacity(0.04), radius: 12, y: 6)
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(selectedTab == tab ? Color.clear : Color.black.opacity(0.08), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private var demandSummaryCard: some View {
+        HStack(spacing: 18) {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.22))
+                    .frame(width: 62, height: 62)
+                Image(systemName: "flame.fill")
+                    .font(.title.weight(.black))
+                    .foregroundStyle(.white)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Right now")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+                Text("\(vm.currentLevel.title) demand")
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(.white)
+                Text("\(vm.activeRequestCount) requests in the last 2 minutes")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.88))
+            }
+
+            Spacer()
+
+            VStack(alignment: .leading, spacing: 8) {
+                demandMeterRow("Now", level: vm.currentLevel)
+                demandMeterRow("Next", level: projectedLevel)
+                demandMeterRow("Later", level: visibleHotspots.isEmpty ? .low : .moderate)
+            }
+            .frame(width: 126)
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Styles.rydrGradient)
+        )
+        .shadow(color: Color.red.opacity(0.22), radius: 18, y: 10)
+    }
+
+    private var projectedLevel: DriverCommunityDemandLevel {
+        let upcomingSoon = visibleHotspots.contains { hotspot in
+            guard let date = hotspot.event.parsedDate else { return false }
+            return date.timeIntervalSince(Date()) < 36 * 60 * 60
+        }
+        if vm.currentLevel >= .high { return vm.currentLevel }
+        return upcomingSoon ? .moderate : .low
+    }
+
+    private func demandMeterRow(_ title: String, level: DriverCommunityDemandLevel) -> some View {
+        HStack(spacing: 7) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.82))
+                .frame(width: 34, alignment: .leading)
+            HStack(spacing: 3) {
+                ForEach(0..<4, id: \.self) { index in
+                    Capsule()
+                        .fill(index <= level.rawValue ? Color.white.opacity(0.82) : Color.white.opacity(0.22))
+                        .frame(width: 16, height: 6)
+                }
+            }
+        }
+    }
+
+    private var eventHotspotMap: some View {
+        VStack(spacing: 0) {
+            ZStack(alignment: .top) {
+                Map(position: $mapPosition) {
+                    ForEach(visibleHotspots) { hotspot in
+                        Annotation(hotspot.event.venueName, coordinate: hotspot.coordinate) {
+                            DriverEventHotspotAnnotation(hotspot: hotspot)
+                        }
+                    }
+                }
+                .mapStyle(.standard(elevation: .flat))
+                .frame(height: 360)
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .fill(Color.black.opacity(0.18))
+                        .allowsHitTesting(false)
+                )
+
+                HStack {
+                    Label("Live event demand", systemImage: "circle.fill")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .frame(height: 44)
+                        .background(.black.opacity(0.62), in: Capsule())
+                    Spacer()
+                    Button {
+                        focusMap()
+                    } label: {
+                        Label("Fit venues", systemImage: "list.bullet")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .frame(height: 44)
+                            .background(.black.opacity(0.62), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(14)
+            }
+
+            DriverCommunityLegend()
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                .background(Color(.secondarySystemBackground))
+        }
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .shadow(color: Color.black.opacity(0.10), radius: 18, y: 10)
+        .onChange(of: visibleHotspots.map(\.id)) { _, _ in
+            focusMap()
+        }
+    }
+
+    private func focusMap() {
+        let coordinates = visibleHotspots.compactMap { $0.event.coordinate }
+        guard !coordinates.isEmpty else { return }
+        let minLat = coordinates.map(\.latitude).min() ?? DriverMapDefaults.pilotCoordinate.latitude
+        let maxLat = coordinates.map(\.latitude).max() ?? DriverMapDefaults.pilotCoordinate.latitude
+        let minLng = coordinates.map(\.longitude).min() ?? DriverMapDefaults.pilotCoordinate.longitude
+        let maxLng = coordinates.map(\.longitude).max() ?? DriverMapDefaults.pilotCoordinate.longitude
+        let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2, longitude: (minLng + maxLng) / 2)
+        let span = MKCoordinateSpan(
+            latitudeDelta: max(0.14, (maxLat - minLat) * 1.8),
+            longitudeDelta: max(0.18, (maxLng - minLng) * 1.8)
+        )
+        mapPosition = .region(MKCoordinateRegion(center: center, span: span))
+    }
+
+    private var upcomingEventsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Upcoming events near you")
+                    .font(.title3.weight(.black))
+                Spacer()
+                if vm.isLoadingEvents {
+                    ProgressView()
+                }
+            }
+
+            if visibleHotspots.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("No eligible event hotspots yet", systemImage: "calendar.badge.exclamationmark")
+                        .font(.headline.weight(.bold))
+                    Text("Events from airports are hidden. Stadiums, arenas, theaters, and other eligible venues will appear when Ticketmaster has upcoming Atlanta events.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            } else {
+                ForEach(visibleHotspots.prefix(4)) { hotspot in
+                    DriverCommunityEventCard(hotspot: hotspot)
+                }
+            }
+        }
+    }
+
+    private var proTipCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "sparkles")
+                .font(.title2.weight(.black))
+                .foregroundStyle(Styles.rydrGradient)
+                .frame(width: 58, height: 58)
+                .background(Color.red.opacity(0.09), in: Circle())
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Pro tip")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Styles.rydrGradient)
+                Text("Arrive 60-90 min early and stay after events to catch the most ride requests.")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(18)
+        .background(
+            LinearGradient(
+                colors: [Color.red.opacity(0.10), Color(.systemBackground)],
+                startPoint: .leading,
+                endPoint: .trailing
+            ),
+            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+        )
+    }
+}
+
+private struct DriverEventHotspotAnnotation: View {
+    let hotspot: DriverCommunityHotspot
+
+    var body: some View {
+        VStack(spacing: 8) {
+            VStack(spacing: 4) {
+                Text(hotspot.event.venueName)
+                    .font(.caption.weight(.black))
+                    .lineLimit(1)
+                Text(hotspot.level.title)
+                    .font(.caption2.weight(.semibold))
+                HStack(spacing: 3) {
+                    ForEach(0..<4, id: \.self) { index in
+                        Circle()
+                            .fill(index <= hotspot.level.rawValue ? hotspot.level.color : Color.white.opacity(0.42))
+                            .frame(width: 6, height: 6)
+                    }
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(width: 132)
+            .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(hotspot.level.color.opacity(0.72), lineWidth: 1)
+            )
+
+            ZStack {
+                Circle()
+                    .fill(hotspot.level.color.opacity(0.18))
+                    .frame(width: glowSize, height: glowSize)
+                    .blur(radius: 8)
+                Circle()
+                    .stroke(Styles.rydrGradient, lineWidth: 3)
+                    .frame(width: 34, height: 34)
+                    .shadow(color: hotspot.level.color.opacity(0.6), radius: 16)
+                Image(systemName: hotspot.event.isTheater ? "theatermasks.fill" : "building.columns.fill")
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(.white)
+                    .frame(width: 28, height: 28)
+                    .background(Styles.rydrGradient, in: Circle())
+            }
+        }
+    }
+
+    private var glowSize: CGFloat {
+        switch hotspot.level {
+        case .low: return 48
+        case .moderate: return 64
+        case .high: return 82
+        case .veryHigh: return 102
+        }
+    }
+}
+
+private struct DriverCommunityLegend: View {
+    var body: some View {
+        HStack(spacing: 14) {
+            ForEach([DriverCommunityDemandLevel.veryHigh, .high, .moderate, .low], id: \.rawValue) { level in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(level.color)
+                        .frame(width: 10, height: 10)
+                    Text(level.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Image(systemName: "info.circle")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct DriverCommunityEventCard: View {
+    let hotspot: DriverCommunityHotspot
+
+    var body: some View {
+        HStack(spacing: 14) {
+            VStack(spacing: 4) {
+                Text(hotspot.event.displayDate)
+                    .font(.caption.weight(.black))
+                    .multilineTextAlignment(.center)
+                Text(hotspot.event.displayTime)
+                    .font(.caption2.weight(.bold))
+                    .multilineTextAlignment(.center)
+            }
+            .foregroundStyle(.white)
+            .frame(width: 76, height: 86)
+            .background(Styles.rydrGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(hotspot.event.title)
+                    .font(.headline.weight(.black))
+                    .lineLimit(2)
+                Text(hotspot.event.venueLine)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                HStack(spacing: 8) {
+                    Label(hotspot.level.title, systemImage: "flame.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(hotspot.level.color)
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(hotspot.level.color.opacity(0.12), in: Capsule())
+                    Label("\(hotspot.requestCount) recent", systemImage: "clock")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.04), radius: 10, y: 5)
+    }
+}
+
+private struct DriverCommunityMapPattern: View {
+    var body: some View {
+        Canvas { context, size in
+            let stroke = StrokeStyle(lineWidth: 1.2, lineCap: .round)
+            for index in 0..<7 {
+                var path = Path()
+                let y = CGFloat(index) * size.height / 6
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addCurve(
+                    to: CGPoint(x: size.width, y: y + CGFloat(index % 2 == 0 ? 24 : -18)),
+                    control1: CGPoint(x: size.width * 0.32, y: y - 26),
+                    control2: CGPoint(x: size.width * 0.66, y: y + 30)
+                )
+                context.stroke(path, with: .color(Color.red.opacity(0.10)), style: stroke)
+            }
+            for index in 0..<5 {
+                var path = Path()
+                let x = CGFloat(index) * size.width / 4
+                path.move(to: CGPoint(x: x, y: 0))
+                path.addCurve(
+                    to: CGPoint(x: x + CGFloat(index % 2 == 0 ? 20 : -22), y: size.height),
+                    control1: CGPoint(x: x + 22, y: size.height * 0.3),
+                    control2: CGPoint(x: x - 28, y: size.height * 0.68)
+                )
+                context.stroke(path, with: .color(Color.red.opacity(0.08)), style: stroke)
+            }
+        }
+    }
+}
+
 struct DrawerDestinationView: View {
     let item: SideMenuItem
     @ObservedObject var vm: DriverDashboardVM
@@ -751,9 +1614,11 @@ struct DrawerDestinationView: View {
             if item == .profile {
                 DriverProfileView()
             } else if item == .community {
-                DriverCashRydrHubView()
+                DriverCommunityHubView()
             } else if item == .walletPayouts {
                 DriverWalletPayoutsView(vm: vm)
+            } else if item == .documents {
+                DriverDocumentsView(vm: vm)
             } else if item == .settings {
                 DriverSettingsView()
             } else {
@@ -791,11 +1656,11 @@ struct DrawerDestinationView: View {
         switch item {
         case .profile: return "Manage your public driver profile and preferences."
         case .vehicleRideTypes: return "Review vehicle information, qualifications, upgrade eligibility, and approved ride types."
-        case .earnings: return "Track daily, weekly, monthly, and annual earnings with export-ready reports."
+        case .fareInsights: return "Track completed-ride earnings, recent trip totals, and performance health."
         case .walletPayouts: return "Manage payout methods, instant pay, and payout history."
         case .documents: return "Keep required driver documents current."
         case .rewards: return "Track milestones, referrals, promotions, and Rydr incentives."
-        case .community: return "Access Cash Rydr Hub, local events, and community announcements."
+        case .community: return "Find live event demand, venue hotspots, and upcoming Atlanta events."
         case .safety: return "Emergency contacts, incident reports, SafeRydr settings, and Safety Center."
         case .helpSupport: return "FAQs, support contact, and issue reporting."
         case .settings: return "Notifications, appearance, privacy, and location settings."
@@ -808,11 +1673,11 @@ struct DrawerDestinationView: View {
         switch item {
         case .profile: return ["Profile Photo", "Bio", "Contact Information", "Driver Preferences"]
         case .vehicleRideTypes: return ["Vehicle Information", "Ride Type Qualifications", "Upgrade Eligibility"] + DriverDashboardVM.availableRideTypes
-        case .earnings: return ["Daily", "Weekly", "Monthly", "Annual", "Export Earnings Reports"]
+        case .fareInsights: return ["Today", "This Week", "This Month", "Recent Trips"]
         case .walletPayouts: return ["Bank Account", "Debit Card", "Instant Pay", "Payout History"]
-        case .documents: return ["Driver License", "Insurance", "Registration", "Vehicle Inspection", "Background Check Status"]
+        case .documents: return ["Driver License", "Insurance", "Registration", "Background Check Status"]
         case .rewards: return ["Driver Milestones", "Referral Rewards", "Promotions", "Rydr Incentives"]
-        case .community: return ["Cash Rydr Hub", "Local Events", "Community Announcements"]
+        case .community: return ["Live Hotspots", "Upcoming Events", "Venue Demand"]
         case .safety: return ["Emergency Contacts", "Incident Reports", "SafeRydr Settings", "Safety Center"]
         case .helpSupport: return ["FAQs", "Contact Support", "Report Issue"]
         case .settings: return ["Notifications", "Appearance", "Privacy", "Location Settings"]

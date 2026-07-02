@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="860" viewBox="0 0 1200 860">
+  <defs>
+    <linearGradient id="rydrGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ff3b4f"/>
+      <stop offset="100%" stop-color="#800021"/>
+    </linearGradient>
+    <radialGradient id="markGradient" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#fb2056"/>
+      <stop offset="100%" stop-color="#870223"/>
+    </radialGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#111111" flood-opacity="0.10"/>
+    </filter>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="#ff3047" flood-opacity="0.38"/>
+    </filter>
+    <style>
+      .label { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif; }
+      .title { font-size: 30px; font-weight: 800; fill: #111; }
+      .subtitle { font-size: 21px; font-weight: 500; fill: #8d8d94; }
+      .note { font-size: 15px; font-weight: 650; fill: #686872; }
+      .caption { font-size: 13px; font-weight: 750; fill: #8a8a92; letter-spacing: .4px; }
+      .pulseRingOuter { opacity: .17; }
+      .pulseRingInner { opacity: .28; }
+      .slotLine { fill: #ececf1; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="860" fill="#f6f6f8"/>
+
+  <text x="52" y="58" class="label title" font-size="28">Rydr R Loading Indicator Mockup</text>
+  <text x="52" y="88" class="label subtitle" font-size="17">Review concept only. No app code has been changed for this visual.</text>
+
+  <!-- Connection screen mock -->
+  <g transform="translate(70 130)">
+    <rect width="460" height="650" rx="46" fill="white" filter="url(#softShadow)"/>
+    <rect x="126" y="20" width="88" height="26" rx="13" fill="#111" opacity=".96"/>
+    <text x="58" y="48" class="label title" font-size="28">3:37</text>
+    <text x="344" y="48" class="label title" font-size="22">72%</text>
+
+    <g transform="translate(230 300)">
+      <circle r="94" fill="none" stroke="url(#rydrGradient)" stroke-width="16" opacity=".20"/>
+      <circle r="74" fill="none" stroke="url(#rydrGradient)" stroke-width="11" opacity=".35"/>
+      <circle r="70" fill="none" stroke="url(#rydrGradient)" stroke-width="9" stroke-linecap="round"
+              stroke-dasharray="285 155" transform="rotate(-72)" filter="url(#glow)"/>
+      <circle r="27" fill="white"/>
+      <g transform="translate(-17 -17) scale(.086)">
+        <path fill="url(#markGradient)" d="M30.76,40l-10.8,0l-3.64-6.28l-7,0l0,6.28l-9.32,0l0-15.6l22.88,0.04c2.6,0,4.68-2.12,4.68-4.68c0-2.6-2.08-4.68-4.68-4.68l-19.76,0l0,3.12l19.76,0c0.84,0.04,1.48,0.72,1.48,1.56s-0.64,1.52-1.48,1.56l-0.04,0l-0.04,0l-22.8,0l0-9.36l22.88,0c4.32,0,7.8,3.48,7.8,7.8c0,4.28-3.48,7.8-7.8,7.8l-19.76-0.04l0,9.36l3.12,0l0-6.28l11.88,0c1.28,2.32,3.44,5.88,3.64,6.28l3.6,0c-0.32-0.44-2.16-3.72-3.64-6.28l3.6,0c1.32,2.28,2.64,4.64,3.72,6.4z" transform="translate(24.479 -96.491) scale(11.412)"/>
+      </g>
+    </g>
+
+    <text x="230" y="430" text-anchor="middle" class="label title">Connecting with Jamie...</text>
+    <text x="230" y="465" text-anchor="middle" class="label subtitle">Confirming your ride request</text>
+    <g transform="translate(120 520)">
+      <circle cx="0" cy="0" r="4" fill="#b7b7bd"/>
+      <circle cx="14" cy="0" r="4" fill="#b7b7bd" opacity=".65"/>
+      <circle cx="28" cy="0" r="4" fill="#b7b7bd" opacity=".35"/>
+      <text x="48" y="7" class="label subtitle" font-size="18">This usually takes only a moment...</text>
+    </g>
+
+    <text x="44" y="606" class="label note">R mark replaces the plain center dot.</text>
+  </g>
+
+  <!-- Driver card loading slot mock -->
+  <g transform="translate(620 130)">
+    <rect width="500" height="650" rx="34" fill="white" filter="url(#softShadow)"/>
+    <g transform="translate(28 30)">
+      <rect width="104" height="34" rx="17" fill="#fff0f2"/>
+      <text x="18" y="23" class="label caption" fill="#e9283f">MATCH 2</text>
+      <circle cx="422" cy="17" r="13" fill="none" stroke="#ff3047" stroke-width="3" opacity=".35"/>
+      <path d="M422 4 A13 13 0 0 1 435 17" fill="none" stroke="url(#rydrGradient)" stroke-width="4" stroke-linecap="round"/>
+    </g>
+
+    <text x="38" y="112" class="label title">Finding a nearby driver</text>
+    <text x="38" y="146" class="label subtitle" font-size="18">This card becomes available when a match is ready.</text>
+
+    <g transform="translate(250 300)">
+      <rect x="-170" y="-104" width="340" height="208" rx="20" fill="#faf0f2"/>
+      <circle r="76" fill="none" stroke="url(#rydrGradient)" stroke-width="12" opacity=".20"/>
+      <circle r="58" fill="none" stroke="url(#rydrGradient)" stroke-width="8" opacity=".32"/>
+      <circle r="56" fill="none" stroke="url(#rydrGradient)" stroke-width="7" stroke-dasharray="210 120" stroke-linecap="round" transform="rotate(-35)" filter="url(#glow)"/>
+      <circle r="25" fill="white"/>
+      <g transform="translate(-15 -15) scale(.076)">
+        <path fill="url(#markGradient)" d="M30.76,40l-10.8,0l-3.64-6.28l-7,0l0,6.28l-9.32,0l0-15.6l22.88,0.04c2.6,0,4.68-2.12,4.68-4.68c0-2.6-2.08-4.68-4.68-4.68l-19.76,0l0,3.12l19.76,0c0.84,0.04,1.48,0.72,1.48,1.56s-0.64,1.52-1.48,1.56l-0.04,0l-0.04,0l-22.8,0l0-9.36l22.88,0c4.32,0,7.8,3.48,7.8,7.8c0,4.28-3.48,7.8-7.8,7.8l-19.76-0.04l0,9.36l3.12,0l0-6.28l11.88,0c1.28,2.32,3.44,5.88,3.64,6.28l3.6,0c-0.32-0.44-2.16-3.72-3.64-6.28l3.6,0c1.32,2.28,2.64,4.64,3.72,6.4z" transform="translate(24.479 -96.491) scale(11.412)"/>
+      </g>
+      <text x="0" y="138" text-anchor="middle" class="label note">Matchmaking</text>
+    </g>
+
+    <rect x="38" y="465" width="260" height="14" rx="7" class="slotLine"/>
+    <rect x="38" y="494" width="185" height="11" rx="6" class="slotLine" opacity=".75"/>
+    <rect x="38" y="540" width="122" height="36" rx="18" class="slotLine"/>
+    <rect x="177" y="540" width="122" height="36" rx="18" class="slotLine"/>
+    <rect x="316" y="540" width="122" height="36" rx="18" class="slotLine"/>
+
+    <text x="38" y="616" class="label note">Same R + ring indicator inside blank driver card slots.</text>
+  </g>
+</svg>

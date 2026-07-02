@@ -229,13 +229,6 @@ struct RydrBankView: View {
     @State private var transferFriendName = ""
     @State private var transferFriendPhone = ""
 
-    // TEMP START: Dev mint helpers (remove when done testing)
-    @State private var isMinting = false
-    @State private var mintAlert: String?
-    @State private var showMintAlert = false
-    @State private var devMintRideType = "Rydr Go"
-    // TEMP END
-
     // Copy confirmation
     @State private var showCopyAlert = false
     @State private var copiedCode: String?
@@ -251,7 +244,6 @@ struct RydrBankView: View {
                     balanceCard
                     activeCodesSection
                     earnMoreCard
-                    devMintSection
 
                     if let error = vm.errorMessage {
                         Text(error)
@@ -679,70 +671,6 @@ struct RydrBankView: View {
         .padding(.horizontal, 24)
     }
 
-    private var devMintSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Alpha Testing", systemImage: "hammer")
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-
-            Text("Mint 10 eligible test rides into one RydrBank reward group. This is only for simulator/beta verification.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            Menu {
-                Button("Rydr Go / Rydr Eco") { devMintRideType = "Rydr Go" }
-                Button("Rydr XL") { devMintRideType = "Rydr XL" }
-                Button("Rydr Prestine") { devMintRideType = "Rydr Prestine" }
-                Button("Rydr Executive") { devMintRideType = "Rydr Executive" }
-            } label: {
-                HStack {
-                    Text("Reward group")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(displayRideType(devMintRideType))
-                        .fontWeight(.semibold)
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 14)
-                .frame(height: 48)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-
-            Button {
-                mintDevRides()
-            } label: {
-                HStack(spacing: 8) {
-                    if isMinting { ProgressView().tint(.white) }
-                    Text(isMinting ? "Minting..." : "Mint 10 Eligible Rides")
-                        .font(.headline.weight(.bold))
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 52)
-            }
-            .background(Styles.rydrGradient.opacity(isMinting ? 0.55 : 1))
-            .foregroundColor(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .disabled(isMinting)
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemBackground).opacity(0.7))
-        )
-        .padding(.horizontal)
-        .alert("RydrBank", isPresented: $showMintAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(mintAlert ?? "")
-        }
-    }
-
     // MARK: - Rows
 
     private func activeCodeRow(_ code: RydrBankCode) -> some View {
@@ -1001,28 +929,6 @@ struct RydrBankView: View {
         clearTransferForm()
     }
 
-    private func displayRideType(_ rideType: String) -> String {
-        rideType == "Rydr Go" ? "Rydr Go / Rydr Eco" : rideType
-    }
-
-    private func mintDevRides() {
-        Task {
-            isMinting = true
-            do {
-                if let code = try await RydrBankAPI.mintTenDevRides(rideType: devMintRideType) {
-                    mintAlert = "Minted \(displayRideType(devMintRideType)) code: \(code)"
-                } else {
-                    mintAlert = "No code minted. If some rides were already counted, run again."
-                }
-                vm.refreshCodes()
-                showMintAlert = true
-            } catch {
-                mintAlert = "Mint failed: \(error.localizedDescription)"
-                showMintAlert = true
-            }
-            isMinting = false
-        }
-    }
 }
 
 private struct RydrBankWalletArt: View {

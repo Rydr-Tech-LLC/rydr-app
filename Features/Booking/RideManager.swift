@@ -419,6 +419,8 @@ final class RideManager: ObservableObject {
     @Published var lastReceipt: Receipt?
     @Published var history: [Receipt] = []
     @Published var isLoadingDrivers = false
+    @Published var driverSearchTargetCount = 3
+    @Published var driverSearchCompletedCount = 0
     @Published var rideRequestErrorMessage: String?
     @Published var hasRecoveredActiveRide = false
 
@@ -462,6 +464,7 @@ final class RideManager: ObservableObject {
 
     // Dependencies & tasks
     private let rideService: RideService
+    private var driverSearchTask: Task<Void, Never>?
     private var decisionTask: Task<Void, Never>?
     private var rideLifecycleTask: Task<Void, Never>?
 
@@ -554,13 +557,18 @@ final class RideManager: ObservableObject {
         cachedDropoffCoordinate = dropoffCoordinate
         cachedEstimate = estimate ?? estimateFor(pickup: pickup, dropoff: dropoff)
 
+        driverSearchTask?.cancel()
         attemptedDriverIDs.removeAll()
         selectedDriver = nil
+        availableDrivers = []
+        driverSearchCompletedCount = 0
+        driverSearchTargetCount = 3
         rideRequestErrorMessage = nil
         isLoadingDrivers = true
         state = .selecting
 
-        Task {
+        driverSearchTask = Task { [weak self] in
+            guard let self else { return }
             do {
                 let drivers = try await rideService.fetchNearbyDrivers(
                     pickup: pickup,
@@ -570,13 +578,35 @@ final class RideManager: ObservableObject {
                     pickupCoordinate: pickupCoordinate,
                     dropoffCoordinate: dropoffCoordinate
                 )
+
+                guard !Task.isCancelled else { return }
+
+                let previewDrivers = Array(drivers.prefix(3))
+                self.driverSearchTargetCount = 3
+                if drivers.isEmpty {
+                    self.availableDrivers = []
+                    self.driverSearchCompletedCount = 0
+                    self.isLoadingDrivers = false
+                    self.rideRequestErrorMessage = RideRequestError.noDriversAvailable.localizedDescription
+                    return
+                }
+
+                try await Task.sleep(nanoseconds: 420_000_000)
+                for (index, driver) in previewDrivers.enumerated() {
+                    guard !Task.isCancelled else { return }
+                    if index > 0 {
+                        try await Task.sleep(nanoseconds: 340_000_000)
+                    }
+                    self.availableDrivers.append(driver)
+                    self.driverSearchCompletedCount = min(self.availableDrivers.count, self.driverSearchTargetCount)
+                }
+
                 self.availableDrivers = drivers
                 self.isLoadingDrivers = false
-                if drivers.isEmpty {
-                    self.rideRequestErrorMessage = RideRequestError.noDriversAvailable.localizedDescription
-                }
             } catch {
+                guard !Task.isCancelled else { return }
                 self.availableDrivers = []
+                self.driverSearchCompletedCount = 0
                 self.isLoadingDrivers = false
                 self.rideRequestErrorMessage = error.localizedDescription
             }
@@ -585,6 +615,9 @@ final class RideManager: ObservableObject {
 
     /// Step 2: user taps a driver; send request, await accept/decline.
     func confirm(driver: Driver) {
+        driverSearchTask?.cancel()
+        isLoadingDrivers = false
+
         // Part 6 (Payment Hardening): never let a ride be requested without a
         // real, verified Stripe payment method on file — mock/placeholder
         // cards can no longer reach the request flow.

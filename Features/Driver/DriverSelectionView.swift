@@ -51,13 +51,28 @@ struct DriverSelectionView: View {
                     .padding(.horizontal)
 
                     if rideManager.isLoadingDrivers {
-                        VStack(spacing: 12) {
-                            ProgressView()
-                            Text("Finding nearby drivers...")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                        TabView {
+                            ForEach(0..<rideManager.driverSearchTargetCount, id: \.self) { index in
+                                if index < rideManager.availableDrivers.count {
+                                    let driver = rideManager.availableDrivers[index]
+                                    DriverCard(
+                                        rideManager: rideManager,
+                                        driver: driver,
+                                        rideType: rideType,
+                                        estimate: estimate,
+                                        promoAppliedDevFree: promoApplied
+                                    ) {
+                                        confirm(driver)
+                                    }
+                                    .padding(.horizontal)
+                                } else {
+                                    DriverMatchmakingCard(slotNumber: index + 1)
+                                        .padding(.horizontal)
+                                }
+                            }
                         }
-                        .frame(maxWidth: .infinity, minHeight: 320)
+                        .tabViewStyle(.page(indexDisplayMode: .automatic))
+                        .indexViewStyle(.page(backgroundDisplayMode: .interactive))
                     } else if rideManager.availableDrivers.isEmpty {
                         EmptyDriverState(message: rideManager.rideRequestErrorMessage ?? "No nearby drivers are available right now.") {
                             rideManager.requestDrivers(
@@ -133,8 +148,7 @@ struct DriverSelectionView: View {
         .fullScreenCover(isPresented: $showConnecting) {
             ConnectingOverlay(
                 title: "Connecting with \(rideManager.selectedDriver?.name ?? "driver")…",
-                subtitle: "Confirming your ride request",
-                gradient: Styles.rydrGradient
+                subtitle: "Confirming your ride request"
             )
             .ignoresSafeArea()
         }
@@ -143,6 +157,144 @@ struct DriverSelectionView: View {
     private func confirm(_ driver: Driver) {
         rideManager.confirm(driver: driver)
         // state change to .awaitingDriver will trigger overlay via onChange
+    }
+}
+
+private struct DriverMatchmakingCard: View {
+    let slotNumber: Int
+
+    @State private var shimmer = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("Match \(slotNumber)", systemImage: "sparkles")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Styles.rydrGradient)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Color.red.opacity(0.08)))
+                Spacer()
+                ProgressView()
+                    .tint(.red)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Finding a nearby driver")
+                    .font(.title3.weight(.black))
+                Text("Checking availability, ride type, distance, and driver filters.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.red.opacity(0.10), Color(.secondarySystemGroupedBackground)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                VStack(spacing: 14) {
+                    RydrPulseIndicator(size: 96, markSize: 24, ringWidth: 8)
+
+                    Text("Matchmaking")
+                        .font(.headline.weight(.black))
+                    Text("This spot will become a driver card when a match is ready.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(22)
+            }
+            .frame(height: 190)
+
+            VStack(spacing: 10) {
+                skeletonLine(width: 220, height: 13)
+                skeletonLine(width: 170, height: 11)
+                HStack {
+                    skeletonPill()
+                    skeletonPill()
+                    skeletonPill()
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 430, alignment: .topLeading)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.08), radius: 20, y: 10)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
+                shimmer = true
+            }
+        }
+    }
+
+    private func skeletonLine(width: CGFloat, height: CGFloat) -> some View {
+        Capsule()
+            .fill(Color.gray.opacity(shimmer ? 0.22 : 0.11))
+            .frame(width: width, height: height)
+    }
+
+    private func skeletonPill() -> some View {
+        Capsule()
+            .fill(Color.gray.opacity(shimmer ? 0.18 : 0.10))
+            .frame(maxWidth: .infinity)
+            .frame(height: 34)
+    }
+}
+
+private struct RydrPulseIndicator: View {
+    let size: CGFloat
+    let markSize: CGFloat
+    let ringWidth: CGFloat
+
+    @State private var spin = false
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.red.opacity(0.12), lineWidth: ringWidth)
+                .frame(width: size, height: size)
+                .scaleEffect(pulse ? 1.10 : 0.94)
+                .opacity(pulse ? 0.35 : 0.18)
+
+            Circle()
+                .trim(from: 0.08, to: 0.78)
+                .stroke(Styles.rydrGradient, style: StrokeStyle(lineWidth: ringWidth, lineCap: .round))
+                .frame(width: size, height: size)
+                .rotationEffect(.degrees(spin ? 360 : 0))
+                .scaleEffect(pulse ? 1.02 : 0.96)
+                .shadow(color: Color.red.opacity(0.24), radius: 10, y: 0)
+
+            Circle()
+                .fill(Color(.systemBackground))
+                .frame(width: markSize + 14, height: markSize + 14)
+                .shadow(color: Color.red.opacity(0.14), radius: 8, y: 2)
+
+            Image("RydrBankWalletR")
+                .resizable()
+                .scaledToFit()
+                .frame(width: markSize, height: markSize)
+                .scaleEffect(pulse ? 1.0 : 0.82)
+        }
+        .accessibilityLabel("Rydr is connecting")
+        .onAppear {
+            spin = true
+            pulse = true
+        }
+        .animation(.linear(duration: 1.2).repeatForever(autoreverses: false), value: spin)
+        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
     }
 }
 
@@ -513,31 +665,13 @@ private struct RydrGradientButton: ButtonStyle {
 private struct ConnectingOverlay: View {
     let title: String
     let subtitle: String
-    let gradient: LinearGradient
-
-    @State private var spin = false
-    @State private var pulse = false
 
     var body: some View {
         ZStack {
             Color(.systemBackground).ignoresSafeArea()
 
             VStack(spacing: 22) {
-                // Pulsing, spinning gradient ring
-                ZStack {
-                    Circle()
-                        .stroke(gradient, lineWidth: 10)
-                        .frame(width: 120, height: 120)
-                        .rotationEffect(.degrees(spin ? 360 : 0))
-                        .animation(.linear(duration: 1.2).repeatForever(autoreverses: false), value: spin)
-
-                    Circle()
-                        .fill(gradient)
-                        .frame(width: 24, height: 24)
-                        .scaleEffect(pulse ? 1.0 : 0.6)
-                        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
-                }
-                .onAppear { spin = true; pulse = true }
+                RydrPulseIndicator(size: 120, markSize: 28, ringWidth: 10)
 
                 VStack(spacing: 6) {
                     Text(title).font(.title3).bold()

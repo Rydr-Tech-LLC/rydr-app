@@ -12,6 +12,7 @@ import { VEHICLE_COLORS, type VehicleColor, type VehicleBodyStyle } from "./type
 export { onRideUpdated } from "./triggers/rideNotifications";
 export { onSupportMessageCreated } from "./triggers/supportNotifications";
 export { onDriverApprovalDecision } from "./triggers/driverApprovalNotifications";
+export { onDocumentUploadedForReview } from "./triggers/documentReview";
 
 const VEHICLE_BODY_STYLES: readonly VehicleBodyStyle[] = [
   "sedan",

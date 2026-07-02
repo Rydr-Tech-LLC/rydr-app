@@ -1,7 +1,12 @@
 import { getAdminSession } from "@/lib/session";
+import { adminDb } from "@/lib/firebaseAdmin";
+import CashHubBetaToggle from "./CashHubBetaToggle";
 
 export default async function SettingsPage() {
   const session = await getAdminSession();
+  const cashHubConfigSnap = await adminDb.collection("platformConfig").doc("cashRydrHub").get().catch(() => null);
+  const cashHubConfig = cashHubConfigSnap?.data() ?? {};
+  const cashHubTermsAcceptanceEnabled = cashHubConfig.termsAcceptanceEnabled === true;
 
   return (
     <div className="space-y-6">
@@ -15,6 +20,8 @@ export default async function SettingsPage() {
         <p className="text-sm text-ink">{session?.email}</p>
         <p className="mt-1 text-xs text-muted">Role: {session?.role}</p>
       </div>
+
+      <CashHubBetaToggle initialEnabled={cashHubTermsAcceptanceEnabled} />
 
       <div className="rounded-lg border border-line bg-white p-5 shadow-sm">
         <h2 className="mb-2 text-sm font-semibold text-ink">Granting access</h2>

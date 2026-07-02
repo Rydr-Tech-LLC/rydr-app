@@ -23,7 +23,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var isOnline: Bool = false
     @Published var showMenu: Bool = false
     @Published var earningsToday: Decimal = 0
-    // Real Fare Insights data, computed from completed `rides` / `rideRequests`
+    // Real Earnings Hub data, computed from completed `rides` / `rideRequests`
     // documents via DriverEarningsService — replaces all previously hardcoded
     // weekly/monthly/acceptance/completion/recent-trip values.
     @Published var earningsSummary: DriverEarningsSummary = .empty
@@ -700,7 +700,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         if let finalFare {
             // Real final fare, computed from the actual elapsed ride time and
             // the driver's saved per-mile/per-minute rate — this is what
-            // DriverEarningsService and Fare Insights read going forward,
+            // DriverEarningsService and Earnings Hub read going forward,
             // rather than only ever the pre-ride estimate.
             completionFields["fare"] = NSDecimalNumber(decimal: finalFare).doubleValue
         }
@@ -728,7 +728,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         resumeStandbyIfWaiting(statusMessage: "Ride completed. You are ready for the next request.")
     }
 
-    /// Loads real Fare Insights data (weekly/monthly earnings, acceptance rate,
+    /// Loads real Earnings Hub data (weekly/monthly earnings, acceptance rate,
     /// completion rate, recent trips) from completed rides — call when Fare
     /// Insights is opened or pulled-to-refresh. No hardcoded fallback values.
     @MainActor
@@ -1836,7 +1836,7 @@ struct DriverDashboardView: View {
     private func sheetContent(_ sheet: DriverDashboardSheet) -> some View {
         switch sheet {
         case .fareInsights:
-            FareInsightsView(vm: vm)
+            EarningsHubView(vm: vm)
         case .rideFilters:
             DriverRideFiltersView(preferences: $vm.rideFilterPreferences) {
                 activeSheet = nil
