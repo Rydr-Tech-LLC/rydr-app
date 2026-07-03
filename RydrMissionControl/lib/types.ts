@@ -23,10 +23,28 @@ export interface DriverAddress {
 export interface DriverLicense {
   number?: string;
   state?: string;
-  // Not yet populated by the app today (documents are picked but never
-  // uploaded — see beta readiness audit, P0 #10). Field is here so the
-  // review screen lights up the moment that gets wired up.
   imageUrl?: string;
+}
+
+export interface DriverDocumentRecord {
+  status?: "pending" | "approved" | "expired" | "needs_review" | "rejected";
+  downloadURL?: string | null;
+  frontURL?: string | null;
+  backURL?: string | null;
+  documentURL?: string | null;
+  storagePath?: string | null;
+  frontPath?: string | null;
+  backPath?: string | null;
+  documentPath?: string | null;
+  reviewReason?: string | null;
+}
+
+export interface DriverDocuments {
+  driverLicense?: DriverDocumentRecord;
+  license?: DriverDocumentRecord;
+  insurance?: DriverDocumentRecord;
+  registration?: DriverDocumentRecord;
+  vehicleInspection?: DriverDocumentRecord;
 }
 
 export interface DriverVehicle {
@@ -64,6 +82,7 @@ export interface DriverRecord {
   address?: DriverAddress;
   license?: DriverLicense;
   vehicle?: DriverVehicle;
+  documents?: DriverDocuments;
   qualifiedRideTypes?: string[];
   selectedRideTypes?: string[];
   createdAt?: { toDate?: () => Date } | null;
@@ -75,12 +94,21 @@ export interface DriverRecord {
   approvedBy?: string;
   rejectionReason?: string;
   backgroundCheckStatus?: BackgroundCheckStatus;
+  backgroundCheckPassed?: boolean;
   backgroundCheckAcknowledgedAt?: { toDate?: () => Date } | null;
   betaAgreementAccepted?: boolean;
   betaAgreementAcceptedAt?: { toDate?: () => Date } | null;
+  betaBackgroundCheckBypassEnabled?: boolean;
+  betaBackgroundCheckBypassedAt?: { toDate?: () => Date } | null;
+  betaBackgroundCheckBypassedBy?: string;
+  betaBackgroundCheckBypassReason?: string;
   stripeAccountId?: string;
   stripeConnectStatus?: "not_started" | "pending" | "completed";
   stripeIdentityStatus?: "not_started" | "pending" | "verified" | "failed";
+  stripeChargesEnabled?: boolean;
+  stripePayoutsEnabled?: boolean;
+  identityStatus?: string;
+  identityVerified?: boolean;
   isApproved?: boolean;
 
   // Vehicle Library System
@@ -90,7 +118,7 @@ export interface DriverRecord {
 
 export interface DriverApprovalRequest {
   uid: string;
-  requestType: "backgroundCheck" | "debugApprovalBypass" | "identityReview";
+  requestType: "backgroundCheck" | "identityReview";
   source?: string;
   requested?: boolean;
   updatedAt?: { toDate?: () => Date } | null;
@@ -232,15 +260,86 @@ export const DRIVER_APPROVAL_REQUIREMENTS: { key: string; label: string }[] = [
   { key: "agreementAccepted", label: "Driver agreement accepted" }
 ];
 
+export function driverDocumentUrl(driver: DriverRecord, kind: "license" | "insurance" | "registration"): string | null {
+  const document =
+    kind === "license"
+      ? driver.documents?.driverLicense ?? driver.documents?.license
+      : kind === "insurance"
+        ? driver.documents?.insurance
+        : driver.documents?.registration;
+  const legacyUrl =
+    kind === "license"
+      ? driver.license?.imageUrl
+      : kind === "insurance"
+        ? driver.vehicle?.insuranceImageUrl
+        : driver.vehicle?.registrationImageUrl;
+
+  return firstPresent(legacyUrl, document?.frontURL, document?.documentURL, document?.downloadURL, document?.backURL);
+}
+
+export function driverDocumentBackUrl(driver: DriverRecord, kind: "license" | "insurance" | "registration"): string | null {
+  const document =
+    kind === "license"
+      ? driver.documents?.driverLicense ?? driver.documents?.license
+      : kind === "insurance"
+        ? driver.documents?.insurance
+        : driver.documents?.registration;
+  return firstPresent(document?.backURL);
+}
+
+export function driverIdentityStatus(driver: DriverRecord): "not_started" | "pending" | "verified" | "failed" {
+  if (
+    driver.identityVerified === true ||
+    driver.identityStatus === "verified" ||
+    (driver.stripeIdentityStatus === "verified" && driver.identityVerified !== false)
+  ) {
+    return "verified";
+  }
+  if (driver.stripeIdentityStatus === "failed" || driver.identityStatus === "requires_input" || driver.identityStatus === "canceled") {
+    return "failed";
+  }
+  if (driver.stripeIdentityStatus === "pending" || driver.identityStatus === "processing" || driver.identityStatus === "pending_manual_review") {
+    return "pending";
+  }
+  return "not_started";
+}
+
+function firstPresent(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+export function driverConnectStatus(driver: DriverRecord): "not_started" | "pending" | "completed" {
+  const hasConnectFlagData = driver.stripeChargesEnabled !== undefined || driver.stripePayoutsEnabled !== undefined;
+  if (Boolean(driver.stripeAccountId) && driver.stripeChargesEnabled === true && driver.stripePayoutsEnabled === true) {
+    return "completed";
+  }
+  if (driver.stripeConnectStatus === "completed" && !hasConnectFlagData) {
+    return "completed";
+  }
+  if (driver.stripeConnectStatus === "pending" || Boolean(driver.stripeAccountId)) {
+    return "pending";
+  }
+  return "not_started";
+}
+
 export function evaluateDriverRequirements(driver: DriverRecord) {
   const checks: Record<string, boolean> = {
     profileComplete: Boolean(driver.firstName && driver.lastName && driver.email && driver.phoneNumber),
-    licenseUploaded: Boolean(driver.license?.imageUrl),
-    insuranceUploaded: Boolean(driver.vehicle?.insuranceImageUrl),
-    registrationUploaded: Boolean(driver.vehicle?.registrationImageUrl),
-    stripeIdentityVerified: driver.stripeIdentityStatus === "verified",
-    stripeConnectCompleted: driver.stripeConnectStatus === "completed" || Boolean(driver.stripeAccountId),
-    backgroundCheckDeferred: driver.backgroundCheckStatus === "beta_deferred" || driver.backgroundCheckStatus === "passed",
+    licenseUploaded: Boolean(driverDocumentUrl(driver, "license")),
+    insuranceUploaded: Boolean(driverDocumentUrl(driver, "insurance")),
+    registrationUploaded: Boolean(driverDocumentUrl(driver, "registration")),
+    stripeIdentityVerified: driverIdentityStatus(driver) === "verified",
+    stripeConnectCompleted: driverConnectStatus(driver) === "completed",
+    backgroundCheckDeferred:
+      driver.betaBackgroundCheckBypassEnabled === true ||
+      driver.backgroundCheckStatus === "beta_deferred" ||
+      driver.backgroundCheckStatus === "passed" ||
+      driver.backgroundCheckPassed === true,
     agreementAccepted: Boolean(driver.betaAgreementAccepted)
   };
   const missing = DRIVER_APPROVAL_REQUIREMENTS.filter((r) => !checks[r.key]).map((r) => r.label);

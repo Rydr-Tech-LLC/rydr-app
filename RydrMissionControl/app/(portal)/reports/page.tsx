@@ -19,8 +19,7 @@ export default async function ReportsPage() {
 
       {reports.length === 0 ? (
         <div className="rounded-lg border border-dashed border-line bg-white p-10 text-center text-sm text-muted">
-          No reports yet. Note: the apps don't currently persist incident reports server-side (see beta
-          readiness audit, item #11) — this queue will populate once that's wired up.
+          No reports yet. Rider incident reports submitted from active rides will appear here.
         </div>
       ) : (
         <div className="space-y-2">

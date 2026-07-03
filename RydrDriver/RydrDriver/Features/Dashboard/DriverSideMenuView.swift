@@ -5,9 +5,10 @@ import FirebaseAuth
 enum SideMenuItem: String, CaseIterable, Identifiable {
     case dashboard = "Dashboard"
     case profile = "Profile"
-    case vehicleRideTypes = "Vehicle & Ride Types"
+    case vehicleRideTypes = "Vehicle & Rydr Hub"
     case fareInsights = "Earnings Hub"
     case walletPayouts = "Wallet & Payouts"
+    case cashRydrHub = "Cash Rydr Hub"
     case documents = "Documents"
     case rewards = "Rewards"
     case community = "Community"
@@ -26,6 +27,7 @@ enum SideMenuItem: String, CaseIterable, Identifiable {
         case .vehicleRideTypes: return "car.2.fill"
         case .fareInsights: return "dollarsign.circle.fill"
         case .walletPayouts: return "creditcard.fill"
+        case .cashRydrHub: return "banknote.fill"
         case .documents: return "doc.text"
         case .rewards: return "gift"
         case .community: return "person.3.fill"
@@ -57,10 +59,6 @@ struct SideMenuView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 profileHeader
-
-                #if DEBUG
-                debugApprovalBypassButton
-                #endif
 
                 ForEach(SideMenuItem.allCases.filter { $0 != .logout }) { item in
                     Button { onSelect(item) } label: {
@@ -170,36 +168,6 @@ struct SideMenuView: View {
         }
         .padding(.bottom, 14)
     }
-
-    #if DEBUG
-    private var debugApprovalBypassButton: some View {
-        Button {
-            vm.setDebugApprovalBypass(!vm.debugApprovalBypassEnabled)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: vm.debugApprovalBypassEnabled ? "checkmark.shield.fill" : "shield")
-                    .frame(width: 22)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Test Approval Bypass")
-                        .font(.caption.weight(.bold))
-                    Text(vm.debugApprovalBypassEnabled ? "Enabled for this simulator" : "Tap to approve test driver")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(vm.debugApprovalBypassEnabled ? Color.green.opacity(0.16) : Color(.secondarySystemBackground))
-            )
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(vm.debugApprovalBypassEnabled ? .green : .primary)
-        .padding(.bottom, 8)
-    }
-    #endif
 
     private var displayedProfilePhotoURL: String? {
         if vm.profilePhotoReviewStatus == "pending" {

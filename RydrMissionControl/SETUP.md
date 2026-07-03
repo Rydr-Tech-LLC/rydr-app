@@ -93,26 +93,24 @@ write (see `lib/types.ts` for field-by-field mapping back to
 will look empty or incomplete until other parts of the platform catch up —
 this is expected, not a bug in Mission Control:
 
-- **License/insurance/registration images** show "Not uploaded yet" because
-  the driver apps currently pick these documents but never upload them
-  anywhere (beta readiness audit, P0 #10). The review page is wired to
-  `license.imageUrl`, `vehicle.insuranceImageUrl`, `vehicle.registrationImageUrl`
-  — once that upload pipeline writes those URLs, images appear automatically.
-- **Stripe Identity / Stripe Connect status** read `stripeIdentityStatus` /
-  `stripeConnectStatus`, which nothing currently writes (Identity verification
-  is fully client-stubbed today — audit P0 #7). Until that's wired server-side,
-  every driver will show "Not started" and Approve will stay disabled for
-  everyone, by design — the approval rule is "all requirements or nothing."
+- **License/insurance/registration images** read both the current Firebase
+  document review schema (`documents.<kind>.downloadURL` / `frontURL` /
+  `backURL` / `documentURL`) and the legacy review aliases
+  (`license.imageUrl`, `vehicle.insuranceImageUrl`,
+  `vehicle.registrationImageUrl`). New uploads also denormalize those legacy
+  aliases for compatibility.
+- **Stripe Identity / Stripe Connect status** read both the Stripe webhook
+  fields (`identityStatus`, `identityVerified`, `stripeAccountId`,
+  `stripeChargesEnabled`, `stripePayoutsEnabled`) and the Mission Control
+  aliases (`stripeIdentityStatus`, `stripeConnectStatus`). New Stripe events
+  write the aliases too.
 - **Background check** intentionally shows "Beta Deferred" as a satisfying
   state — no real Checkr integration exists yet, and isn't expected to for
   the beta. `backgroundCheckStatus: "beta_deferred"` plus
   `betaAgreementAccepted: true` is enough to unblock approval.
-- **Safety Reports** queue will be empty until the apps actually persist
-  incident reports somewhere (audit P0 #11 — today "Report an incident" just
-  shows a static alert). A `safetyReports` Firestore rule has been added to
-  `Rydr_Firebase/firestore.rules` so the apps can start writing there; deploy
-  it with `firebase deploy --only firestore:rules` once you wire up the
-  client-side write.
+- **Safety Reports** lists rider incident reports written by the iOS rider app
+  to `safetyReports`. Deploy `Rydr_Firebase/firestore.rules` with
+  `firebase deploy --only firestore:rules` before relying on this in beta.
 - **Driver/Rider Search** does a bounded in-memory scan (good for beta-scale
   data, a few hundred to low thousands of users). Swap for a real search
   index later if either collection grows large.

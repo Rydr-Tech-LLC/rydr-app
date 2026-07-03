@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { VehicleLibraryEntry } from "@/lib/vehicleLibrary";
 
 const VEHICLE_COLORS = ["Black", "White", "Silver", "Gray", "Blue", "Red", "Green", "Brown", "Gold", "Yellow", "Orange"] as const;
+const OPENART_URL = "https://openart.ai/suite/create-image/";
 
 export default function VehicleImageManager({ entry: initialEntry }: { entry: VehicleLibraryEntry }) {
   const [entry, setEntry] = useState(initialEntry);
@@ -53,12 +54,28 @@ export default function VehicleImageManager({ entry: initialEntry }: { entry: Ve
   ];
 
   return (
-    <div className="space-y-3">
+    <section className="space-y-4 rounded-lg border border-line bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-ink">Image Coverage</h2>
+          <p className="mt-1 text-xs text-muted">
+            Upload a default image first, then add color-specific images as they become available.
+          </p>
+        </div>
+        <a
+          href={OPENART_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="rounded-md border border-rydr-burgundy px-3 py-1.5 text-xs font-semibold text-rydr-burgundy hover:bg-red-50"
+        >
+          Create image
+        </a>
+      </div>
       {error && <p className="text-xs text-rydr-red">{error}</p>}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
         {slots.map((slot) => (
-          <div key={slot.key} className="overflow-hidden rounded-lg border border-line bg-white shadow-sm">
-            <div className="flex h-28 items-center justify-center bg-grouped">
+          <div key={slot.key} className="overflow-hidden rounded-lg border border-line bg-white">
+            <div className="flex h-32 items-center justify-center bg-grouped">
               {slot.url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={slot.url} alt={slot.label} className="h-full w-full object-cover" />
@@ -67,8 +84,13 @@ export default function VehicleImageManager({ entry: initialEntry }: { entry: Ve
               )}
             </div>
             <div className="p-2">
-              <p className="truncate text-xs font-medium text-ink">{slot.label}</p>
-              <div className="mt-1.5 flex gap-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-xs font-medium text-ink">{slot.label}</p>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${slot.url ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                  {slot.url ? "Ready" : "Needed"}
+                </span>
+              </div>
+              <div className="mt-2 flex gap-1.5">
                 <input
                   ref={(el) => {
                     fileInputs.current[slot.key] = el;
@@ -87,7 +109,7 @@ export default function VehicleImageManager({ entry: initialEntry }: { entry: Ve
                   disabled={busySlot === slot.key}
                   className="flex-1 rounded-md bg-ink py-1 text-[11px] font-semibold text-white disabled:opacity-40"
                 >
-                  {busySlot === slot.key ? "…" : slot.url ? "Replace" : "Upload"}
+                  {busySlot === slot.key ? "Saving" : slot.url ? "Replace" : "Upload"}
                 </button>
                 {slot.url && (
                   <button
@@ -99,10 +121,20 @@ export default function VehicleImageManager({ entry: initialEntry }: { entry: Ve
                   </button>
                 )}
               </div>
+              {!slot.url && (
+                <a
+                  href={OPENART_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1.5 block rounded-md border border-line py-1 text-center text-[11px] font-medium text-muted hover:bg-grouped"
+                >
+                  Create image
+                </a>
+              )}
             </div>
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }

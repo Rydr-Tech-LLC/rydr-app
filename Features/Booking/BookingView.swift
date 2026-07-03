@@ -703,24 +703,21 @@ struct BookingView: View {
             }
 
             if showStopField {
-                bookingField(title: "Add stop", text: $stopText, icon: "plus.circle")
+                bookingField(
+                    title: "Add stop",
+                    text: $stopText,
+                    icon: "plus.circle",
+                    onClear: {
+                        stopText = ""
+                        stopCompleter.setQuery("")
+                        showStopField = false
+                        focusedField = nil
+                    }
+                )
                     .focused($focusedField, equals: .stop)
                     .onChange(of: stopText) { _, new in
                         stopCompleter.setRegion(region)
                         stopCompleter.setQuery(new)
-                    }
-                    .overlay(alignment: .trailing) {
-                        Button {
-                            stopText = ""
-                            showStopField = false
-                            focusedField = nil
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.trailing, 10)
-                        }
-                        .buttonStyle(.plain)
                     }
                 if showStopSuggestions {
                     suggestionsList(for: stopCompleter) { completion in
@@ -731,7 +728,12 @@ struct BookingView: View {
             }
 
             // Dropoff
-            bookingField(title: "Dropoff", text: $dropoffText, icon: "flag.checkered")
+            bookingField(
+                title: "Dropoff",
+                text: $dropoffText,
+                icon: "flag.checkered",
+                onClear: clearDropoffSelection
+            )
                 .focused($focusedField, equals: .dropoff)
                 .onChange(of: dropoffText) { _, new in
                     if new != dropoffResolvedAddress {
@@ -741,22 +743,6 @@ struct BookingView: View {
                     }
                     dropoffCompleter.setRegion(region); dropoffCompleter.setQuery(new)
                 }
-                .overlay(alignment: .trailing) {
-                    if !dropoffText.isEmpty {
-                        Button {
-                            dropoffText = ""
-                            dropoffCoordinate = nil
-                            dropoffResolvedAddress = ""
-                            clearRoutePreview()
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.trailing, 10)
-                        }
-                        .buttonStyle(.plain)
-                    }
-            }
             if showDropoffSuggestions {
                 suggestionsList(for: dropoffCompleter) { completion in
                     Task { await selectDropoff(completion) }
@@ -793,7 +779,8 @@ struct BookingView: View {
         title: String,
         text: Binding<String>,
         icon: String,
-        onIconTap: (() -> Void)? = nil
+        onIconTap: (() -> Void)? = nil,
+        onClear: (() -> Void)? = nil
     ) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
@@ -808,6 +795,18 @@ struct BookingView: View {
                 .onSubmit {
                     dismissBookingKeyboard()
                 }
+
+            if let onClear, !text.wrappedValue.isEmpty {
+                Button(action: onClear) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear \(title)")
+            }
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color(.secondarySystemGroupedBackground).opacity(0.72)))
@@ -1214,6 +1213,16 @@ struct BookingView: View {
         routePolyline = nil
         routeErrorMessage = nil
         routeRequestID = UUID()
+    }
+
+    private func clearDropoffSelection() {
+        dropoffText = ""
+        dropoffCoordinate = nil
+        dropoffResolvedAddress = ""
+        dropoffCompleter.setQuery("")
+        requestValidationMessage = nil
+        focusedField = nil
+        clearRoutePreview()
     }
 
     private func updateSearchRegion(_ newRegion: MKCoordinateRegion) {

@@ -55,15 +55,15 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var vehicleImageURL: String?
     @Published var vehicleColor: String?
     @Published var vehicleSummaryText: String?
+    @Published var vehicleDetailText: String?
+    @Published var vehiclePlateText: String?
+    @Published var insuranceStatus: String = "missing"
+    @Published var registrationStatus: String = "missing"
     @Published var profilePhotoReviewStatus: String = "approved"
     @Published var isUploadingProfilePhoto: Bool = false
     @Published var profilePhotoMessage: String?
     @Published var accountDeletionMessage: String?
     @Published var isRequestingAccountDeletion: Bool = false
-    #if DEBUG
-    @Published var debugApprovalBypassEnabled: Bool = DriverApprovalDebugBypass.isEnabled
-    #endif
-
     static let availableRideTypes = RydrRideTierCatalog.orderedRideTypes
 
     var isReadyToGoOnline: Bool {
@@ -84,6 +84,8 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private var requestListener: ListenerRegistration?
     private var mapRequestBlipListener: ListenerRegistration?
     private var activeRideListener: ListenerRegistration?
+    private var lastTripTelemetryAt: Date?
+    private var lastTripTelemetryLocation: CLLocation?
     #if DEBUG
     private var didCreateMockRideThisOnlineSession = false
 
@@ -245,6 +247,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             #if DEBUG
             createMockRideRequestIfNeeded()
             #endif
+            recordDriverPresenceEvent(online: true)
         } else {
             isSearchingForRides = false
             #if DEBUG
@@ -253,6 +256,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             stopPushingDriverPresence()
             stopRequestListener()
             updateDriverPresence(online: false)
+            recordDriverPresenceEvent(online: false)
             pendingRequests = []
             statusMessage = "Offline. You will not receive new ride requests."
         }
@@ -275,35 +279,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private func applyAtlantaPilotLocation() {
         lastLocation = DriverMapDefaults.pilotLocation
         mapRegion = DriverMapDefaults.pilotRegion
-    }
-    #endif
-
-    #if DEBUG
-    func setDebugApprovalBypass(_ enabled: Bool) {
-        DriverApprovalDebugBypass.setEnabled(enabled)
-        debugApprovalBypassEnabled = enabled
-        canGoOnline = enabled || canGoOnline
-
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        let payload: [String: Any] = [
-            "uid": uid,
-            "requestType": "debugApprovalBypass",
-            "requested": enabled,
-            "source": "driver-ios-debug",
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-
-        db.collection("driverApprovalRequests").document(uid).setData(payload, merge: true) { [weak self] error in
-            DispatchQueue.main.async {
-                if let error {
-                    self?.statusMessage = "Could not submit test approval request: \(error.localizedDescription)"
-                } else {
-                    self?.statusMessage = enabled
-                        ? "Local simulator approval enabled. Backend approval request recorded for admin review."
-                        : "Local simulator approval disabled. Backend approval request updated."
-                }
-            }
-        }
     }
     #endif
 
@@ -1057,12 +1032,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             }
 
             DispatchQueue.main.async {
-                #if DEBUG
-                self.debugApprovalBypassEnabled = DriverApprovalDebugBypass.isEnabled
-                self.canGoOnline = DriverApprovalDebugBypass.isApproved(data: data)
-                #else
                 self.canGoOnline = DriverApprovalPolicy.isApproved(data: data)
-                #endif
                 self.applyVehicleEligibility(from: data)
                 self.profilePhotoURL = data["profilePhotoURL"] as? String
                 self.pendingProfilePhotoURL = data["pendingProfilePhotoURL"] as? String
@@ -1508,6 +1478,18 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         publishPublicDriverProfile(uid: uid, displayName: Auth.auth().currentUser?.displayName ?? "Rydr Driver", online: online)
     }
 
+    private func recordDriverPresenceEvent(online: Bool) {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        db.collection("driverPresenceEvents").addDocument(data: [
+            "driverId": uid,
+            "isOnline": online,
+            "availabilityStatus": online ? "available" : "offline",
+            "selectedRideTypes": Array(selectedRideTypes).sorted(),
+            "hasActiveRide": activeRide != nil,
+            "createdAt": FieldValue.serverTimestamp()
+        ])
+    }
+
     private func publishPublicDriverProfile(uid: String, displayName: String, online: Bool) {
         var payload: [String: Any] = [
             "uid": uid,
@@ -1572,9 +1554,23 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             let year = Self.vehicleYearString(vehicle["year"])
             let summary = [year, make, model].filter { !$0.isEmpty }.joined(separator: " ")
             vehicleSummaryText = summary.isEmpty ? nil : summary
+            vehiclePlateText = vehicle["plate"] as? String
+            let trim = vehicle["trim"] as? String
+            let bodyStyle = vehicle["bodyStyle"] as? String
+            vehicleDetailText = [trim, bodyStyle].compactMap { value in
+                guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                return value
+            }.joined(separator: " ")
+            if vehicleDetailText?.isEmpty == true {
+                vehicleDetailText = nil
+            }
         } else {
             vehicleSummaryText = nil
+            vehicleDetailText = nil
+            vehiclePlateText = nil
         }
+        insuranceStatus = data["insuranceStatus"] as? String ?? "missing"
+        registrationStatus = data["registrationStatus"] as? String ?? "missing"
 
         let vehicleEligibility = vehicle.map {
             DriverVehicleEligibility.evaluate(
@@ -1591,13 +1587,13 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         let legacyRideTypes = data["rideTypes"] as? [String]
 
         let baseRideTypes: [String]
-        if let vehicleEligibility {
-            baseRideTypes = vehicleEligibility.expandedEligibleRideTypes(with: manuallyApprovedRideTypes)
-        } else if let storedQualifiedRideTypes, !storedQualifiedRideTypes.isEmpty {
+        if let storedQualifiedRideTypes, !storedQualifiedRideTypes.isEmpty {
             baseRideTypes = RydrRideTierCatalog.expandedRideTypes(
                 for: storedQualifiedRideTypes + manuallyApprovedRideTypes,
                 hasXLVehicle: normalizeRideTypes(storedQualifiedRideTypes).contains("Rydr XL")
             )
+        } else if let vehicleEligibility {
+            baseRideTypes = vehicleEligibility.expandedEligibleRideTypes(with: manuallyApprovedRideTypes)
         } else if let legacyRideTypes, !legacyRideTypes.isEmpty {
             baseRideTypes = normalizeRideTypes(legacyRideTypes)
         } else if let vehicle = data["vehicle"] as? [String: Any] {
@@ -1709,6 +1705,33 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             ],
             "updatedAt": FieldValue.serverTimestamp()
         ], merge: true)
+        recordTripTelemetryIfNeeded(ride: ride, location: location)
+    }
+
+    private func recordTripTelemetryIfNeeded(ride: DriverActiveRide, location: CLLocation) {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+
+        let now = Date()
+        let movedMeters = lastTripTelemetryLocation?.distance(from: location) ?? .greatestFiniteMagnitude
+        if let lastTripTelemetryAt, now.timeIntervalSince(lastTripTelemetryAt) < 30, movedMeters < 100 {
+            return
+        }
+
+        lastTripTelemetryAt = now
+        lastTripTelemetryLocation = location
+
+        db.collection("rides").document(ride.id).collection("telemetry").addDocument(data: [
+            "rideId": ride.id,
+            "driverId": uid,
+            "riderId": ride.riderId,
+            "status": ride.status,
+            "lat": location.coordinate.latitude,
+            "lng": location.coordinate.longitude,
+            "speed": location.speed,
+            "course": location.course,
+            "horizontalAccuracy": location.horizontalAccuracy,
+            "recordedAt": FieldValue.serverTimestamp()
+        ])
     }
 
     private static func driverMessage(for status: String) -> String {

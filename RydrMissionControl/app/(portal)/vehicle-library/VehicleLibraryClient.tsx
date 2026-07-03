@@ -4,7 +4,8 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import type { VehicleLibraryEntry } from "@/lib/vehicleLibrary";
 
-const TOTAL_COLORS = 11;
+const VEHICLE_COLORS = ["Black", "White", "Silver", "Gray", "Blue", "Red", "Green", "Brown", "Gold", "Yellow", "Orange"] as const;
+const OPENART_URL = "https://openart.ai/suite/create-image/";
 
 export default function VehicleLibraryClient({
   initialEntries,
@@ -25,12 +26,11 @@ export default function VehicleLibraryClient({
   const [error, setError] = useState<string | null>(null);
 
   const stats = useMemo(() => {
-    const missing = initialEntries.filter((e) => !e.defaultImage && Object.keys(e.colorImages ?? {}).length === 0).length;
-    const incomplete = initialEntries.filter(
-      (e) => (e.availableColors?.length ?? 0) > 0 && (e.availableColors?.length ?? 0) < TOTAL_COLORS
-    ).length;
-    return { total: initialEntries.length, missing, incomplete };
-  }, [initialEntries]);
+    const missing = entries.filter((entry) => imageCount(entry) === 0).length;
+    const incomplete = entries.filter((entry) => imageCount(entry) > 0 && imageCount(entry) < VEHICLE_COLORS.length + 1).length;
+    const coveredColors = entries.reduce((sum, entry) => sum + (entry.availableColors?.length ?? 0), 0);
+    return { total: entries.length, missing, incomplete, coveredColors };
+  }, [entries]);
 
   function runSearch() {
     setError(null);
@@ -43,11 +43,11 @@ export default function VehicleLibraryClient({
 
     startTransition(async () => {
       const res = await fetch(`/api/vehicle-library?${params.toString()}`);
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError("Search failed.");
+        setError(body.error ?? "Search failed.");
         return;
       }
-      const body = await res.json();
       setEntries(body.entries ?? []);
     });
   }
@@ -63,110 +63,156 @@ export default function VehicleLibraryClient({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard label="Total entries" value={stats.total} />
-        <StatCard label="Missing all images" value={stats.missing} tone={stats.missing > 0 ? "warn" : "ok"} />
-        <StatCard label="Incomplete color sets" value={stats.incomplete} tone={stats.incomplete > 0 ? "warn" : "ok"} />
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatCard label="Library entries" value={stats.total} />
+        <StatCard label="Missing images" value={stats.missing} tone={stats.missing > 0 ? "warn" : "ok"} />
+        <StatCard label="Needs color coverage" value={stats.incomplete} tone={stats.incomplete > 0 ? "warn" : "ok"} />
+        <StatCard label="Color images stored" value={stats.coveredColors} />
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-line bg-white p-4 shadow-sm">
-        <Field label="Make">
-          <input value={make} onChange={(e) => setMake(e.target.value)} placeholder="Toyota" className={inputClass} />
-        </Field>
-        <Field label="Model">
-          <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Camry" className={inputClass} />
-        </Field>
-        <Field label="Year">
-          <input value={year} onChange={(e) => setYear(e.target.value)} placeholder="2022" className={inputClass} />
-        </Field>
-        <label className="flex items-center gap-1.5 pb-1.5 text-xs font-medium text-muted">
-          <input type="checkbox" checked={missingOnly} onChange={(e) => setMissingOnly(e.target.checked)} />
-          Missing images
-        </label>
-        <label className="flex items-center gap-1.5 pb-1.5 text-xs font-medium text-muted">
-          <input type="checkbox" checked={incompleteOnly} onChange={(e) => setIncompleteOnly(e.target.checked)} />
-          Incomplete colors
-        </label>
-        <button
-          onClick={runSearch}
-          disabled={isPending}
-          className="rounded-md bg-ink px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-        >
-          {isPending ? "Searching…" : "Search"}
-        </button>
-        <button onClick={resetSearch} className="rounded-md border border-line px-3 py-1.5 text-xs font-medium text-muted">
-          Reset
-        </button>
-        <Link href="/vehicle-library/new" className="ml-auto rounded-md bg-rydr-burgundy px-3 py-1.5 text-xs font-semibold text-white">
-          + Add Vehicle
-        </Link>
+      <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Make">
+            <input value={make} onChange={(event) => setMake(event.target.value)} placeholder="Search make" className={inputClass} />
+          </Field>
+          <Field label="Model">
+            <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="Search model" className={inputClass} />
+          </Field>
+          <Field label="Year">
+            <input value={year} onChange={(event) => setYear(event.target.value)} inputMode="numeric" placeholder="Optional" className={inputClass} />
+          </Field>
+          <label className="flex items-center gap-2 pb-2 text-xs font-medium text-muted">
+            <input type="checkbox" checked={missingOnly} onChange={(event) => setMissingOnly(event.target.checked)} />
+            Missing images
+          </label>
+          <label className="flex items-center gap-2 pb-2 text-xs font-medium text-muted">
+            <input type="checkbox" checked={incompleteOnly} onChange={(event) => setIncompleteOnly(event.target.checked)} />
+            Incomplete colors
+          </label>
+          <button
+            onClick={runSearch}
+            disabled={isPending}
+            className="rounded-md bg-ink px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            {isPending ? "Searching" : "Search"}
+          </button>
+          <button onClick={resetSearch} className="rounded-md border border-line px-4 py-2 text-xs font-medium text-muted">
+            Reset
+          </button>
+          <div className="ml-auto flex gap-2">
+            <a
+              href={OPENART_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md border border-rydr-burgundy px-4 py-2 text-xs font-semibold text-rydr-burgundy hover:bg-red-50"
+            >
+              Create image
+            </a>
+            <Link href="/vehicle-library/new" className="rounded-md bg-rydr-burgundy px-4 py-2 text-xs font-semibold text-white">
+              Add vehicle
+            </Link>
+          </div>
+        </div>
+        {error && <p className="mt-3 text-xs text-rydr-red">{error}</p>}
       </div>
 
-      {error && <p className="text-xs text-rydr-red">{error}</p>}
-
-      <div className="overflow-hidden rounded-lg border border-line bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="border-b border-line bg-grouped text-left text-xs font-medium text-muted">
-            <tr>
-              <th className="px-4 py-2.5">Vehicle</th>
-              <th className="px-4 py-2.5">Years</th>
-              <th className="px-4 py-2.5">Trim</th>
-              <th className="px-4 py-2.5">Body Style</th>
-              <th className="px-4 py-2.5">Colors</th>
-              <th className="px-4 py-2.5">Image Status</th>
-              <th className="px-4 py-2.5" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
-            {entries.map((entry) => {
-              const colorCount = entry.availableColors?.length ?? 0;
-              const hasAnyImage = Boolean(entry.defaultImage) || colorCount > 0;
-              return (
-                <tr key={entry.vehicleId} className="hover:bg-grouped/60">
-                  <td className="px-4 py-2.5 font-medium text-ink">
-                    {entry.make} {entry.model}
-                  </td>
-                  <td className="px-4 py-2.5 text-muted">
-                    {entry.yearStart === entry.yearEnd ? entry.yearStart : `${entry.yearStart}–${entry.yearEnd}`}
-                  </td>
-                  <td className="px-4 py-2.5 text-muted">{entry.trim ?? "—"}</td>
-                  <td className="px-4 py-2.5 text-muted">{entry.bodyStyle}</td>
-                  <td className="px-4 py-2.5 text-muted">
-                    {colorCount}/{TOTAL_COLORS}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {!hasAnyImage ? (
-                      <Badge tone="danger">No images</Badge>
-                    ) : colorCount < TOTAL_COLORS ? (
-                      <Badge tone="warn">Incomplete</Badge>
-                    ) : (
-                      <Badge tone="ok">Complete</Badge>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <Link href={`/vehicle-library/${entry.vehicleId}`} className="text-xs font-semibold text-rydr-burgundy hover:underline">
-                      Manage
-                    </Link>
-                  </td>
-                </tr>
-              );
-            })}
-            {entries.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted">
-                  No vehicle library entries match these filters.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className="grid gap-3 xl:grid-cols-2">
+        {entries.map((entry) => (
+          <VehicleCard key={entry.vehicleId} entry={entry} />
+        ))}
+        {entries.length === 0 && (
+          <div className="rounded-lg border border-dashed border-line bg-white p-8 text-center text-sm text-muted">
+            No vehicle library entries match these filters.
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-const inputClass = "w-32 rounded-md border border-line bg-grouped px-2.5 py-1.5 text-xs outline-none focus:border-ink";
+const inputClass = "w-40 rounded-md border border-line bg-grouped px-3 py-2 text-xs outline-none focus:border-ink";
+
+function VehicleCard({ entry }: { entry: VehicleLibraryEntry }) {
+  const count = imageCount(entry);
+  const status = count === 0 ? "Missing images" : count < VEHICLE_COLORS.length + 1 ? "Needs colors" : "Complete";
+  const statusTone = count === 0 ? "danger" : count < VEHICLE_COLORS.length + 1 ? "warn" : "ok";
+  const previewUrl = entry.defaultImageUrl ?? firstColorImage(entry);
+
+  return (
+    <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
+      <div className="flex gap-4">
+        <div className="flex h-28 w-36 flex-shrink-0 items-center justify-center overflow-hidden rounded-md border border-line bg-grouped">
+          {previewUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={previewUrl} alt={`${entry.make} ${entry.model}`} className="h-full w-full object-cover" />
+          ) : (
+            <span className="px-4 text-center text-[11px] font-medium text-muted">No image</span>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold text-ink">
+                {entry.yearStart === entry.yearEnd ? entry.yearStart : `${entry.yearStart}-${entry.yearEnd}`} {entry.make} {entry.model}
+              </h2>
+              <p className="mt-1 truncate text-xs text-muted">
+                {[entry.trim, entry.bodyStyle].filter(Boolean).join(" · ") || "No trim details"}
+              </p>
+            </div>
+            <Badge tone={statusTone}>{status}</Badge>
+          </div>
+
+          <div className="mt-3">
+            <div className="flex items-center justify-between text-[11px] text-muted">
+              <span>Color coverage</span>
+              <span>{entry.availableColors?.length ?? 0}/{VEHICLE_COLORS.length}</span>
+            </div>
+            <div className="mt-1 grid grid-cols-11 gap-1">
+              {VEHICLE_COLORS.map((color) => (
+                <div
+                  key={color}
+                  title={color}
+                  className={`h-2 rounded-full ${entry.colorImages?.[color] ? "bg-rydr-burgundy" : "bg-line"}`}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {(entry.eligibleRideTypes ?? []).length > 0 ? (
+              entry.eligibleRideTypes?.map((rideType) => <Badge key={rideType} tone="neutral">{rideType}</Badge>)
+            ) : (
+              <Badge tone="warn">Manual eligibility</Badge>
+            )}
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <Link href={`/vehicle-library/${entry.vehicleId}`} className="rounded-md bg-ink px-3 py-1.5 text-xs font-semibold text-white">
+              Manage
+            </Link>
+            <a
+              href={OPENART_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-md border border-line px-3 py-1.5 text-xs font-medium text-muted hover:bg-grouped"
+            >
+              Create image
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function imageCount(entry: VehicleLibraryEntry) {
+  return (entry.defaultImage ? 1 : 0) + Object.keys(entry.colorImages ?? {}).length;
+}
+
+function firstColorImage(entry: VehicleLibraryEntry) {
+  return Object.values(entry.colorImageUrls ?? {}).find(Boolean) ?? null;
+}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -181,13 +227,19 @@ function StatCard({ label, value, tone }: { label: string; value: number; tone?:
   return (
     <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
       <p className="text-[11px] font-medium text-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold ${tone === "warn" ? "text-amber-600" : "text-ink"}`}>{value}</p>
+      <p className={`mt-1 text-2xl font-semibold ${tone === "warn" ? "text-amber-600" : tone === "ok" ? "text-emerald-600" : "text-ink"}`}>{value}</p>
     </div>
   );
 }
 
-function Badge({ tone, children }: { tone: "ok" | "warn" | "danger"; children: React.ReactNode }) {
+function Badge({ tone, children }: { tone: "ok" | "warn" | "danger" | "neutral"; children: React.ReactNode }) {
   const styles =
-    tone === "ok" ? "bg-emerald-50 text-emerald-700" : tone === "warn" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-rydr-red";
+    tone === "ok"
+      ? "bg-emerald-50 text-emerald-700"
+      : tone === "warn"
+        ? "bg-amber-50 text-amber-700"
+        : tone === "danger"
+          ? "bg-red-50 text-rydr-red"
+          : "bg-grouped text-muted";
   return <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${styles}`}>{children}</span>;
 }

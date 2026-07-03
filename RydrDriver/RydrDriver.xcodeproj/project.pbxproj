@@ -182,6 +182,7 @@
 				8B2D1EEE2E98039B00229527 /* Sources */,
 				8B2D1EEF2E98039B00229527 /* Frameworks */,
 				8B2D1EF02E98039B00229527 /* Resources */,
+				8B2459502E981A200093D5YM /* Upload dSYMs to Firebase Crashlytics */,
 			);
 			buildRules = (
 			);
@@ -342,6 +343,33 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		8B2459502E981A200093D5YM /* Upload dSYMs to Firebase Crashlytics */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${PRODUCT_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Info.plist",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GoogleService-Info.plist",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)",
+			);
+			name = "Upload dSYMs to Firebase Crashlytics";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"${CONFIGURATION}\" != \"Release\" ] || [ \"${ACTION}\" != \"install\" ]; then\n  echo \"Skipping Crashlytics dSYM upload for ${CONFIGURATION}/${ACTION}.\"\n  exit 0\nfi\n\nCRASHLYTICS_RUN_SCRIPT=\"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\n\nif [ ! -x \"${CRASHLYTICS_RUN_SCRIPT}\" ]; then\n  echo \"error: Firebase Crashlytics run script not found at ${CRASHLYTICS_RUN_SCRIPT}\"\n  exit 1\nfi\n\n\"${CRASHLYTICS_RUN_SCRIPT}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		8B2D1EEE2E98039B00229527 /* Sources */ = {

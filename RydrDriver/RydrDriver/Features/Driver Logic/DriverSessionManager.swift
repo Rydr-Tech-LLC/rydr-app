@@ -11,34 +11,15 @@ import FirebaseAuth
 import FirebaseFirestore
 
 enum DriverApprovalPolicy {
-    private static let approvedStatuses = ["passed", "clear", "approved", "complete", "completed"]
-
     static func isApproved(data: [String: Any]) -> Bool {
-        let status = (data["backgroundCheckStatus"] as? String)?.lowercased() ?? "pending"
-        let passed = (data["backgroundCheckPassed"] as? Bool) ?? false
-        let allowedByString = approvedStatuses.contains(status)
-        return passed || allowedByString
+        let status = (data["driverApprovalStatus"] as? String)?.lowercased()
+            ?? (data["approvalStatus"] as? String)?.lowercased()
+            ?? "pending"
+        let approvedByMissionControl = status == "approved"
+        let legacyApproved = (data["isApproved"] as? Bool) ?? false
+        return approvedByMissionControl || legacyApproved
     }
 }
-
-#if DEBUG
-enum DriverApprovalDebugBypass {
-    static let defaultsKey = "debugDriverApprovalBypassEnabled"
-
-    static var isEnabled: Bool {
-        UserDefaults.standard.bool(forKey: defaultsKey)
-    }
-
-    static func setEnabled(_ enabled: Bool) {
-        UserDefaults.standard.set(enabled, forKey: defaultsKey)
-    }
-
-    static func isApproved(data: [String: Any]) -> Bool {
-        if isEnabled { return true }
-        return DriverApprovalPolicy.isApproved(data: data)
-    }
-}
-#endif
 
 final class DriverSessionManager: ObservableObject {
     @Published var driverName: String = ""
@@ -89,11 +70,7 @@ final class DriverSessionManager: ObservableObject {
             guard let self = self else { return }
             guard error == nil, let data = snapshot?.data() else { return }
             DispatchQueue.main.async {
-                #if DEBUG
-                self.canGoOnline = DriverApprovalDebugBypass.isApproved(data: data)
-                #else
                 self.canGoOnline = DriverApprovalPolicy.isApproved(data: data)
-                #endif
             }
         }
     }

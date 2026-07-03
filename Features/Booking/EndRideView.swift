@@ -6,10 +6,18 @@
 //
 import SwiftUI
 
+struct DriverFeedbackDraft {
+    let rating: Int?
+    let compliments: [String]
+    let feedback: String
+    let favoriteDriver: Bool
+}
+
 struct EndRideView: View {
     let ride: Receipt?
     let onDone: () -> Void
-    var onTipSelected: (Int) -> Void = { _ in }
+    var onTipSelected: (Int) async throws -> Void = { _ in }
+    var onFeedbackSubmitted: (DriverFeedbackDraft) async throws -> Void = { _ in }
     /// The receipt screen observes `paymentStatus`/`paymentFailureReason`
     /// and shows a "Payment Failed" card with a Retry action instead of
     /// pretending the charge went through. Defaults to a fresh, disconnected
@@ -25,6 +33,8 @@ struct EndRideView: View {
     @State private var selectedTip: Int = 0
     @State private var extraNotes: String = ""
     @State private var isFavoriteDriver = false
+    @State private var isSubmittingFeedback = false
+    @State private var feedbackError: String?
 
     private let complimentSet: [RideCompliment] = [
         .init(title: "Clean car", icon: "car.fill"),
@@ -58,11 +68,12 @@ struct EndRideView: View {
                         if phase == .receipt {
                             onDone()
                         } else {
-                            submitFeedback()
+                            Task { await submitFeedback(skipTip: true) }
                         }
                     }
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
+                    .disabled(isSubmittingFeedback)
                 }
             }
         }
@@ -83,12 +94,29 @@ struct EndRideView: View {
             favoriteDriverCard
             feedbackCard
 
-            Button(action: submitFeedback) {
-                Text("Submit")
-                    .font(.headline.weight(.bold))
-                    .frame(maxWidth: .infinity)
+            if let feedbackError {
+                Text(feedbackError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Button {
+                Task { await submitFeedback() }
+            } label: {
+                HStack(spacing: 8) {
+                    if isSubmittingFeedback {
+                        ProgressView()
+                            .tint(.white)
+                    }
+                    Text(isSubmittingFeedback ? "Submitting..." : "Submit")
+                        .font(.headline.weight(.bold))
+                }
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(EndRideGradientButton())
+            .disabled(isSubmittingFeedback || !canSubmitFeedback)
+            .opacity(isSubmittingFeedback || !canSubmitFeedback ? 0.65 : 1)
 
             safetyNote
         }
@@ -252,6 +280,12 @@ struct EndRideView: View {
                 ForEach(tipOptions, id: \.self) { cents in
                     tipButton(cents)
                 }
+            }
+
+            if let message = tipReadinessMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .cardStyle()
@@ -587,8 +621,52 @@ struct EndRideView: View {
         ride?.addingTip(cents: selectedTip)
     }
 
-    private func submitFeedback() {
-        onTipSelected(selectedTip)
+    private var canSubmitFeedback: Bool {
+        selectedTip == 0 || rideManager.paymentStatus == "succeeded"
+    }
+
+    private var tipReadinessMessage: String? {
+        guard selectedTip > 0 else { return nil }
+        switch rideManager.paymentStatus {
+        case "succeeded":
+            return nil
+        case "failed":
+            return "Ride payment failed. Select No tip to continue, then retry the ride payment from your receipt."
+        default:
+            return "Finish the ride payment before adding a tip. Select No tip to continue without one."
+        }
+    }
+
+    @MainActor
+    private func submitFeedback(skipTip: Bool = false) async {
+        guard !isSubmittingFeedback else { return }
+        let tipCents = skipTip ? 0 : selectedTip
+        if skipTip {
+            selectedTip = 0
+        }
+        guard tipCents == 0 || rideManager.paymentStatus == "succeeded" else {
+            feedbackError = tipReadinessMessage
+            return
+        }
+
+        isSubmittingFeedback = true
+        feedbackError = nil
+        defer { isSubmittingFeedback = false }
+
+        do {
+            let feedback = DriverFeedbackDraft(
+                rating: rating > 0 ? rating : nil,
+                compliments: Array(selectedCompliments).sorted(),
+                feedback: extraNotes,
+                favoriteDriver: isFavoriteDriver
+            )
+            try await onFeedbackSubmitted(feedback)
+            try await onTipSelected(tipCents)
+        } catch {
+            feedbackError = error.localizedDescription
+            return
+        }
+
         withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
             phase = .receipt
         }

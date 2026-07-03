@@ -18,6 +18,26 @@ export default function DriverActions({
   const [reason, setReason] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  async function deferBackgroundCheck() {
+    setLoading("background_bypass");
+    setError(null);
+    try {
+      const response = await fetch(`/api/drivers/${uid}/background-bypass`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reason || undefined })
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setError(body.error ?? "Something went wrong.");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setLoading(null);
+    }
+  }
+
   async function submit(decision: "approved" | "needs_attention" | "rejected") {
     setLoading(decision);
     setError(null);
@@ -80,7 +100,7 @@ export default function DriverActions({
       <textarea
         value={reason}
         onChange={(e) => setReason(e.target.value)}
-        placeholder="Optional reason (used for Needs Attention / Reject)"
+        placeholder="Optional reason (used for beta deferral / Needs Attention / Reject)"
         className="mb-3 w-full rounded-md border border-line bg-grouped px-3 py-2 text-xs outline-none focus:border-ink"
         rows={2}
       />
@@ -88,6 +108,13 @@ export default function DriverActions({
       {error && <p className="mb-2 text-xs text-rydr-red">{error}</p>}
 
       <div className="flex flex-col gap-2">
+        <button
+          disabled={loading !== null}
+          onClick={deferBackgroundCheck}
+          className="rounded-md bg-slate-900 py-2 text-xs font-semibold text-white transition disabled:opacity-40"
+        >
+          {loading === "background_bypass" ? "Saving…" : "Defer Background Check for Beta"}
+        </button>
         <button
           disabled={!canApprove || loading !== null}
           onClick={() => submit("approved")}

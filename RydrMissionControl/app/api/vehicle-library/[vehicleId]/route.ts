@@ -29,16 +29,28 @@ export async function PATCH(request: NextRequest, { params }: { params: { vehicl
 
   const body = await request.json().catch(() => ({}));
   const bodyStyle: VehicleBodyStyle = VEHICLE_BODY_STYLES.includes(body.bodyStyle) ? body.bodyStyle : existing.bodyStyle;
+  const yearStart = Number.isFinite(Number(body.yearStart)) ? Number(body.yearStart) : existing.yearStart;
+  const yearEnd = Number.isFinite(Number(body.yearEnd)) ? Number(body.yearEnd) : existing.yearEnd;
+  if (
+    !Number.isInteger(yearStart) ||
+    !Number.isInteger(yearEnd) ||
+    yearStart < 1980 ||
+    yearEnd > 2100 ||
+    yearEnd < yearStart
+  ) {
+    return NextResponse.json({ error: "`yearStart`/`yearEnd` must be valid years between 1980 and 2100 with yearEnd >= yearStart." }, { status: 400 });
+  }
 
   const entry = await upsertVehicleLibraryEntry(
     {
       vehicleId: params.vehicleId,
       make: typeof body.make === "string" && body.make.trim() ? body.make.trim() : existing.make,
       model: typeof body.model === "string" && body.model.trim() ? body.model.trim() : existing.model,
-      yearStart: Number.isFinite(Number(body.yearStart)) ? Number(body.yearStart) : existing.yearStart,
-      yearEnd: Number.isFinite(Number(body.yearEnd)) ? Number(body.yearEnd) : existing.yearEnd,
+      yearStart,
+      yearEnd,
       trim: typeof body.trim === "string" ? (body.trim.trim() || null) : existing.trim,
-      bodyStyle
+      bodyStyle,
+      eligibleRideTypes: Array.isArray(body.eligibleRideTypes) ? body.eligibleRideTypes : existing.eligibleRideTypes
     },
     session.uid
   );

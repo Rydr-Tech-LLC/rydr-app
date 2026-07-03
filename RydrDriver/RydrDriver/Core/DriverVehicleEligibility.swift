@@ -198,6 +198,14 @@ struct DriverVehicleEligibility {
         eligibleRideTypes.isEmpty
     }
 
+    static func vehicleClass(for rideTypes: [String]) -> String {
+        let canonical = Set(rideTypes.map(RydrRideTierCatalog.canonicalRideType))
+        if canonical.contains("Rydr XL") { return "xl" }
+        if canonical.contains("Rydr Eco") { return "electric" }
+        if canonical.contains("Rydr Go") { return "go" }
+        return "manual_review"
+    }
+
     private var normalizedMake: String {
         Self.normalized(make)
     }

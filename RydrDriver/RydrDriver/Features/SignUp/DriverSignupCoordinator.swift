@@ -214,7 +214,10 @@ struct DriverSignupCoordinator: View {
                             year: decodedVehicle.year,
                             fuelType: decodedVehicle.fuelType.rawValue
                         )
-                        let eligibleRideTypes = eligibility.eligibleRideTypes
+                        let libraryRideTypes = RydrRideTierCatalog.normalizedRideTypes(vehicleImageInfo?.eligibleRideTypes ?? [])
+                        let eligibleRideTypes = libraryRideTypes.isEmpty ? eligibility.eligibleRideTypes : libraryRideTypes
+                        let vehicleClass = libraryRideTypes.isEmpty ? eligibility.vehicleClass : DriverVehicleEligibility.vehicleClass(for: eligibleRideTypes)
+                        let requiresManualReview = libraryRideTypes.isEmpty ? eligibility.requiresManualReview : false
                         var tierRates: [String: Any] = [:]
                         for rideType in eligibleRideTypes {
                             let key = RydrRideTierCatalog.canonicalRideType(rideType)
@@ -222,13 +225,14 @@ struct DriverSignupCoordinator: View {
                         }
                         upsertDriver([
                             "vehicle": [
-                                "class": eligibility.vehicleClass,
+                                "class": vehicleClass,
                                 "plate": plateNumber
                             ],
                             "vehicleEligibility": [
                                 "rideTypes": eligibleRideTypes,
-                                "requiresManualReview": eligibility.requiresManualReview,
-                                "vehicleClass": eligibility.vehicleClass,
+                                "requiresManualReview": requiresManualReview,
+                                "vehicleClass": vehicleClass,
+                                "source": libraryRideTypes.isEmpty ? "appRules" : "vehicleLibrary",
                                 "evaluatedAt": FieldValue.serverTimestamp()
                             ],
                             "qualifiedRideTypes": eligibleRideTypes,

@@ -1,11 +1,19 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { adminDb } from "@/lib/firebaseAdmin";
-import { evaluateDriverRequirements, type DriverRecord } from "@/lib/types";
+import {
+  driverConnectStatus,
+  driverDocumentBackUrl,
+  driverDocumentUrl,
+  driverIdentityStatus,
+  evaluateDriverRequirements,
+  type DriverRecord
+} from "@/lib/types";
 import { toDateSafe, fullName } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
 import ImageViewer from "@/components/ImageViewer";
 import RequirementChecklist from "@/components/RequirementChecklist";
+import TripSafetyAnalytics from "@/components/TripSafetyAnalytics";
 import DriverActions from "./DriverActions";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +26,14 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
   const { checks, missing, canApprove } = evaluateDriverRequirements(driver);
   const createdAt = toDateSafe(driver.createdAt);
   const dob = toDateSafe(driver.dob);
+  const licenseUrl = driverDocumentUrl(driver, "license");
+  const licenseBackUrl = driverDocumentBackUrl(driver, "license");
+  const insuranceUrl = driverDocumentUrl(driver, "insurance");
+  const insuranceBackUrl = driverDocumentBackUrl(driver, "insurance");
+  const registrationUrl = driverDocumentUrl(driver, "registration");
+  const registrationBackUrl = driverDocumentBackUrl(driver, "registration");
+  const identityStatus = driverIdentityStatus(driver);
+  const connectStatus = driverConnectStatus(driver);
 
   return (
     <div className="space-y-6">
@@ -59,7 +75,8 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
               <Field label="License state" value={driver.license?.state} />
             </Grid>
             <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <ImageViewer label="License image" url={driver.license?.imageUrl} />
+              <ImageViewer label="License front" url={licenseUrl} />
+              {licenseBackUrl && licenseBackUrl !== licenseUrl && <ImageViewer label="License back" url={licenseBackUrl} />}
             </div>
           </Section>
 
@@ -122,13 +139,15 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
 
           <Section title="Insurance Information">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <ImageViewer label="Insurance card" url={driver.vehicle?.insuranceImageUrl} />
+              <ImageViewer label="Insurance card" url={insuranceUrl} />
+              {insuranceBackUrl && insuranceBackUrl !== insuranceUrl && <ImageViewer label="Insurance back" url={insuranceBackUrl} />}
             </div>
           </Section>
 
           <Section title="Registration Information">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <ImageViewer label="Registration" url={driver.vehicle?.registrationImageUrl} />
+              <ImageViewer label="Registration" url={registrationUrl} />
+              {registrationBackUrl && registrationBackUrl !== registrationUrl && <ImageViewer label="Registration back" url={registrationBackUrl} />}
             </div>
           </Section>
 
@@ -139,6 +158,10 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
                 value={driver.backgroundCheckStatus === "beta_deferred" ? "Beta Deferred" : driver.backgroundCheckStatus ?? "Not started"}
               />
               <Field
+                label="Mission Control deferral"
+                value={driver.betaBackgroundCheckBypassEnabled ? "Enabled" : "Not enabled"}
+              />
+              <Field
                 label="Beta agreement"
                 value={driver.betaAgreementAccepted ? "Accepted" : "Not accepted"}
               />
@@ -146,18 +169,27 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
                 label="Acknowledged at"
                 value={toDateSafe(driver.backgroundCheckAcknowledgedAt)?.toLocaleString() ?? "—"}
               />
+              <Field
+                label="Deferred at"
+                value={toDateSafe(driver.betaBackgroundCheckBypassedAt)?.toLocaleString() ?? "—"}
+              />
             </Grid>
             <p className="mt-2 text-[11px] text-muted">
-              Beta-deferred satisfies onboarding for now; will be replaced with real Checkr integration.
+              Mission Control may defer the background check for this 60-day beta. Final driver approval still requires
+              the Approve Driver action.
             </p>
           </Section>
+
+          <TripSafetyAnalytics uid={driver.uid} kind="driver" />
         </div>
 
         <div className="space-y-6">
           <Section title="Verification Status">
             <Grid cols={1}>
-              <Field label="Stripe Identity" value={driver.stripeIdentityStatus ?? "Not started"} />
-              <Field label="Stripe Connect" value={driver.stripeConnectStatus ?? (driver.stripeAccountId ? "Connected" : "Not started")} />
+              <Field label="Stripe Identity" value={formatStatus(identityStatus)} />
+              <Field label="Stripe Connect" value={formatStatus(connectStatus)} />
+              <Field label="Charges enabled" value={driver.stripeChargesEnabled ? "Yes" : "No"} />
+              <Field label="Payouts enabled" value={driver.stripePayoutsEnabled ? "Yes" : "No"} />
               <Field label="Beta Agreement" value={driver.betaAgreementAccepted ? "Accepted" : "Not accepted"} />
             </Grid>
           </Section>
@@ -193,4 +225,11 @@ function Field({ label, value }: { label: string; value?: string | number | null
       <p className="text-sm text-ink">{value || value === 0 ? value : "—"}</p>
     </div>
   );
+}
+
+function formatStatus(value: string) {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getVehicleLibraryEntry } from "@/lib/vehicleLibrary";
 import VehicleImageManager from "./VehicleImageManager";
 import VehicleEntryActions from "./VehicleEntryActions";
+import VehicleMetadataEditor from "./VehicleMetadataEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ export default async function VehicleLibraryEntryPage({ params }: { params: { ve
         <VehicleEntryActions vehicleId={entry.vehicleId} />
       </div>
 
+      <VehicleMetadataEditor entry={entry} />
       <VehicleImageManager entry={entry} />
     </div>
   );

@@ -8,6 +8,7 @@ import SwiftUI
 import MapKit
 import CoreLocation
 import FirebaseAuth
+import FirebaseFirestore
 
 // MARK: - Models
 struct Driver: Identifiable, Equatable {
@@ -532,6 +533,7 @@ final class RideManager: ObservableObject {
     private var cachedDropoffCoordinate: CLLocationCoordinate2D?
     private var currentServiceRideId: String?
     private var currentAppliedRydrBankCode: String?
+    private var lastCompletedDriverId: String?
     private var cachedRidePreferences: RiderRidePreferences?
     private var cachedRiderVerified = false
     private var currentBaseFare: Double = 0
@@ -832,6 +834,7 @@ final class RideManager: ObservableObject {
             backendRideId: currentServiceRideId ?? ride.id.uuidString
         )
         lastReceipt = receipt
+        lastCompletedDriverId = ride.driver.id
         history.insert(receipt, at: 0)
         let backendRideId = currentServiceRideId ?? ride.id.uuidString
         let chatContext = activeRideChatContext
@@ -860,13 +863,70 @@ final class RideManager: ObservableObject {
         }
     }
 
-    func applyTipToLastReceipt(cents: Int) {
-        guard cents >= 0, let receipt = lastReceipt else { return }
+    func applyTipToLastReceipt(cents: Int) async throws {
+        guard cents >= 0 else { throw RideTipError.invalidAmount }
+        guard let receipt = lastReceipt else { throw RideTipError.missingReceipt }
+        guard cents > 0 else { return }
+        guard let backendRideId = receipt.backendRideId else { throw RideTipError.missingRideId }
+        guard paymentStatus == "succeeded" else { throw RideTipError.ridePaymentNotSettled }
+
+        try await chargeTip(rideId: backendRideId, cents: cents)
+
         let updatedReceipt = receipt.addingTip(cents: cents)
         lastReceipt = updatedReceipt
         if let index = history.firstIndex(where: { $0.id == receipt.id }) {
             history[index] = updatedReceipt
         }
+    }
+
+    func submitDriverFeedback(_ draft: DriverFeedbackDraft) async throws {
+        guard let user = Auth.auth().currentUser else { throw RideFeedbackError.notSignedIn }
+        guard let receipt = lastReceipt else { throw RideFeedbackError.missingReceipt }
+        guard let backendRideId = receipt.backendRideId else { throw RideFeedbackError.missingRideId }
+
+        let rating = draft.rating
+        let trimmedFeedback = draft.feedback.trimmingCharacters(in: .whitespacesAndNewlines)
+        let compliments = draft.compliments
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard rating != nil || !trimmedFeedback.isEmpty || !compliments.isEmpty || draft.favoriteDriver else {
+            return
+        }
+        if let rating, !(1...5).contains(rating) {
+            throw RideFeedbackError.invalidRating
+        }
+
+        var payload: [String: Any] = [
+            "rideId": backendRideId,
+            "riderId": user.uid,
+            "driverName": receipt.driverName,
+            "pickup": receipt.pickup,
+            "dropoff": receipt.dropoff,
+            "compliments": compliments,
+            "feedback": trimmedFeedback,
+            "favoriteDriver": draft.favoriteDriver,
+            "source": "ios_rider_app",
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        if let driverId = lastCompletedDriverId {
+            payload["driverId"] = driverId
+        }
+        if let rating {
+            payload["rating"] = rating
+        }
+
+        let db = Firestore.firestore()
+        let ratingRef = db.collection("driverRatings").document(backendRideId)
+        let rideRef = db.collection("rides").document(backendRideId)
+        let batch = db.batch()
+        batch.setData(payload, forDocument: ratingRef, merge: true)
+        batch.setData([
+            "riderDriverRating": payload,
+            "updatedAt": FieldValue.serverTimestamp()
+        ], forDocument: rideRef, merge: true)
+        try await batch.commit()
     }
 
     func cancelAll() {
@@ -1432,6 +1492,30 @@ final class RideManager: ObservableObject {
         await performChargeRequest(path: "payments/retry", body: body)
     }
 
+    private func chargeTip(rideId: String, cents: Int) async throws {
+        var body: [String: Any] = [
+            "rideId": rideId,
+            "amountCents": cents,
+            "currency": "usd"
+        ]
+        if let paymentMethodId = selectedCard?.stripePaymentMethodId {
+            body["paymentMethodId"] = paymentMethodId
+        }
+
+        guard let data = await stripeRequest("payments/tip", body: body) else {
+            throw RideTipError.networkUnavailable
+        }
+        guard let response = try? JSONDecoder().decode(StripePaymentIntentResponse_Ride.self, from: data) else {
+            throw RideTipError.unconfirmed
+        }
+        if let error = response.error {
+            throw RideTipError.backend(response.message ?? error)
+        }
+        guard response.status == "succeeded" else {
+            throw RideTipError.unconfirmed
+        }
+    }
+
     private func performChargeRequest(path: String, body: [String: Any]) async {
         paymentStatus = "processing"
         paymentFailureReason = nil
@@ -1479,4 +1563,49 @@ private struct StripePaymentIntentResponse_Ride: Decodable {
     let status: String?
     let error: String?
     let message: String?
+}
+
+private enum RideTipError: LocalizedError {
+    case invalidAmount
+    case missingReceipt
+    case missingRideId
+    case ridePaymentNotSettled
+    case networkUnavailable
+    case unconfirmed
+    case backend(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidAmount:
+            return "Choose a valid tip amount."
+        case .missingReceipt, .missingRideId:
+            return "We could not find this completed ride. Please contact support before adding a tip."
+        case .ridePaymentNotSettled:
+            return "Finish the ride payment before adding a tip."
+        case .networkUnavailable:
+            return "Couldn't reach the payment server. Please try again."
+        case .unconfirmed:
+            return "We couldn't confirm the tip charge. Please try again."
+        case .backend(let message):
+            return message
+        }
+    }
+}
+
+private enum RideFeedbackError: LocalizedError {
+    case notSignedIn
+    case missingReceipt
+    case missingRideId
+    case invalidRating
+
+    var errorDescription: String? {
+        switch self {
+        case .notSignedIn:
+            return "Please sign in again before saving your ride feedback."
+        case .missingReceipt, .missingRideId:
+            return "We could not find this completed ride. Please contact support before submitting feedback."
+        case .invalidRating:
+            return "Choose a rating between 1 and 5 stars."
+        }
+    }
 }

@@ -64,6 +64,7 @@ struct VehicleImageInfo: Equatable {
     var imagePath: String?
     var matchTier: Int?
     var status: String // "matched" | "fallback" | "missing"
+    var eligibleRideTypes: [String] = []
 }
 
 enum VehicleLibraryClientError: LocalizedError {
@@ -144,7 +145,8 @@ enum VehicleLibraryClient {
             imageUrl: match?["imageUrl"] as? String,
             imagePath: match?["storagePath"] as? String,
             matchTier: match?["tier"] as? Int,
-            status: status
+            status: status,
+            eligibleRideTypes: match?["eligibleRideTypes"] as? [String] ?? []
         )
     }
 
@@ -165,7 +167,8 @@ enum VehicleLibraryClient {
             imageUrl: vehicle?["imageUrl"] as? String,
             imagePath: vehicle?["imagePath"] as? String,
             matchTier: vehicle?["imageMatchTier"] as? Int,
-            status: data["vehicleImageStatus"] as? String ?? "missing"
+            status: data["vehicleImageStatus"] as? String ?? "missing",
+            eligibleRideTypes: data["eligibleRideTypes"] as? [String] ?? []
         )
     }
 
@@ -196,7 +199,8 @@ enum VehicleLibraryClient {
             imageUrl: vehicle?["imageUrl"] as? String,
             imagePath: vehicle?["imagePath"] as? String,
             matchTier: vehicle?["imageMatchTier"] as? Int,
-            status: data["vehicleImageStatus"] as? String ?? "missing"
+            status: data["vehicleImageStatus"] as? String ?? "missing",
+            eligibleRideTypes: data["eligibleRideTypes"] as? [String] ?? []
         )
     }
 }

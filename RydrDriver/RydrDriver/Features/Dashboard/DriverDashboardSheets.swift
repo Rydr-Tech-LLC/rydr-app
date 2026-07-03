@@ -1629,6 +1629,10 @@ struct DrawerDestinationView: View {
         NavigationStack {
             if item == .profile {
                 DriverProfileView()
+            } else if item == .vehicleRideTypes {
+                VehicleRydrHubView(vm: vm)
+            } else if item == .cashRydrHub {
+                DriverCashRydrHubView()
             } else if item == .community {
                 DriverCommunityHubView()
             } else if item == .walletPayouts {
@@ -1671,9 +1675,10 @@ struct DrawerDestinationView: View {
     private var subtitle: String {
         switch item {
         case .profile: return "Manage your public driver profile and preferences."
-        case .vehicleRideTypes: return "Review vehicle information, qualifications, upgrade eligibility, and approved ride types."
+        case .vehicleRideTypes: return "Manage your vehicle, Rydr Hub qualifications, and approved ride types."
         case .fareInsights: return "Track completed-ride earnings, recent trip totals, and performance health."
         case .walletPayouts: return "Manage payout methods, instant pay, and payout history."
+        case .cashRydrHub: return "Review open Cash Hub rider posts and manage accepted cash rides."
         case .documents: return "Keep required driver documents current."
         case .rewards: return "Track milestones, referrals, promotions, and Rydr incentives."
         case .community: return "Find live event demand, venue hotspots, and upcoming Atlanta events."
@@ -1688,9 +1693,10 @@ struct DrawerDestinationView: View {
     private var rows: [String] {
         switch item {
         case .profile: return ["Profile Photo", "Bio", "Contact Information", "Driver Preferences"]
-        case .vehicleRideTypes: return ["Vehicle Information", "Ride Type Qualifications", "Upgrade Eligibility"] + DriverDashboardVM.availableRideTypes
+        case .vehicleRideTypes: return ["My Vehicle", "Ride Type Qualifications"] + DriverDashboardVM.availableRideTypes
         case .fareInsights: return ["Today", "This Week", "This Month", "Recent Trips"]
         case .walletPayouts: return ["Bank Account", "Debit Card", "Instant Pay", "Payout History"]
+        case .cashRydrHub: return ["Open Requests", "Accepted Cash Rides", "Cash Hub Terms"]
         case .documents: return ["Driver License", "Insurance", "Registration", "Background Check Status"]
         case .rewards: return ["Driver Milestones", "Referral Rewards", "Promotions", "Rydr Incentives"]
         case .community: return ["Live Hotspots", "Upcoming Events", "Venue Demand"]

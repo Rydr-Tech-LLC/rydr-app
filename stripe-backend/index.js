@@ -248,6 +248,18 @@ async function updateDriver(uid, payload) {
   );
 }
 
+function missionControlIdentityStatus(status) {
+  if (status === "verified") return "verified";
+  if (status === "processing") return "pending";
+  if (status === "requires_input" || status === "canceled") return "failed";
+  return "not_started";
+}
+
+function missionControlConnectStatus(account) {
+  if (!account?.id) return "not_started";
+  return account.charges_enabled && account.payouts_enabled ? "completed" : "pending";
+}
+
 async function driverData(uid) {
   if (!uid) return null;
   initializeFirebase();
@@ -277,6 +289,7 @@ async function updateIdentityStatus(session, status) {
   const timestamp = admin.firestore.FieldValue.serverTimestamp();
   const base = {
     identityStatus: status,
+    stripeIdentityStatus: missionControlIdentityStatus(status),
     stripeIdentityVerificationId: session.id,
     stripeIdentityFlow: role,
     stripeIdentityLastEventAt: timestamp,
@@ -579,11 +592,27 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
         const rideId = pi.metadata?.rideId;
         const rideRef = await rideByPaymentIntentMetadata(rideId);
         if (rideRef) {
-          await recordPaymentStatus(rideRef, "succeeded", {
-            stripePaymentIntentId: pi.id,
-            failureReason: null,
-            failureCode: null,
-          });
+          if (pi.metadata?.paymentType === "driver_tip") {
+            await rideRef.set(
+              {
+                tipPaymentStatus: "succeeded",
+                stripeTipPaymentIntentId: pi.id,
+                tipAmountCents: pi.amount_received || pi.amount,
+                pendingTipAmountCents: admin.firestore.FieldValue.delete(),
+                tipFailureReason: null,
+                tipFailureCode: null,
+                tippedAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            );
+          } else {
+            await recordPaymentStatus(rideRef, "succeeded", {
+              stripePaymentIntentId: pi.id,
+              failureReason: null,
+              failureCode: null,
+            });
+          }
         }
         break;
       }
@@ -593,11 +622,24 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
         const rideId = pi.metadata?.rideId;
         const rideRef = await rideByPaymentIntentMetadata(rideId);
         if (rideRef) {
-          await recordPaymentStatus(rideRef, "failed", {
-            stripePaymentIntentId: pi.id,
-            failureReason: pi.last_payment_error?.message || "Payment failed",
-            failureCode: pi.last_payment_error?.code || null,
-          });
+          if (pi.metadata?.paymentType === "driver_tip") {
+            await rideRef.set(
+              {
+                tipPaymentStatus: "failed",
+                stripeTipPaymentIntentId: pi.id,
+                tipFailureReason: pi.last_payment_error?.message || "Tip payment failed",
+                tipFailureCode: pi.last_payment_error?.code || null,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            );
+          } else {
+            await recordPaymentStatus(rideRef, "failed", {
+              stripePaymentIntentId: pi.id,
+              failureReason: pi.last_payment_error?.message || "Payment failed",
+              failureCode: pi.last_payment_error?.code || null,
+            });
+          }
         }
         break;
       }
@@ -609,6 +651,7 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
         });
         await updateDriver(acct.metadata?.uid, {
           stripeAccountId: acct.id,
+          stripeConnectStatus: missionControlConnectStatus(acct),
           stripeChargesEnabled: acct.charges_enabled,
           stripePayoutsEnabled: acct.payouts_enabled,
           stripeRequirementsDue: acct.requirements?.currently_due || [],
@@ -1104,6 +1147,160 @@ app.post("/payments/retry", async (req, res) => {
   }
 });
 
+// --- Charge a post-ride driver tip ---------------------------------------
+// Body: { rideId, amountCents, currency?, paymentMethodId? }
+// Auth required. Tips are separate from the authoritative fare so riders can
+// never mutate trip pricing from the client. A ride can only receive one
+// successful tip, and only after the base ride payment has succeeded.
+app.post("/payments/tip", async (req, res) => {
+  try {
+    const uid = await requireFirebaseUid(req, res);
+    if (!uid) return;
+    if (rejectIfSuppliedUidMismatch(req, res, uid)) return;
+
+    const { rideId, amountCents, currency = "usd", paymentMethodId } = req.body || {};
+    if (!rideId) return res.status(400).json({ error: "rideId_required" });
+
+    const tipAmount = Number(amountCents);
+    if (!Number.isInteger(tipAmount) || tipAmount <= 0) {
+      return res.status(400).json({ error: "invalid_tip_amount" });
+    }
+    if (tipAmount > 50000) {
+      return res.status(400).json({ error: "tip_amount_too_large" });
+    }
+
+    const owned = await ownedRide(uid, rideId);
+    if (!owned) return res.status(404).json({ error: "ride_not_found_or_not_owned" });
+    const { ref: rideRef, data: ride } = owned;
+
+    if (!CHARGEABLE_RIDE_STATUSES.has(ride.status)) {
+      return res.status(409).json({ error: "ride_not_completed", rideStatus: ride.status || "unknown" });
+    }
+    if (ride.paymentStatus !== "succeeded") {
+      return res.status(409).json({ error: "ride_payment_not_succeeded", paymentStatus: ride.paymentStatus || "pending" });
+    }
+    if (ride.tipPaymentStatus === "succeeded" || positiveIntegerField(ride, "tipAmountCents")) {
+      return res.status(409).json({ error: "tip_already_charged" });
+    }
+    if (ride.tipPaymentStatus === "processing") {
+      return res.status(409).json({ error: "tip_payment_processing" });
+    }
+
+    const customerId = await ownedCustomerId(uid);
+    if (!customerId) {
+      return res.status(404).json({ error: "no_stripe_customer_on_file" });
+    }
+
+    let resolvedPaymentMethodId = paymentMethodId || null;
+    if (resolvedPaymentMethodId) {
+      const pm = await stripe.paymentMethods.retrieve(resolvedPaymentMethodId);
+      if (pm.customer !== customerId) {
+        return res.status(403).json({ error: "payment_method_not_owned" });
+      }
+    } else {
+      const customer = await stripe.customers.retrieve(customerId);
+      resolvedPaymentMethodId = customer?.invoice_settings?.default_payment_method || null;
+    }
+    if (!resolvedPaymentMethodId) {
+      return res.status(400).json({ error: "no_payment_method_on_file", message: "No default payment method is on file." });
+    }
+
+    const driverAccountId = await driverAccountForRide(ride);
+    if (!driverAccountId) {
+      return res.status(409).json({ error: "driver_connect_account_unavailable" });
+    }
+
+    let tipAttempt;
+    try {
+      tipAttempt = await admin.firestore().runTransaction(async (tx) => {
+        const fresh = await tx.get(rideRef);
+        const current = fresh.data() || {};
+        if (current.tipPaymentStatus === "succeeded" || positiveIntegerField(current, "tipAmountCents")) {
+          throw { httpStatus: 409, body: { error: "tip_already_charged" } };
+        }
+        if (current.tipPaymentStatus === "processing") {
+          throw { httpStatus: 409, body: { error: "tip_payment_processing" } };
+        }
+        const attempt = (current.tipRetryCount || 0) + 1;
+        tx.set(
+          rideRef,
+          {
+            tipPaymentStatus: "processing",
+            tipRetryCount: current.tipRetryCount || 0,
+            tipFailureReason: null,
+            tipFailureCode: null,
+            pendingTipAmountCents: tipAmount,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        return attempt;
+      });
+    } catch (e) {
+      if (e?.httpStatus) return res.status(e.httpStatus).json(e.body);
+      throw e;
+    }
+
+    const params = {
+      amount: tipAmount,
+      currency,
+      customer: customerId,
+      payment_method: resolvedPaymentMethodId,
+      confirm: true,
+      off_session: true,
+      transfer_data: { destination: driverAccountId },
+      metadata: {
+        rideId,
+        riderId: uid,
+        driverId: ride.driverId || "",
+        paymentType: "driver_tip",
+        attempt: String(tipAttempt),
+      },
+    };
+
+    try {
+      const pi = await stripe.paymentIntents.create(params, {
+        idempotencyKey: `tip_${rideId}_${tipAmount}_attempt${tipAttempt}`,
+      });
+      const succeeded = pi.status === "succeeded";
+      await rideRef.set(
+        {
+          tipPaymentStatus: succeeded ? "succeeded" : "processing",
+          tipRetryCount: tipAttempt,
+          tipAmountCents: succeeded ? tipAmount : admin.firestore.FieldValue.delete(),
+          pendingTipAmountCents: succeeded ? admin.firestore.FieldValue.delete() : tipAmount,
+          stripeTipPaymentIntentId: pi.id,
+          tippedAt: succeeded ? admin.firestore.FieldValue.serverTimestamp() : null,
+          tipFailureReason: null,
+          tipFailureCode: null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      return res.json({ paymentIntentId: pi.id, status: pi.status, amountCents: tipAmount });
+    } catch (e) {
+      const code = e?.raw?.code || e?.code;
+      const message = e?.raw?.message || e.message || "tip_payment_failed";
+      await rideRef.set(
+        {
+          tipPaymentStatus: "failed",
+          tipRetryCount: tipAttempt,
+          tipFailureReason: message,
+          tipFailureCode: code || null,
+          stripeTipPaymentIntentId: e?.raw?.payment_intent?.id || null,
+          pendingTipAmountCents: tipAmount,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      return res.status(402).json({ error: code || "tip_payment_failed", message });
+    }
+  } catch (e) {
+    console.error("❌ payments/tip:", e);
+    res.status(500).json({ error: "tip_payment_failed" });
+  }
+});
+
 // --- List saved card PaymentMethods (for wallet tiles) ---
 // Auth required -> { paymentMethods: [{id,brand,last4,expMonth,expYear,isDefault}] }
 // customerId is always the authenticated rider's own customer.
@@ -1251,6 +1448,7 @@ app.post("/connect/accounts", async (req, res) => {
         if (!existing.deleted) {
           await updateDriver(driverUid, {
             stripeAccountId: existing.id,
+            stripeConnectStatus: missionControlConnectStatus(existing),
             stripeChargesEnabled: !!existing.charges_enabled,
             stripePayoutsEnabled: !!existing.payouts_enabled,
             stripeRequirementsDue: existing.requirements?.currently_due || [],
@@ -1293,7 +1491,13 @@ app.post("/connect/accounts", async (req, res) => {
       { idempotencyKey: `connect_account_create_${driverUid}` }
     );
 
-    await updateDriver(driverUid, { stripeAccountId: account.id });
+    await updateDriver(driverUid, {
+      stripeAccountId: account.id,
+      stripeConnectStatus: missionControlConnectStatus(account),
+      stripeChargesEnabled: !!account.charges_enabled,
+      stripePayoutsEnabled: !!account.payouts_enabled,
+      stripeRequirementsDue: account.requirements?.currently_due || [],
+    });
     await updatePublicDriverConnectStatus(driverUid, {
       stripeAccountId: account.id,
       stripeChargesEnabled: account.charges_enabled,

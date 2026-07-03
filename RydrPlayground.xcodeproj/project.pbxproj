@@ -10,6 +10,7 @@
 		00D5ACBA4CCAFA0275DF58D4 /* View+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7F150DACBCB949A66F8EE5 /* View+Extension.swift */; };
 		022FA2286ACA9A982515313D /* SplashCoordinatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0395430CE916993430C1E509 /* SplashCoordinatorView.swift */; };
 		0A3D861D4FAAAE635BA842A0 /* PaymentMethodView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CD7CE10B7D1AB994E052AB7 /* PaymentMethodView.swift */; };
+		0D4F96A92E827F0F4FA723B1 /* NotificationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A18D8D13091F9B3D061B3D4 /* NotificationView.swift */; };
 		12A202063F07B6133867B622 /* RiderIdentityVerificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A823F3EC96FAD1F8AC3CA2E0 /* RiderIdentityVerificationService.swift */; };
 		1EAA166C9F276E514B095CCB /* DeleteAccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BC58B67C9A74DB4EE037A7D /* DeleteAccountView.swift */; };
 		229EE46BC5AA1763EB7B468C /* VehicleImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC47D4E054870E30C12456B5 /* VehicleImageView.swift */; };
@@ -156,6 +157,7 @@
 		32A6D1C8826F1EF9AB75D7CD /* EndRideView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EndRideView.swift; sourceTree = "<group>"; };
 		374F4E483F207F38DD0A84A1 /* RideHelpView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RideHelpView.swift; sourceTree = "<group>"; };
 		38FCAAD75C6C33288D219665 /* DriverSelectionView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DriverSelectionView.swift; sourceTree = "<group>"; };
+		3A18D8D13091F9B3D061B3D4 /* NotificationView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationView.swift; sourceTree = "<group>"; };
 		3AACF99F1403DF0942634997 /* CashHubSignupView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CashHubSignupView.swift; sourceTree = "<group>"; };
 		3C37386ECFDD05C2CD2310CB /* RideManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RideManager.swift; sourceTree = "<group>"; };
 		4434A644C09A9A53FE0A8D7E /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -431,6 +433,7 @@
 			children = (
 				F4EE10E8E09CF14A81A05647 /* CommunityView.swift */,
 				1BC58B67C9A74DB4EE037A7D /* DeleteAccountView.swift */,
+				3A18D8D13091F9B3D061B3D4 /* NotificationView.swift */,
 				6CD7CE10B7D1AB994E052AB7 /* PaymentMethodView.swift */,
 				26743B1816CC8B4FD0508D0F /* PersonalInfoView.swift */,
 				D99FB1A4CEA99CB2FBD3FD66 /* ProfileView.swift */,
@@ -509,6 +512,7 @@
 				D9A571E02DF9C6A900C04006 /* Sources */,
 				D9A571E12DF9C6A900C04006 /* Frameworks */,
 				D9A571E22DF9C6A900C04006 /* Resources */,
+				8BFA10102E98A12000C0D5YM /* Upload dSYMs to Firebase Crashlytics */,
 			);
 			buildRules = (
 			);
@@ -658,6 +662,33 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		8BFA10102E98A12000C0D5YM /* Upload dSYMs to Firebase Crashlytics */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${PRODUCT_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Info.plist",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GoogleService-Info.plist",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)",
+			);
+			name = "Upload dSYMs to Firebase Crashlytics";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"${CONFIGURATION}\" != \"Release\" ] || [ \"${ACTION}\" != \"install\" ]; then\n  echo \"Skipping Crashlytics dSYM upload for ${CONFIGURATION}/${ACTION}.\"\n  exit 0\nfi\n\nCRASHLYTICS_RUN_SCRIPT=\"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\n\nif [ ! -x \"${CRASHLYTICS_RUN_SCRIPT}\" ]; then\n  echo \"error: Firebase Crashlytics run script not found at ${CRASHLYTICS_RUN_SCRIPT}\"\n  exit 1\nfi\n\n\"${CRASHLYTICS_RUN_SCRIPT}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		D9A571E02DF9C6A900C04006 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -699,6 +730,7 @@
 				CBF3EBC9C85C41C142C65758 /* PaymentScreenView.swift in Sources */,
 				F243EF64A3AF3652B90A7508 /* CommunityView.swift in Sources */,
 				1EAA166C9F276E514B095CCB /* DeleteAccountView.swift in Sources */,
+				0D4F96A92E827F0F4FA723B1 /* NotificationView.swift in Sources */,
 				0A3D861D4FAAAE635BA842A0 /* PaymentMethodView.swift in Sources */,
 				77516E5AB253AE4B5EC45B57 /* PersonalInfoView.swift in Sources */,
 				68727367461BA89E6CDEF557 /* ProfileView.swift in Sources */,

@@ -12,6 +12,7 @@ struct ProfileView: View {
     @EnvironmentObject var session: UserSessionManager
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var bankVM = RydrBankVM()
+    @StateObject private var notificationVM = RiderNotificationInboxViewModel()
 
     @State private var showImagePicker = false
     @State private var showRiderUpgrade = false
@@ -68,8 +69,8 @@ struct ProfileView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                NavigationLink {
+                    NotificationView()
                 } label: {
                     ZStack(alignment: .topTrailing) {
                         Image(systemName: "bell")
@@ -79,10 +80,12 @@ struct ProfileView: View {
                             .background(adaptiveCardBackground, in: Circle())
                             .shadow(color: softShadow, radius: 12, x: 0, y: 6)
 
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 7, height: 7)
-                            .offset(x: -7, y: 8)
+                        if notificationVM.unreadCount > 0 {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 8, height: 8)
+                                .offset(x: -7, y: 8)
+                        }
                     }
                 }
                 .accessibilityLabel("Notifications")
@@ -94,8 +97,12 @@ struct ProfileView: View {
             loadRiderIdentityStatus()
             loadRidePreferences()
             if !session.isCashHubOnly { bankVM.start() }
+            notificationVM.start()
         }
-        .onDisappear { bankVM.stop() }
+        .onDisappear {
+            bankVM.stop()
+            notificationVM.stop()
+        }
         .sheet(isPresented: $showImagePicker, onDismiss: didPickPhoto) {
             ImagePicker(selectedImage: $pickedUIImage, sourceType: .photoLibrary)
         }
@@ -332,7 +339,7 @@ struct ProfileView: View {
                 .init(title: "Notifications",
                       subtitle: "Manage your alerts and updates",
                       icon: "bell.badge",
-                      destination: AnyView(Text("Coming soon").navigationTitle("Notifications")))
+                      destination: AnyView(NotificationView()))
             ])
 
             settingsRow

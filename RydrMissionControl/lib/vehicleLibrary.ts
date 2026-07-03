@@ -54,6 +54,9 @@ export const VEHICLE_BODY_STYLES: VehicleBodyStyle[] = [
   "unknown"
 ];
 
+export const RYDR_RIDE_TYPES = ["Rydr Go", "Rydr Eco", "Rydr XL"] as const;
+export type RydrRideType = (typeof RYDR_RIDE_TYPES)[number];
+
 export interface VehicleLibraryEntry {
   vehicleId: string;
   make: string;
@@ -62,6 +65,7 @@ export interface VehicleLibraryEntry {
   yearEnd: number;
   trim: string | null;
   bodyStyle: VehicleBodyStyle;
+  eligibleRideTypes?: RydrRideType[];
   availableColors: VehicleColor[];
   defaultImage: string | null;
   defaultImageUrl?: string | null;
@@ -103,6 +107,21 @@ export function genericBodyVehicleId(bodyStyle: VehicleBodyStyle): string {
 
 function storagePathFor(make: string, model: string, year: number, fileName: string): string {
   return `${STORAGE_ROOT}/${slugify(make)}/${slugify(model)}/${year}/${fileName}`;
+}
+
+function normalizedText(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeRideTypes(values: unknown): RydrRideType[] {
+  if (!Array.isArray(values)) return [];
+  const selected = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const match = RYDR_RIDE_TYPES.find((rideType) => rideType.toLowerCase() === value.trim().toLowerCase());
+    if (match) selected.add(match);
+  }
+  return RYDR_RIDE_TYPES.filter((rideType) => selected.has(rideType));
 }
 
 function bucket() {
@@ -147,13 +166,21 @@ export interface VehicleLibrarySearchFilters {
 }
 
 export async function searchVehicleLibrary(filters: VehicleLibrarySearchFilters): Promise<VehicleLibraryEntry[]> {
-  let query: FirebaseFirestore.Query = collection();
-  if (filters.make) query = query.where("make", "==", filters.make);
-  if (filters.model) query = query.where("model", "==", filters.model);
-  if (filters.trim) query = query.where("trim", "==", filters.trim);
-
-  const snap = await query.limit(filters.limit ?? 500).get();
+  const snap = await collection().limit(filters.limit ?? 500).get();
   let entries = snap.docs.map((d) => d.data() as VehicleLibraryEntry);
+
+  if (filters.make) {
+    const make = filters.make.trim().toLowerCase();
+    entries = entries.filter((e) => e.make.toLowerCase().includes(make));
+  }
+  if (filters.model) {
+    const model = filters.model.trim().toLowerCase();
+    entries = entries.filter((e) => e.model.toLowerCase().includes(model));
+  }
+  if (filters.trim) {
+    const trim = filters.trim.trim().toLowerCase();
+    entries = entries.filter((e) => (e.trim ?? "").toLowerCase().includes(trim));
+  }
 
   if (filters.year != null) {
     entries = entries.filter((e) => filters.year! >= e.yearStart && filters.year! <= e.yearEnd);
@@ -185,22 +212,28 @@ export async function upsertVehicleLibraryEntry(
     yearEnd: number;
     trim?: string | null;
     bodyStyle: VehicleBodyStyle;
+    eligibleRideTypes?: unknown;
   },
   adminUid: string
 ): Promise<VehicleLibraryEntry> {
-  const vehicleId = input.vehicleId ?? buildVehicleId(input.make, input.model, input.yearStart, input.yearEnd, input.trim);
+  const make = normalizedText(input.make);
+  const model = normalizedText(input.model);
+  const trim = typeof input.trim === "string" && input.trim.trim() ? normalizedText(input.trim) : null;
+  const eligibleRideTypes = normalizeRideTypes(input.eligibleRideTypes);
+  const vehicleId = input.vehicleId ?? buildVehicleId(make, model, input.yearStart, input.yearEnd, trim);
   const ref = collection().doc(vehicleId);
   const existing = await ref.get();
 
   if (!existing.exists) {
     const entry: VehicleLibraryEntry = {
       vehicleId,
-      make: input.make,
-      model: input.model,
+      make,
+      model,
       yearStart: input.yearStart,
       yearEnd: input.yearEnd,
-      trim: input.trim ?? null,
+      trim,
       bodyStyle: input.bodyStyle,
+      eligibleRideTypes,
       availableColors: [],
       defaultImage: null,
       colorImages: {},
@@ -214,12 +247,13 @@ export async function upsertVehicleLibraryEntry(
   }
 
   await ref.update({
-    make: input.make,
-    model: input.model,
+    make,
+    model,
     yearStart: input.yearStart,
     yearEnd: input.yearEnd,
-    trim: input.trim ?? null,
+    trim,
     bodyStyle: input.bodyStyle,
+    eligibleRideTypes,
     updatedAt: FieldValue.serverTimestamp(),
     updatedBy: adminUid
   });

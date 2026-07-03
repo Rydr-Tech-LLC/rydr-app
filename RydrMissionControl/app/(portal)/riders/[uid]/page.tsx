@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/firebaseAdmin";
 import type { RiderRecord } from "@/lib/types";
 import { toDateSafe, fullName } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
+import TripSafetyAnalytics from "@/components/TripSafetyAnalytics";
 import RiderActions from "./RiderActions";
 import RydrBankMintPanel from "./RydrBankMintPanel";
 
@@ -109,6 +110,8 @@ export default async function RiderReviewPage({ params }: { params: { uid: strin
               </table>
             </div>
           </Section>
+
+          <TripSafetyAnalytics uid={rider.uid} kind="rider" />
         </div>
 
         <div className="space-y-6">

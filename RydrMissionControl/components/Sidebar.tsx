@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: "/drivers/all", label: "Drivers" },
   { href: "/riders", label: "Riders" },
   { href: "/reports", label: "Reports" },
+  { href: "/analytics", label: "Analytics" },
   { href: "/payment-failures", label: "Payment Failures" },
   { href: "/support", label: "Support Inbox" },
   { href: "/account-deletions", label: "Account Deletions" },

@@ -204,8 +204,10 @@ struct BackgroundCheckView: View {
 
         Firestore.firestore().collection("drivers").document(uid).setData([
             "backgroundCheckAcknowledged": true,
-            "backgroundAcknowledgedAt": FieldValue.serverTimestamp(),
-            "backgroundAcknowledgementVersion": 1
+            "backgroundCheckAcknowledgedAt": FieldValue.serverTimestamp(),
+            "backgroundAcknowledgementVersion": 1,
+            "betaAgreementAccepted": true,
+            "betaAgreementAcceptedAt": FieldValue.serverTimestamp()
         ], merge: true) { error in
             isSaving = false
             if let error {

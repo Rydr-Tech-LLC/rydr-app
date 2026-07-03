@@ -73,9 +73,10 @@ struct LoginView: View {
             .ignoresSafeArea()
 
             RiderLoginCitySilhouette()
-                .frame(height: 190)
-                .opacity(0.22)
-                .ignoresSafeArea(edges: .bottom)
+                .frame(height: 180)
+                .opacity(0.42)
+                .ignoresSafeArea(.container, edges: .bottom)
+                .ignoresSafeArea(.keyboard, edges: .bottom)
                 .accessibilityHidden(true)
 
             ScrollView(showsIndicators: false) {
@@ -110,6 +111,7 @@ struct LoginView: View {
                 .frame(maxWidth: .infinity)
             }
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .hideKeyboardOnTap()
         .alert(isPresented: $showPasswordResetAlert) {
             Alert(
@@ -702,51 +704,24 @@ private struct GoogleGlyph: View {
 }
 
 private struct RiderLoginCitySilhouette: View {
-    private let buildingHeights: [CGFloat] = [
-        0.42, 0.64, 0.50, 0.78, 0.56, 0.70, 0.48, 0.86,
-        0.60, 0.45, 0.76, 0.54, 0.68, 0.49, 0.82, 0.58
-    ]
-
     var body: some View {
-        GeometryReader { proxy in
-            let width = proxy.size.width
-            let maxHeight = proxy.size.height
-            let buildingWidth = max(18, width / CGFloat(buildingHeights.count + 4))
+        ZStack(alignment: .bottom) {
+            LinearGradient(
+                colors: [
+                    Color.clear,
+                    Color(red: 1.0, green: 0.90, blue: 0.92).opacity(0.62)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
 
-            ZStack(alignment: .bottom) {
-                Capsule()
-                    .fill(Styles.rydrGradient)
-                    .frame(width: width * 1.18, height: maxHeight * 0.34)
-                    .blur(radius: 18)
-                    .offset(y: maxHeight * 0.22)
-                    .opacity(0.42)
-
-                HStack(alignment: .bottom, spacing: 5) {
-                    ForEach(buildingHeights.indices, id: \.self) { index in
-                        VStack(spacing: 4) {
-                            if index % 4 == 1 {
-                                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                    .fill(Color.white.opacity(0.42))
-                                    .frame(width: buildingWidth * 0.48, height: 5)
-                            }
-
-                            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .fill(Styles.rydrGradient)
-                                .frame(
-                                    width: buildingWidth,
-                                    height: maxHeight * buildingHeights[index]
-                                )
-                        }
-                    }
-                }
+            Image("SignupAtlantaSkyline")
+                .resizable()
+                .scaledToFit()
                 .frame(maxWidth: .infinity)
-                .padding(.horizontal, 14)
-
-                Rectangle()
-                    .fill(Styles.rydrGradient)
-                    .frame(height: maxHeight * 0.18)
-                    .blur(radius: 1)
-            }
+                .foregroundStyle(Styles.rydrGradient)
+                .padding(.horizontal, -18)
+                .padding(.bottom, 4)
         }
         .allowsHitTesting(false)
     }

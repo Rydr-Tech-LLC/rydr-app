@@ -10,6 +10,8 @@ import SwiftUI
 import MapKit
 import _MapKit_SwiftUI
 import CoreLocation
+import FirebaseAuth
+import FirebaseFirestore
 
 struct RideInProgressView: View {
     @ObservedObject var rideManager: RideManager
@@ -19,7 +21,10 @@ struct RideInProgressView: View {
     @State private var camera: MapCameraPosition = .automatic
 
     // Sheets & UI bits
-    @State private var showReportAlert = false
+    @State private var showIncidentReportSheet = false
+    @State private var showReportResultAlert = false
+    @State private var reportResultTitle = ""
+    @State private var reportResultMessage = ""
     @State private var showChat = false
     @State private var showPaymentSheet = false
     @State private var showNotesSheet = false
@@ -92,7 +97,7 @@ struct RideInProgressView: View {
                     onReport: {
                         showTripOptionsSheet = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            showReportAlert = true
+                            showIncidentReportSheet = true
                         }
                     },
                     onCancel: {
@@ -106,14 +111,22 @@ struct RideInProgressView: View {
                 EndRideView(
                     ride: rideManager.lastReceipt,
                     onDone: { dismiss() },
-                    onTipSelected: { rideManager.applyTipToLastReceipt(cents: $0) },
+                    onTipSelected: { try await rideManager.applyTipToLastReceipt(cents: $0) },
+                    onFeedbackSubmitted: { try await rideManager.submitDriverFeedback($0) },
                     rideManager: rideManager
                 )
             }
-            .alert("Report an incident", isPresented: $showReportAlert) {
+            .sheet(isPresented: $showIncidentReportSheet) {
+                IncidentReportSheet(rideManager: rideManager) {
+                    reportResultTitle = "Incident report submitted"
+                    reportResultMessage = "Rydr safety support will review this trip in Mission Control."
+                    showReportResultAlert = true
+                }
+            }
+            .alert(reportResultTitle, isPresented: $showReportResultAlert) {
                 Button("OK", role: .cancel) { }
             } message: {
-                Text("Thanks for the report. Our team will review this trip.")
+                Text(reportResultMessage)
             }
     }
 
@@ -175,7 +188,7 @@ struct RideInProgressView: View {
             Spacer()
 
             Button {
-                showReportAlert = true
+                showIncidentReportSheet = true
             } label: {
                 Label("Help", systemImage: "headphones")
                     .font(.caption.weight(.bold))
@@ -472,7 +485,7 @@ struct RideInProgressView: View {
 
     private var safetyCard: some View {
         Button {
-            showReportAlert = true
+            showIncidentReportSheet = true
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "shield.checkered")
@@ -996,6 +1009,164 @@ struct RideInProgressView: View {
                 }
             }
             .navigationTitle("Notes")
+        }
+    }
+}
+
+private struct IncidentReportDraft {
+    var reportType: String = IncidentReportSheet.reportTypes[0]
+    var description: String = ""
+}
+
+private enum IncidentReportError: LocalizedError {
+    case notSignedIn
+    case missingRide
+    case emptyDescription
+
+    var errorDescription: String? {
+        switch self {
+        case .notSignedIn:
+            return "Please sign in again before filing a safety report."
+        case .missingRide:
+            return "We could not identify the active ride. Please contact support."
+        case .emptyDescription:
+            return "Tell us what happened so the safety team can review it."
+        }
+    }
+}
+
+private final class IncidentReportService {
+    private let db = Firestore.firestore()
+
+    @MainActor
+    func submit(draft: IncidentReportDraft, rideManager: RideManager) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw IncidentReportError.notSignedIn
+        }
+        guard let ride = rideManager.currentRide,
+              let context = rideManager.activeRideChatContext else {
+            throw IncidentReportError.missingRide
+        }
+
+        let description = draft.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !description.isEmpty else {
+            throw IncidentReportError.emptyDescription
+        }
+
+        let reportRef = db.collection("safetyReports").document()
+        let reportId = reportRef.documentID
+        let payload: [String: Any] = [
+            "id": reportId,
+            "reportType": draft.reportType,
+            "description": description,
+            "status": "open",
+            "source": "ios_rider_app",
+            "submittedByRole": "rider",
+            "rideId": context.rideId,
+            "riderId": user.uid,
+            "riderName": normalized(user.displayName) ?? "Rydr rider",
+            "riderEmail": user.email ?? "",
+            "driverId": ride.driver.id,
+            "driverName": ride.driver.name,
+            "rideStatus": ride.status.rawValue,
+            "rideType": ride.rideType,
+            "pickup": ride.pickup,
+            "dropoff": ride.dropoff,
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        try await reportRef.setData(payload)
+    }
+
+    private func normalized(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private struct IncidentReportSheet: View {
+    static let reportTypes = [
+        "Unsafe driving",
+        "Harassment or threat",
+        "Wrong driver or vehicle",
+        "Crash or emergency",
+        "Other safety concern"
+    ]
+
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var rideManager: RideManager
+    var onSubmitted: () -> Void
+
+    @State private var draft = IncidentReportDraft()
+    @State private var isSubmitting = false
+    @State private var inlineError: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Issue", selection: $draft.reportType) {
+                        ForEach(Self.reportTypes, id: \.self) { type in
+                            Text(type).tag(type)
+                        }
+                    }
+
+                    TextField("Describe what happened", text: $draft.description, axis: .vertical)
+                        .lineLimit(4...8)
+                } header: {
+                    Text("Incident details")
+                } footer: {
+                    Text("Reports are sent to Rydr safety support with this ride, rider, and driver attached.")
+                }
+
+                if let inlineError {
+                    Section {
+                        Text(inlineError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Section {
+                    Button {
+                        Task { await submit() }
+                    } label: {
+                        HStack {
+                            if isSubmitting {
+                                ProgressView()
+                            }
+                            Text(isSubmitting ? "Submitting..." : "Submit Incident Report")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .disabled(isSubmitting || draft.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .navigationTitle("Report Incident")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(isSubmitting)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func submit() async {
+        isSubmitting = true
+        inlineError = nil
+        defer { isSubmitting = false }
+
+        do {
+            try await IncidentReportService().submit(draft: draft, rideManager: rideManager)
+            dismiss()
+            onSubmitted()
+        } catch {
+            inlineError = error.localizedDescription
         }
     }
 }
