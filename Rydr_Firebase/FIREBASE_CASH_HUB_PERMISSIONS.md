@@ -6,17 +6,23 @@ layers below.
 
 ## 1. Register the App Check debug token
 
-Debug builds use `AppCheckDebugProviderFactory` in `App/AppDelegate.swift`.
-When you run the app from Xcode, Firebase prints a debug token in the console.
+Debug builds use `AppCheckDebugProviderFactory` in both apps:
 
-1. Run `RydrPlayground` from Xcode.
+- Rider app: `App/AppDelegate.swift`
+- Driver app: `RydrDriver/RydrDriver/Rydr_DriverApp.swift`
+
+When you run either app from Xcode, Firebase prints a debug token in the console.
+
+1. Run the affected app from Xcode.
 2. In the Xcode console, copy the App Check debug token printed by Firebase.
 3. Open Firebase Console.
 4. Go to **App Check**.
-5. Select the RydrPlayground iOS app:
+5. Select the matching iOS app:
    `com.khris.rydr.RydrPlayground`.
+   For the driver app, select:
+   `Rydr-Tech-LLC.Rydr-Drivers`.
 6. Open **Manage debug tokens**.
-7. Add the copied token and label it with the machine name.
+7. Add the copied token and label it with the machine name and app name.
 8. Relaunch the app.
 
 Do not commit debug tokens to the shared Xcode scheme. Each development machine

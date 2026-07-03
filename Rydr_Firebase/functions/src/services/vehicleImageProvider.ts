@@ -31,7 +31,8 @@ function resultFor(entry: VehicleLibraryEntry, path: string, tier: ImageMatchTie
     imageUrl: toPublicUrl(path),
     tier,
     matchedVehicleId: entry.vehicleId,
-    matchedColor: color
+    matchedColor: color,
+    eligibleRideTypes: entry.eligibleRideTypes ?? []
   };
 }
 

@@ -32,6 +32,9 @@ export type VehicleBodyStyle =
   | "van"
   | "unknown";
 
+export const RYDR_RIDE_TYPES = ["Rydr Go", "Rydr Eco", "Rydr XL"] as const;
+export type RydrRideType = (typeof RYDR_RIDE_TYPES)[number];
+
 /** A single entry in the managed vehicle image library. One document per
  * make/model/year-range/trim combination Mission Control has uploaded
  * imagery for. `_generic` is a reserved pseudo-make used for two tiers of
@@ -46,6 +49,8 @@ export interface VehicleLibraryEntry {
   yearEnd: number;
   trim: string | null;
   bodyStyle: VehicleBodyStyle;
+  /** Optional Mission Control override for the ride types this vehicle may support. */
+  eligibleRideTypes?: RydrRideType[];
   /** Colors that actually have an uploaded image in `colorImages`. */
   availableColors: VehicleColor[];
   /** Storage path (not a download URL) to the default/fallback image for
@@ -105,6 +110,7 @@ export interface VehicleImageResult {
   tier: ImageMatchTier;
   matchedVehicleId: string;
   matchedColor: string | null;
+  eligibleRideTypes?: RydrRideType[];
 }
 
 export type VehicleImageStatus = "matched" | "fallback" | "missing";

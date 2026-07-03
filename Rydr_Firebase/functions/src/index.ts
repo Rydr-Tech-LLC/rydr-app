@@ -12,6 +12,7 @@ import { VEHICLE_COLORS, type VehicleColor, type VehicleBodyStyle } from "./type
 export { onRideUpdated } from "./triggers/rideNotifications";
 export { onSupportMessageCreated } from "./triggers/supportNotifications";
 export { onDriverApprovalDecision } from "./triggers/driverApprovalNotifications";
+export { onRydrBankCodeCreated, onRydrBankSummaryUpdated } from "./triggers/rydrBankNotifications";
 export { onDocumentUploadedForReview } from "./triggers/documentReview";
 
 const VEHICLE_BODY_STYLES: readonly VehicleBodyStyle[] = [
@@ -171,12 +172,29 @@ export const submitVehicleVin = onCall(async (request) => {
     color,
     imagePath: lookup.result?.storagePath ?? null,
     imageUrl: lookup.result?.imageUrl ?? null,
-    imageMatchTier: lookup.result?.tier ?? null
+    imageMatchTier: lookup.result?.tier ?? null,
+    libraryVehicleId: lookup.result?.matchedVehicleId ?? null,
+    libraryMatchedColor: lookup.result?.matchedColor ?? null
   };
+  const libraryRideTypes = lookup.result?.eligibleRideTypes ?? [];
 
   await driverRef.set(
     {
       vehicle: vehicleFields,
+      ...(libraryRideTypes.length > 0
+        ? {
+            vehicleEligibility: {
+              rideTypes: libraryRideTypes,
+              source: "vehicleLibrary",
+              matchedVehicleId: lookup.result?.matchedVehicleId ?? null,
+              evaluatedAt: FieldValue.serverTimestamp()
+            },
+            qualifiedRideTypes: libraryRideTypes,
+            supportedRideTypes: libraryRideTypes,
+            selectedRideTypes: libraryRideTypes,
+            rideTypes: libraryRideTypes
+          }
+        : {}),
       vinDecodeStatus: "decoded",
       vehicleImageStatus: lookup.status,
       updatedAt: FieldValue.serverTimestamp()
@@ -184,7 +202,7 @@ export const submitVehicleVin = onCall(async (request) => {
     { merge: true }
   );
 
-  return { vehicle: vehicleFields, vinDecodeStatus: "decoded", vehicleImageStatus: lookup.status };
+  return { vehicle: vehicleFields, eligibleRideTypes: libraryRideTypes, vinDecodeStatus: "decoded", vehicleImageStatus: lookup.status };
 });
 
 /**
@@ -244,12 +262,29 @@ export const submitVehicleManual = onCall(async (request) => {
     color,
     imagePath: lookup.result?.storagePath ?? null,
     imageUrl: lookup.result?.imageUrl ?? null,
-    imageMatchTier: lookup.result?.tier ?? null
+    imageMatchTier: lookup.result?.tier ?? null,
+    libraryVehicleId: lookup.result?.matchedVehicleId ?? null,
+    libraryMatchedColor: lookup.result?.matchedColor ?? null
   };
+  const libraryRideTypes = lookup.result?.eligibleRideTypes ?? [];
 
   await driverRef.set(
     {
       vehicle: vehicleFields,
+      ...(libraryRideTypes.length > 0
+        ? {
+            vehicleEligibility: {
+              rideTypes: libraryRideTypes,
+              source: "vehicleLibrary",
+              matchedVehicleId: lookup.result?.matchedVehicleId ?? null,
+              evaluatedAt: FieldValue.serverTimestamp()
+            },
+            qualifiedRideTypes: libraryRideTypes,
+            supportedRideTypes: libraryRideTypes,
+            selectedRideTypes: libraryRideTypes,
+            rideTypes: libraryRideTypes
+          }
+        : {}),
       vinDecodeStatus: "manual",
       vehicleImageStatus: lookup.status,
       updatedAt: FieldValue.serverTimestamp()
@@ -257,5 +292,5 @@ export const submitVehicleManual = onCall(async (request) => {
     { merge: true }
   );
 
-  return { vehicle: vehicleFields, vinDecodeStatus: "manual", vehicleImageStatus: lookup.status };
+  return { vehicle: vehicleFields, eligibleRideTypes: libraryRideTypes, vinDecodeStatus: "manual", vehicleImageStatus: lookup.status };
 });

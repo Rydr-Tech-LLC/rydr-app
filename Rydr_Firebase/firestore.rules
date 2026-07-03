@@ -50,7 +50,10 @@ service cloud.firestore {
         "backgroundCheckPassed",
         "backgroundCheckStatus",
         "balance",
+        "betaBackgroundCheckBypassReason",
         "betaBackgroundCheckBypassEnabled",
+        "betaBackgroundCheckBypassedAt",
+        "betaBackgroundCheckBypassedBy",
         "betaTester",
         "cashHubLastLateReleaseAt",
         "cashHubLastLateReleaseRequestId",
@@ -63,6 +66,7 @@ service cloud.firestore {
         "debugApprovalBypassUpdatedAt",
         "documents",
         "documentReviewStatus",
+        "driverApprovalStatus",
         "identityStatus",
         "identityVerified",
         "identityVerifiedAt",
@@ -204,6 +208,7 @@ service cloud.firestore {
           "pickupWaitStartedAt",
           "releasedAt",
           "riderRideState",
+          "riderDriverRating",
           "riderStatusMessage",
           "rideId",
           "rideStartedAt",
@@ -391,6 +396,8 @@ service cloud.firestore {
         "tierRates",
         "uid",
         "updatedAt",
+        "vehicleColor",
+        "vehicleImageURL",
         "vehicleSummary"
       ];
     }
@@ -419,6 +426,14 @@ service cloud.firestore {
         allow read: if isSelf(uid) || isAdmin();
         allow create, update: if validNotificationToken(uid, "rider", "rider");
         allow delete: if isSelf(uid) || isAdmin();
+      }
+
+      match /notifications/{notificationId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow create, delete: if isAdmin();
+        allow update: if isSelf(uid)
+          && affectedKeys().hasOnly(["isRead", "readAt"])
+          && request.resource.data.isRead == true;
       }
 
       match /cashHubFavoriteDrivers/{driverUid} {
@@ -450,6 +465,14 @@ service cloud.firestore {
         allow read: if isSelf(uid) || isAdmin();
         allow create, update: if validNotificationToken(uid, "driver", "driver");
         allow delete: if isSelf(uid) || isAdmin();
+      }
+
+      match /notifications/{notificationId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow create, delete: if isAdmin();
+        allow update: if isSelf(uid)
+          && affectedKeys().hasOnly(["isRead", "readAt"])
+          && request.resource.data.isRead == true;
       }
 
       match /cashHubPenaltyMarkers/{markerId} {
@@ -515,6 +538,22 @@ service cloud.firestore {
       allow delete: if isSelf(uid) || isAdmin();
     }
 
+    match /driverPresenceEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create: if signedIn()
+        && request.resource.data.driverId == request.auth.uid
+        && request.resource.data.isOnline is bool
+        && request.resource.data.keys().hasOnly([
+          "availabilityStatus",
+          "createdAt",
+          "driverId",
+          "hasActiveRide",
+          "isOnline",
+          "selectedRideTypes"
+        ]);
+      allow update, delete: if false;
+    }
+
     match /publicDriverProfiles/{driverUid} {
       allow read: if signedIn();
       allow create: if validPublicDriverProfileOwnerCreate(driverUid) || isAdmin();
@@ -526,7 +565,7 @@ service cloud.firestore {
       allow read: if isSelf(uid) || isAdmin();
       allow create, update: if isSelf(uid)
         && request.resource.data.uid == uid
-        && request.resource.data.requestType in ["backgroundCheck", "debugApprovalBypass", "identityReview"]
+        && request.resource.data.requestType in ["backgroundCheck", "identityReview"]
         && request.resource.data.keys().hasOnly([
           "requestType",
           "requested",
@@ -559,6 +598,27 @@ service cloud.firestore {
         || isAdmin();
       allow update: if validRideLifecycleUpdate() || isAdmin();
       allow delete: if isAdmin();
+
+      match /telemetry/{eventId} {
+        allow read: if rideParticipant(get(/databases/$(database)/documents/rides/$(rideId)).data) || isAdmin();
+        allow create: if signedIn()
+          && get(/databases/$(database)/documents/rides/$(rideId)).data.driverId == request.auth.uid
+          && request.resource.data.rideId == rideId
+          && request.resource.data.driverId == request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            "course",
+            "driverId",
+            "horizontalAccuracy",
+            "lat",
+            "lng",
+            "recordedAt",
+            "rideId",
+            "riderId",
+            "speed",
+            "status"
+          ]);
+        allow update, delete: if false;
+      }
     }
 
     match /rideChats/{rideId} {
@@ -601,6 +661,23 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.driverId == request.auth.uid;
       allow read: if signedIn() && (resource.data.driverId == request.auth.uid || isAdmin());
       allow update, delete: if isAdmin();
+    }
+
+    match /driverRatings/{ratingId} {
+      allow create: if signedIn()
+        && request.resource.data.riderId == request.auth.uid
+        && request.resource.data.rideId == ratingId
+        && get(/databases/$(database)/documents/rides/$(ratingId)).data.riderId == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.riderId == request.auth.uid
+        && request.resource.data.riderId == request.auth.uid
+        && request.resource.data.rideId == ratingId;
+      allow read: if signedIn() && (
+        resource.data.riderId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
     }
 
     match /cashRydrRequests/{requestId} {
@@ -752,13 +829,16 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /platformAnnouncements/{announcementId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
     // Added for Rydr Mission Control (internal admin portal). Riders and
     // drivers can file/read their own safety reports; only admins (Mission
     // Control, via the Admin SDK) can list across all reports, dismiss,
     // escalate, or otherwise moderate. Mission Control itself bypasses this
-    // entirely via the Admin SDK — this rule only governs the mobile apps,
-    // which do not yet write here (see beta readiness audit P0 #11); add the
-    // client-side write call when that gets built.
+    // entirely via the Admin SDK — this rule only governs the mobile apps.
     match /safetyReports/{reportId} {
       allow read: if signedIn() && (
         resource.data.riderId == request.auth.uid ||

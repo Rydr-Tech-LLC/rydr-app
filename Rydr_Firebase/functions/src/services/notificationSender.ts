@@ -12,7 +12,7 @@
 // payload to route a tap to the right screen.
 
 import type * as admin from "firebase-admin";
-import { db, messaging } from "../admin";
+import { db, FieldValue, messaging } from "../admin";
 
 export type NotificationAudience = "rider" | "driver";
 
@@ -26,7 +26,11 @@ export type NotificationType =
   | "paymentFailed"
   | "paymentPending"
   | "supportReply"
-  | "driverApprovalDecision";
+  | "driverApprovalDecision"
+  | "rydrBankCode"
+  | "rydrBankCompleted"
+  | "betaAnnouncement"
+  | "promo";
 
 export interface NotificationRouteData {
   type: NotificationType;
@@ -61,6 +65,25 @@ function dataPayload(route: NotificationRouteData): Record<string, string> {
   return data;
 }
 
+async function writeInboxRecord(args: SendPushArgs): Promise<void> {
+  const { audience, uid, title, body, route } = args;
+  await db
+    .collection(collectionFor(audience))
+    .doc(uid)
+    .collection("notifications")
+    .add({
+      title,
+      body,
+      type: route.type,
+      target: route.target,
+      rideId: route.rideId ?? null,
+      requestId: route.requestId ?? null,
+      chatId: route.chatId ?? null,
+      isRead: false,
+      createdAt: FieldValue.serverTimestamp()
+    });
+}
+
 /**
  * Sends a push notification to every enabled device token registered for
  * the given rider/driver, and prunes any token FCM reports as
@@ -73,6 +96,8 @@ export async function sendPushToUser(args: SendPushArgs): Promise<void> {
   const { audience, uid, title, body, route } = args;
 
   try {
+    await writeInboxRecord(args);
+
     const tokensSnap = await db
       .collection(collectionFor(audience))
       .doc(uid)

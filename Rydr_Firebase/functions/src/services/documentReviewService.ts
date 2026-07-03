@@ -480,6 +480,7 @@ async function writePendingReview(
         [`documents.${parsed.kind}.storagePath`]: parsed.storagePath,
         [`documents.${parsed.kind}.downloadURL`]: downloadURL,
         ...sideSpecificDocumentPointers(parsed, downloadURL),
+        ...legacyDriverDocumentImagePointers(parsed, downloadURL),
         updatedAt: now
       },
       { merge: true }
@@ -553,6 +554,7 @@ async function writeFinalReview(
         [`documents.${parsed.kind}.storagePath`]: parsed.storagePath,
         [`documents.${parsed.kind}.downloadURL`]: options.downloadURL,
         ...sideSpecificDocumentPointers(parsed, options.downloadURL),
+        ...legacyDriverDocumentImagePointers(parsed, options.downloadURL),
         [`documents.${parsed.kind}.extractedFields`]: options.extractedFields,
         [`documents.${parsed.kind}.reviewedAt`]: now,
         updatedAt: now
@@ -780,6 +782,22 @@ function sideSpecificDocumentPointers(parsed: ParsedDocumentPath, downloadURL: s
     [`documents.${parsed.kind}.documentPath`]: parsed.storagePath,
     [`documents.${parsed.kind}.documentURL`]: downloadURL
   };
+}
+
+function legacyDriverDocumentImagePointers(parsed: ParsedDocumentPath, downloadURL: string | null): Record<string, string | null> {
+  if (parsed.ownerType !== "driver" || parsed.side === "back") return {};
+
+  if (parsed.kind === "driverLicense") {
+    return { "license.imageUrl": downloadURL };
+  }
+  if (parsed.kind === "insurance") {
+    return { "vehicle.insuranceImageUrl": downloadURL };
+  }
+  if (parsed.kind === "registration") {
+    return { "vehicle.registrationImageUrl": downloadURL };
+  }
+
+  return {};
 }
 
 function truncate(value: string, maxLength: number): string {
