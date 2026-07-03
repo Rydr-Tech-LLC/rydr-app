@@ -854,6 +854,39 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // Driver safety penalty markers are placed by Mission Control/Admin SDK
+    // after rider reports or manual investigation. Drivers can read their own
+    // markers and submit appeals; they cannot create or modify markers.
+    match /driverSafetyPenalties/{penaltyId} {
+      allow read: if signedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+      allow write: if isAdmin();
+    }
+
+    match /driverSafetyPenaltyAppeals/{appealId} {
+      allow read: if signedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if signedIn()
+        && request.resource.data.driverId == request.auth.uid
+        && request.resource.data.status == "submitted"
+        && request.resource.data.keys().hasOnly([
+          "penaltyId",
+          "driverId",
+          "rideId",
+          "riderReportId",
+          "category",
+          "reason",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ]);
+      allow update, delete: if isAdmin();
+    }
+
     // Vehicle Library System: the managed library of generic factory-style
     // vehicle images (see Rydr_Firebase/functions and VEHICLE_LIBRARY_README.md).
     // Every app reads this to display a vehicle's image; only the Admin SDK

@@ -27,7 +27,13 @@ export default function ReportActions({ id, hasDriver, hasRider }: { id: string;
       <ActionButton label="Dismiss" onClick={() => run("dismiss")} loading={loading === "dismiss"} variant="muted" />
       <ActionButton label="Escalate" onClick={() => run("escalate")} loading={loading === "escalate"} variant="warning" />
       {hasDriver && (
-        <ActionButton label="Suspend Driver" onClick={() => run("suspend_driver")} loading={loading === "suspend_driver"} variant="danger" />
+        <>
+          <ActionButton label="Unsafe Driving" onClick={() => run("mark_unsafe_driving")} loading={loading === "mark_unsafe_driving"} variant="warning" />
+          <ActionButton label="Unclean Car" onClick={() => run("mark_cleanliness")} loading={loading === "mark_cleanliness"} variant="warning" />
+          <ActionButton label="Phone Use" onClick={() => run("mark_phone_use")} loading={loading === "mark_phone_use"} variant="warning" />
+          <ActionButton label="Unprofessional Hold" onClick={() => run("mark_unprofessional")} loading={loading === "mark_unprofessional"} variant="danger" />
+          <ActionButton label="Suspend Driver" onClick={() => run("suspend_driver")} loading={loading === "suspend_driver"} variant="danger" />
+        </>
       )}
       {hasRider && (
         <ActionButton label="Suspend Rider" onClick={() => run("suspend_rider")} loading={loading === "suspend_rider"} variant="danger" />

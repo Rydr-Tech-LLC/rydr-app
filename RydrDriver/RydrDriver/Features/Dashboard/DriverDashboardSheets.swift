@@ -1641,6 +1641,8 @@ struct DrawerDestinationView: View {
                 DriverDocumentsView(vm: vm)
             } else if item == .settings {
                 DriverSettingsView()
+            } else if item == .safety {
+                DriverSafetyCenterView(vm: vm)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
