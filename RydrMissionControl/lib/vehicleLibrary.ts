@@ -124,18 +124,107 @@ function normalizeRideTypes(values: unknown): RydrRideType[] {
   return RYDR_RIDE_TYPES.filter((rideType) => selected.has(rideType));
 }
 
+function stringValue(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const normalized = normalizedText(value);
+  return normalized || fallback;
+}
+
+function optionalString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = normalizedText(value);
+  return normalized || null;
+}
+
+function numberValue(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function normalizeBodyStyle(value: unknown): VehicleBodyStyle {
+  return VEHICLE_BODY_STYLES.includes(value as VehicleBodyStyle) ? (value as VehicleBodyStyle) : "unknown";
+}
+
+function normalizeColor(value: unknown): VehicleColor | null {
+  if (typeof value !== "string") return null;
+  return VEHICLE_COLORS.find((color) => color.toLowerCase() === value.trim().toLowerCase()) ?? null;
+}
+
+function normalizeColorImages(value: unknown): Partial<Record<VehicleColor, string>> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const colorImages: Partial<Record<VehicleColor, string>> = {};
+  for (const [key, path] of Object.entries(value)) {
+    const color = normalizeColor(key);
+    if (color && typeof path === "string" && path.trim()) {
+      colorImages[color] = path.trim();
+    }
+  }
+  return colorImages;
+}
+
+function normalizeVehicleLibraryEntry(data: unknown, fallbackVehicleId?: string): VehicleLibraryEntry {
+  const record = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
+  const make = stringValue(record.make, "Unknown make");
+  const model = stringValue(record.model, "Unknown model");
+  const yearStart = Math.trunc(numberValue(record.yearStart, numberValue(record.year, new Date().getFullYear())));
+  const yearEnd = Math.trunc(numberValue(record.yearEnd, yearStart));
+  const colorImages = normalizeColorImages(record.colorImages);
+  const colors = new Set<VehicleColor>();
+  if (Array.isArray(record.availableColors)) {
+    for (const value of record.availableColors) {
+      const color = normalizeColor(value);
+      if (color) colors.add(color);
+    }
+  }
+  for (const color of Object.keys(colorImages)) {
+    colors.add(color as VehicleColor);
+  }
+
+  return {
+    vehicleId: stringValue(record.vehicleId, fallbackVehicleId ?? buildVehicleId(make, model, yearStart, yearEnd, optionalString(record.trim))),
+    make,
+    model,
+    yearStart,
+    yearEnd,
+    trim: optionalString(record.trim),
+    bodyStyle: normalizeBodyStyle(record.bodyStyle),
+    eligibleRideTypes: normalizeRideTypes(record.eligibleRideTypes),
+    availableColors: VEHICLE_COLORS.filter((color) => colors.has(color)),
+    defaultImage: optionalString(record.defaultImage),
+    colorImages
+  };
+}
+
+function storageBucketName(): string | null {
+  return (
+    process.env.FIREBASE_STORAGE_BUCKET ||
+    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
+    (process.env.FIREBASE_ADMIN_PROJECT_ID ? `${process.env.FIREBASE_ADMIN_PROJECT_ID}.firebasestorage.app` : null)
+  );
+}
+
 function bucket() {
-  return adminStorage.bucket(process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || undefined);
+  return adminStorage.bucket(storageBucketName() ?? undefined);
 }
 
-function publicUrl(path: string): string {
-  return `https://storage.googleapis.com/${bucket().name}/${encodeURI(path)}`;
+function publicUrl(path: string): string | null {
+  const bucketName = storageBucketName();
+  if (!bucketName) return null;
+  return `https://storage.googleapis.com/${bucketName}/${encodeURI(path)}`;
 }
 
-function withUrls(entry: VehicleLibraryEntry): VehicleLibraryEntry {
+function withUrls(data: unknown, fallbackVehicleId?: string): VehicleLibraryEntry {
+  const entry = normalizeVehicleLibraryEntry(data, fallbackVehicleId);
   const colorImageUrls: Partial<Record<VehicleColor, string>> = {};
   for (const [color, path] of Object.entries(entry.colorImages ?? {})) {
-    if (path) colorImageUrls[color as VehicleColor] = publicUrl(path);
+    if (path) {
+      const url = publicUrl(path);
+      if (url) colorImageUrls[color as VehicleColor] = url;
+    }
   }
   return {
     ...entry,
@@ -151,7 +240,7 @@ function collection() {
 export async function getVehicleLibraryEntry(vehicleId: string): Promise<VehicleLibraryEntry | null> {
   const snap = await collection().doc(vehicleId).get();
   if (!snap.exists) return null;
-  return withUrls(snap.data() as VehicleLibraryEntry);
+  return withUrls(snap.data(), snap.id);
 }
 
 export interface VehicleLibrarySearchFilters {
@@ -167,7 +256,7 @@ export interface VehicleLibrarySearchFilters {
 
 export async function searchVehicleLibrary(filters: VehicleLibrarySearchFilters): Promise<VehicleLibraryEntry[]> {
   const snap = await collection().limit(filters.limit ?? 500).get();
-  let entries = snap.docs.map((d) => d.data() as VehicleLibraryEntry);
+  let entries = snap.docs.map((d) => withUrls(d.data(), d.id));
 
   if (filters.make) {
     const make = filters.make.trim().toLowerCase();
@@ -195,12 +284,12 @@ export async function searchVehicleLibrary(filters: VehicleLibrarySearchFilters)
     entries = entries.filter((e) => (e.availableColors?.length ?? 0) > 0 && (e.availableColors?.length ?? 0) < VEHICLE_COLORS.length);
   }
 
-  return entries.sort((a, b) => (a.make + a.model + a.yearStart).localeCompare(b.make + b.model + b.yearStart)).map(withUrls);
+  return entries.sort((a, b) => (a.make + a.model + a.yearStart).localeCompare(b.make + b.model + b.yearStart));
 }
 
 export async function listVehicleLibrary(limit = 1000): Promise<VehicleLibraryEntry[]> {
   const snap = await collection().limit(limit).get();
-  return snap.docs.map((d) => withUrls(d.data() as VehicleLibraryEntry));
+  return snap.docs.map((d) => withUrls(d.data(), d.id));
 }
 
 export async function upsertVehicleLibraryEntry(
@@ -257,7 +346,7 @@ export async function upsertVehicleLibraryEntry(
     updatedAt: FieldValue.serverTimestamp(),
     updatedBy: adminUid
   });
-  return withUrls((await ref.get()).data() as VehicleLibraryEntry);
+  return withUrls((await ref.get()).data(), ref.id);
 }
 
 export async function uploadVehicleImage(params: {
@@ -295,7 +384,7 @@ export async function uploadVehicleImage(params: {
     update.defaultImage = path;
   }
   await ref.update(update);
-  return withUrls((await ref.get()).data() as VehicleLibraryEntry);
+  return withUrls((await ref.get()).data(), ref.id);
 }
 
 export async function deleteVehicleImage(params: { vehicleId: string; color?: VehicleColor; adminUid: string }): Promise<VehicleLibraryEntry> {
@@ -321,7 +410,7 @@ export async function deleteVehicleImage(params: { vehicleId: string; color?: Ve
     update.defaultImage = null;
   }
   await ref.update(update);
-  return withUrls((await ref.get()).data() as VehicleLibraryEntry);
+  return withUrls((await ref.get()).data(), ref.id);
 }
 
 export async function deleteVehicleLibraryEntry(vehicleId: string): Promise<void> {
