@@ -103,8 +103,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private var lastTripTelemetryAt: Date?
     private var lastTripTelemetryLocation: CLLocation?
     #if DEBUG
-    private var didCreateMockRideThisOnlineSession = false
-
     private var shouldUseAtlantaPilotLocationInSimulator: Bool {
         #if targetEnvironment(simulator)
         ProcessInfo.processInfo.environment["RYDR_USE_SIMULATOR_CORE_LOCATION"] != "1"
@@ -265,15 +263,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             #endif
             startPushingDriverPresence()
             startRequestListener()
-            #if DEBUG
-            createMockRideRequestIfNeeded()
-            #endif
             recordDriverPresenceEvent(online: true)
         } else {
             isSearchingForRides = false
-            #if DEBUG
-            didCreateMockRideThisOnlineSession = false
-            #endif
             stopPushingDriverPresence()
             stopRequestListener()
             updateDriverPresence(online: false)
@@ -633,36 +625,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         recordWaitTimeEvent(ride: ride, waitStage: "wait_ended")
     }
 
-    #if DEBUG
-    func debugMoveToActiveRideDestination() {
-        guard let ride = activeRide else { return }
-        let destination: CLLocationCoordinate2D?
-        switch ride.normalizedStatus {
-        case "navigatingToStop":
-            destination = ride.stopCoordinate
-        default:
-            destination = ride.isPickupStage ? ride.pickupCoordinate : ride.dropoffCoordinate
-        }
-        guard let destination else {
-            statusMessage = "Mock ride is missing its next destination."
-            return
-        }
-
-        let location = CLLocation(latitude: destination.latitude, longitude: destination.longitude)
-        lastLocation = location
-        mapRegion.center = destination
-        updateActiveRideLocation(location)
-        statusMessage = ride.isPickupStage ? "Mock driver moved to pickup." : "Mock driver moved to the active destination."
-    }
-
-    func debugMoveActiveRideDriver(to coordinate: CLLocationCoordinate2D) {
-        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        lastLocation = location
-        mapRegion.center = coordinate
-        updateActiveRideLocation(location)
-    }
-    #endif
-
     private func updateActiveRideStatus(status: String, fields: [String: Any]) {
         guard let ride = activeRide else { return }
         guard !isUpdatingActiveRide else { return }
@@ -971,54 +933,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             }
         }
     }
-
-    #if DEBUG
-    private func createMockRideRequestIfNeeded() {
-        guard !didCreateMockRideThisOnlineSession,
-              pendingRequests.isEmpty,
-              activeRide == nil,
-              let uid = Auth.auth().currentUser?.uid else { return }
-        didCreateMockRideThisOnlineSession = true
-
-        let id = "mock-\(UUID().uuidString)"
-        let pickup = CLLocationCoordinate2D(latitude: 33.7550, longitude: -84.3900)
-        let stop = CLLocationCoordinate2D(latitude: 33.7638, longitude: -84.3951)
-        let dropoff = CLLocationCoordinate2D(latitude: 33.7765, longitude: -84.3897)
-        let driver = lastLocation?.coordinate ?? mapRegion.center
-        let pickupMiles = CLLocation(latitude: driver.latitude, longitude: driver.longitude)
-            .distance(from: CLLocation(latitude: pickup.latitude, longitude: pickup.longitude)) / 1609.344
-        let tripMiles = CLLocation(latitude: pickup.latitude, longitude: pickup.longitude)
-            .distance(from: CLLocation(latitude: dropoff.latitude, longitude: dropoff.longitude)) / 1609.344
-        let adjustedTripMiles = ((tripMiles * 1.25) * 10).rounded() / 10
-        let duration = max(6, (adjustedTripMiles / 22.0 * 60).rounded())
-        let rideType = selectedRideTypes.sorted().first ?? "Rydr Go"
-        let rate = self.rate(for: rideType)
-        let fare = (((adjustedTripMiles * rate.perMile) + (duration * rate.perMinute)) * 100).rounded() / 100
-
-        db.collection("rideRequests").document(id).setData([
-            "id": id,
-            "driverId": uid,
-            "riderId": "mock-rider",
-            "riderName": "Maya Test",
-            "riderRating": 4.92,
-            "pickup": "Ponce City Market, Atlanta, GA",
-            "stop": "Georgia Tech, Atlanta, GA",
-            "dropoff": "Piedmont Park, Atlanta, GA",
-            "rideType": rideType,
-            "estimatedFare": fare,
-            "estimatedDistanceMiles": adjustedTripMiles,
-            "estimatedDurationMinutes": duration,
-            "pickupDistanceFromDriverMiles": ((pickupMiles * 10).rounded() / 10),
-            "pickupCoordinate": ["lat": pickup.latitude, "lng": pickup.longitude],
-            "stopCoordinate": ["lat": stop.latitude, "lng": stop.longitude],
-            "dropoffCoordinate": ["lat": dropoff.latitude, "lng": dropoff.longitude],
-            "status": "pending",
-            "source": "debugMockRide",
-            "createdAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
-        ], merge: true)
-    }
-    #endif
 
     func cancelActiveRide() {
         guard let ride = activeRide else { return }
@@ -2080,32 +1994,6 @@ struct DriverDashboardView: View {
             set: { _ in }
         )) {
             if let ride = vm.activeRide {
-                #if DEBUG
-                DriverRideInProgressView(
-                    ride: ride,
-                    currentDriverId: Auth.auth().currentUser?.uid ?? "",
-                    driverCoordinate: vm.lastLocation?.coordinate,
-                    driverSpeedMetersPerSecond: vm.lastLocation?.speed,
-                    isUpdatingRide: vm.isUpdatingActiveRide,
-                    onStartNavigation: vm.startActiveRideNavigation,
-                    onArrivedAtPickup: vm.markArrivedAtPickup,
-                    onStartRide: vm.startPassengerRide,
-                    onArrivedAtStop: vm.markArrivedAtStop,
-                    onHeadToDropoff: vm.headToDropoffFromStop,
-                    onCompleteRide: vm.completeActiveRide,
-                    onPickupPaidWaitStarted: vm.markPickupPaidWaitActive,
-                    onCancel: vm.cancelActiveRide,
-                    onReportIncident: { activeSheet = .menu(.safety) },
-                    onRidePreferencesDismissed: { preferences in
-                        vm.recordDriverOnlyRidePreferenceNote(ride: ride, preferences: preferences)
-                    },
-                    onSendMessage: { text in
-                        try await vm.sendMessageToRider(ride: ride, text: text)
-                    },
-                    onDebugMoveToDestination: vm.debugMoveToActiveRideDestination,
-                    onDebugMoveDriver: vm.debugMoveActiveRideDriver(to:)
-                )
-                #else
                 DriverRideInProgressView(
                     ride: ride,
                     currentDriverId: Auth.auth().currentUser?.uid ?? "",
@@ -2128,7 +2016,6 @@ struct DriverDashboardView: View {
                         try await vm.sendMessageToRider(ride: ride, text: text)
                     }
                 )
-                #endif
             }
         }
         .sheet(item: $vm.completedRideForRating) { ride in

@@ -23,7 +23,7 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
   if (!snap.exists) notFound();
 
   const driver = { ...(snap.data() as DriverRecord), uid: snap.id };
-  const { checks, missing, canApprove } = evaluateDriverRequirements(driver);
+  const { checks, missing } = evaluateDriverRequirements(driver);
   const createdAt = toDateSafe(driver.createdAt);
   const dob = toDateSafe(driver.dob);
   const licenseUrl = driverDocumentUrl(driver, "license");
@@ -198,7 +198,7 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
             <RequirementChecklist checks={checks} />
           </Section>
 
-          <DriverActions uid={driver.uid} canApprove={canApprove} missing={missing} />
+          <DriverActions uid={driver.uid} missing={missing} />
         </div>
       </div>
     </div>

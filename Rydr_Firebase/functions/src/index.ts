@@ -12,6 +12,7 @@ import { VEHICLE_COLORS, type VehicleColor, type VehicleBodyStyle } from "./type
 export { onRideUpdated } from "./triggers/rideNotifications";
 export { onSupportMessageCreated } from "./triggers/supportNotifications";
 export { onDriverApprovalDecision } from "./triggers/driverApprovalNotifications";
+export { onDriverAutoApprovalEligibility } from "./triggers/driverAutoApproval";
 export { onRydrBankCodeCreated, onRydrBankSummaryUpdated } from "./triggers/rydrBankNotifications";
 export { onDocumentUploadedForReview } from "./triggers/documentReview";
 

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Drive with Rydr | Control, Clarity, Safety</title>
+    <meta name="description" content="Join the Rydr driver beta waitlist in Atlanta. Driver-controlled rates, live notifications, clear onboarding, and safety accountability." />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body data-waitlist-endpoint="https://rydr-app-missioncontrol.vercel.app/api/waitlist">
+    <header class="site-header" data-header>
+      <a class="brand" href="index.html" aria-label="Rydr home"><span class="brand-mark">R</span><span>Rydr</span></a>
+      <button class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" data-nav-toggle><span></span><span></span><span></span></button>
+      <nav class="site-nav" data-nav>
+        <a href="riders.html">Riders</a>
+        <a href="drivers.html" aria-current="page">Drivers</a>
+        <a href="cashrydr.html">CashRydr Hub</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="#driver-tools">Driver tools</a>
+        <a class="nav-cta" href="#waitlist">Join Beta</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero product-hero driver-hero">
+        <div class="hero-copy reveal">
+          <p class="eyebrow">Rydr for drivers</p>
+          <h1>Drive with more control.</h1>
+          <p class="lead">
+            Rydr is preparing a driver experience focused on deliberate rate settings, onboarding review through
+            Mission Control, live ride notifications, and safety accountability that can be appealed.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#waitlist">Join driver waitlist</a>
+            <a class="btn btn-secondary" href="#driver-tools">See driver tools</a>
+          </div>
+        </div>
+        <div class="product-shot reveal">
+          <img src="assets/generated/driver-home.png" alt="Rydr driver app dashboard screenshot" />
+        </div>
+      </section>
+
+      <section class="section-band" id="driver-tools">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Driver operating system</p>
+          <h2>Tools for beta readiness and daily driving.</h2>
+          <p>Rydr is building driver features around the work drivers actually need to manage before and during a shift.</p>
+        </div>
+        <div class="detail-grid">
+          <article class="detail-card reveal"><h3>Deliberate rate editing</h3><p>Per-mile and per-minute rates are being made explicit, editable, and saved with clear feedback.</p></article>
+          <article class="detail-card reveal"><h3>Live notifications</h3><p>Ride requests, missed requests, demand updates, safety decisions, and appeal updates can surface in-app.</p></article>
+          <article class="detail-card reveal"><h3>Mission Control approval</h3><p>Driver approval and beta background-check bypass decisions belong to admins, not the driver menu.</p></article>
+          <article class="detail-card reveal"><h3>Safety and appeals</h3><p>Drivers can view penalty markers, report incidents, and appeal concerns while Mission Control reviews supporting analytics.</p></article>
+        </div>
+      </section>
+
+      <section class="app-showcase">
+        <div class="showcase-copy reveal">
+          <p class="eyebrow">Real driver app screens</p>
+          <h2>Beta driver workflows on display.</h2>
+          <p>The site uses fresh screenshots from the driver app build so the public story matches the TestFlight product.</p>
+        </div>
+        <div class="screenshot-row reveal">
+          <img src="assets/generated/driver-home.png" alt="Rydr driver dashboard screenshot" />
+          <img src="assets/generated/driver-safety.png" alt="Rydr driver safety screenshot" />
+        </div>
+      </section>
+
+      <section class="waitlist-section" id="waitlist">
+        <div class="waitlist-copy reveal">
+          <p class="eyebrow">Driver beta</p>
+          <h2>Request a driver invite.</h2>
+          <p>Driver beta approvals are reviewed through Mission Control. You will receive email confirmation and TestFlight instructions if approved.</p>
+        </div>
+        <form class="waitlist-form reveal" data-waitlist-form>
+          <div class="form-grid">
+            <label>First name<input name="firstName" autocomplete="given-name" required /></label>
+            <label>Last name<input name="lastName" autocomplete="family-name" required /></label>
+            <label>Email<input name="email" type="email" autocomplete="email" required /></label>
+            <label>Phone<input name="phoneNumber" type="tel" autocomplete="tel" required /></label>
+          </div>
+          <input type="hidden" name="role" value="driver" />
+          <input type="hidden" name="source" value="rydr-go.com/drivers" />
+          <button class="btn btn-primary" type="submit">Join driver waitlist</button>
+          <p class="form-note" data-form-note aria-live="polite"></p>
+        </form>
+      </section>
+    </main>
+
+    <footer class="site-footer"><div><strong>Rydr</strong><span>Ride Different.</span></div><nav><a href="index.html">Home</a><a href="riders.html">Riders</a><a href="cashrydr.html">CashRydr Hub</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></nav></footer>
+    <script src="script.js"></script>
+  </body>
+</html>

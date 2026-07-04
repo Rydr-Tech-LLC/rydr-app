@@ -3,7 +3,6 @@ import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
-import { evaluateDriverRequirements, type DriverRecord } from "@/lib/types";
 
 type Decision = "approved" | "needs_attention" | "rejected";
 
@@ -36,27 +35,29 @@ export async function POST(request: NextRequest, { params }: { params: { uid: st
     return NextResponse.json({ error: "Driver not found" }, { status: 404 });
   }
 
-  if (decision === "approved") {
-    const { canApprove, missing } = evaluateDriverRequirements(driverSnap.data() as DriverRecord);
-    if (!canApprove) {
-      return NextResponse.json(
-        { error: `Cannot approve — missing: ${missing.join(", ")}` },
-        { status: 422 }
-      );
-    }
-  }
-
   const update: Record<string, unknown> = {
     driverApprovalStatus: decision,
-    isApproved: decision === "approved"
+    isApproved: decision === "approved",
+    canGoOnline: decision === "approved",
+    updatedAt: FieldValue.serverTimestamp()
   };
 
   if (decision === "approved") {
     update.approvedAt = FieldValue.serverTimestamp();
     update.approvedBy = session.uid;
+    update.missionControlApprovalOverride = true;
+    update.missionControlApprovalOverrideAt = FieldValue.serverTimestamp();
+    update.missionControlApprovalOverrideBy = session.uid;
+    update.missionControlApprovalOverrideReason =
+      reason || "Mission Control approved driver despite incomplete beta requirements.";
+    update.rejectionReason = FieldValue.delete();
+    update.needsAttentionReason = FieldValue.delete();
   }
   if (decision === "rejected" && reason) {
     update.rejectionReason = reason;
+  }
+  if (decision === "needs_attention" && reason) {
+    update.needsAttentionReason = reason;
   }
 
   await driverRef.set(update, { merge: true });

@@ -7,6 +7,7 @@ import FirebaseFirestore
 import FirebaseAuth
 
 enum SignupStep: Hashable {
+    case betaWaiver
     case nameEntry
     case emailPassword
     case addressEntry
@@ -17,6 +18,7 @@ enum SignupStep: Hashable {
 
 struct SignupCoordinator: View {
     @EnvironmentObject private var session: UserSessionManager
+    @Environment(\.dismiss) private var dismiss
     let upgradingCashHubAccount: Bool
 
     @State private var path: [SignupStep] = []
@@ -36,7 +38,10 @@ struct SignupCoordinator: View {
     @State private var state = ""
     @State private var zip = ""
     @State private var agreedToTerms = false
+    @State private var betaWaiverAccepted = false
     @State private var verificationRequested = false
+    @State private var betaAccessError = ""
+    @State private var showBetaAccessAlert = false
 
     // Navigate to main app
     @State private var showMainApp = false
@@ -57,12 +62,21 @@ struct SignupCoordinator: View {
                         linkToCurrentUser: upgradingCashHubAccount
                     ) { verifiedPhone in
                         phoneNumber = verifiedPhone
-                        upsertRider([
-                            "phoneNumber": verifiedPhone,
-                            "createdAt": FieldValue.serverTimestamp()
-                        ])
-                        Task { @MainActor in
-                            path.append(.nameEntry)
+                        betaInviteApproved(phoneE164: verifiedPhone) { approved in
+                            Task { @MainActor in
+                                if approved {
+                                    upsertRider([
+                                        "phoneNumber": verifiedPhone,
+                                        "phoneE164": verifiedPhone,
+                                        "createdAt": FieldValue.serverTimestamp()
+                                    ])
+                                    path.append(.betaWaiver)
+                                } else {
+                                    try? Auth.auth().signOut()
+                                    betaAccessError = "This phone number has not been approved for the Rydr rider beta yet. Join the waitlist or use the phone number from your beta approval."
+                                    showBetaAccessAlert = true
+                                }
+                            }
                         }
                     }
                 }
@@ -74,6 +88,24 @@ struct SignupCoordinator: View {
             }
             .navigationDestination(for: SignupStep.self) { step in
                 switch step {
+                case .betaWaiver:
+                    BetaWaiverView(
+                        onAgree: {
+                            betaWaiverAccepted = true
+                            upsertRider([
+                                "betaWaiverAccepted": true,
+                                "betaWaiverAcceptedAt": FieldValue.serverTimestamp(),
+                                "betaWaiverVersion": "2026-07-04"
+                            ])
+                            Task { @MainActor in
+                                path.append(.nameEntry)
+                            }
+                        },
+                        onDecline: {
+                            try? Auth.auth().signOut()
+                            dismiss()
+                        }
+                    )
 
                 case .nameEntry:
                     NameEntryView(
@@ -160,6 +192,11 @@ struct SignupCoordinator: View {
             MainTabView()
                 .environmentObject(session)
         }
+        .alert("Unable to continue", isPresented: $showBetaAccessAlert) {
+            Button("OK") { dismiss() }
+        } message: {
+            Text(betaAccessError)
+        }
     }
 
     // MARK: - Firestore helpers
@@ -179,6 +216,17 @@ struct SignupCoordinator: View {
             .collection("riders").document(uid)
             .setData(fields, merge: true) { err in
                 if let err = err { print("❌ upsertRider error: \(err)") }
+            }
+    }
+
+    private func betaInviteApproved(phoneE164: String, completion: @escaping (Bool) -> Void) {
+        Firestore.firestore()
+            .collection("betaInvites")
+            .document("rider")
+            .collection("phones")
+            .document(phoneE164)
+            .getDocument { snapshot, _ in
+                completion(snapshot?.data()?["status"] as? String == "approved")
             }
     }
 
@@ -275,6 +323,7 @@ struct SignupCoordinator: View {
                 "zip": zip
             ],
             "agreedToTerms": agreedToTerms,
+            "betaWaiverAccepted": betaWaiverAccepted,
             "verificationRequested": verificationRequested,
             "hasRydrRiderAccess": true,
             "cashHubRole": CashHubRole.rider.rawValue,

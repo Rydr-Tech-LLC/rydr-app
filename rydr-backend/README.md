@@ -27,14 +27,14 @@ src/
 ├── routes/
 │   ├── health.js
 │   ├── events.js
-│   ├── community.js
-│   ├── chat.js
-│   └── notifications.js
+│   ├── driver.js
+│   └── moderation.js
 │
 ├── services/
 │   ├── ticketmasterService.js
 │   ├── firestoreService.js
-│   └── notificationService.js
+│   ├── driverService.js
+│   └── moderationService.js
 │
 ├── middleware/
 ├── config/
@@ -96,11 +96,9 @@ Current feature routes:
 
 - `GET /events` - Atlanta event search powered by Ticketmaster Discovery
 - `GET /events/:id` - normalized Ticketmaster event detail
-- `GET /community/posts`
-- `POST /community/posts`
-- `GET /chat/conversations`
-- `POST /chat/message`
-- `GET /notifications`
+- `POST /driver/wait-time-events` - authenticated driver wait-time event logging
+- `POST /driver/account-deletion-requests` - authenticated driver account deletion request intake
+- `POST /moderation/check-image` - authenticated image moderation for uploaded profile photos
 
 ## Environment Variables
 
@@ -164,4 +162,4 @@ This backend is structured to support:
 - Chat
 - Notifications
 
-The event routes call Ticketmaster Discovery. The remaining placeholder routes preserve service boundaries for future implementation.
+The event routes call Ticketmaster Discovery. Placeholder/mock Chat, Community Posts, and Notifications routes were removed for TestFlight readiness; add those APIs back only when they are backed by real data and authentication.

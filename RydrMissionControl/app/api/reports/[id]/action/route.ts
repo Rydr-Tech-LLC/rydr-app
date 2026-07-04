@@ -63,7 +63,10 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   } else if (action === "escalate") {
     await reportRef.set({ status: "escalated" }, { merge: true });
   } else if (action === "suspend_driver" && report.driverId) {
-    await adminDb.collection("drivers").doc(report.driverId).set({ driverApprovalStatus: "rejected", isApproved: false }, { merge: true });
+    await adminDb.collection("drivers").doc(report.driverId).set(
+      { driverApprovalStatus: "rejected", isApproved: false, canGoOnline: false },
+      { merge: true }
+    );
     await reportRef.set({ status: "escalated" }, { merge: true });
   } else if (action === "suspend_rider" && report.riderId) {
     await adminDb.collection("riders").doc(report.riderId).set({ accountStatus: "suspended" }, { merge: true });

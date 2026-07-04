@@ -36,7 +36,7 @@ struct SignupCompleteView: View {
                     .font(.system(size: 26, weight: .heavy, design: .rounded))
                     .foregroundStyle(Styles.rydrGradient)
 
-                Text("We'll notify you when your driver application review is complete. Background checks remain required and will be completed when Rydr opens the next screening phase.")
+                Text("If your beta onboarding checks are complete, your account can be approved automatically. Background checks remain required and will be completed when Rydr opens the next screening phase.")
                     .font(.body)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)

@@ -446,58 +446,23 @@ private struct DriverDocumentDetailView: View {
         guard let item else { return }
         Task {
             do {
-                guard let data = try await item.loadTransferable(type: Data.self) else {
-                    await MainActor.run { message = "Could not read that file." }
-                    return
+                guard let uploadKind = kind.uploadKind else { return }
+                await MainActor.run {
+                    isUploading = true
+                    message = nil
                 }
-                let uploadData = normalizedImageData(data) ?? data
-                try await upload(uploadData, side: side)
+                _ = try await DriverDocumentUploadService.upload(item: item, kind: uploadKind, side: side.uploadSide)
+                await MainActor.run {
+                    isUploading = false
+                    message = "\(kind.title) uploaded. Rydr is reviewing it now."
+                    onUploaded()
+                }
             } catch {
                 await MainActor.run {
                     isUploading = false
                     message = error.localizedDescription
                 }
             }
-        }
-    }
-
-    private func normalizedImageData(_ data: Data) -> Data? {
-        guard let image = UIImage(data: data) else { return nil }
-        let maxDimension: CGFloat = 1800
-        let largest = max(image.size.width, image.size.height)
-        let targetSize: CGSize
-        if largest > maxDimension {
-            let scale = maxDimension / largest
-            targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-        } else {
-            targetSize = image.size
-        }
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
-        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: targetSize)) }
-        return resized.jpegData(compressionQuality: 0.82)
-    }
-
-    private func upload(_ data: Data, side: DriverDocumentSide) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            throw DriverDocumentUploadError.notSignedIn
-        }
-
-        await MainActor.run {
-            isUploading = true
-            message = nil
-        }
-
-        let timestamp = Int(Date().timeIntervalSince1970)
-        let storagePath = "driverDocuments/\(uid)/\(kind.rawValue)/\(side.rawValue)-\(timestamp).jpg"
-        let ref = Storage.storage().reference(withPath: storagePath)
-        let metadata = StorageMetadata()
-        metadata.contentType = "image/jpeg"
-        _ = try await ref.putDataAsync(data, metadata: metadata)
-
-        await MainActor.run {
-            isUploading = false
-            message = "\(kind.title) uploaded. Rydr is reviewing it now."
-            onUploaded()
         }
     }
 }
@@ -577,13 +542,98 @@ private enum DriverDocumentSide: String {
     case single
 }
 
-private enum DriverDocumentUploadError: LocalizedError {
+private extension DriverDocumentKind {
+    var uploadKind: DriverDocumentUploadKind? {
+        switch self {
+        case .driverLicense: return .driverLicense
+        case .insurance: return .insurance
+        case .registration: return .registration
+        case .backgroundCheck: return nil
+        }
+    }
+}
+
+private extension DriverDocumentSide {
+    var uploadSide: DriverDocumentUploadSide {
+        switch self {
+        case .front: return .front
+        case .back: return .back
+        case .single: return .single
+        }
+    }
+}
+
+struct DriverDocumentUploadResult {
+    let storagePath: String
+    let downloadURL: URL
+}
+
+enum DriverDocumentUploadKind: String {
+    case driverLicense
+    case insurance
+    case registration
+    case vehicleInspection
+}
+
+enum DriverDocumentUploadSide: String {
+    case front
+    case back
+    case single
+}
+
+enum DriverDocumentUploadError: LocalizedError {
     case notSignedIn
+    case missingSelection
+    case unreadableImage
 
     var errorDescription: String? {
         switch self {
         case .notSignedIn: return "Sign in before uploading documents."
+        case .missingSelection: return "Choose a clear document photo before continuing."
+        case .unreadableImage: return "Could not read that document photo. Please choose a different image."
         }
+    }
+}
+
+enum DriverDocumentUploadService {
+    static func upload(item: PhotosPickerItem?, kind: DriverDocumentUploadKind, side: DriverDocumentUploadSide) async throws -> DriverDocumentUploadResult {
+        guard let item else { throw DriverDocumentUploadError.missingSelection }
+        guard let data = try await item.loadTransferable(type: Data.self) else {
+            throw DriverDocumentUploadError.unreadableImage
+        }
+        return try await upload(data: data, kind: kind, side: side)
+    }
+
+    static func upload(data: Data, kind: DriverDocumentUploadKind, side: DriverDocumentUploadSide) async throws -> DriverDocumentUploadResult {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw DriverDocumentUploadError.notSignedIn
+        }
+
+        let uploadData = normalizedImageData(data) ?? data
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let storagePath = "driverDocuments/\(uid)/\(kind.rawValue)/\(side.rawValue)-\(timestamp)-\(UUID().uuidString).jpg"
+        let ref = Storage.storage().reference(withPath: storagePath)
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+        _ = try await ref.putDataAsync(uploadData, metadata: metadata)
+        let url = try await ref.downloadURL()
+        return DriverDocumentUploadResult(storagePath: storagePath, downloadURL: url)
+    }
+
+    private static func normalizedImageData(_ data: Data) -> Data? {
+        guard let image = UIImage(data: data) else { return nil }
+        let maxDimension: CGFloat = 1800
+        let largest = max(image.size.width, image.size.height)
+        let targetSize: CGSize
+        if largest > maxDimension {
+            let scale = maxDimension / largest
+            targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        } else {
+            targetSize = image.size
+        }
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: targetSize)) }
+        return resized.jpegData(compressionQuality: 0.82)
     }
 }
 

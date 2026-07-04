@@ -7,9 +7,6 @@ const morgan = require("morgan");
 
 const healthRoutes = require("./routes/health");
 const eventRoutes = require("./routes/events");
-const communityRoutes = require("./routes/community");
-const chatRoutes = require("./routes/chat");
-const notificationRoutes = require("./routes/notifications");
 const driverRoutes = require("./routes/driver");
 const moderationRoutes = require("./routes/moderation");
 
@@ -27,9 +24,6 @@ app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 app.use("/", healthRoutes);
 app.use("/events", eventRoutes);
-app.use("/community", communityRoutes);
-app.use("/chat", chatRoutes);
-app.use("/notifications", notificationRoutes);
 app.use("/driver", driverRoutes);
 app.use("/moderation", moderationRoutes);
 

@@ -534,6 +534,59 @@ function platformFeeCents(ride, chargeAmountCents, resolvedCharge = null) {
   return Math.round(chargeAmountCents * PLATFORM_MIN_FEE_SHARE);
 }
 
+function driverPayoutCents(ride, resolvedCharge = null) {
+  const explicitDriverPayout = nonNegativeIntegerField(ride, "estimatedDriverPayoutCents");
+  const waitCharge = resolvedCharge?.pickupWaitChargeCents ?? 0;
+  const waitDriverPayout = Math.max(0, waitCharge - Math.round(waitCharge * PLATFORM_MIN_FEE_SHARE));
+  if (explicitDriverPayout !== null) return explicitDriverPayout + waitDriverPayout;
+
+  const rideSubtotal = nonNegativeIntegerField(ride, "rideSubtotalCents");
+  if (rideSubtotal !== null) return Math.round(rideSubtotal * (1 - PLATFORM_MIN_FEE_SHARE)) + waitDriverPayout;
+  return Math.max(0, Math.round((resolvedCharge?.amount ?? 0) * (1 - PLATFORM_MIN_FEE_SHARE)));
+}
+
+function applicationFeeForGuaranteedDriverPayout(ride, chargeAmountCents, resolvedCharge = null) {
+  const targetDriverPayout = driverPayoutCents(ride, resolvedCharge);
+  return Math.min(platformFeeCents(ride, chargeAmountCents, resolvedCharge), Math.max(0, chargeAmountCents - targetDriverPayout));
+}
+
+async function transferPromoSubsidyIfNeeded({ rideRef, rideId, ride, driverAccountId, targetDriverPayoutCents, amountTransferredFromChargeCents }) {
+  const subsidyCents = Math.max(0, targetDriverPayoutCents - amountTransferredFromChargeCents);
+  if (subsidyCents <= 0) {
+    return { subsidyCents: 0, transferId: null, transferStatus: "not_needed" };
+  }
+
+  if (!driverAccountId) {
+    await rideRef.set(
+      {
+        driverPayoutCents: targetDriverPayoutCents,
+        promoSubsidyTransferCents: subsidyCents,
+        promoSubsidyTransferStatus: "pending_driver_connect_account",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return { subsidyCents, transferId: null, transferStatus: "pending_driver_connect_account" };
+  }
+
+  const transfer = await stripe.transfers.create(
+    {
+      amount: subsidyCents,
+      currency: "usd",
+      destination: driverAccountId,
+      metadata: {
+        rideId,
+        riderId: ride.riderId || "",
+        driverId: ride.driverId || "",
+        reason: "promo_driver_payout_subsidy",
+      },
+    },
+    { idempotencyKey: `promo_subsidy_${rideId}` }
+  );
+
+  return { subsidyCents, transferId: transfer.id, transferStatus: "succeeded" };
+}
+
 /** Persists payment state onto the ride document the rider/driver apps already listen to. */
 async function recordPaymentStatus(rideRef, status, fields = {}) {
   if (!PAYMENT_STATUSES.has(status)) {
@@ -933,7 +986,30 @@ async function chargeRideAttempt({
     return { httpStatus: 409, body: { error: "fare_not_authoritative", message } };
   }
   const authoritativeAmount = resolvedCharge.amount;
+  const targetDriverPayout = driverPayoutCents(ride, resolvedCharge);
   if (authoritativeAmount <= 0) {
+    const driverAccountId = await driverAccountForRide(ride);
+    let subsidyResult = { subsidyCents: 0, transferId: null, transferStatus: "not_needed" };
+    try {
+      subsidyResult = await transferPromoSubsidyIfNeeded({
+        rideRef,
+        rideId,
+        ride,
+        driverAccountId,
+        targetDriverPayoutCents: targetDriverPayout,
+        amountTransferredFromChargeCents: 0,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Promo subsidy transfer failed.";
+      await recordPaymentStatus(rideRef, "failed", {
+        retryCount: attempt,
+        failureReason: message,
+        failureCode: "promo_subsidy_transfer_failed",
+        driverPayoutCents: targetDriverPayout,
+      });
+      return { httpStatus: 500, body: { error: "promo_subsidy_transfer_failed", message } };
+    }
+
     await recordPaymentStatus(rideRef, "succeeded", {
       retryCount: attempt,
       paymentFailureReason: null,
@@ -945,10 +1021,21 @@ async function chargeRideAttempt({
       finalRiderChargeCents: 0,
       pickupPaidWaitSeconds: resolvedCharge.pickupPaidWaitSeconds,
       pickupWaitChargeCents: resolvedCharge.pickupWaitChargeCents,
+      driverPayoutCents: targetDriverPayout,
+      promoSubsidyTransferCents: subsidyResult.subsidyCents,
+      promoSubsidyTransferId: subsidyResult.transferId,
+      promoSubsidyTransferStatus: subsidyResult.transferStatus,
     });
     return {
       httpStatus: 200,
-      body: { clientSecret: null, paymentIntentId: null, status: "succeeded", noCharge: true },
+      body: {
+        clientSecret: null,
+        paymentIntentId: null,
+        status: "succeeded",
+        noCharge: true,
+        driverPayoutCents: targetDriverPayout,
+        promoSubsidyTransferStatus: subsidyResult.transferStatus,
+      },
     };
   }
   if (amount !== undefined && amount !== null) {
@@ -1021,10 +1108,14 @@ async function chargeRideAttempt({
     return { httpStatus: 403, body: { error: "driver_account_not_owned" } };
   }
   let applicationFeeAmount;
+  let amountTransferredFromChargeCents = 0;
   if (driverAccountId) {
-    // Prefer the pricing snapshot's platform share; fall back to the minimum
-    // documented 30% share so stale ride docs cannot bypass the platform cut.
-    applicationFeeAmount = platformFeeCents(ride, authoritativeAmount, resolvedCharge);
+    // Keep driver payout based on the pre-promo ride economics. Promo/free
+    // ride discounts reduce Rydr's platform economics first; if the rider
+    // charge is lower than the driver payout, Rydr funds the difference with
+    // a separate transfer after payment succeeds.
+    applicationFeeAmount = applicationFeeForGuaranteedDriverPayout(ride, authoritativeAmount, resolvedCharge);
+    amountTransferredFromChargeCents = Math.max(0, authoritativeAmount - applicationFeeAmount);
   }
 
   const idempotencyKey = attempt === 1 ? rideId : `${rideId}_attempt${attempt}`;
@@ -1037,6 +1128,7 @@ async function chargeRideAttempt({
     finalRiderChargeCents: authoritativeAmount,
     pickupPaidWaitSeconds: resolvedCharge.pickupPaidWaitSeconds,
     pickupWaitChargeCents: resolvedCharge.pickupWaitChargeCents,
+    driverPayoutCents: targetDriverPayout,
   });
 
   const params = {
@@ -1055,13 +1147,45 @@ async function chargeRideAttempt({
 
   try {
     const pi = await stripe.paymentIntents.create(params, { idempotencyKey });
+    let subsidyResult = { subsidyCents: 0, transferId: null, transferStatus: "not_needed" };
+    if (pi.status === "succeeded") {
+      try {
+        subsidyResult = await transferPromoSubsidyIfNeeded({
+          rideRef,
+          rideId,
+          ride,
+          driverAccountId,
+          targetDriverPayoutCents: targetDriverPayout,
+          amountTransferredFromChargeCents,
+        });
+      } catch (err) {
+        subsidyResult = { subsidyCents: Math.max(0, targetDriverPayout - amountTransferredFromChargeCents), transferId: null, transferStatus: "failed" };
+        await rideRef.set(
+          {
+            promoSubsidyTransferError: err instanceof Error ? err.message : "Promo subsidy transfer failed.",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    }
     await recordPaymentStatus(rideRef, pi.status === "succeeded" ? "succeeded" : "processing", {
       stripePaymentIntentId: pi.id,
       retryCount: attempt,
+      driverPayoutCents: targetDriverPayout,
+      promoSubsidyTransferCents: subsidyResult.subsidyCents,
+      promoSubsidyTransferId: subsidyResult.transferId,
+      promoSubsidyTransferStatus: subsidyResult.transferStatus,
     });
     return {
       httpStatus: 200,
-      body: { clientSecret: pi.client_secret, paymentIntentId: pi.id, status: pi.status },
+      body: {
+        clientSecret: pi.client_secret,
+        paymentIntentId: pi.id,
+        status: pi.status,
+        driverPayoutCents: targetDriverPayout,
+        promoSubsidyTransferStatus: subsidyResult.transferStatus,
+      },
     };
   } catch (e) {
     const code = e?.raw?.code || e?.code;

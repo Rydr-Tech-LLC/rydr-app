@@ -12,12 +12,13 @@ struct TermsAndVerificationView: View {
     var onSubmit: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var showTermsModal = false
-    @State private var showPrivacyModal = false
+    @Environment(\.openURL) private var openURL
     @State private var showError = false
     @State private var isStartingIdentityVerification = false
     @State private var verificationMessage: String?
     @State private var verificationIsError = false
+    private let termsURL = URL(string: "https://rydr-go.com/terms.html")!
+    private let privacyURL = URL(string: "https://rydr-go.com/privacy.html")!
 
     var body: some View {
         ZStack {
@@ -119,12 +120,6 @@ struct TermsAndVerificationView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .preferredColorScheme(.light)
-        .sheet(isPresented: $showTermsModal) {
-            TermsModalView()
-        }
-        .sheet(isPresented: $showPrivacyModal) {
-            PrivacyModalView()
-        }
     }
 }
 
@@ -144,7 +139,7 @@ private extension TermsAndVerificationView {
                 .foregroundStyle(SignupPalette.muted)
 
             Button("Terms of Use") {
-                showTermsModal = true
+                openURL(termsURL)
             }
             .buttonStyle(.plain)
             .foregroundStyle(SignupPalette.red)
@@ -153,7 +148,7 @@ private extension TermsAndVerificationView {
                 .foregroundStyle(SignupPalette.muted)
 
             Button("Privacy Policy") {
-                showPrivacyModal = true
+                openURL(privacyURL)
             }
             .buttonStyle(.plain)
             .foregroundStyle(SignupPalette.red)

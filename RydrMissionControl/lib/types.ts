@@ -95,9 +95,12 @@ export interface DriverRecord {
   rejectionReason?: string;
   backgroundCheckStatus?: BackgroundCheckStatus;
   backgroundCheckPassed?: boolean;
+  backgroundCheckAcknowledged?: boolean;
   backgroundCheckAcknowledgedAt?: { toDate?: () => Date } | null;
   betaAgreementAccepted?: boolean;
   betaAgreementAcceptedAt?: { toDate?: () => Date } | null;
+  betaWaiverAccepted?: boolean;
+  driverSignupCompleted?: boolean;
   betaBackgroundCheckBypassEnabled?: boolean;
   betaBackgroundCheckBypassedAt?: { toDate?: () => Date } | null;
   betaBackgroundCheckBypassedBy?: string;
@@ -110,6 +113,12 @@ export interface DriverRecord {
   identityStatus?: string;
   identityVerified?: boolean;
   isApproved?: boolean;
+  canGoOnline?: boolean;
+  missionControlApprovalOverride?: boolean;
+  missionControlApprovalOverrideAt?: { toDate?: () => Date } | null;
+  missionControlApprovalOverrideBy?: string;
+  missionControlApprovalOverrideReason?: string;
+  needsAttentionReason?: string;
 
   // Vehicle Library System
   vinDecodeStatus?: "pending" | "decoded" | "failed";
@@ -178,7 +187,8 @@ export interface AuditLogEntry {
     | "accountDeletion"
     | "payment"
     | "supportTicket"
-    | "platformConfig";
+    | "platformConfig"
+    | "betaWaitlist";
   targetId: string;
   reason?: string;
   createdAt: unknown;
@@ -337,6 +347,7 @@ export function evaluateDriverRequirements(driver: DriverRecord) {
     stripeConnectCompleted: driverConnectStatus(driver) === "completed",
     backgroundCheckDeferred:
       driver.betaBackgroundCheckBypassEnabled === true ||
+      driver.backgroundCheckAcknowledged === true ||
       driver.backgroundCheckStatus === "beta_deferred" ||
       driver.backgroundCheckStatus === "passed" ||
       driver.backgroundCheckPassed === true,

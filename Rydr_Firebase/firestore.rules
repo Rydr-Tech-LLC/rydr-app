@@ -31,6 +31,12 @@ service cloud.firestore {
         );
     }
 
+    function hasApprovedBetaInvite(roleName) {
+      return hasVerifiedPhone()
+        && exists(/databases/$(database)/documents/betaInvites/$(roleName)/phones/$(request.auth.token.phone_number))
+        && get(/databases/$(database)/documents/betaInvites/$(roleName)/phones/$(request.auth.token.phone_number)).data.status == "approved";
+    }
+
     function isServiceManagedWrite() {
       return isAdmin();
     }
@@ -54,7 +60,12 @@ service cloud.firestore {
         "betaBackgroundCheckBypassEnabled",
         "betaBackgroundCheckBypassedAt",
         "betaBackgroundCheckBypassedBy",
+        "betaInviteVerifiedForAutoApproval",
         "betaTester",
+        "autoApprovalReason",
+        "autoApprovedAt",
+        "autoApprovedBy",
+        "canGoOnline",
         "cashHubLastLateReleaseAt",
         "cashHubLastLateReleaseRequestId",
         "cashHubLateReleaseCount",
@@ -75,6 +86,11 @@ service cloud.firestore {
         "isLicenseVerified",
         "isRydrVerifiedDriver",
         "isVerified",
+        "missionControlApprovalOverride",
+        "missionControlApprovalOverrideAt",
+        "missionControlApprovalOverrideBy",
+        "missionControlApprovalOverrideReason",
+        "needsAttentionReason",
         "paymentStatus",
         "pendingBalance",
         "rating",
@@ -418,7 +434,7 @@ service cloud.firestore {
     match /riders/{uid} {
       allow get: if isSelf(uid) || phoneMatches(resource.data) || isAdmin();
       allow list: if false;
-      allow create: if isSelf(uid) && noBackendOwnedKeysOnCreate() && noCashHubTermsAcceptanceOnCreateWhenDisabled();
+      allow create: if isSelf(uid) && hasApprovedBetaInvite("rider") && noBackendOwnedKeysOnCreate() && noCashHubTermsAcceptanceOnCreateWhenDisabled();
       allow update: if isSelf(uid) && noBackendOwnedKeysChanged() && noCashHubTermsAcceptanceChangedWhenDisabled();
       allow delete: if isAdmin();
 
@@ -457,7 +473,7 @@ service cloud.firestore {
     match /drivers/{uid} {
       allow get: if isSelf(uid) || phoneMatches(resource.data) || isAdmin();
       allow list: if false;
-      allow create: if isSelf(uid) && noBackendOwnedKeysOnCreate() && noCashHubTermsAcceptanceOnCreateWhenDisabled();
+      allow create: if isSelf(uid) && hasApprovedBetaInvite("driver") && noBackendOwnedKeysOnCreate() && noCashHubTermsAcceptanceOnCreateWhenDisabled();
       allow update: if isSelf(uid) && noBackendOwnedKeysChanged() && noCashHubTermsAcceptanceChangedWhenDisabled();
       allow delete: if isAdmin();
 
@@ -484,6 +500,12 @@ service cloud.firestore {
         allow read: if isSelf(uid) || isAdmin();
         allow write: if false;
       }
+    }
+
+    match /betaInvites/{role}/phones/{phone} {
+      allow get: if isAdmin() || (hasVerifiedPhone() && request.auth.token.phone_number == phone);
+      allow list: if false;
+      allow create, update, delete: if isAdmin();
     }
 
     // Lightweight phone -> uid pointer used to resolve a driver's phone number

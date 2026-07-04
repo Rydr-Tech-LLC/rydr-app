@@ -78,7 +78,7 @@ struct DriverPhoneEntryView: View {
 
                 featureRow
 
-                Text("By continuing, you agree to Rydr's [Terms of Service](https://rydr.app/terms) and [Privacy Policy](https://rydr.app/privacy)")
+                Text("By continuing, you agree to Rydr's [Terms of Service](https://rydr-go.com/terms.html) and [Privacy Policy](https://rydr-go.com/privacy.html)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

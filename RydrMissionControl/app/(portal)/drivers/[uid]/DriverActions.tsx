@@ -5,11 +5,9 @@ import { useRouter } from "next/navigation";
 
 export default function DriverActions({
   uid,
-  canApprove,
   missing
 }: {
   uid: string;
-  canApprove: boolean;
   missing: string[];
 }) {
   const router = useRouter();
@@ -91,9 +89,9 @@ export default function DriverActions({
     <div className="rounded-lg border border-line bg-white p-5 shadow-sm">
       <h2 className="mb-3 text-sm font-semibold text-ink">Driver Actions</h2>
 
-      {!canApprove && (
+      {missing.length > 0 && (
         <p className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-          Approve disabled — missing: {missing.join(", ")}
+          Approval override will enable this driver even though these requirements are missing: {missing.join(", ")}
         </p>
       )}
 
@@ -116,11 +114,11 @@ export default function DriverActions({
           {loading === "background_bypass" ? "Saving…" : "Defer Background Check for Beta"}
         </button>
         <button
-          disabled={!canApprove || loading !== null}
+          disabled={loading !== null}
           onClick={() => submit("approved")}
           className="rounded-md bg-emerald-600 py-2 text-xs font-semibold text-white transition disabled:opacity-40"
         >
-          {loading === "approved" ? "Approving…" : "Approve Driver"}
+          {loading === "approved" ? "Approving…" : "Approve Driver & Enable Online"}
         </button>
         <button
           disabled={loading !== null}

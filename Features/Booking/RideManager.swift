@@ -9,6 +9,7 @@ import MapKit
 import CoreLocation
 import FirebaseAuth
 import FirebaseFirestore
+import AVFoundation
 
 // MARK: - Models
 struct Driver: Identifiable, Equatable {
@@ -538,10 +539,12 @@ final class RideManager: ObservableObject {
     private var cachedRiderVerified = false
     private var currentBaseFare: Double = 0
     private var currentWaitChargePerMinute: Double = 0
+    private var hasPlayedTripStartedSoundForCurrentRide = false
+    private let tripTransitionSoundPlayer = RiderTripTransitionSoundPlayer()
     private let activeRideSnapshotKey = "rydr.activeRideSnapshot.v1"
     private let driverDecisionTimeoutSeconds: UInt64 = 12
 
-    init(rideService: RideService = DebugFallbackRideService(primary: FirestoreRideService(), fallback: MockRideService())) {
+    init(rideService: RideService = FirestoreRideService()) {
         self.rideService = rideService
         restoreActiveRideIfNeeded()
         if state == .inProgress {
@@ -758,6 +761,7 @@ final class RideManager: ObservableObject {
         let fareAfterPromo = currentAppliedRydrBankCode == nil ? applyPromo(to: fareBeforePromo) : 0
         currentBaseFare = fareAfterPromo
         currentWaitChargePerMinute = cappedWaitRate(for: driver, rideType: cachedRideType)
+        hasPlayedTripStartedSoundForCurrentRide = false
 
         let start  = driver.coordinate
         let pickup = cachedPickupCoordinate ?? CLLocationCoordinate2D(latitude: start.latitude + 0.02, longitude: start.longitude + 0.02)
@@ -818,6 +822,7 @@ final class RideManager: ObservableObject {
         rideLifecycleTask = nil
 
         guard let ride = currentRide else { return }
+        tripTransitionSoundPlayer.play()
         let card = selectedCard
         let chargeBreakdown = receiptChargeBreakdown(for: ride, finalFare: ride.fare)
         let receipt = Receipt(
@@ -846,6 +851,7 @@ final class RideManager: ObservableObject {
         currentAppliedRydrBankCode = nil
         currentBaseFare = 0
         currentWaitChargePerMinute = 0
+        hasPlayedTripStartedSoundForCurrentRide = false
         clearActiveRideSnapshot()
         state = .completed
         closeRideChatIfNeeded(chatContext)
@@ -938,6 +944,7 @@ final class RideManager: ObservableObject {
         currentServiceRideId = nil
         currentBaseFare = 0
         currentWaitChargePerMinute = 0
+        hasPlayedTripStartedSoundForCurrentRide = false
         releaseAppliedRydrBankCodeIfNeeded()
         clearActiveRideSnapshot()
         state = .cancelled
@@ -1075,6 +1082,7 @@ final class RideManager: ObservableObject {
         pickupWaitCharge = 0
         currentBaseFare = 0
         currentWaitChargePerMinute = 0
+        hasPlayedTripStartedSoundForCurrentRide = false
         clearActiveRideSnapshot()
 
         if availableDrivers.isEmpty {
@@ -1134,6 +1142,7 @@ final class RideManager: ObservableObject {
         currentAppliedRydrBankCode = nil
         currentBaseFare = 0
         currentWaitChargePerMinute = 0
+        hasPlayedTripStartedSoundForCurrentRide = false
         releaseAppliedRydrBankCodeIfNeeded()
         clearActiveRideSnapshot()
         state = .completed
@@ -1180,6 +1189,7 @@ final class RideManager: ObservableObject {
             cachedDropoffCoordinate = dropoff
         }
         if let status = snapshot.status {
+            let previousStatus = currentRide?.status
             currentRide?.status = status
             switch status {
             case .enRouteToPickup:
@@ -1189,6 +1199,11 @@ final class RideManager: ObservableObject {
             case .enRouteToDropoff:
                 pickupEtaSecondsRemaining = 0
                 pickupWaitSecondsRemaining = 0
+                if previousStatus != .enRouteToDropoff,
+                   !hasPlayedTripStartedSoundForCurrentRide {
+                    hasPlayedTripStartedSoundForCurrentRide = true
+                    tripTransitionSoundPlayer.play()
+                }
             case .completed:
                 completeRide()
                 return
@@ -1401,6 +1416,7 @@ final class RideManager: ObservableObject {
         pickupWaitSecondsRemaining = snapshot.pickupWaitSecondsRemaining
         paidPickupWaitSeconds = snapshot.paidPickupWaitSeconds
         pickupWaitCharge = snapshot.pickupWaitCharge
+        hasPlayedTripStartedSoundForCurrentRide = snapshot.status == .enRouteToDropoff || snapshot.status == .completed
         state = .inProgress
         hasRecoveredActiveRide = true
     }
@@ -1538,6 +1554,34 @@ final class RideManager: ObservableObject {
         } else {
             paymentStatus = "failed"
             paymentFailureReason = "Payment status could not be confirmed. Please try again."
+        }
+    }
+}
+
+@MainActor
+private final class RiderTripTransitionSoundPlayer {
+    private var player: AVAudioPlayer?
+
+    func play() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default, options: [.duckOthers])
+            try audioSession.setActive(true)
+
+            if player == nil {
+                guard let url = Bundle.main.url(forResource: "trip-transition-chime", withExtension: "mp3") else {
+                    return
+                }
+                let audioPlayer = try AVAudioPlayer(contentsOf: url)
+                audioPlayer.numberOfLoops = 0
+                audioPlayer.prepareToPlay()
+                player = audioPlayer
+            }
+
+            player?.currentTime = 0
+            player?.play()
+        } catch {
+            player = nil
         }
     }
 }

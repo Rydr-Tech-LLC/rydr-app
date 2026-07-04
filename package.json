@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "resend": "^6.17.1",
     "stripe": "^18.3.0"
   }
 }

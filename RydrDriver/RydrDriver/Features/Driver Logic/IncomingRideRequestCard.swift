@@ -8,6 +8,7 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import AVFoundation
 
 struct IncomingRideRequestCard: View {
     let request: DriverRideRequest
@@ -18,6 +19,7 @@ struct IncomingRideRequestCard: View {
     let onDecline: () -> Void
     let onTimeout: () -> Void
 
+    @State private var alertSound = IncomingRideAlertSoundPlayer()
     @State private var pickupLeg: RideRequestLegEstimate?
     @State private var tripLeg: RideRequestLegEstimate?
     @State private var secondsRemaining = 15
@@ -65,6 +67,7 @@ struct IncomingRideRequestCard: View {
                 Button {
                     guard !isResponding else { return }
                     didRespond = true
+                    alertSound.stop()
                     onDecline()
                 } label: {
                     Label("Decline", systemImage: "xmark")
@@ -81,6 +84,7 @@ struct IncomingRideRequestCard: View {
                 Button {
                     guard !isResponding else { return }
                     didRespond = true
+                    alertSound.stop()
                     onAccept()
                 } label: {
                     HStack {
@@ -118,6 +122,24 @@ struct IncomingRideRequestCard: View {
         )
         .shadow(color: .black.opacity(0.18), radius: 22, y: 12)
         .accessibilityElement(children: .contain)
+        .onAppear {
+            if !isResponding {
+                alertSound.startLoop()
+            }
+        }
+        .onDisappear {
+            alertSound.stop()
+        }
+        .onChange(of: request.id) { _, _ in
+            alertSound.restartLoop()
+        }
+        .onChange(of: isResponding) { _, responding in
+            if responding {
+                alertSound.stop()
+            } else if !didRespond {
+                alertSound.startLoop()
+            }
+        }
         .task(id: request.id) {
             await loadRouteEstimates()
         }
@@ -207,8 +229,50 @@ struct IncomingRideRequestCard: View {
         guard !didRespond else { return }
         await MainActor.run {
             didRespond = true
+            alertSound.stop()
             onTimeout()
         }
+    }
+}
+
+@MainActor
+private final class IncomingRideAlertSoundPlayer {
+    private var player: AVAudioPlayer?
+
+    func startLoop() {
+        guard player?.isPlaying != true else { return }
+
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default, options: [.duckOthers])
+            try audioSession.setActive(true)
+
+            if player == nil {
+                guard let url = Bundle.main.url(forResource: "incoming-ride-alert", withExtension: "mp3") else {
+                    return
+                }
+                let audioPlayer = try AVAudioPlayer(contentsOf: url)
+                audioPlayer.numberOfLoops = -1
+                audioPlayer.prepareToPlay()
+                player = audioPlayer
+            }
+
+            player?.currentTime = 0
+            player?.play()
+        } catch {
+            player = nil
+        }
+    }
+
+    func restartLoop() {
+        stop()
+        startLoop()
+    }
+
+    func stop() {
+        player?.stop()
+        player?.currentTime = 0
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
     }
 }
 

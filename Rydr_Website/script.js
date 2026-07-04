@@ -1,10 +1,12 @@
 const header = document.querySelector("[data-header]");
 const nav = document.querySelector("[data-nav]");
 const navToggle = document.querySelector("[data-nav-toggle]");
-const signupForm = document.querySelector("[data-signup-form]");
-const formNote = document.querySelector("[data-form-note]");
 const revealItems = document.querySelectorAll(".reveal");
-const executiveSection = document.querySelector("[data-executive]");
+const forms = document.querySelectorAll("[data-waitlist-form]");
+
+const updateHeader = () => {
+  if (header) header.classList.toggle("is-scrolled", window.scrollY > 8);
+};
 
 const closeNav = () => {
   if (!nav || !navToggle || !header) return;
@@ -14,30 +16,8 @@ const closeNav = () => {
   navToggle.setAttribute("aria-expanded", "false");
 };
 
-const updateHeader = () => {
-  if (!header) return;
-  header.classList.toggle("is-scrolled", window.scrollY > 8);
-};
-
-const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
-
-const updateExecutiveState = () => {
-  if (!executiveSection) return;
-
-  const rect = executiveSection.getBoundingClientRect();
-  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-  const active = rect.top < viewportHeight * 0.64 && rect.bottom > viewportHeight * 0.42;
-  const progress = clamp((viewportHeight - rect.top) / (viewportHeight + rect.height * 0.5), 0, 1);
-
-  document.body.classList.toggle("executive-active", active);
-  executiveSection.style.setProperty("--executive-scroll", progress.toFixed(3));
-};
-
 window.addEventListener("scroll", updateHeader, { passive: true });
-window.addEventListener("scroll", updateExecutiveState, { passive: true });
-window.addEventListener("resize", updateExecutiveState);
 updateHeader();
-updateExecutiveState();
 
 if (navToggle && nav && header) {
   navToggle.addEventListener("click", () => {
@@ -48,23 +28,43 @@ if (navToggle && nav && header) {
   });
 
   nav.addEventListener("click", (event) => {
-    if (event.target instanceof HTMLAnchorElement) {
-      closeNav();
+    if (event.target instanceof HTMLAnchorElement) closeNav();
+  });
+}
+
+forms.forEach((form) => {
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const note = form.querySelector("[data-form-note]");
+    const submit = form.querySelector("button[type='submit']");
+    const endpoint = document.body.dataset.waitlistEndpoint || "/api/waitlist";
+    const data = new FormData(form);
+    const payload = Object.fromEntries(data.entries());
+
+    if (note) note.textContent = "Submitting your beta request...";
+    if (submit) submit.disabled = true;
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Unable to join the waitlist right now.");
+
+      form.reset();
+      if (note) {
+        note.textContent =
+          "You are on the Rydr beta waitlist. Check your email for confirmation, and Mission Control will send next steps if approved.";
+      }
+    } catch (error) {
+      if (note) note.textContent = error instanceof Error ? error.message : "Unable to join the waitlist right now.";
+    } finally {
+      if (submit) submit.disabled = false;
     }
   });
-}
-
-if (signupForm && formNote) {
-  signupForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const formData = new FormData(signupForm);
-    const role = formData.get("role");
-    const label = role === "driver" ? "driver" : role === "both" ? "rider and driver" : "rider";
-
-    formNote.textContent = `You are on the ${label} launch list.`;
-    signupForm.reset();
-  });
-}
+});
 
 if ("IntersectionObserver" in window) {
   const observer = new IntersectionObserver(
@@ -78,7 +78,6 @@ if ("IntersectionObserver" in window) {
     },
     { threshold: 0.12 }
   );
-
   revealItems.forEach((item) => observer.observe(item));
 } else {
   revealItems.forEach((item) => item.classList.add("is-visible"));

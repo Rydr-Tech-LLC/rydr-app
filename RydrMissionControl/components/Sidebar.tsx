@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { href: "/support", label: "Support Inbox" },
   { href: "/account-deletions", label: "Account Deletions" },
   { href: "/vehicle-library", label: "Vehicle Library" },
+  { href: "/waitlist", label: "Waitlist" },
   { href: "/beta-testers", label: "Beta Testers" },
   { href: "/search", label: "Search" },
   { href: "/settings", label: "Settings" }

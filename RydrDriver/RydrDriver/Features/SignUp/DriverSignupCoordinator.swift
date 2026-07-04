@@ -17,6 +17,7 @@ import FirebaseFirestore
 
 enum DriverSignupStep: Hashable {
     case phoneCode
+    case betaWaiver
     case nameDOB
     case emailPassword
     case address
@@ -75,6 +76,8 @@ struct DriverSignupCoordinator: View {
     // Errors
     @State private var errorText: String = ""
     @State private var existingAccountAlert = false
+    @State private var flowAlertText: String?
+    @State private var isSubmittingDocuments = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -129,7 +132,15 @@ struct DriverSignupCoordinator: View {
                                             errorText = "An account with this phone number already exists. Please sign in."
                                             existingAccountAlert = true
                                         } else {
-                                            path.append(.nameDOB)
+                                            betaInviteApproved(phoneE164: verifiedE164) { approved in
+                                                if approved {
+                                                    path.append(.betaWaiver)
+                                                } else {
+                                                    try? Auth.auth().signOut()
+                                                    errorText = "This phone number has not been approved for the Rydr Driver beta yet. Join the waitlist or use the phone number from your beta approval."
+                                                    existingAccountAlert = true
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -137,9 +148,32 @@ struct DriverSignupCoordinator: View {
                         }
                     )
 
+                case .betaWaiver:
+                    BetaWaiverView(
+                        onAgree: {
+                            upsertDriver([
+                                "phoneNumber": phoneNumber,
+                                "phoneE164": phoneNumber,
+                                "betaWaiverAccepted": true,
+                                "betaWaiverAcceptedAt": FieldValue.serverTimestamp(),
+                                "betaWaiverVersion": "2026-07-04"
+                            ])
+                            path.append(.nameDOB)
+                        },
+                        onDecline: {
+                            try? Auth.auth().signOut()
+                            dismiss()
+                        }
+                    )
+
                 case .nameDOB:
                     NameDOBView(firstName: $firstName, lastName: $lastName, dob: $dob) {
-                        upsertDriver(["firstName": firstName, "lastName": lastName, "dob": Timestamp(date: dob)])
+                        upsertDriver([
+                            "firstName": firstName,
+                            "lastName": lastName,
+                            "dob": Timestamp(date: dob),
+                            "nameDOBStepCompleted": true
+                        ])
                         path.append(.emailPassword)
                     }
 
@@ -166,7 +200,9 @@ struct DriverSignupCoordinator: View {
                             "city": city,
                             "state": state,
                             "zip": zip
-                        ]])
+                        ],
+                        "addressStepCompleted": true
+                        ])
                         path.append(.license)
                     }
 
@@ -177,13 +213,7 @@ struct DriverSignupCoordinator: View {
                         front: $licenseFront,
                         back: $licenseBack
                     ) {
-                        upsertDriver([
-                            "license": [
-                                "number": licenseNumber,
-                                "state": licenseState
-                            ]
-                        ])
-                        path.append(.vehicle)
+                        submitLicenseDocumentsAndContinue()
                     }
 
                 case .vehicle:
@@ -204,44 +234,7 @@ struct DriverSignupCoordinator: View {
                         registrationDoc: $registrationDoc,
                         insuranceCard: $insuranceCard
                     ) {
-                        guard let decodedVehicle else {
-                            path.append(.identity)
-                            return
-                        }
-                        let eligibility = DriverVehicleEligibility.evaluate(
-                            make: decodedVehicle.make,
-                            model: decodedVehicle.model,
-                            year: decodedVehicle.year,
-                            fuelType: decodedVehicle.fuelType.rawValue
-                        )
-                        let libraryRideTypes = RydrRideTierCatalog.normalizedRideTypes(vehicleImageInfo?.eligibleRideTypes ?? [])
-                        let eligibleRideTypes = libraryRideTypes.isEmpty ? eligibility.eligibleRideTypes : libraryRideTypes
-                        let vehicleClass = libraryRideTypes.isEmpty ? eligibility.vehicleClass : DriverVehicleEligibility.vehicleClass(for: eligibleRideTypes)
-                        let requiresManualReview = libraryRideTypes.isEmpty ? eligibility.requiresManualReview : false
-                        var tierRates: [String: Any] = [:]
-                        for rideType in eligibleRideTypes {
-                            let key = RydrRideTierCatalog.canonicalRideType(rideType)
-                            tierRates[key] = DriverRateSetting.defaultValue(for: rideType).dictionary(for: rideType)
-                        }
-                        upsertDriver([
-                            "vehicle": [
-                                "class": vehicleClass,
-                                "plate": plateNumber
-                            ],
-                            "vehicleEligibility": [
-                                "rideTypes": eligibleRideTypes,
-                                "requiresManualReview": requiresManualReview,
-                                "vehicleClass": vehicleClass,
-                                "source": libraryRideTypes.isEmpty ? "appRules" : "vehicleLibrary",
-                                "evaluatedAt": FieldValue.serverTimestamp()
-                            ],
-                            "qualifiedRideTypes": eligibleRideTypes,
-                            "supportedRideTypes": eligibleRideTypes,
-                            "selectedRideTypes": eligibleRideTypes,
-                            "rideTypes": eligibleRideTypes,
-                            "tierRates": tierRates
-                        ])
-                        path.append(.identity)
+                        submitVehicleDocumentsAndContinue(decodedVehicle: decodedVehicle)
                     }
 
                 case .identity:
@@ -282,9 +275,16 @@ struct DriverSignupCoordinator: View {
                         zip: zip,
                         connectOnboarded: $connectOnboarded
                     ) { accountId in
+                        var completionFields: [String: Any] = [
+                            "payoutsStepCompleted": true,
+                            "driverSignupCompleted": true,
+                            "driverSignupCompletedAt": FieldValue.serverTimestamp(),
+                            "driverOnboardingStatus": "completed"
+                        ]
                         if let accountId {
-                            upsertDriver(["stripeAccountId": accountId])
+                            completionFields["stripeConnectAccountSeenByApp"] = accountId
                         }
+                        upsertDriver(completionFields)
                         if connectOnboarded { path.append(.done) }
                     }
 
@@ -297,13 +297,173 @@ struct DriverSignupCoordinator: View {
                     })
                 }
             }
+            .overlay {
+                if isSubmittingDocuments {
+                    ZStack {
+                        Color.black.opacity(0.25).ignoresSafeArea()
+                        VStack(spacing: 14) {
+                            ProgressView()
+                                .controlSize(.large)
+                            Text("Uploading documents for review...")
+                                .font(.headline.weight(.semibold))
+                        }
+                        .padding(24)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.16), radius: 22, y: 12)
+                    }
+                }
+            }
             .toolbar { ToolbarItem(placement: .navigationBarLeading) { Button("Close") { dismiss() } } }
-            .alert("Account already exists", isPresented: $existingAccountAlert) {
+            .alert("Unable to continue", isPresented: $existingAccountAlert) {
                 Button("OK") { dismiss() }
             } message: {
                 Text(errorText)
             }
+            .alert("Unable to continue", isPresented: Binding(
+                get: { flowAlertText != nil },
+                set: { if !$0 { flowAlertText = nil } }
+            )) {
+                Button("OK", role: .cancel) { flowAlertText = nil }
+            } message: {
+                Text(flowAlertText ?? "")
+            }
         }
+    }
+
+    // MARK: - Document uploads
+
+    private func submitLicenseDocumentsAndContinue() {
+        guard !isSubmittingDocuments else { return }
+        Task { await uploadLicenseDocumentsAndContinue() }
+    }
+
+    @MainActor
+    private func uploadLicenseDocumentsAndContinue() async {
+        guard licenseFront != nil, licenseBack != nil else {
+            flowAlertText = "Upload clear photos of the front and back of your driver license before continuing."
+            return
+        }
+
+        isSubmittingDocuments = true
+        defer { isSubmittingDocuments = false }
+
+        do {
+            let front = try await DriverDocumentUploadService.upload(item: licenseFront, kind: .driverLicense, side: .front)
+            let back = try await DriverDocumentUploadService.upload(item: licenseBack, kind: .driverLicense, side: .back)
+            upsertDriver([
+                "license": [
+                    "number": licenseNumber,
+                    "state": licenseState,
+                    "imageUrl": front.downloadURL.absoluteString
+                ],
+                "documents": [
+                    "driverLicense": [
+                        "status": "pending",
+                        "frontStoragePath": front.storagePath,
+                        "frontURL": front.downloadURL.absoluteString,
+                        "backStoragePath": back.storagePath,
+                        "backURL": back.downloadURL.absoluteString,
+                        "uploadedAt": FieldValue.serverTimestamp(),
+                        "source": "driver-ios-signup"
+                    ]
+                ],
+                "licenseStepCompleted": true,
+                "licensePhotosSelected": true
+            ])
+            path.append(.vehicle)
+        } catch {
+            flowAlertText = error.localizedDescription
+        }
+    }
+
+    private func submitVehicleDocumentsAndContinue(decodedVehicle: DecodedVehicleInfo?) {
+        guard !isSubmittingDocuments else { return }
+        Task { await uploadVehicleDocumentsAndContinue(decodedVehicle: decodedVehicle) }
+    }
+
+    @MainActor
+    private func uploadVehicleDocumentsAndContinue(decodedVehicle: DecodedVehicleInfo?) async {
+        guard let decodedVehicle else {
+            flowAlertText = "Complete the vehicle details before continuing."
+            return
+        }
+        guard registrationDoc != nil, insuranceCard != nil else {
+            flowAlertText = "Upload your registration and insurance documents before continuing."
+            return
+        }
+
+        isSubmittingDocuments = true
+        defer { isSubmittingDocuments = false }
+
+        do {
+            let registration = try await DriverDocumentUploadService.upload(item: registrationDoc, kind: .registration, side: .single)
+            let insurance = try await DriverDocumentUploadService.upload(item: insuranceCard, kind: .insurance, side: .single)
+            writeVehicleStep(decodedVehicle: decodedVehicle, registration: registration, insurance: insurance)
+            path.append(.identity)
+        } catch {
+            flowAlertText = error.localizedDescription
+        }
+    }
+
+    private func writeVehicleStep(
+        decodedVehicle: DecodedVehicleInfo,
+        registration: DriverDocumentUploadResult,
+        insurance: DriverDocumentUploadResult
+    ) {
+        let eligibility = DriverVehicleEligibility.evaluate(
+            make: decodedVehicle.make,
+            model: decodedVehicle.model,
+            year: decodedVehicle.year,
+            fuelType: decodedVehicle.fuelType.rawValue
+        )
+        let libraryRideTypes = RydrRideTierCatalog.normalizedRideTypes(vehicleImageInfo?.eligibleRideTypes ?? [])
+        let eligibleRideTypes = libraryRideTypes.isEmpty ? eligibility.eligibleRideTypes : libraryRideTypes
+        let vehicleClass = libraryRideTypes.isEmpty ? eligibility.vehicleClass : DriverVehicleEligibility.vehicleClass(for: eligibleRideTypes)
+        let requiresManualReview = libraryRideTypes.isEmpty ? eligibility.requiresManualReview : false
+        var tierRates: [String: Any] = [:]
+        for rideType in eligibleRideTypes {
+            let key = RydrRideTierCatalog.canonicalRideType(rideType)
+            tierRates[key] = DriverRateSetting.defaultValue(for: rideType).dictionary(for: rideType)
+        }
+
+        upsertDriver([
+            "vehicle": [
+                "class": vehicleClass,
+                "plate": plateNumber,
+                "registrationImageUrl": registration.downloadURL.absoluteString,
+                "insuranceImageUrl": insurance.downloadURL.absoluteString
+            ],
+            "vehicleEligibility": [
+                "rideTypes": eligibleRideTypes,
+                "requiresManualReview": requiresManualReview,
+                "vehicleClass": vehicleClass,
+                "source": libraryRideTypes.isEmpty ? "appRules" : "vehicleLibrary",
+                "evaluatedAt": FieldValue.serverTimestamp()
+            ],
+            "documents": [
+                "registration": pendingSingleDocumentPayload(registration),
+                "insurance": pendingSingleDocumentPayload(insurance)
+            ],
+            "qualifiedRideTypes": eligibleRideTypes,
+            "supportedRideTypes": eligibleRideTypes,
+            "selectedRideTypes": eligibleRideTypes,
+            "rideTypes": eligibleRideTypes,
+            "tierRates": tierRates,
+            "vehicleStepCompleted": true,
+            "registrationDocumentSelected": true,
+            "insuranceDocumentSelected": true
+        ])
+    }
+
+    private func pendingSingleDocumentPayload(_ result: DriverDocumentUploadResult) -> [String: Any] {
+        [
+            "status": "pending",
+            "storagePath": result.storagePath,
+            "documentURL": result.downloadURL.absoluteString,
+            "downloadURL": result.downloadURL.absoluteString,
+            "uploadedAt": FieldValue.serverTimestamp(),
+            "source": "driver-ios-signup"
+        ]
     }
 
     // MARK: - Email/password step
@@ -368,7 +528,8 @@ struct DriverSignupCoordinator: View {
             "lastName": lastName,
             "phoneNumber": phoneNumber,
             "phoneE164": phoneNumber,
-            "createdAt": FieldValue.serverTimestamp()
+            "createdAt": FieldValue.serverTimestamp(),
+            "emailPasswordStepCompleted": true
         ])
         writePhoneIndex(phoneE164: phoneNumber, uid: uid)
         path.append(.address)
@@ -392,6 +553,17 @@ struct DriverSignupCoordinator: View {
             .document(phoneE164)
             .getDocument { snapshot, _ in
                 completion(snapshot?.exists == true)
+            }
+    }
+
+    private func betaInviteApproved(phoneE164: String, completion: @escaping (Bool) -> Void) {
+        Firestore.firestore()
+            .collection("betaInvites")
+            .document("driver")
+            .collection("phones")
+            .document(phoneE164)
+            .getDocument { snapshot, _ in
+                completion(snapshot?.data()?["status"] as? String == "approved")
             }
     }
 

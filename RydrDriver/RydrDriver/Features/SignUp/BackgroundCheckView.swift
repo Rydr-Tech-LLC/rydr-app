@@ -206,6 +206,7 @@ struct BackgroundCheckView: View {
             "backgroundCheckAcknowledged": true,
             "backgroundCheckAcknowledgedAt": FieldValue.serverTimestamp(),
             "backgroundAcknowledgementVersion": 1,
+            "backgroundCheckStepCompleted": true,
             "betaAgreementAccepted": true,
             "betaAgreementAcceptedAt": FieldValue.serverTimestamp()
         ], merge: true) { error in

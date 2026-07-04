@@ -54,6 +54,8 @@ struct DriverLoginView: View {
                         .multilineTextAlignment(.center)
                 }
 
+                signupPrompt
+
                 promoCard
 
                 emailLoginFields
@@ -66,25 +68,6 @@ struct DriverLoginView: View {
                 }
 
                 featureRow
-
-                HStack(spacing: 4) {
-                    Text("Not a driver yet?")
-                        .foregroundStyle(.secondary)
-                    Button(action: { showingSignup = true }) {
-                        HStack(spacing: 2) {
-                            Text("Sign up")
-                                .underline()
-                                .fontWeight(.semibold)
-                            Image(systemName: "arrow.right")
-                                .font(.footnote.weight(.semibold))
-                        }
-                        .foregroundStyle(Styles.rydrGradient)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .font(.subheadline)
-                .padding(.top, 4)
-                .padding(.bottom, 12)
             }
             .padding(.horizontal, 20)
         }
@@ -103,6 +86,33 @@ struct DriverLoginView: View {
         .fullScreenCover(isPresented: $showPhoneFlow) {
             phoneFlowCover
         }
+    }
+
+    private var signupPrompt: some View {
+        Button(action: { showingSignup = true }) {
+            HStack(spacing: 10) {
+                Image(systemName: "person.badge.plus.fill")
+                    .font(.subheadline.weight(.semibold))
+                Text("Don't have an account? Sign Up")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                Image(systemName: "arrow.right")
+                    .font(.caption.weight(.bold))
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 50)
+        }
+        .foregroundStyle(Styles.rydrGradient)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.red.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.red.opacity(0.18), lineWidth: 1)
+        )
+        .buttonStyle(.plain)
+        .accessibilityLabel("Sign up for a driver account")
     }
 
     private enum DriverLoginPhoneStep: Hashable {

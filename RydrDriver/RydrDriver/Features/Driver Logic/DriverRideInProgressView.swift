@@ -37,11 +37,6 @@ struct DriverRideInProgressView: View {
     let onReportIncident: () -> Void
     let onRidePreferencesDismissed: (_ preferences: DriverVisibleRidePreferences) -> Void
     let onSendMessage: (_ text: String) async throws -> Void
-    #if DEBUG
-    let onDebugMoveToDestination: () -> Void
-    let onDebugMoveDriver: (_ coordinate: CLLocationCoordinate2D) -> Void
-    #endif
-
     @State private var camera: MapCameraPosition = .region(
         MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: 33.7490, longitude: -84.3880),
@@ -58,7 +53,6 @@ struct DriverRideInProgressView: View {
     @State private var routeTravelTime: TimeInterval?
     @State private var isRouteTrayExpanded = false
     @State private var isNavigationStarted = false
-    @State private var isMockDrivingRoute = false
     @State private var now = Date()
     @State private var didPublishPickupPaidWait = false
     @State private var pendingRidePreferences: DriverVisibleRidePreferences?
@@ -111,7 +105,7 @@ struct DriverRideInProgressView: View {
             }
         }
         .onChange(of: routeCameraKey) { _, _ in
-            guard isNavigationStarted || isMockDrivingRoute else { return }
+            guard isNavigationStarted else { return }
             camera = .camera(navigationCamera)
         }
         .task(id: routeCalculationKey) {
@@ -409,73 +403,6 @@ struct DriverRideInProgressView: View {
                     .foregroundStyle(.secondary)
             }
 
-            #if DEBUG
-            DisclosureGroup("Alpha Testing") {
-                VStack(spacing: 10) {
-                    Button {
-                        Task { await mockDriveRoute() }
-                    } label: {
-                        Label(isMockDrivingRoute ? "Mock Driving..." : "Mock Drive Route", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                            .font(.subheadline.weight(.bold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(Styles.rydrGradient.opacity(displayedRouteCoordinates.count > 1 && !isMockDrivingRoute ? 1 : 0.35))
-                            )
-                            .foregroundStyle(.white)
-                    }
-                    .disabled(displayedRouteCoordinates.count < 2 || isMockDrivingRoute)
-                    .accessibilityLabel(isMockDrivingRoute ? "Mock driving route in progress" : "Mock drive route")
-
-                    Button {
-                        onDebugMoveToDestination()
-                    } label: {
-                        Label(debugArrivalTitle, systemImage: "scope")
-                            .font(.subheadline.weight(.bold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(Color(.systemGray6))
-                                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.red.opacity(0.35), lineWidth: 1))
-                            )
-                            .foregroundStyle(.red)
-                    }
-                    .accessibilityLabel(debugArrivalTitle)
-
-                    if lifecyclePhase == .waitingForRider {
-                        Button {
-                            didPublishPickupPaidWait = true
-                            onPickupPaidWaitStarted()
-                        } label: {
-                            Label("Mock Pickup Wait Expired", systemImage: "timer")
-                                .font(.subheadline.weight(.bold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(RoundedRectangle(cornerRadius: 14).fill(Color(.systemGray6)))
-                                .foregroundStyle(.red)
-                        }
-                        .accessibilityLabel("Mock pickup wait expired")
-                    }
-
-                    Button {
-                        handlePrimaryAction()
-                    } label: {
-                        Label("Mock \(primaryActionTitle)", systemImage: "bolt.fill")
-                            .font(.subheadline.weight(.bold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(RoundedRectangle(cornerRadius: 14).fill(Color(.systemGray6)))
-                            .foregroundStyle(.primary)
-                    }
-                    .disabled(isUpdatingRide)
-                    .accessibilityLabel("Mock \(primaryActionTitle)")
-                }
-            }
-            .font(.caption.weight(.bold))
-            .tint(.secondary)
-            #endif
         }
     }
 
@@ -717,19 +644,6 @@ struct DriverRideInProgressView: View {
         ride.estimatedFare?.formatted(.currency(code: "USD"))
     }
 
-    #if DEBUG
-    private var debugArrivalTitle: String {
-        switch lifecyclePhase {
-        case .accepted, .navigatingToPickup, .waitingForRider:
-            return "Mock Arrival at Pickup"
-        case .navigatingToStop, .waitingAtStop:
-            return "Mock Arrival at Stop"
-        case .navigatingToDropoff, .completed:
-            return "Mock Arrival Near Drop-off"
-        }
-    }
-    #endif
-
     private var primaryDestinationCoordinate: CLLocationCoordinate2D? {
         switch lifecyclePhase {
         case .accepted, .navigatingToPickup, .waitingForRider:
@@ -888,7 +802,7 @@ struct DriverRideInProgressView: View {
                 .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             routeDistanceMeters = route.distance
             routeTravelTime = route.expectedTravelTime
-            camera = isNavigationStarted || isMockDrivingRoute
+            camera = isNavigationStarted
                 ? .camera(navigationCamera)
                 : .region(region(for: calculatedRouteCoordinates))
         } catch {
@@ -898,34 +812,6 @@ struct DriverRideInProgressView: View {
             routeTravelTime = nil
         }
     }
-
-    #if DEBUG
-    @MainActor
-    private func mockDriveRoute() async {
-        let coordinates = sampledRouteCoordinates(from: displayedRouteCoordinates)
-        guard !coordinates.isEmpty else { return }
-        isNavigationStarted = true
-        isMockDrivingRoute = true
-        defer { isMockDrivingRoute = false }
-
-        for coordinate in coordinates {
-            if Task.isCancelled { return }
-            onDebugMoveDriver(coordinate)
-            camera = .camera(navigationCamera)
-            try? await Task.sleep(nanoseconds: 260_000_000)
-        }
-    }
-
-    private func sampledRouteCoordinates(from coordinates: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
-        guard coordinates.count > 24 else { return coordinates }
-        let step = max(1, coordinates.count / 24)
-        var sampled = stride(from: 0, to: coordinates.count, by: step).map { coordinates[$0] }
-        if sampled.last?.latitude != coordinates.last?.latitude || sampled.last?.longitude != coordinates.last?.longitude {
-            sampled.append(coordinates.last!)
-        }
-        return sampled
-    }
-    #endif
 
     private func region(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
         guard !coordinates.isEmpty else { return region }

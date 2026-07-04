@@ -6,454 +6,147 @@
     <title>Rydr | Ride Different.</title>
     <meta
       name="description"
-      content="Rydr is a rideshare platform where riders choose nearby drivers, earn RydrBank rewards, discover local experiences, and connect with community opportunities."
+      content="Rydr is an invite-only Atlanta rideshare beta built around rider choice, driver control, transparent pricing, and no surge pricing."
     />
     <meta property="og:title" content="Rydr | Ride Different." />
     <meta
       property="og:description"
-      content="Choose your driver, earn RydrBank rewards, and discover your community with Rydr."
+      content="No surges. Built for choice. Join the Atlanta beta waitlist for Rydr."
     />
     <meta property="og:type" content="website" />
-    <link rel="icon" href="assets/rydr-logo.png" />
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
+  <body data-waitlist-endpoint="https://rydr-app-missioncontrol.vercel.app/api/waitlist">
     <header class="site-header" data-header>
-      <a class="brand" href="#home" aria-label="Rydr home">
-        <img src="assets/rydr-logo.png" alt="" />
-        <span>Rydr</span>
-      </a>
-
+      <a class="brand" href="index.html" aria-label="Rydr home"><span class="brand-mark">R</span><span>Rydr</span></a>
       <button class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" data-nav-toggle>
-        <span></span>
-        <span></span>
-        <span></span>
+        <span></span><span></span><span></span>
       </button>
-
       <nav class="site-nav" data-nav>
-        <a href="#driver-selection">Driver Selection</a>
-        <a href="#rydrbank">RydrBank</a>
-        <a href="#ride-types">Ride Types</a>
-        <a href="#executive">Executive</a>
-        <a href="#community">Community</a>
-        <a href="#drivers">Drivers</a>
-        <a class="nav-cta" href="#get-started">Get Started</a>
+        <a href="riders.html">Riders</a>
+        <a href="drivers.html">Drivers</a>
+        <a href="cashrydr.html">CashRydr Hub</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="#why">Why Rydr</a>
+        <a class="nav-cta" href="#waitlist">Join Beta</a>
       </nav>
     </header>
 
-    <main id="home">
-      <section class="hero section-pad">
+    <main>
+      <section class="hero hero-home">
         <div class="hero-copy reveal">
-          <p class="eyebrow">Choose Your Driver. Earn Rewards. Discover Your Community.</p>
+          <p class="eyebrow">Atlanta invite-only beta</p>
           <h1>Ride Different.</h1>
-          <p>
-            Rydr gives riders more control than traditional rideshare platforms. Compare nearby
-            drivers, choose the ride that fits, earn RydrBank rewards, and stay connected to local
-            experiences around you.
+          <p class="lead">
+            Rydr is building a rideshare network where riders choose, drivers stay in control, and pricing
+            stays transparent. No surge pricing. No mystery match. A better way to move through the city.
           </p>
           <div class="hero-actions">
-            <a class="btn btn-primary" href="#driver-selection">Ride with Rydr</a>
-            <a class="btn btn-secondary" href="#drivers">Drive with Rydr</a>
+            <a class="btn btn-primary" href="#waitlist">Join the waitlist</a>
+            <a class="btn btn-secondary" href="riders.html">Explore rider app</a>
           </div>
-          <div class="hero-points" aria-label="Rydr highlights">
-            <span>Driver selection</span>
-            <span>Ride credits</span>
-            <span>Local discovery</span>
+          <div class="proof-row">
+            <span>No surges</span>
+            <span>Driver choice</span>
+            <span>Invite-controlled beta</span>
           </div>
         </div>
-
-        <div class="hero-visual reveal" aria-label="Rydr app preview">
-          <div class="rydr-device" aria-hidden="true">
-            <div class="device-notch"></div>
-            <div class="device-screen">
-              <div class="device-header">
-                <span>Rydr</span>
-                <strong>Choose Your Driver</strong>
-              </div>
-              <div class="device-map">
-                <span class="route-dot route-start"></span>
-                <span class="route-line"></span>
-                <span class="route-dot route-end"></span>
-                <span class="driver-pin pin-one">A</span>
-                <span class="driver-pin pin-two">M</span>
-              </div>
-              <div class="device-sheet">
-                <div class="sheet-grabber"></div>
-                <div class="device-driver selected">
-                  <div class="avatar">M</div>
-                  <div>
-                    <strong>Maya</strong>
-                    <span>5.0 rating · Ford Mach-E</span>
-                  </div>
-                  <b>$17.85</b>
-                </div>
-                <div class="device-driver">
-                  <div class="avatar">A</div>
-                  <div>
-                    <strong>Ari</strong>
-                    <span>4.9 rating · Toyota Camry</span>
-                  </div>
-                  <b>$18.42</b>
-                </div>
-                <button type="button">Confirm Rydr Go</button>
-              </div>
-            </div>
-          </div>
-          <div class="hero-card driver-snapshot">
-            <div class="avatar">M</div>
-            <div>
-              <strong>Maya</strong>
-              <span>5.0 rating · Ford Mach-E</span>
-            </div>
-            <b>$17.85</b>
-          </div>
-          <div class="hero-card bank-snapshot">
-            <strong>RydrBank</strong>
-            <span>7 of 10 rides toward a reward</span>
+        <div class="hero-media reveal">
+          <div class="phone-stack">
+            <img class="phone-shot phone-shot-main" src="assets/generated/rider-home.png" alt="Rydr rider app running on an iPhone simulator" />
+            <img class="phone-shot phone-shot-secondary" src="assets/generated/driver-home.png" alt="Rydr driver app running on an iPhone simulator" />
           </div>
         </div>
       </section>
 
-      <section class="trust-strip" aria-label="Rydr product pillars">
-        <div>
-          <strong>More control</strong>
-          <span>Review nearby drivers before you confirm.</span>
-        </div>
-        <div>
-          <strong>More rewards</strong>
-          <span>Track ride progress, credits, and free ride opportunities.</span>
-        </div>
-        <div>
-          <strong>More community</strong>
-          <span>Find events, activities, and local ways to earn.</span>
-        </div>
-      </section>
-
-      <section class="section-pad driver-choice" id="driver-selection">
-        <div class="section-copy reveal">
-          <p class="eyebrow gradient-text">Driver Selection</p>
-          <h2>Pick the driver that fits your ride.</h2>
-          <p>
-            Driver Selection is the center of the Rydr experience. Instead of being assigned one
-            option by default, riders can compare a focused set of nearby drivers and confirm the
-            person, vehicle, rating, and fare that best matches the trip.
-          </p>
-          <div class="feature-list">
-            <article>
-              <span>01</span>
-              <strong>Compare nearby drivers</strong>
-              <p>Swipe through available driver cards based on proximity, ride type, and trip details.</p>
-            </article>
-            <article>
-              <span>02</span>
-              <strong>Review driver information</strong>
-              <p>See vehicle details, driver ratings, compliments, price, distance, and estimated time.</p>
-            </article>
-            <article>
-              <span>03</span>
-              <strong>Select with confidence</strong>
-              <p>Choose the driver that best fits your needs before confirming the ride.</p>
-            </article>
-          </div>
-        </div>
-
-        <div class="selection-panel reveal">
-          <div class="panel-header">
-            <span class="mini-icon">DR</span>
-            <div>
-              <strong>Nearby Drivers</strong>
-              <small>Swipe to view options</small>
-            </div>
-          </div>
-          <div class="driver-card active">
-            <div class="driver-top">
-              <div class="avatar">A</div>
-              <div>
-                <strong>Ari</strong>
-                <span>4.9 · Toyota Camry</span>
-              </div>
-              <b>$18.42</b>
-            </div>
-            <div class="car-preview">
-              <span></span>
-              <p>Clean car · Smooth ride · Great conversation</p>
-            </div>
-            <div class="driver-meta">
-              <span>6.2 mi</span>
-              <span>18 min</span>
-              <span>Rydr Go</span>
-            </div>
-            <button type="button">Confirm ride with Ari</button>
-          </div>
-          <div class="driver-card muted">
-            <div class="driver-top">
-              <div class="avatar">J</div>
-              <div>
-                <strong>Jordan</strong>
-                <span>4.8 · Kia Telluride</span>
-              </div>
-              <b>$23.10</b>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="section-pad bank-section" id="rydrbank">
-        <div class="bank-achievement reveal" aria-label="RydrBank ride progress tracker">
-          <div class="bank-achievement-header">
-            <span>RydrBank</span>
-            <strong>Ride progress</strong>
-          </div>
-          <div class="progress-ring" aria-label="8 of 10 eligible rides completed">
-            <span>8</span>
-            <small>of 10 rides</small>
-          </div>
-          <div class="milestone-track">
-            <span class="complete"></span>
-            <span class="complete"></span>
-            <span class="complete"></span>
-            <span class="complete"></span>
-            <span class="complete"></span>
-            <span class="complete"></span>
-            <span class="complete"></span>
-            <span class="complete"></span>
-            <span></span>
-            <span class="reward"></span>
-          </div>
-          <div class="unlock-card">
-            <strong>Free ride reward unlocks at 10 rides</strong>
-            <p>Eligible completed rides move riders toward free ride value in the matching ride group.</p>
-          </div>
-        </div>
-        <div class="section-copy reveal">
-          <p class="eyebrow gradient-text">RydrBank</p>
-          <h2>Ride more. Earn free rides.</h2>
-          <p>
-            RydrBank is Rydr’s ride progression system. Eligible completed rides move riders toward
-            reward milestones, and once requirements are met, riders unlock free ride opportunities.
-            Every completed eligible ride brings riders closer to real ride value.
-          </p>
-          <div class="reward-grid">
-            <article><strong>Ride count tracking</strong><span>Eligible completed rides build visible progress.</span></article>
-            <article><strong>Milestone progress</strong><span>Riders see how close they are to reward eligibility.</span></article>
-            <article><strong>Free ride unlocks</strong><span>Completed requirements unlock future ride value.</span></article>
-            <article><strong>Reward status</strong><span>Active, reserved, and used ride rewards stay organized.</span></article>
-          </div>
-        </div>
-      </section>
-
-      <section class="section-pad ride-types" id="ride-types">
+      <section class="section-band" id="why">
         <div class="section-heading reveal">
-          <p class="eyebrow gradient-text">Ride Types</p>
-          <h2>Choose the right ride for the moment.</h2>
+          <p class="eyebrow">Built for choice</p>
+          <h2>Rydr is not trying to hide the ride from either side.</h2>
           <p>
-            The public site follows the ride names currently used in the app experience.
+            Riders should understand who is coming, what type of ride they are choosing, and what they are paying.
+            Drivers should understand demand, earnings, safety expectations, and the terms of each trip.
           </p>
         </div>
-        <div class="ride-grid">
-          <article class="ride-card reveal">
-            <span class="ride-icon">GO</span>
-            <h3>Rydr Go</h3>
-            <p>Affordable everyday rides for work, errands, school, and nights out.</p>
+        <div class="feature-grid">
+          <article class="feature-card reveal">
+            <span>01</span>
+            <h3>Transparent pricing</h3>
+            <p>Rydr is being designed without surge pricing so riders do not get punished for busy moments.</p>
           </article>
-          <article class="ride-card reveal">
-            <span class="ride-icon">XL</span>
-            <h3>Rydr XL</h3>
-            <p>More space for extra passengers, luggage, and group plans.</p>
+          <article class="feature-card reveal">
+            <span>02</span>
+            <h3>Choice before confirmation</h3>
+            <p>Riders can compare ride options and driver details before they commit to a trip.</p>
           </article>
-          <article class="ride-card reveal">
-            <span class="ride-icon">PR</span>
-            <h3>Rydr Prestine</h3>
-            <p>Premium vehicles and top-rated drivers for a more elevated ride.</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="executive-experience" id="executive" data-executive>
-        <div class="executive-bg" aria-hidden="true"></div>
-        <div class="executive-sheen" aria-hidden="true"></div>
-        <div class="executive-inner">
-          <div class="executive-copy executive-reveal">
-            <div class="executive-badge">
-              <span>By Invitation</span>
-              <em>Upper echelon travel</em>
-            </div>
-            <p class="executive-kicker">Rydr Executive</p>
-            <h2>More Than A Ride.<br />An Arrival.</h2>
-            <p>
-              A top-tier Rydr experience for riders who expect elevated comfort, professional
-              service, luxury vehicles, and a destination experience that begins before the door
-              opens.
-            </p>
-            <p class="executive-age">Available for riders 21+.</p>
-            <div class="executive-actions">
-              <a class="executive-primary" href="#get-started">Experience Rydr Executive</a>
-              <a class="executive-secondary" href="#get-started">Join The Waitlist</a>
-            </div>
-          </div>
-
-          <div class="executive-feature-suite executive-reveal" aria-label="Rydr Executive features">
-            <article>
-              <span>01</span>
-              <strong>Premium vehicles</strong>
-              <p>Refined, executive-level transportation for high-touch moments.</p>
-            </article>
-            <article>
-              <span>02</span>
-              <strong>Luxury interiors</strong>
-              <p>Quiet cabins, elevated materials, and a calmer ride environment.</p>
-            </article>
-            <article>
-              <span>03</span>
-              <strong>Professional drivers</strong>
-              <p>Service-minded drivers focused on discretion, timing, and comfort.</p>
-            </article>
-            <article>
-              <span>04</span>
-              <strong>Priority service</strong>
-              <p>Enhanced comfort, complimentary refreshments, and elevated care.</p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section class="section-pad community-section" id="community">
-        <div class="section-copy reveal">
-          <p class="eyebrow gradient-text">Community & Events</p>
-          <h2>More than transportation.</h2>
-          <p>
-            Rydr is designed to help riders discover local experiences before and after the trip.
-            The platform can surface nearby events, community activities, things to do, and local
-            places worth visiting.
-          </p>
-        </div>
-        <div class="experience-board reveal" aria-label="Local event discovery preview">
-          <article>
-            <span>Tonight</span>
-            <strong>Downtown food market</strong>
-            <p>12 min away · Popular nearby</p>
-          </article>
-          <article>
-            <span>Weekend</span>
-            <strong>Community concert</strong>
-            <p>Rydr XL recommended</p>
-          </article>
-          <article>
-            <span>Nearby</span>
-            <strong>Local art walk</strong>
-            <p>Earn progress with your trip</p>
+          <article class="feature-card reveal">
+            <span>03</span>
+            <h3>Driver control</h3>
+            <p>Drivers get tools around availability, rates, notifications, safety, and beta readiness.</p>
           </article>
         </div>
       </section>
 
-      <section class="section-pad cash-hub" id="cash-hub">
-        <div class="cash-launch-copy reveal">
-          <p class="eyebrow gradient-text">Major Ecosystem Feature</p>
-          <h2>Introducing Cash Rydr Hub.</h2>
+      <section class="split-section">
+        <div class="split-copy reveal">
+          <p class="eyebrow">Two apps, one network</p>
+          <h2>Separate experiences for riders and drivers.</h2>
           <p>
-            Cash Rydr Hub expands what Rydr can do for local transportation. Riders can explore cash
-            ride opportunities and community connections, while independent drivers gain more ways
-            to discover local demand beyond standard Rydr rides.
+            Rydr is organized around real workflows: riders book and manage trips; drivers manage readiness,
+            vehicle eligibility, earnings, safety, and support.
           </p>
-          <div class="cash-launch-actions">
-            <a class="btn btn-primary" href="#get-started">Explore Cash Rydr Hub</a>
-            <span>Separate from standard Rydr-dispatched rides.</span>
-          </div>
         </div>
-        <div class="cash-hub-stage reveal" aria-label="Cash Rydr Hub product preview">
-          <div class="cash-request-card primary">
-            <span>Cash ride request</span>
-            <strong>Airport pickup · 6:30 PM</strong>
-            <p>2 passengers · Driver offers open</p>
-          </div>
-          <div class="cash-request-card">
-            <span>Community route</span>
-            <strong>Downtown to event district</strong>
-            <p>Flexible timing · Local drivers nearby</p>
-          </div>
-          <div class="cash-signal-grid">
-            <article><strong>Cash rides</strong><p>Expanded flexibility for riders arranging local transportation.</p></article>
-            <article><strong>Driver opportunities</strong><p>More ways for independent drivers to see nearby demand.</p></article>
-            <article><strong>Community transportation</strong><p>Connections for local needs, events, and planned trips.</p></article>
-          </div>
+        <div class="path-grid">
+          <a class="path-card reveal" href="riders.html">
+            <img src="assets/generated/rider-trip.png" alt="Rydr rider trip flow screenshot" />
+            <strong>Rider Landing Page</strong>
+            <span>Choice, transparency, rewards, and safety.</span>
+          </a>
+          <a class="path-card reveal" href="drivers.html">
+            <img src="assets/generated/driver-safety.png" alt="Rydr driver safety screen screenshot" />
+            <strong>Driver Landing Page</strong>
+            <span>Earnings tools, live notifications, and safety accountability.</span>
+          </a>
+          <a class="path-card reveal" href="cashrydr.html">
+            <img src="assets/generated/mission-control-waitlist.png" alt="Rydr Mission Control waitlist screenshot" />
+            <strong>CashRydr Hub</strong>
+            <span>The local earning and community layer Rydr is preparing to build.</span>
+          </a>
         </div>
       </section>
 
-      <section class="section-pad drivers-section" id="drivers">
-        <div class="section-copy reveal">
-          <p class="eyebrow gradient-text">Driver Opportunities</p>
-          <h2>Built for flexible, independent work.</h2>
+      <section class="waitlist-section" id="waitlist">
+        <div class="waitlist-copy reveal">
+          <p class="eyebrow">Phase 0 beta</p>
+          <h2>Join the Atlanta beta waitlist.</h2>
           <p>
-            Rydr gives drivers a clearer role in the marketplace. Riders see driver information up
-            front, while drivers can build trust, manage opportunities, and use Cash Rydr Hub for
-            additional community connections.
+            Rydr is controlling early access so the first group of riders and drivers can be supported properly.
+            After you submit, Mission Control reviews the waitlist and sends next steps by email when approved.
           </p>
-          <div class="driver-points">
-            <span>Flexible schedules</span>
-            <span>Transparent earnings</span>
-            <span>Driver empowerment</span>
-            <span>Independent opportunities</span>
+        </div>
+        <form class="waitlist-form reveal" data-waitlist-form>
+          <div class="form-grid">
+            <label>First name<input name="firstName" autocomplete="given-name" required /></label>
+            <label>Last name<input name="lastName" autocomplete="family-name" required /></label>
+            <label>Email<input name="email" type="email" autocomplete="email" required /></label>
+            <label>Phone<input name="phoneNumber" type="tel" autocomplete="tel" required /></label>
           </div>
-        </div>
-        <div class="desktop-shot reveal">
-          <img src="assets/driver-app.png" alt="Rydr driver opportunity interface preview" />
-        </div>
-      </section>
-
-      <section class="section-pad saferydr" id="saferydr">
-        <div class="safe-inner reveal">
-          <p class="eyebrow">SafeRydr · Coming Soon</p>
-          <h2>Safety enhancements are under development.</h2>
-          <p>
-            SafeRydr is planned as a future safety layer for the Rydr platform. It is not marketed
-            as a launch feature; it represents ongoing work to improve ride confidence, support, and
-            safety-focused tooling.
-          </p>
-        </div>
-      </section>
-
-      <section class="download section-pad" id="get-started">
-        <div class="download-inner reveal">
-          <img src="assets/rydr-logo.png" alt="Rydr logo" />
-          <p class="eyebrow">Get Started</p>
-          <h2>Join Rydr as a rider or driver.</h2>
-          <p>
-            Get updates for rider access, driver opportunities, RydrBank rewards, community events,
-            and Cash Rydr Hub availability.
-          </p>
-          <form class="signup-form" data-signup-form>
-            <label class="sr-only" for="email">Email address</label>
-            <input id="email" name="email" type="email" placeholder="Email address" required />
-            <select name="role" aria-label="Choose rider or driver">
-              <option value="rider">I want to ride</option>
-              <option value="driver">I want to drive</option>
-              <option value="both">Rider and driver</option>
-            </select>
-            <button class="btn btn-dark" type="submit">Get Started</button>
-          </form>
+          <fieldset>
+            <legend>I want to join as</legend>
+            <label><input type="radio" name="role" value="rider" checked /> Rider</label>
+            <label><input type="radio" name="role" value="driver" /> Driver</label>
+          </fieldset>
+          <input type="hidden" name="source" value="rydr-go.com/home" />
+          <button class="btn btn-primary" type="submit">Join waitlist</button>
           <p class="form-note" data-form-note aria-live="polite"></p>
-        </div>
+        </form>
       </section>
     </main>
 
     <footer class="site-footer">
-      <div>
-        <a class="brand footer-brand" href="#home" aria-label="Rydr home">
-          <img src="assets/rydr-logo.png" alt="" />
-          <span>Rydr</span>
-        </a>
-        <p>Ride Different.</p>
-      </div>
-      <nav class="footer-links" aria-label="Footer navigation">
-        <a href="#driver-selection">Driver Selection</a>
-        <a href="#rydrbank">RydrBank</a>
-        <a href="#executive">Executive</a>
-        <a href="#cash-hub">Cash Rydr Hub</a>
-        <a href="#drivers">Drivers</a>
-        <a href="#saferydr">SafeRydr</a>
-      </nav>
+      <div><strong>Rydr</strong><span>Ride Different.</span></div>
+      <nav><a href="riders.html">Riders</a><a href="drivers.html">Drivers</a><a href="cashrydr.html">CashRydr Hub</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></nav>
     </footer>
-
     <script src="script.js"></script>
   </body>
 </html>

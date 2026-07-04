@@ -30,7 +30,8 @@ function anonymizedFields(role: "rider" | "driver") {
       address: null,
       stripeAccountId: null,
       driverApprovalStatus: "rejected",
-      isApproved: false
+      isApproved: false,
+      canGoOnline: false
     };
   }
   return common;

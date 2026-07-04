@@ -11,12 +11,15 @@ struct PhoneVerificationView: View {
     var onVerified: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     @State private var nationalNumber: String = ""
     @State private var sending = false
     @State private var errorMessage = ""
     @State private var verificationSession: PhoneVerificationSession?
     @State private var contentVisible = false
+    private let termsURL = URL(string: "https://rydr-go.com/terms.html")!
+    private let privacyURL = URL(string: "https://rydr-go.com/privacy.html")!
 
     private var formattedPhoneNumber: String {
         let digits = nationalNumber.filter { $0.isNumber }.prefix(10)
@@ -265,17 +268,18 @@ struct PhoneVerificationView: View {
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(PhoneVerificationPalette.slate.opacity(0.72))
 
-            (
-                Text("By continuing, you agree to our ")
+            HStack(spacing: 3) {
+                Text("By continuing, you agree to our")
                     .foregroundStyle(PhoneVerificationPalette.slate)
-                + Text("Terms of Service")
+                Button("Terms") { openURL(termsURL) }
                     .foregroundStyle(PhoneVerificationPalette.red)
-                + Text(" and ")
+                Text("and")
                     .foregroundStyle(PhoneVerificationPalette.slate)
-                + Text("Privacy Policy.")
+                Button("Privacy Policy.") { openURL(privacyURL) }
                     .foregroundStyle(PhoneVerificationPalette.red)
-            )
+            }
             .font(.system(size: 13, weight: .medium))
+            .buttonStyle(.plain)
             .lineLimit(2)
             .minimumScaleFactor(0.78)
         }
