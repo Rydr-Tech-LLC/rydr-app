@@ -515,7 +515,7 @@ service cloud.firestore {
     }
 
     match /driver_status/{uid} {
-      allow read: if isSelf(uid) || isAdmin();
+      allow read: if signedIn();
       allow create, update: if isSelf(uid)
         && request.resource.data.keys().hasOnly([
           "availabilityStatus",

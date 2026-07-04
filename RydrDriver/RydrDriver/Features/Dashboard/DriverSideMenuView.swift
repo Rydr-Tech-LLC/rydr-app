@@ -10,7 +10,6 @@ enum SideMenuItem: String, CaseIterable, Identifiable {
     case walletPayouts = "Wallet & Payouts"
     case cashRydrHub = "Cash Rydr Hub"
     case documents = "Documents"
-    case rewards = "Rewards"
     case community = "Community"
     case safety = "Safety"
     case helpSupport = "Help & Support"
@@ -29,7 +28,6 @@ enum SideMenuItem: String, CaseIterable, Identifiable {
         case .walletPayouts: return "creditcard.fill"
         case .cashRydrHub: return "banknote.fill"
         case .documents: return "doc.text"
-        case .rewards: return "gift"
         case .community: return "person.3.fill"
         case .safety: return "shield.fill"
         case .helpSupport: return "questionmark.circle.fill"
@@ -69,6 +67,14 @@ struct SideMenuView: View {
                             Text(item.rawValue)
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
+                            if item == .notifications, vm.unreadNotificationCount > 0 {
+                                Text(vm.notificationBadgeText)
+                                    .font(.caption2.weight(.heavy))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(Capsule().fill(Color.red))
+                            }
                         }
                         .padding(.vertical, 9)
                         .padding(.horizontal, 10)

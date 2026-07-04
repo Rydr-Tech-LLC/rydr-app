@@ -244,9 +244,12 @@ struct RideTypeConfigurationView: View {
                 onStep: { stepRate(field: .perMinute, delta: $0) }
             )
 
+            if hasDraftChanges {
+                unsavedRateChangesNotice
+            }
+
             Button {
-                onSaveRate(currentPerMile, currentPerMinute)
-                resetDrafts()
+                saveRateChanges()
             } label: {
                 Label("Save Changes", systemImage: "checkmark.circle.fill")
                     .font(.headline.weight(.bold))
@@ -267,13 +270,54 @@ struct RideTypeConfigurationView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
             } else if !isPerMileInputValid || !isPerMinuteInputValid {
-                Label("Custom rates must stay inside the listed range and use a $0.00 format.", systemImage: "exclamationmark.triangle.fill")
+                Label("Custom rates must stay inside the listed range and use a 0.00 format.", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
             }
         }
         .padding(20)
         .background(cardBackground(cornerRadius: 26))
+    }
+
+    private var unsavedRateChangesNotice: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.orange)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(Color.orange.opacity(0.14)))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Unsaved rate changes")
+                    .font(.subheadline.weight(.bold))
+                Text("$\(rateText(currentPerMile))/mi · $\(rateText(currentPerMinute))/min")
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                saveRateChanges()
+            } label: {
+                Text("Save")
+                    .font(.caption.weight(.heavy))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(Capsule().fill(canSaveRate ? Color.orange : Color(.systemGray5)))
+                    .foregroundStyle(canSaveRate ? Color.white : Color.secondary)
+            }
+            .disabled(!canSaveRate)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.orange.opacity(0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.orange.opacity(0.24), lineWidth: 1)
+                )
+        )
     }
 
     private var requirementsCard: some View {
@@ -344,30 +388,35 @@ struct RideTypeConfigurationView: View {
                 Spacer(minLength: 8)
 
                 VStack(alignment: .trailing, spacing: 8) {
-                    Text("Current Rate")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Label("Edit rate", systemImage: "pencil")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(isOnline || !isEligible ? Color.secondary : Color.red)
 
-                    TextField(currencyText(value), text: text)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .font(.title2.weight(.heavy).monospacedDigit())
-                        .foregroundStyle(isInputValid ? Color.primary : Color.red)
-                        .frame(width: 116)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color(.systemBackground))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(isInputValid ? Color.clear : Color.red.opacity(0.6), lineWidth: 1)
-                                )
-                        )
-                        .disabled(isOnline || !isEligible)
-                        .onChange(of: text.wrappedValue) { _, newValue in
-                            onTextChange(newValue)
-                        }
+                    HStack(spacing: 3) {
+                        Text("$")
+                            .font(.title3.weight(.heavy).monospacedDigit())
+                            .foregroundStyle(isInputValid ? Color.primary : Color.red)
+                        TextField(rateText(value), text: text)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .font(.title2.weight(.heavy).monospacedDigit())
+                            .foregroundStyle(isInputValid ? Color.primary : Color.red)
+                            .frame(width: 82)
+                            .disabled(isOnline || !isEligible)
+                            .onChange(of: text.wrappedValue) { _, newValue in
+                                onTextChange(newValue)
+                            }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(.systemBackground))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(isInputValid ? Color.red.opacity(0.28) : Color.red.opacity(0.70), lineWidth: 1.4)
+                            )
+                    )
 
                     HStack(spacing: 0) {
                         Button {
@@ -425,7 +474,7 @@ struct RideTypeConfigurationView: View {
                 Text(signal.title)
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(.primary)
-                Text("Suggested \(currencyText(suggested))\(suffix)")
+                Text("Suggested $\(rateText(suggested))\(suffix)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -482,11 +531,11 @@ struct RideTypeConfigurationView: View {
         case .perMile:
             let next = roundToCents(min(max(currentPerMile + delta, pricing.minPerMile), pricing.maxPerMile))
             draftPerMile = next
-            perMileText = currencyText(next)
+            perMileText = rateText(next)
         case .perMinute:
             let next = roundToCents(min(max(currentPerMinute + delta, pricing.minPerMinute), pricing.maxPerMinute))
             draftPerMinute = next
-            perMinuteText = currencyText(next)
+            perMinuteText = rateText(next)
         }
     }
 
@@ -495,19 +544,25 @@ struct RideTypeConfigurationView: View {
         case .perMile:
             let next = roundToCents(min(max(value, pricing.minPerMile), pricing.maxPerMile))
             draftPerMile = next
-            perMileText = currencyText(next)
+            perMileText = rateText(next)
         case .perMinute:
             let next = roundToCents(min(max(value, pricing.minPerMinute), pricing.maxPerMinute))
             draftPerMinute = next
-            perMinuteText = currencyText(next)
+            perMinuteText = rateText(next)
         }
     }
 
     private func resetDrafts() {
         draftPerMile = nil
         draftPerMinute = nil
-        perMileText = currencyText(rate.perMile)
-        perMinuteText = currencyText(rate.perMinute)
+        perMileText = rateText(rate.perMile)
+        perMinuteText = rateText(rate.perMinute)
+    }
+
+    private func saveRateChanges() {
+        guard canSaveRate else { return }
+        onSaveRate(currentPerMile, currentPerMinute)
+        resetDrafts()
     }
 
     private func isValidRateText(_ text: String, bounds: ClosedRange<Double>) -> Bool {
@@ -517,13 +572,13 @@ struct RideTypeConfigurationView: View {
 
     private func parsedRate(_ text: String) -> Double? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let pattern = #"^\$?\d+\.\d{2}$"#
+        let pattern = #"^\d+\.\d{2}$"#
         guard trimmed.range(of: pattern, options: .regularExpression) != nil else { return nil }
-        return Double(trimmed.replacingOccurrences(of: "$", with: ""))
+        return Double(trimmed)
     }
 
-    private func currencyText(_ value: Double) -> String {
-        "$\(String(format: "%.2f", value))"
+    private func rateText(_ value: Double) -> String {
+        String(format: "%.2f", value)
     }
 
     private func suggestedRate(min: Double, max: Double) -> Double {
@@ -962,7 +1017,6 @@ private final class DriverCommunityHubVM: ObservableObject {
     @Published var errorMessage: String?
 
     private let db = Firestore.firestore()
-    private var requestListener: ListenerRegistration?
     private var driverListener: ListenerRegistration?
 
     var hotspots: [DriverCommunityHotspot] {
@@ -1006,8 +1060,6 @@ private final class DriverCommunityHubVM: ObservableObject {
     }
 
     func stop() {
-        requestListener?.remove()
-        requestListener = nil
         driverListener?.remove()
         driverListener = nil
     }
@@ -1033,26 +1085,8 @@ private final class DriverCommunityHubVM: ObservableObject {
     }
 
     private func startDemandListeners() {
-        requestListener?.remove()
-        requestListener = db.collection("rideRequests")
-            .order(by: "createdAt", descending: true)
-            .limit(to: 120)
-            .addSnapshotListener { [weak self] snapshot, error in
-                Task { @MainActor in
-                    guard let self else { return }
-                    if let error {
-                        self.errorMessage = error.localizedDescription
-                        return
-                    }
-                    let cutoff = Date().addingTimeInterval(-120)
-                    self.rideRequests = (snapshot?.documents ?? [])
-                        .map(DriverCommunityRideRequest.init(document:))
-                        .filter { ($0.createdAt ?? .distantPast) >= cutoff }
-                }
-            }
-
         driverListener?.remove()
-        driverListener = db.collection("drivers")
+        driverListener = db.collection("driver_status")
             .whereField("isOnline", isEqualTo: true)
             .limit(to: 150)
             .addSnapshotListener { [weak self] snapshot, error in
@@ -1621,6 +1655,416 @@ private struct DriverCommunityMapPattern: View {
     }
 }
 
+struct DriverNotificationsView: View {
+    @ObservedObject var vm: DriverDashboardVM
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 14) {
+                headerCard
+
+                if let message = vm.notificationErrorMessage {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+
+                if vm.driverNotifications.isEmpty {
+                    emptyNotifications
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(vm.driverNotifications) { notification in
+                            DriverNotificationRow(notification: notification) {
+                                vm.markNotificationRead(notification)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Mark Read") {
+                    vm.markAllNotificationsRead()
+                }
+                .font(.subheadline.weight(.bold))
+                .disabled(vm.unreadNotificationCount == 0)
+            }
+        }
+    }
+
+    private var headerCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "bell.badge.fill")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .background(Styles.rydrGradient, in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(vm.unreadNotificationCount == 0 ? "All caught up" : "\(vm.unreadNotificationCount) unread")
+                    .font(.headline.weight(.bold))
+                Text("Ride requests, demand alerts, safety updates, and Mission Control notices appear here.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    private var emptyNotifications: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "bell.slash.fill")
+                .font(.title.weight(.bold))
+                .foregroundStyle(.secondary)
+            Text("No notifications yet")
+                .font(.headline.weight(.bold))
+            Text("Live driver alerts will appear here as they are received.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 44)
+        .padding(.horizontal, 16)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
+private struct DriverNotificationRow: View {
+    let notification: DriverNotificationItem
+    let onRead: () -> Void
+
+    var body: some View {
+        Button(action: onRead) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: notification.icon)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(iconColor.opacity(0.12)))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(notification.title)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.primary)
+                        if !notification.isRead {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 7, height: 7)
+                        }
+                        Spacer()
+                        Text(relativeTime)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text(notification.message)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(14)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(notification.isRead ? Color.black.opacity(0.05) : Color.red.opacity(0.24), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var iconColor: Color {
+        switch notification.priority {
+        case .urgent: return .red
+        case .high: return .orange
+        case .normal: return .secondary
+        }
+    }
+
+    private var relativeTime: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: notification.createdAt, relativeTo: Date())
+    }
+}
+
+struct DriverHelpSupportView: View {
+    @State private var searchText = ""
+
+    private let discordURL = URL(string: "https://discord.gg/kfUz52849")!
+
+    private var filteredArticles: [DriverSupportArticle] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return DriverSupportArticle.library }
+        return DriverSupportArticle.library.filter { article in
+            article.title.lowercased().contains(query) ||
+                article.category.lowercased().contains(query) ||
+                article.summary.lowercased().contains(query) ||
+                article.steps.joined(separator: " ").lowercased().contains(query)
+        }
+    }
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 14) {
+                supportHero
+                searchField
+                discordCard
+
+                VStack(spacing: 10) {
+                    ForEach(filteredArticles) { article in
+                        DriverSupportArticleCard(article: article)
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Help & Support")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var supportHero: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "questionmark.bubble.fill")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 50, height: 50)
+                .background(Styles.rydrGradient, in: Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Driver knowledge base")
+                    .font(.headline.weight(.bold))
+                Text("Quick answers for beta drivers, onboarding, ride flow, earnings, safety, and app troubleshooting.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search articles", text: $searchText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(13)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var discordCard: some View {
+        Link(destination: discordURL) {
+            HStack(spacing: 12) {
+                Image(systemName: "person.2.wave.2.fill")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(Color.indigo, in: Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Live beta support")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.primary)
+                    Text("Join the Rydr Live Beta Discord for support during the beta.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+                Image(systemName: "arrow.up.right.square.fill")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(Color.indigo)
+            }
+            .padding(14)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.indigo.opacity(0.20), lineWidth: 1)
+            )
+        }
+    }
+}
+
+private struct DriverSupportArticleCard: View {
+    let article: DriverSupportArticle
+
+    var body: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 9) {
+                Text(article.summary)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(article.steps, id: \.self) { step in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.green)
+                            .padding(.top, 2)
+                        Text(step)
+                            .font(.footnote)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(.top, 8)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: article.icon)
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(Styles.rydrGradient)
+                    .frame(width: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(article.title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.primary)
+                    Text(article.category)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(14)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+        )
+    }
+}
+
+private struct DriverSupportArticle: Identifiable {
+    let id: String
+    let title: String
+    let category: String
+    let icon: String
+    let summary: String
+    let steps: [String]
+
+    static let library: [DriverSupportArticle] = [
+        DriverSupportArticle(
+            id: "going-online",
+            title: "Getting ready to go online",
+            category: "Account readiness",
+            icon: "power.circle.fill",
+            summary: "A driver must be approved, have at least one active ride type, and save rates before receiving standard ride requests.",
+            steps: [
+                "Confirm Mission Control approval is complete.",
+                "Open Vehicle & Rydr Hub and keep at least one eligible ride type active.",
+                "Open the ride type rate card while offline, set rates in 0.00 format, and save changes."
+            ]
+        ),
+        DriverSupportArticle(
+            id: "ride-requests",
+            title: "Handling ride requests",
+            category: "Ride flow",
+            icon: "car.fill",
+            summary: "Assigned ride requests appear on the dashboard when you are online and match your active ride types and filters.",
+            steps: [
+                "Review pickup, drop-off, ride type, rider rating, and estimated fare before accepting.",
+                "Accept only when you can safely reach pickup.",
+                "Declined or missed requests may appear in earnings and performance analytics."
+            ]
+        ),
+        DriverSupportArticle(
+            id: "rates",
+            title: "Editing per-mile and per-minute rates",
+            category: "Rates",
+            icon: "dollarsign.circle.fill",
+            summary: "Rates can be changed only while offline so pricing does not change mid-dispatch.",
+            steps: [
+                "Open the ride type card from the dashboard or Vehicle & Rydr Hub.",
+                "Use the edit field or plus/minus controls for each rate.",
+                "Save the unsaved rate notification before going online."
+            ]
+        ),
+        DriverSupportArticle(
+            id: "safety-markers",
+            title: "Safety markers and appeals",
+            category: "Safety",
+            icon: "shield.fill",
+            summary: "Safety markers come from rider reports and Mission Control review. Some conduct concerns may place the account on hold.",
+            steps: [
+                "Open Safety to review active markers.",
+                "Use Appeal when you have ride context or evidence Mission Control should review.",
+                "Unprofessional conduct markers may temporarily suspend access until manual investigation is complete."
+            ]
+        ),
+        DriverSupportArticle(
+            id: "documents",
+            title: "Document review status",
+            category: "Onboarding",
+            icon: "doc.text.fill",
+            summary: "License, insurance, registration, identity, and beta background-check status affect approval readiness.",
+            steps: [
+                "Upload clear document images with all corners visible.",
+                "Check Documents for missing or pending items.",
+                "Mission Control handles beta approval and background-check bypass decisions."
+            ]
+        ),
+        DriverSupportArticle(
+            id: "notifications",
+            title: "Notification types",
+            category: "Alerts",
+            icon: "bell.fill",
+            summary: "The bell shows live ride, demand, missed request, safety, appeal, and Mission Control notices.",
+            steps: [
+                "Open Notifications from the bell or side menu.",
+                "Unread alerts show a badge until opened or marked read.",
+                "Device push alerts require notification permission and a saved Firebase token."
+            ]
+        ),
+        DriverSupportArticle(
+            id: "troubleshooting",
+            title: "Common beta troubleshooting",
+            category: "Beta support",
+            icon: "wrench.and.screwdriver.fill",
+            summary: "Most beta issues come from permissions, stale approval status, missing rates, or network state.",
+            steps: [
+                "Confirm location and notification permissions are enabled.",
+                "Close and reopen the app after Mission Control changes approval status.",
+                "Share screenshots and the time of the issue in the Rydr Live Beta Discord."
+            ]
+        )
+    ]
+}
+
 struct DrawerDestinationView: View {
     let item: SideMenuItem
     @ObservedObject var vm: DriverDashboardVM
@@ -1643,6 +2087,10 @@ struct DrawerDestinationView: View {
                 DriverSettingsView()
             } else if item == .safety {
                 DriverSafetyCenterView(vm: vm)
+            } else if item == .notifications {
+                DriverNotificationsView(vm: vm)
+            } else if item == .helpSupport {
+                DriverHelpSupportView()
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
@@ -1682,7 +2130,6 @@ struct DrawerDestinationView: View {
         case .walletPayouts: return "Manage payout methods, instant pay, and payout history."
         case .cashRydrHub: return "Review open Cash Hub rider posts and manage accepted cash rides."
         case .documents: return "Keep required driver documents current."
-        case .rewards: return "Track milestones, referrals, promotions, and Rydr incentives."
         case .community: return "Find live event demand, venue hotspots, and upcoming Atlanta events."
         case .safety: return "Emergency contacts, incident reports, SafeRydr settings, and Safety Center."
         case .helpSupport: return "FAQs, support contact, and issue reporting."
@@ -1700,7 +2147,6 @@ struct DrawerDestinationView: View {
         case .walletPayouts: return ["Bank Account", "Debit Card", "Instant Pay", "Payout History"]
         case .cashRydrHub: return ["Open Requests", "Accepted Cash Rides", "Cash Hub Terms"]
         case .documents: return ["Driver License", "Insurance", "Registration", "Background Check Status"]
-        case .rewards: return ["Driver Milestones", "Referral Rewards", "Promotions", "Rydr Incentives"]
         case .community: return ["Live Hotspots", "Upcoming Events", "Venue Demand"]
         case .safety: return ["Emergency Contacts", "Incident Reports", "SafeRydr Settings", "Safety Center"]
         case .helpSupport: return ["FAQs", "Contact Support", "Report Issue"]

@@ -64,6 +64,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var profilePhotoMessage: String?
     @Published var accountDeletionMessage: String?
     @Published var isRequestingAccountDeletion: Bool = false
+    @Published var driverNotifications: [DriverNotificationItem] = []
+    @Published var unreadNotificationCount: Int = 0
+    @Published var notificationErrorMessage: String?
     static let availableRideTypes = RydrRideTierCatalog.orderedRideTypes
 
     var isReadyToGoOnline: Bool {
@@ -77,6 +80,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         return nil
     }
 
+    var notificationBadgeText: String {
+        unreadNotificationCount > 99 ? "99+" : "\(unreadNotificationCount)"
+    }
+
     private let locationManager = CLLocationManager()
     private var locationTimer: Timer?
     private let db = Firestore.firestore()
@@ -84,6 +91,15 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private var requestListener: ListenerRegistration?
     private var mapRequestBlipListener: ListenerRegistration?
     private var activeRideListener: ListenerRegistration?
+    private var notificationListener: ListenerRegistration?
+    private var safetyPenaltyNotificationListener: ListenerRegistration?
+    private var appealNotificationListener: ListenerRegistration?
+    private var systemNotifications: [DriverNotificationItem] = []
+    private var localNotifications: [String: DriverNotificationItem] = [:]
+    private var seenPendingRideRequestIDs = Set<String>()
+    private var seenDemandNotificationBuckets = Set<String>()
+    private var readLocalNotificationIDs: Set<String> = []
+    private let readLocalNotificationIDsKey = "rydr.driver.notifications.readLocalNotificationIDs"
     private var lastTripTelemetryAt: Date?
     private var lastTripTelemetryLocation: CLLocation?
     #if DEBUG
@@ -110,10 +126,14 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         requestListener?.remove()
         mapRequestBlipListener?.remove()
         activeRideListener?.remove()
+        notificationListener?.remove()
+        safetyPenaltyNotificationListener?.remove()
+        appealNotificationListener?.remove()
         locationTimer?.invalidate()
     }
 
     func startDashboard() {
+        loadReadLocalNotificationIDs()
         #if DEBUG
         if shouldUseAtlantaPilotLocationInSimulator {
             applyAtlantaPilotLocation()
@@ -123,6 +143,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         startObservingDriverEligibility()
         startMapRequestBlipListener()
         startActiveRideListener()
+        startNotificationListeners()
         publishDriverProfile()
     }
 
@@ -501,6 +522,21 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                     return
                 }
                 self?.pendingRequests.removeAll { $0.id == request.id }
+                if status == "missed" {
+                    self?.upsertLocalNotification(
+                        DriverNotificationItem(
+                            id: "missed-ride-\(request.id)",
+                            type: "missed_ride_request",
+                            title: "Missed ride request",
+                            message: "\(request.rideType) request from \(request.pickup) expired before you accepted.",
+                            createdAt: Date(),
+                            isRead: false,
+                            source: .local,
+                            priority: .high,
+                            relatedId: request.id
+                        )
+                    )
+                }
                 self?.statusMessage = message
                 self?.resumeStandbyIfWaiting()
             }
@@ -1057,6 +1093,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                     let requests = snapshot?.documents
                         .map(DriverRideRequest.init(document:))
                         .filter { self?.canPresentAssignedRequest($0) == true } ?? []
+                    self?.applyPendingRideNotifications(requests)
                     self?.pendingRequests = (self?.isOnline == true && self?.activeRide == nil) ? requests : []
                     if self?.pendingRequests.isEmpty == false {
                         self?.isSearchingForRides = false
@@ -1070,6 +1107,181 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private func stopRequestListener() {
         requestListener?.remove()
         requestListener = nil
+    }
+
+    private func startNotificationListeners() {
+        notificationListener?.remove()
+        safetyPenaltyNotificationListener?.remove()
+        appealNotificationListener?.remove()
+
+        guard let uid = Auth.auth().currentUser?.uid else {
+            systemNotifications = []
+            localNotifications = [:]
+            refreshNotifications()
+            return
+        }
+
+        notificationListener = db.collection("drivers")
+            .document(uid)
+            .collection("notifications")
+            .order(by: "createdAt", descending: true)
+            .limit(to: 100)
+            .addSnapshotListener { [weak self] snapshot, error in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if let error {
+                        self.notificationErrorMessage = "Notifications could not be loaded: \(error.localizedDescription)"
+                        return
+                    }
+                    self.notificationErrorMessage = nil
+                    self.systemNotifications = (snapshot?.documents ?? [])
+                        .map(DriverNotificationItem.init(document:))
+                    self.refreshNotifications()
+                }
+            }
+
+        safetyPenaltyNotificationListener = db.collection("driverSafetyPenalties")
+            .whereField("driverId", isEqualTo: uid)
+            .addSnapshotListener { [weak self] snapshot, error in
+                DispatchQueue.main.async {
+                    guard let self, error == nil else { return }
+                    let penalties = (snapshot?.documents ?? []).compactMap(DriverSafetyPenalty.init(document:))
+                    penalties.forEach { penalty in
+                        self.upsertLocalNotification(
+                            DriverNotificationItem(
+                                id: "safety-penalty-\(penalty.id)",
+                                type: "safety_penalty",
+                                title: "Safety marker added",
+                                message: "\(penalty.categoryLabel): \(penalty.description)",
+                                createdAt: penalty.createdAt ?? Date(),
+                                isRead: self.readLocalNotificationIDs.contains("safety-penalty-\(penalty.id)"),
+                                source: .local,
+                                priority: penalty.requiresInvestigationHold ? .urgent : .high,
+                                relatedId: penalty.id
+                            )
+                        )
+                    }
+                }
+            }
+
+        appealNotificationListener = db.collection("driverSafetyPenaltyAppeals")
+            .whereField("driverId", isEqualTo: uid)
+            .addSnapshotListener { [weak self] snapshot, error in
+                DispatchQueue.main.async {
+                    guard let self, error == nil else { return }
+                    let appeals = (snapshot?.documents ?? []).compactMap(DriverPenaltyAppeal.init(document:))
+                    appeals
+                        .filter { $0.status.lowercased() != "submitted" }
+                        .forEach { appeal in
+                            self.upsertLocalNotification(
+                                DriverNotificationItem(
+                                    id: "appeal-decision-\(appeal.id)",
+                                    type: "appeal_decision",
+                                    title: "Appeal decision updated",
+                                    message: "Your safety appeal status changed to \(appeal.status.replacingOccurrences(of: "_", with: " ")).",
+                                    createdAt: appeal.createdAt ?? Date(),
+                                    isRead: self.readLocalNotificationIDs.contains("appeal-decision-\(appeal.id)"),
+                                    source: .local,
+                                    priority: .high,
+                                    relatedId: appeal.id
+                                )
+                            )
+                        }
+                }
+            }
+    }
+
+    private func applyPendingRideNotifications(_ requests: [DriverRideRequest]) {
+        for request in requests where !seenPendingRideRequestIDs.contains(request.id) {
+            seenPendingRideRequestIDs.insert(request.id)
+            upsertLocalNotification(
+                DriverNotificationItem(
+                    id: "new-ride-\(request.id)",
+                    type: "new_ride_request",
+                    title: "New ride request",
+                    message: "\(request.rideType) request from \(request.pickup).",
+                    createdAt: request.createdAt ?? Date(),
+                    isRead: readLocalNotificationIDs.contains("new-ride-\(request.id)"),
+                    source: .local,
+                    priority: .urgent,
+                    relatedId: request.id
+                )
+            )
+        }
+    }
+
+    private func applyDemandNotification(_ demand: DriverDemandSnapshot) {
+        guard demand.level == .high || demand.level == .moderate else { return }
+        let levelKey = demand.level == .high ? "high" : "moderate"
+        let bucket = Int(Date().timeIntervalSince1970 / 900)
+        let id = "demand-\(levelKey)-\(bucket)"
+        guard !seenDemandNotificationBuckets.contains(id) else { return }
+        seenDemandNotificationBuckets.insert(id)
+        upsertLocalNotification(
+            DriverNotificationItem(
+                id: id,
+                type: demand.level == .high ? "demand_high" : "demand_moderate",
+                title: demand.level == .high ? "High demand nearby" : "Demand building nearby",
+                message: "\(demand.nearbyRequestCount) recent requests within \(Int(demand.radiusMiles.rounded())) miles. \(demand.paceText).",
+                createdAt: Date(),
+                isRead: readLocalNotificationIDs.contains(id),
+                source: .local,
+                priority: demand.level == .high ? .high : .normal
+            )
+        )
+    }
+
+    private func upsertLocalNotification(_ item: DriverNotificationItem) {
+        var next = item
+        if readLocalNotificationIDs.contains(item.id) {
+            next.isRead = true
+        }
+        localNotifications[item.id] = next
+        refreshNotifications()
+    }
+
+    private func refreshNotifications() {
+        let combined = systemNotifications + Array(localNotifications.values)
+        driverNotifications = combined.sorted(by: DriverNotificationItem.sort)
+        unreadNotificationCount = driverNotifications.filter { !$0.isRead }.count
+    }
+
+    func markNotificationRead(_ notification: DriverNotificationItem) {
+        guard !notification.isRead else { return }
+
+        switch notification.source {
+        case .system:
+            guard let uid = Auth.auth().currentUser?.uid else { return }
+            db.collection("drivers")
+                .document(uid)
+                .collection("notifications")
+                .document(notification.id)
+                .updateData([
+                    "isRead": true,
+                    "readAt": FieldValue.serverTimestamp()
+                ])
+        case .local:
+            readLocalNotificationIDs.insert(notification.id)
+            persistReadLocalNotificationIDs()
+            if var existing = localNotifications[notification.id] {
+                existing.isRead = true
+                localNotifications[notification.id] = existing
+                refreshNotifications()
+            }
+        }
+    }
+
+    func markAllNotificationsRead() {
+        driverNotifications.forEach { markNotificationRead($0) }
+    }
+
+    private func loadReadLocalNotificationIDs() {
+        let stored = UserDefaults.standard.stringArray(forKey: readLocalNotificationIDsKey) ?? []
+        readLocalNotificationIDs = Set(stored)
+    }
+
+    private func persistReadLocalNotificationIDs() {
+        UserDefaults.standard.set(Array(readLocalNotificationIDs), forKey: readLocalNotificationIDsKey)
     }
 
     private func startMapRequestBlipListener() {
@@ -1096,7 +1308,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                     #if DEBUG && targetEnvironment(simulator)
                     liveRequests += self.simulatorTestRideRequests()
                     #endif
-                    self.demandSnapshot = self.demandSnapshot(from: liveRequests)
+                    let demand = self.demandSnapshot(from: liveRequests)
+                    self.demandSnapshot = demand
+                    self.applyDemandNotification(demand)
 
                     let visibleRequests = liveRequests
                         .filter { request in

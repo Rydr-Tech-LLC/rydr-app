@@ -86,10 +86,15 @@ struct DriverTopBar: View {
                             Image(systemName: "bell.fill")
                                 .font(.footnote)
                                 .foregroundStyle(Color.primary)
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 9, height: 9)
-                                .offset(x: 7, y: -7)
+                            if vm.unreadNotificationCount > 0 {
+                                Text(vm.notificationBadgeText)
+                                    .font(.system(size: vm.unreadNotificationCount > 9 ? 8 : 9, weight: .heavy))
+                                    .foregroundStyle(.white)
+                                    .frame(minWidth: 16, minHeight: 16)
+                                    .padding(.horizontal, vm.unreadNotificationCount > 9 ? 2 : 0)
+                                    .background(Capsule().fill(Color.red))
+                                    .offset(x: 10, y: -9)
+                            }
                         }
                     }
                     .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
