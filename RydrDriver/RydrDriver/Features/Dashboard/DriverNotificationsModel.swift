@@ -6,7 +6,7 @@ enum DriverNotificationPriority: String, Equatable {
     case high
     case urgent
 
-    var sortRank: Int {
+    nonisolated var sortRank: Int {
         switch self {
         case .urgent: return 3
         case .high: return 2
@@ -53,7 +53,7 @@ struct DriverNotificationItem: Identifiable, Equatable {
         self.relatedId = relatedId
     }
 
-    init(document: QueryDocumentSnapshot) {
+    nonisolated init(document: QueryDocumentSnapshot) {
         let data = document.data()
         id = document.documentID
         type = data["type"] as? String ?? "driver_update"
@@ -82,14 +82,14 @@ struct DriverNotificationItem: Identifiable, Equatable {
         }
     }
 
-    static func sort(_ lhs: DriverNotificationItem, _ rhs: DriverNotificationItem) -> Bool {
+    nonisolated static func sort(_ lhs: DriverNotificationItem, _ rhs: DriverNotificationItem) -> Bool {
         if lhs.isRead != rhs.isRead { return !lhs.isRead }
         if lhs.priority.sortRank != rhs.priority.sortRank { return lhs.priority.sortRank > rhs.priority.sortRank }
         if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
         return lhs.id < rhs.id
     }
 
-    private static func defaultTitle(for type: String) -> String {
+    private nonisolated static func defaultTitle(for type: String) -> String {
         switch type {
         case "new_ride_request": return "New ride request"
         case "missed_ride_request": return "Missed ride request"

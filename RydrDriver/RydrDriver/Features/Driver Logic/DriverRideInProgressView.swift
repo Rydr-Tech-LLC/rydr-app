@@ -33,7 +33,7 @@ struct DriverRideInProgressView: View {
     let onHeadToDropoff: () -> Void
     let onCompleteRide: () -> Void
     let onPickupPaidWaitStarted: () -> Void
-    let onCancel: () -> Void
+    let onCancel: (_ reason: String) -> Void
     let onReportIncident: () -> Void
     let onRidePreferencesDismissed: (_ preferences: DriverVisibleRidePreferences) -> Void
     let onSendMessage: (_ text: String) async throws -> Void
@@ -111,11 +111,15 @@ struct DriverRideInProgressView: View {
         .task(id: routeCalculationKey) {
             await calculateRoute()
         }
-        .confirmationDialog("Cancel this ride?", isPresented: $showCancelConfirm, titleVisibility: .visible) {
-            Button("Confirm Cancellation", role: .destructive, action: onCancel)
+        .confirmationDialog("Why are you cancelling?", isPresented: $showCancelConfirm, titleVisibility: .visible) {
+            ForEach(driverCancellationReasons, id: \.self) { reason in
+                Button(reason, role: .destructive) {
+                    onCancel(reason)
+                }
+            }
             Button("Keep Ride", role: .cancel) { }
         } message: {
-            Text("The rider will be notified that you cancelled.")
+            Text("The rider will be notified and this reason will be saved with the ride.")
         }
         .confirmationDialog("Report an incident", isPresented: $showIncidentConfirm, titleVisibility: .visible) {
             Button("Open Incident Report") {
@@ -353,6 +357,12 @@ struct DriverRideInProgressView: View {
                     showIncidentConfirm = true
                 }
                 Divider().padding(.leading, 58)
+                if shouldShowCancelRideButton {
+                    navigationOption("Cancel Ride", icon: "xmark.circle.fill", color: .red) {
+                        showCancelConfirm = true
+                    }
+                    Divider().padding(.leading, 58)
+                }
                 navigationOption("Recenter Navigation", icon: "location.fill") {
                     startNavigation()
                 }
@@ -381,21 +391,6 @@ struct DriverRideInProgressView: View {
             .disabled(!canTapPrimaryAction || isUpdatingRide)
             .accessibilityLabel(primaryActionTitle)
             .accessibilityHint(canTapPrimaryAction ? "Updates the ride to the next phase." : disabledActionMessage)
-
-            if shouldShowCancelRideButton {
-                Button(role: .destructive) {
-                    showCancelConfirm = true
-                } label: {
-                    Text("Cancel Ride")
-                        .font(.headline.weight(.bold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 15)
-                        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color.black.opacity(0.08)))
-                        .foregroundStyle(.red)
-                }
-                .accessibilityLabel("Cancel ride")
-                .accessibilityHint("Cancels this ride after paid wait time has started.")
-            }
 
             if !canTapPrimaryAction {
                 Text(disabledActionMessage)
@@ -506,7 +501,19 @@ struct DriverRideInProgressView: View {
     }
 
     private var shouldShowCancelRideButton: Bool {
-        lifecyclePhase == .waitingForRider && pickupPaidWaitActive
+        [.accepted, .navigatingToPickup, .waitingForRider].contains(lifecyclePhase)
+    }
+
+    private var driverCancellationReasons: [String] {
+        [
+            "Destination too far",
+            "Ride undesirable",
+            "Accepted by mistake",
+            "Deciding to go offline",
+            "Rider no-show",
+            "Safety concern",
+            "Other"
+        ]
     }
 
     private var disabledActionMessage: String {
@@ -789,8 +796,8 @@ struct DriverRideInProgressView: View {
         }
 
         let request = MKDirections.Request()
-        request.source = MKMapItem(location: CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude), address: nil)
-        request.destination = MKMapItem(location: CLLocation(latitude: destination.latitude, longitude: destination.longitude), address: nil)
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: driverCoordinate))
+        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
         request.transportType = .automobile
 
         do {

@@ -558,21 +558,21 @@ struct DriverLoginView: View {
     }
 
     private func makeLoginProfile(from profile: [String: Any], user: User, fallbackEmail: String) -> DriverLoginProfile {
-        let first = profile["firstName"] as? String ?? ""
-        let last = profile["lastName"] as? String ?? ""
-        let preferred = profile["preferredName"] as? String ?? ""
-        let displayName = profile["displayName"] as? String ?? ""
+        let first = (profile["firstName"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let last = (profile["lastName"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let preferred = (profile["preferredName"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = (profile["displayName"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let legalName = [first, last]
+            .filter { !$0.isEmpty }
             .joined(separator: " ")
-            .trimmingCharacters(in: .whitespaces)
 
         let name: String
-        if !displayName.isEmpty {
-            name = displayName
-        } else if !preferred.isEmpty {
+        if !preferred.isEmpty {
             name = preferred
         } else if !legalName.isEmpty {
             name = legalName
+        } else if !displayName.isEmpty, displayName != "Rydr Driver" {
+            name = displayName
         } else {
             name = user.displayName ?? "Rydr Driver"
         }

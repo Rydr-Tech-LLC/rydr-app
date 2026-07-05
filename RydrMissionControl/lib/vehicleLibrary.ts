@@ -387,6 +387,109 @@ export async function uploadVehicleImage(params: {
   return withUrls((await ref.get()).data(), ref.id);
 }
 
+function normalizedCompare(value: unknown): string {
+  return typeof value === "string" ? normalizedText(value).toLowerCase() : "";
+}
+
+function yearValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.trunc(parsed);
+  }
+  return null;
+}
+
+function matchingVehicleImagePath(entry: VehicleLibraryEntry, color?: VehicleColor): { path: string; matchedColor: VehicleColor | null } | null {
+  if (color && entry.colorImages?.[color]) {
+    return { path: entry.colorImages[color]!, matchedColor: color };
+  }
+  if (entry.defaultImage) {
+    return { path: entry.defaultImage, matchedColor: null };
+  }
+  return null;
+}
+
+export async function backfillDriverVehicleImagesForEntry(entry: VehicleLibraryEntry, color?: VehicleColor): Promise<number> {
+  const snap = await adminDb.collection("drivers").limit(1000).get();
+  let count = 0;
+  let pendingWrites = 0;
+  let batch = adminDb.batch();
+
+  async function commitIfNeeded(force = false) {
+    if (pendingWrites === 0) return;
+    if (!force && pendingWrites < 450) return;
+    await batch.commit();
+    batch = adminDb.batch();
+    pendingWrites = 0;
+  }
+
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    const vehicle = data.vehicle && typeof data.vehicle === "object" && !Array.isArray(data.vehicle)
+      ? (data.vehicle as Record<string, unknown>)
+      : null;
+    if (!vehicle) continue;
+
+    const vehicleYear = yearValue(vehicle.year);
+    if (vehicleYear == null || vehicleYear < entry.yearStart || vehicleYear > entry.yearEnd) continue;
+    if (normalizedCompare(vehicle.make) !== normalizedCompare(entry.make)) continue;
+    if (normalizedCompare(vehicle.model) !== normalizedCompare(entry.model)) continue;
+    const vehicleColor = normalizeColor(vehicle.color);
+    if (color && vehicleColor !== color) continue;
+    const match = matchingVehicleImagePath(entry, color ?? vehicleColor ?? undefined);
+    if (!match) continue;
+    const imageUrl = publicUrl(match.path);
+    if (!imageUrl) continue;
+
+    const nextVehicle = {
+      ...vehicle,
+      imagePath: match.path,
+      imageUrl,
+      imageMatchTier: match.matchedColor ? 1 : 2,
+      libraryVehicleId: entry.vehicleId,
+      libraryMatchedColor: match.matchedColor
+    };
+    const libraryRideTypes = entry.eligibleRideTypes ?? [];
+    const driverUpdate: Record<string, unknown> = {
+      vehicle: nextVehicle,
+      vehicleImageStatus: "matched",
+      updatedAt: FieldValue.serverTimestamp()
+    };
+    if (libraryRideTypes.length > 0) {
+      driverUpdate.vehicleEligibility = {
+        rideTypes: libraryRideTypes,
+        source: "vehicleLibrary",
+        matchedVehicleId: entry.vehicleId,
+        evaluatedAt: FieldValue.serverTimestamp()
+      };
+      driverUpdate.qualifiedRideTypes = libraryRideTypes;
+      driverUpdate.supportedRideTypes = libraryRideTypes;
+      driverUpdate.selectedRideTypes = libraryRideTypes;
+      driverUpdate.rideTypes = libraryRideTypes;
+    }
+
+    batch.set(doc.ref, driverUpdate, { merge: true });
+    pendingWrites += 1;
+    batch.set(
+      adminDb.collection("publicDriverProfiles").doc(doc.id),
+      {
+        vehicleColor: typeof vehicle.color === "string" ? vehicle.color : "",
+        vehicleImageURL: imageUrl,
+        vehicleSummary: [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "),
+        updatedAt: FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+    pendingWrites += 1;
+    count += 1;
+    await commitIfNeeded();
+  }
+
+  await commitIfNeeded(true);
+  return count;
+}
+
 export async function deleteVehicleImage(params: { vehicleId: string; color?: VehicleColor; adminUid: string }): Promise<VehicleLibraryEntry> {
   const ref = collection().doc(params.vehicleId);
   const snap = await ref.get();

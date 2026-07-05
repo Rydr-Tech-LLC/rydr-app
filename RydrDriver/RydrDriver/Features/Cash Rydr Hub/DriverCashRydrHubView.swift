@@ -2130,8 +2130,8 @@ private struct DriverCashRydrNavigationView: View {
         }
 
         let routeRequest = MKDirections.Request()
-        routeRequest.source = MKMapItem(location: CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude), address: nil)
-        routeRequest.destination = MKMapItem(location: CLLocation(latitude: destination.latitude, longitude: destination.longitude), address: nil)
+        routeRequest.source = MKMapItem(placemark: MKPlacemark(coordinate: driverCoordinate))
+        routeRequest.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
         routeRequest.transportType = .automobile
 
         do {
@@ -2166,7 +2166,7 @@ private struct DriverCashRydrNavigationView: View {
             request.naturalLanguageQuery = trimmed
             request.region = DriverMapDefaults.pilotRegion
             let response = try await MKLocalSearch(request: request).start()
-            return response.mapItems.first?.location.coordinate
+            return response.mapItems.first?.placemark.coordinate
         } catch {
             return nil
         }

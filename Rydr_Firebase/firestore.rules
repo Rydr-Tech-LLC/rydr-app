@@ -201,10 +201,13 @@ service cloud.firestore {
           "arrivedAtStopAt",
           "cancelledAt",
           "cancelledBy",
+          "cancelledByRole",
+          "cancellationReason",
           "cashCompletedAt",
           "cashRideStartedAt",
           "completedAt",
           "connectedDriverId",
+          "driverCancellationReason",
           "driverConfirmedAt",
           "driverLocation",
           "driverLocationUpdatedAt",
@@ -246,12 +249,30 @@ service cloud.firestore {
     function validRideChatCreate() {
       return signedIn()
         && (request.resource.data.riderId == request.auth.uid || request.resource.data.driverId == request.auth.uid)
-        && request.resource.data.status in ["active", "closed"];
+        && request.resource.data.status in ["active", "closed"]
+        && request.resource.data.keys().hasOnly([
+          "createdAt",
+          "driverId",
+          "participants",
+          "rideId",
+          "riderId",
+          "status",
+          "updatedAt"
+        ]);
     }
 
     function validRideChatUpdate() {
       return chatParticipant(resource.data)
-        && affectedKeys().hasOnly(["status", "updatedAt"]);
+        && request.resource.data.riderId == resource.data.riderId
+        && request.resource.data.driverId == resource.data.driverId
+        && affectedKeys().hasOnly([
+          "driverId",
+          "participants",
+          "rideId",
+          "riderId",
+          "status",
+          "updatedAt"
+        ]);
     }
 
     function validChatMessageCreate(chatId) {
@@ -408,6 +429,8 @@ service cloud.firestore {
         "eligibleRideTypes",
         "isOnline",
         "profilePhotoURL",
+        "rating",
+        "ratingCount",
         "rideFilters",
         "tierRates",
         "uid",

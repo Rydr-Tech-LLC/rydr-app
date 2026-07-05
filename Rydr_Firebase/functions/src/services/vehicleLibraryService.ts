@@ -20,6 +20,10 @@ function slugify(value: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
+function normalizedLookup(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 export function buildVehicleId(make: string, model: string, yearStart: number, yearEnd: number, trim?: string | null): string {
   const parts = [slugify(make), slugify(model), String(yearStart), String(yearEnd)];
   if (trim) parts.push(slugify(trim));
@@ -70,7 +74,16 @@ export class VehicleLibraryService {
       .where("make", "==", make)
       .where("model", "==", model)
       .get();
-    return snap.docs.map((d) => d.data() as VehicleLibraryEntry);
+    if (!snap.empty) {
+      return snap.docs.map((d) => d.data() as VehicleLibraryEntry);
+    }
+
+    const normalizedMake = normalizedLookup(make);
+    const normalizedModel = normalizedLookup(model);
+    const fallbackSnap = await this.collection().limit(1000).get();
+    return fallbackSnap.docs
+      .map((d) => d.data() as VehicleLibraryEntry)
+      .filter((entry) => normalizedLookup(entry.make) === normalizedMake && normalizedLookup(entry.model) === normalizedModel);
   }
 
   async findGenericForMake(make: string): Promise<VehicleLibraryEntry | null> {

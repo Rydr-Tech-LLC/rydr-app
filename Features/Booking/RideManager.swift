@@ -24,6 +24,9 @@ struct Driver: Identifiable, Equatable {
     let perMile: Double            // driver-set, will be capped by ride type
     var coordinate: CLLocationCoordinate2D
     var score: Int                 // proximity/quality score
+    var ratingCount: Int = 0
+    var completedRideCount: Int? = nil
+    var acceptanceRate: Int? = nil
     var stripeAccountId: String? = nil       // Stripe Connect account, for destination-charge payouts
     var stripeChargesEnabled: Bool = false   // Connect account has completed onboarding
     var gender: String? = nil
@@ -542,7 +545,7 @@ final class RideManager: ObservableObject {
     private var hasPlayedTripStartedSoundForCurrentRide = false
     private let tripTransitionSoundPlayer = RiderTripTransitionSoundPlayer()
     private let activeRideSnapshotKey = "rydr.activeRideSnapshot.v1"
-    private let driverDecisionTimeoutSeconds: UInt64 = 12
+    private let driverDecisionTimeoutSeconds: UInt64 = 18
 
     init(rideService: RideService = FirestoreRideService()) {
         self.rideService = rideService
@@ -1287,6 +1290,9 @@ final class RideManager: ObservableObject {
         let perMile: Double
         let coordinate: CoordinateSnapshot
         let score: Int
+        let ratingCount: Int?
+        let completedRideCount: Int?
+        let acceptanceRate: Int?
 
         init(_ driver: Driver) {
             id = driver.id
@@ -1298,6 +1304,9 @@ final class RideManager: ObservableObject {
             perMile = driver.perMile
             coordinate = CoordinateSnapshot(driver.coordinate)
             score = driver.score
+            ratingCount = driver.ratingCount
+            completedRideCount = driver.completedRideCount
+            acceptanceRate = driver.acceptanceRate
         }
 
         var driver: Driver {
@@ -1312,7 +1321,10 @@ final class RideManager: ObservableObject {
                 perMinute: perMinute,
                 perMile: perMile,
                 coordinate: coordinate.coordinate,
-                score: score
+                score: score,
+                ratingCount: ratingCount ?? 0,
+                completedRideCount: completedRideCount,
+                acceptanceRate: acceptanceRate
             )
         }
     }

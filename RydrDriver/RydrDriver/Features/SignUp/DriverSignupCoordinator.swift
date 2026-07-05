@@ -168,9 +168,14 @@ struct DriverSignupCoordinator: View {
 
                 case .nameDOB:
                     NameDOBView(firstName: $firstName, lastName: $lastName, dob: $dob) {
+                        let displayName = [firstName, lastName]
+                            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                            .filter { !$0.isEmpty }
+                            .joined(separator: " ")
                         upsertDriver([
                             "firstName": firstName,
                             "lastName": lastName,
+                            "displayName": displayName,
                             "dob": Timestamp(date: dob),
                             "nameDOBStepCompleted": true
                         ])
@@ -521,11 +526,16 @@ struct DriverSignupCoordinator: View {
     }
 
     private func finishEmailPasswordStep(uid: String) {
+        let displayName = [firstName, lastName]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
         upsertDriver([
             "uid": uid,
             "email": email,
             "firstName": firstName,
             "lastName": lastName,
+            "displayName": displayName,
             "phoneNumber": phoneNumber,
             "phoneE164": phoneNumber,
             "createdAt": FieldValue.serverTimestamp(),

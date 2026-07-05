@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Rydr for Riders | No Surges. Built for Choice.</title>
-    <meta name="description" content="Join the Rydr rider beta waitlist in Atlanta. Choose your ride, see clearer details, and move without surge pricing." />
+    <title>Rydr for Riders | Ride Different in Atlanta</title>
+    <meta name="description" content="Join the Rydr rider beta waitlist in Atlanta. Choose your ride, review nearby drivers, use RydrBank rewards, and move without surge pricing." />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body data-waitlist-endpoint="https://rydr-app-missioncontrol.vercel.app/api/waitlist">
@@ -22,47 +22,131 @@
     </header>
 
     <main>
-      <section class="hero product-hero">
+      <section class="hero product-hero rider-hero">
         <div class="hero-copy reveal">
           <p class="eyebrow">Rydr for riders</p>
-          <h1>More control before you ride.</h1>
+          <h1>Ride Different in Atlanta.</h1>
           <p class="lead">
-            Rydr gives riders a clearer path from request to pickup: transparent options, real driver details,
-            no surge pricing, and a beta program small enough to support well.
+            Rydr gives riders a clearer path from request to pickup: visible ride choices, nearby driver details,
+            route preview, RydrBank rewards, and a beta program small enough to support well.
           </p>
           <div class="hero-actions">
             <a class="btn btn-primary" href="#waitlist">Join rider waitlist</a>
             <a class="btn btn-secondary" href="drivers.html">Driving instead?</a>
           </div>
+          <div class="proof-row">
+            <span>No surge pricing</span>
+            <span>Driver choice</span>
+            <span>Invite-only beta</span>
+          </div>
         </div>
-        <div class="product-shot reveal">
-          <img src="assets/generated/rider-home.png" alt="Rydr rider app home screenshot" />
+        <div class="rider-hero-gallery reveal" aria-label="Rydr rider app screenshots">
+          <img class="rider-hero-phone rider-hero-phone-main" src="assets/generated/rider-welcome.png" alt="Rydr rider signup screen with Ride Different message" />
+          <img class="rider-hero-phone rider-hero-phone-secondary" src="assets/generated/rider-choose-ride.png" alt="Rydr rider choose your ride screen" />
         </div>
       </section>
 
-      <section class="section-band" id="experience">
+      <section class="section-band rider-beta-band" id="experience">
         <div class="section-heading reveal">
           <p class="eyebrow">The rider promise</p>
           <h2>Know more before you confirm.</h2>
-          <p>Rydr is being built around visible choices, simpler ride categories, and safety reporting that reaches Mission Control.</p>
+          <p>
+            Rydr is being built around visible choices, simpler ride categories, driver context, and rider tools
+            that make the whole trip easier to understand before you commit.
+          </p>
         </div>
-        <div class="detail-grid">
-          <article class="detail-card reveal"><h3>No surge pricing</h3><p>Busy times should not turn into surprise price spikes. Rydr is built around clearer pricing rules.</p></article>
-          <article class="detail-card reveal"><h3>Driver and vehicle context</h3><p>Review the ride you are choosing with more confidence before pickup.</p></article>
-          <article class="detail-card reveal"><h3>Safety reports</h3><p>Incident reports and rider feedback can flow into Mission Control for review during beta.</p></article>
-          <article class="detail-card reveal"><h3>RydrBank rewards</h3><p>Rydr is preparing a reward path that helps frequent riders build toward future ride value.</p></article>
+        <div class="rider-flow-grid">
+          <article class="rider-flow-step reveal">
+            <span>01</span>
+            <h3>Pick the ride type</h3>
+            <p>Choose from everyday, eco, XL, pristine, executive, and CashRydr options as they become available.</p>
+          </article>
+          <article class="rider-flow-step reveal">
+            <span>02</span>
+            <h3>Set the route</h3>
+            <p>Use current location, saved shortcuts, recent destinations, stops, and route preview before requesting.</p>
+          </article>
+          <article class="rider-flow-step reveal">
+            <span>03</span>
+            <h3>Review nearby drivers</h3>
+            <p>See driver profile, vehicle, distance, estimated arrival, and service tags before confirming a ride.</p>
+          </article>
+          <article class="rider-flow-step reveal">
+            <span>04</span>
+            <h3>Bank ride value</h3>
+            <p>RydrBank helps riders earn, reserve, and transfer eligible ride credits during the beta program.</p>
+          </article>
         </div>
       </section>
 
-      <section class="app-showcase">
+      <section class="app-showcase rider-app-showcase">
         <div class="showcase-copy reveal">
-          <p class="eyebrow">Real app work</p>
-          <h2>Built from the live iOS app, not a mockup.</h2>
-          <p>These screenshots are captured fresh from the Rydr app build so the website reflects the product being prepared for TestFlight.</p>
+          <p class="eyebrow">Ride flow</p>
+          <h2>From destination to driver confirmation.</h2>
+          <p>
+            The Rider beta shows the important trip details before the request is committed: pickup, drop-off,
+            route timing, ride category, nearby driver profile, vehicle details, and fare context.
+          </p>
         </div>
-        <div class="screenshot-row reveal">
-          <img src="assets/generated/rider-home.png" alt="Rydr rider app screenshot" />
-          <img src="assets/generated/rider-trip.png" alt="Rydr rider trip screenshot" />
+        <div class="rider-screenshot-grid reveal">
+          <figure>
+            <img src="assets/generated/rider-booking.png" alt="Rydr rider route setup with pickup and drop-off fields" />
+            <figcaption>Destination and route setup</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/generated/rider-choose-ride.png" alt="Rydr rider ride category selection screen" />
+            <figcaption>Ride category selection</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/generated/rider-nearby-drivers.png" alt="Rydr rider nearby drivers confirmation card" />
+            <figcaption>Nearby driver review</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="split-section rider-rewards-section">
+        <div class="split-copy reveal">
+          <p class="eyebrow">RydrBank and preferences</p>
+          <h2>Personalized rides with banked value.</h2>
+          <p>
+            Rider profiles include preference controls for music, climate, conversation, and driver matching.
+            RydrBank adds a reward layer for free ride value, code transfer, and progress tracking.
+          </p>
+          <div class="rider-stat-row">
+            <strong>Free ride value</strong>
+            <span>Eligible RydrBank codes can be applied, reserved, or transferred.</span>
+          </div>
+          <div class="rider-stat-row">
+            <strong>Rider preferences</strong>
+            <span>Trip comfort settings can be saved before the ride.</span>
+          </div>
+        </div>
+        <div class="rider-duo-shots reveal">
+          <img src="assets/generated/rider-rydrbank.png" alt="RydrBank rider balance and free ride codes" />
+          <img src="assets/generated/rider-preferences.png" alt="Rydr rider preference settings for music, climate, conversation, and driver preference" />
+        </div>
+      </section>
+
+      <section class="section-band rider-community-section">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Community</p>
+          <h2>Plan the ride around the city.</h2>
+          <p>
+            The rider community view is designed for Atlanta events, music, sports, venues, and Ticketmaster links
+            so riders can plan where they are going and return to Rydr when it is time to book.
+          </p>
+        </div>
+        <div class="rider-community-layout reveal">
+          <img src="assets/generated/rider-community-events.png" alt="Rydr rider community events screen for Atlanta" />
+          <div class="rider-community-copy">
+            <h3>Events in the city</h3>
+            <p>Rydr can surface nearby plans and bring riders back into booking when they are ready to leave.</p>
+            <ul>
+              <li>Featured event categories for Atlanta.</li>
+              <li>Ticket links can open externally.</li>
+              <li>Return to Rydr for the ride there or home.</li>
+            </ul>
+          </div>
         </div>
       </section>
 

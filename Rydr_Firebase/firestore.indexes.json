@@ -28,6 +28,14 @@
       ]
     },
     {
+      "collectionGroup": "driverRatings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "driverId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "cashRydrRequests",
       "queryScope": "COLLECTION",
       "fields": [

@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/session";
 import { writeAuditLog } from "@/lib/auditLog";
-import { deleteVehicleImage, uploadVehicleImage, VEHICLE_COLORS, type VehicleColor } from "@/lib/vehicleLibrary";
+import {
+  backfillDriverVehicleImagesForEntry,
+  deleteVehicleImage,
+  uploadVehicleImage,
+  VEHICLE_COLORS,
+  type VehicleColor
+} from "@/lib/vehicleLibrary";
 
 const MAX_SIZE = 5 * 1024 * 1024;
 
@@ -45,16 +51,17 @@ export async function POST(request: NextRequest, { params }: { params: { vehicle
       data,
       adminUid: session.uid
     });
+    const matchedDriverCount = await backfillDriverVehicleImagesForEntry(entry, color as VehicleColor | undefined);
 
     await writeAuditLog({
       adminUid: session.uid,
       adminEmail: session.email ?? undefined,
-      action: `Vehicle Image Uploaded${color ? ` (${color})` : " (default)"}`,
+      action: `Vehicle Image Uploaded${color ? ` (${color})` : " (default)"} · ${matchedDriverCount} driver profile${matchedDriverCount === 1 ? "" : "s"} updated`,
       targetType: "vehicleLibrary",
       targetId: params.vehicleId
     });
 
-    return NextResponse.json({ entry });
+    return NextResponse.json({ entry, matchedDriverCount });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Upload failed" }, { status: 400 });
   }

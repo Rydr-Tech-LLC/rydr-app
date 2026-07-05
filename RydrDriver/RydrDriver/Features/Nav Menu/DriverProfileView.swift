@@ -252,7 +252,7 @@ private final class DriverProfileViewModel: ObservableObject {
             let user = Auth.auth().currentUser
             Task { @MainActor in
                 self.profile = DriverProfileSummary(
-                    displayName: data["displayName"] as? String ?? data["name"] as? String ?? user?.displayName ?? "Rydr Driver",
+                    displayName: Self.publicDisplayName(from: data, authUser: user),
                     email: data["email"] as? String ?? user?.email ?? "",
                     photoURL: data["pendingProfilePhotoURL"] as? String ?? data["profilePhotoURL"] as? String,
                     photoReviewStatus: data["profilePhotoReviewStatus"] as? String ?? ((data["pendingProfilePhotoURL"] as? String) == nil ? "approved" : "pending"),
@@ -278,6 +278,31 @@ private final class DriverProfileViewModel: ObservableObject {
         if let number = value as? NSNumber { return number.doubleValue }
         if let string = value as? String { return Double(string) }
         return nil
+    }
+
+    private static func publicDisplayName(from data: [String: Any], authUser: User?) -> String {
+        let first = (data["firstName"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let last = (data["lastName"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let legalName = [first, last].filter { !$0.isEmpty }.joined(separator: " ")
+        if !legalName.isEmpty { return legalName }
+
+        if let displayName = data["displayName"] as? String {
+            let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, trimmed != "Rydr Driver" { return trimmed }
+        }
+
+        if let name = data["name"] as? String {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, trimmed != "Rydr Driver" { return trimmed }
+        }
+
+        if let authName = authUser?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !authName.isEmpty,
+           authName != "Rydr Driver" {
+            return authName
+        }
+
+        return "Rydr Driver"
     }
 
     private static func feedbackHighlights(from data: [String: Any]) -> [String] {

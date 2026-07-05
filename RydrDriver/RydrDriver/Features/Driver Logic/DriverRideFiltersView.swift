@@ -219,7 +219,7 @@ struct DriverRideFiltersView: View {
             let response = try await MKLocalSearch(request: request).start()
             guard let item = response.mapItems.first else { return }
             draft.destinationText = item.name ?? trimmed
-            draft.destinationCoordinate = item.location.coordinate
+            draft.destinationCoordinate = item.placemark.coordinate
             draft.destinationModeEnabled = true
         } catch {
             draft.destinationCoordinate = nil
@@ -447,7 +447,7 @@ private struct DestinationModeControl: View {
             let response = try await MKLocalSearch(request: request).start()
             if let item = response.mapItems.first {
                 preferences.destinationText = item.name ?? completion.title
-                preferences.destinationCoordinate = item.location.coordinate
+                preferences.destinationCoordinate = item.placemark.coordinate
                 preferences.destinationModeEnabled = true
                 search.results = []
             }

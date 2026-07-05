@@ -94,10 +94,7 @@ enum DriverNavigationHandoff {
     }
 
     private static func openAppleMaps(coordinate: CLLocationCoordinate2D, name: String?) {
-        let item = MKMapItem(
-            location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
-            address: nil
-        )
+        let item = MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
         item.name = name
         item.openInMaps(launchOptions: [
             MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving

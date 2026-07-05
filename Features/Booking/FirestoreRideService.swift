@@ -232,7 +232,10 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             dropoffCoordinate: dropoffCoordinate
         ) else { return nil }
 
-        let rating = data["rating"] as? Double ?? 4.85
+        let rating = doubleValue(data["rating"]) ?? 5.0
+        let ratingCount = intValue(data["ratingCount"]) ?? 0
+        let completedRideCount = intValue(data["completedRideCount"] ?? data["lifetimeRideCount"])
+        let acceptanceRate = intValue(data["acceptanceRate"])
         let pricing = RydrPricing.config(for: rideType)
         let rate = driverRate(from: data, rideType: rideType, pricing: pricing)
         let gender = driverGender(from: data)
@@ -241,21 +244,24 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         return Driver(
             id: document.documentID,
             name: driverName(from: data),
-            profileImage: data["profilePhotoURL"] as? String ?? data["profileImage"] as? String,
+            profileImage: nonEmptyString(data["profilePhotoURL"]) ?? nonEmptyString(data["profileImage"]),
             // "vehicleImageURL" is written by the Vehicle Library System
             // (RydrDriver's DriverDashboardVM.publishPublicDriverProfile) —
             // the generic factory-style image matched from the driver's
             // decoded VIN + chosen color, never a photo of their actual car.
             // "carImage" is kept for backward compatibility with any older
             // writer of this field.
-            carImage: data["carImage"] as? String ?? data["vehicleImageURL"] as? String,
+            carImage: nonEmptyString(data["vehicleImageURL"]) ?? nonEmptyString(data["carImage"]),
             carMakeModel: vehicleName(from: data),
             rating: rating,
-            compliments: data["compliments"] as? [String] ?? ["Professional", "Clean Car", "Reliable"],
+            compliments: data["compliments"] as? [String] ?? [],
             perMinute: rate.perMinute,
             perMile: rate.perMile,
             coordinate: coordinate,
             score: score,
+            ratingCount: ratingCount,
+            completedRideCount: completedRideCount,
+            acceptanceRate: acceptanceRate,
             stripeAccountId: data["stripeAccountId"] as? String,
             stripeChargesEnabled: data["stripeChargesEnabled"] as? Bool ?? false,
             gender: gender
@@ -294,6 +300,20 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         if let value = raw as? CLLocationDegrees { return value }
         if let value = raw as? NSNumber { return value.doubleValue }
         if let value = raw as? String { return Double(value) }
+        return nil
+    }
+
+    private func nonEmptyString(_ raw: Any?) -> String? {
+        guard let value = raw as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func intValue(_ raw: Any?) -> Int? {
+        if let value = raw as? Int { return value }
+        if let value = raw as? NSNumber { return value.intValue }
+        if let value = raw as? Double { return Int(value) }
+        if let value = raw as? String { return Int(value) }
         return nil
     }
 
@@ -430,12 +450,18 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
 
     private func driverName(from data: [String: Any]) -> String {
         if let displayName = data["displayName"] as? String, !displayName.isEmpty {
-            return displayName
+            return firstNameOnly(displayName)
         }
-        let first = data["firstName"] as? String ?? ""
-        let last = data["lastName"] as? String ?? ""
-        let combined = "\(first) \(last)".trimmingCharacters(in: .whitespacesAndNewlines)
-        return combined.isEmpty ? "Rydr Driver" : combined
+        let first = (data["firstName"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !first.isEmpty { return firstNameOnly(first) }
+        let name = data["name"] as? String ?? ""
+        return name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Rydr Driver" : firstNameOnly(name)
+    }
+
+    private func firstNameOnly(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Rydr Driver" }
+        return trimmed.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? trimmed
     }
 
     private func vehicleName(from data: [String: Any]) -> String {

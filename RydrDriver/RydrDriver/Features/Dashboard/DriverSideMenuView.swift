@@ -147,13 +147,13 @@ struct SideMenuView: View {
             .buttonStyle(.plain)
             .disabled(vm.isUploadingProfilePhoto)
             VStack(alignment: .leading, spacing: 2) {
-                Text(Auth.auth().currentUser?.displayName ?? "Driver")
+                Text(vm.driverDisplayName)
                     .font(.headline.weight(.bold))
                 HStack(spacing: 4) {
                     Image(systemName: "star.fill")
                         .font(.caption)
                         .foregroundStyle(.yellow)
-                    Text("4.93")
+                    Text(String(format: "%.2f", vm.driverRating))
                         .font(.caption.weight(.semibold))
                 }
                 Text("Approved Driver")

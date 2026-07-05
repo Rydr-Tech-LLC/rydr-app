@@ -42,6 +42,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var mapRideRequestBlips: [DriverRideRadarBlip] = []
     @Published var demandSnapshot = DriverDemandSnapshot()
     @Published var rideFilterPreferences = DriverRideFilterPreferences()
+    @Published var driverDisplayName: String = "Rydr Driver"
+    @Published var driverRating: Double = 5.0
+    @Published var driverRatingCount: Int = 0
     @Published var activeRide: DriverActiveRide?
     @Published var isUpdatingActiveRide: Bool = false
     @Published var completedRideForRating: DriverActiveRide?
@@ -142,6 +145,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         startMapRequestBlipListener()
         startActiveRideListener()
         startNotificationListeners()
+        refreshDriverRatingSummary()
         publishDriverProfile()
     }
 
@@ -934,20 +938,33 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         }
     }
 
-    func cancelActiveRide() {
+    func cancelActiveRide(reason: String) {
         guard let ride = activeRide else { return }
-        db.collection("rides").document(ride.id).setData([
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        let trimmedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cancellationReason = trimmedReason.isEmpty ? "Other" : trimmedReason
+        let payload: [String: Any] = [
             "status": "driverCancelled",
+            "cancelledBy": uid,
+            "cancelledByRole": "driver",
+            "cancellationReason": cancellationReason,
+            "driverCancellationReason": cancellationReason,
             "cancelledAt": FieldValue.serverTimestamp(),
+            "riderRideState": DriverRideLifecyclePolicy.riderState(forDriverStatus: "driverCancelled"),
+            "riderStatusMessage": "Your driver cancelled this ride.",
             "updatedAt": FieldValue.serverTimestamp()
-        ], merge: true) { [weak self] error in
+        ]
+        let batch = db.batch()
+        batch.setData(payload, forDocument: db.collection("rides").document(ride.id), merge: true)
+        batch.setData(payload, forDocument: db.collection("rideRequests").document(ride.id), merge: true)
+        batch.commit { [weak self] error in
             DispatchQueue.main.async {
                 if let error {
                     self?.statusMessage = "Could not cancel ride: \(error.localizedDescription)"
                     return
                 }
                 self?.activeRide = nil
-                self?.statusMessage = "Ride cancelled."
+                self?.statusMessage = "Ride cancelled: \(cancellationReason)."
                 self?.resumeStandbyIfWaiting()
                 self?.updateDriverPresence(online: self?.isOnline ?? false)
             }
@@ -983,10 +1000,14 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
             DispatchQueue.main.async {
                 self.canGoOnline = DriverApprovalPolicy.isApproved(data: data)
+                self.driverDisplayName = Self.publicDisplayName(from: data, authUser: Auth.auth().currentUser)
+                self.driverRating = Self.doubleValue(data["rating"]) ?? self.driverRating
+                self.driverRatingCount = Self.intValue(data["ratingCount"]) ?? self.driverRatingCount
                 self.applyVehicleEligibility(from: data)
                 self.profilePhotoURL = data["profilePhotoURL"] as? String
                 self.pendingProfilePhotoURL = data["pendingProfilePhotoURL"] as? String
                 self.profilePhotoReviewStatus = data["profilePhotoReviewStatus"] as? String ?? (self.pendingProfilePhotoURL == nil ? "approved" : "pending")
+                self.publishPublicDriverProfile(uid: uid, displayName: self.driverDisplayName, online: self.isOnline)
             }
         }
     }
@@ -1200,9 +1221,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     private func startMapRequestBlipListener() {
         mapRequestBlipListener?.remove()
-        #if DEBUG && targetEnvironment(simulator)
-        mapRideRequestBlips = simulatorRadarBlips()
-        #endif
         mapRequestBlipListener = db.collection("rideRequests")
             .whereField("status", isEqualTo: "pending")
             .limit(to: 50)
@@ -1211,17 +1229,12 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                     guard let self else { return }
                     if let error {
                         self.statusMessage = "Map request listener error: \(error.localizedDescription)"
-                        #if DEBUG && targetEnvironment(simulator)
-                        self.mapRideRequestBlips = self.simulatorRadarBlips()
-                        #endif
+                        self.mapRideRequestBlips = []
                         return
                     }
 
-                    var liveRequests = snapshot?.documents
+                    let liveRequests = snapshot?.documents
                         .map(DriverRideRequest.init(document:)) ?? []
-                    #if DEBUG && targetEnvironment(simulator)
-                    liveRequests += self.simulatorTestRideRequests()
-                    #endif
                     let demand = self.demandSnapshot(from: liveRequests)
                     self.demandSnapshot = demand
                     self.applyDemandNotification(demand)
@@ -1230,87 +1243,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                         .filter { request in
                             self.canShowRadarBlip(for: request)
                         }
-                    #if DEBUG && targetEnvironment(simulator)
-                    self.mapRideRequestBlips = self.mergedMapBlips(
-                        self.privacySafeRadarBlips(from: visibleRequests) + self.simulatorRadarBlips()
-                    )
-                    #else
                     self.mapRideRequestBlips = self.privacySafeRadarBlips(from: visibleRequests)
-                    #endif
                 }
             }
     }
-
-    #if DEBUG && targetEnvironment(simulator)
-    private func simulatorTestRideRequests() -> [DriverRideRequest] {
-        [
-            DriverRideRequest(
-                id: "sim-blip-ponce",
-                riderId: "sim-rider-ponce",
-                riderName: "Sim Rider",
-                pickup: "Ponce City Market",
-                dropoff: "Piedmont Park",
-                rideType: "Rydr Go",
-                pickupCoordinate: CLLocationCoordinate2D(latitude: 33.7726, longitude: -84.3656),
-                dropoffCoordinate: CLLocationCoordinate2D(latitude: 33.7851, longitude: -84.3737),
-                createdAt: Date()
-            ),
-            DriverRideRequest(
-                id: "sim-blip-mercedes",
-                riderId: "sim-rider-mercedes",
-                riderName: "Sim Rider",
-                pickup: "Mercedes-Benz Stadium",
-                dropoff: "Georgia Aquarium",
-                rideType: "Rydr Go",
-                pickupCoordinate: CLLocationCoordinate2D(latitude: 33.7554, longitude: -84.4008),
-                dropoffCoordinate: CLLocationCoordinate2D(latitude: 33.7634, longitude: -84.3951),
-                createdAt: Date()
-            ),
-            DriverRideRequest(
-                id: "sim-blip-buckhead",
-                riderId: "sim-rider-buckhead",
-                riderName: "Sim Rider",
-                pickup: "Buckhead Village",
-                dropoff: "Atlantic Station",
-                rideType: "Rydr Go",
-                pickupCoordinate: CLLocationCoordinate2D(latitude: 33.8386, longitude: -84.3799),
-                dropoffCoordinate: CLLocationCoordinate2D(latitude: 33.7932, longitude: -84.3973),
-                createdAt: Date()
-            ),
-            DriverRideRequest(
-                id: "sim-blip-airport",
-                riderId: "sim-rider-airport",
-                riderName: "Sim Rider",
-                pickup: "Hartsfield-Jackson ATL",
-                dropoff: "Downtown Atlanta",
-                rideType: "Rydr Go",
-                pickupCoordinate: CLLocationCoordinate2D(latitude: 33.6407, longitude: -84.4277),
-                dropoffCoordinate: CLLocationCoordinate2D(latitude: 33.7550, longitude: -84.3900),
-                createdAt: Date()
-            )
-        ]
-    }
-
-    private func mergedMapBlips(_ blips: [DriverRideRadarBlip]) -> [DriverRideRadarBlip] {
-        var seen = Set<String>()
-        return blips.filter { blip in
-            guard !seen.contains(blip.id), !blip.isExpired else { return false }
-            seen.insert(blip.id)
-            return true
-        }
-    }
-
-    private func simulatorRadarBlips() -> [DriverRideRadarBlip] {
-        simulatorTestRideRequests().compactMap { request in
-            guard let pickupCoordinate = request.pickupCoordinate else { return nil }
-            return DriverRideRadarBlip(
-                id: request.id,
-                coordinate: fuzzedRadarCoordinate(for: request.id, pickupCoordinate: pickupCoordinate),
-                expiresAt: Date().addingTimeInterval(60 * 60)
-            )
-        }
-    }
-    #endif
 
     private func canShowRadarBlip(for request: DriverRideRequest) -> Bool {
         guard request.pickupCoordinate != nil else { return false }
@@ -1545,7 +1481,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private func publishDriverProfile() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let user = Auth.auth().currentUser
-        let displayName = user?.displayName ?? "Rydr Driver"
+        let displayName = resolvedDriverDisplayName(authUser: user)
         db.collection("drivers").document(uid).setData([
             "uid": uid,
             "displayName": displayName,
@@ -1603,7 +1539,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             }
         }
         db.collection("drivers").document(uid).setData(driverPayload, merge: true)
-        publishPublicDriverProfile(uid: uid, displayName: Auth.auth().currentUser?.displayName ?? "Rydr Driver", online: online)
+        publishPublicDriverProfile(uid: uid, displayName: resolvedDriverDisplayName(), online: online)
     }
 
     private func recordDriverPresenceEvent(online: Bool) {
@@ -1619,10 +1555,13 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func publishPublicDriverProfile(uid: String, displayName: String, online: Bool) {
+        let riderVisibleName = Self.firstNameOnly(displayName)
         var payload: [String: Any] = [
             "uid": uid,
-            "displayName": displayName,
+            "displayName": riderVisibleName,
             "profilePhotoURL": profilePhotoURL ?? "",
+            "rating": driverRating,
+            "ratingCount": driverRatingCount,
             "vehicleSummary": vehicleSummaryText ?? publicVehicleSummary(),
             // Generic factory-style vehicle image (Vehicle Library System) —
             // never a photo of the driver's actual car. Riders see this in
@@ -1645,6 +1584,69 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         }
 
         db.collection("publicDriverProfiles").document(uid).setData(payload, merge: true)
+    }
+
+    private func refreshDriverRatingSummary() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        db.collection("driverRatings")
+            .whereField("driverId", isEqualTo: uid)
+            .order(by: "createdAt", descending: true)
+            .limit(to: 100)
+            .getDocuments { [weak self] snapshot, error in
+                guard let self else { return }
+                DispatchQueue.main.async {
+                    if let error {
+                        print("⚠️ driver rating summary failed: \(error.localizedDescription)")
+                        self.publishPublicDriverProfile(uid: uid, displayName: self.resolvedDriverDisplayName(), online: self.isOnline)
+                        return
+                    }
+
+                    let ratings = snapshot?.documents.compactMap { document -> Double? in
+                        guard let rating = Self.doubleValue(document.data()["rating"]),
+                              (1.0...5.0).contains(rating) else { return nil }
+                        return rating
+                    } ?? []
+                    self.driverRatingCount = ratings.count
+                    self.driverRating = ratings.isEmpty ? 5.0 : ratings.reduce(0, +) / Double(ratings.count)
+                    self.publishPublicDriverProfile(uid: uid, displayName: self.resolvedDriverDisplayName(), online: self.isOnline)
+                }
+            }
+    }
+
+    private func resolvedDriverDisplayName(authUser: User? = Auth.auth().currentUser) -> String {
+        let trimmed = driverDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty, trimmed != "Rydr Driver" { return trimmed }
+        return Self.publicDisplayName(from: [:], authUser: authUser)
+    }
+
+    private static func publicDisplayName(from data: [String: Any], authUser: User?) -> String {
+        let first = (data["firstName"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let last = (data["lastName"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let combined = [first, last].filter { !$0.isEmpty }.joined(separator: " ")
+        if !combined.isEmpty { return combined }
+
+        if let displayName = data["displayName"] as? String {
+            let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, trimmed != "Rydr Driver" { return trimmed }
+        }
+
+        if let authName = authUser?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !authName.isEmpty,
+           authName != "Rydr Driver" {
+            return authName
+        }
+
+        if let emailPrefix = authUser?.email?.split(separator: "@").first, !emailPrefix.isEmpty {
+            return String(emailPrefix)
+        }
+
+        return "Rydr Driver"
+    }
+
+    private static func firstNameOnly(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Rydr Driver" }
+        return trimmed.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? trimmed
     }
 
     private func publicVehicleSummary() -> String {
@@ -1818,6 +1820,13 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         if let double = value as? Double { return double }
         if let int = value as? Int { return Double(int) }
         if let number = value as? NSNumber { return number.doubleValue }
+        return nil
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let int = value as? Int { return int }
+        if let number = value as? NSNumber { return number.intValue }
+        if let double = value as? Double { return Int(double) }
         return nil
     }
 
@@ -2007,7 +2016,7 @@ struct DriverDashboardView: View {
                     onHeadToDropoff: vm.headToDropoffFromStop,
                     onCompleteRide: vm.completeActiveRide,
                     onPickupPaidWaitStarted: vm.markPickupPaidWaitActive,
-                    onCancel: vm.cancelActiveRide,
+                    onCancel: { reason in vm.cancelActiveRide(reason: reason) },
                     onReportIncident: { activeSheet = .menu(.safety) },
                     onRidePreferencesDismissed: { preferences in
                         vm.recordDriverOnlyRidePreferenceNote(ride: ride, preferences: preferences)

@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/session";
 import { writeAuditLog } from "@/lib/auditLog";
-import { deleteVehicleLibraryEntry, getVehicleLibraryEntry, upsertVehicleLibraryEntry, VEHICLE_BODY_STYLES, type VehicleBodyStyle } from "@/lib/vehicleLibrary";
+import {
+  backfillDriverVehicleImagesForEntry,
+  deleteVehicleLibraryEntry,
+  getVehicleLibraryEntry,
+  upsertVehicleLibraryEntry,
+  VEHICLE_BODY_STYLES,
+  type VehicleBodyStyle
+} from "@/lib/vehicleLibrary";
 
 export async function GET(_request: NextRequest, { params }: { params: { vehicleId: string } }) {
   const session = await getAdminSession();
@@ -64,6 +71,35 @@ export async function PATCH(request: NextRequest, { params }: { params: { vehicl
   });
 
   return NextResponse.json({ entry });
+}
+
+export async function POST(request: NextRequest, { params }: { params: { vehicleId: string } }) {
+  const session = await getAdminSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const body = await request.json().catch(() => ({}));
+  if (body.action !== "syncDriverProfiles") {
+    return NextResponse.json({ error: "Unsupported action." }, { status: 400 });
+  }
+
+  const entry = await getVehicleLibraryEntry(params.vehicleId);
+  if (!entry) {
+    return NextResponse.json({ error: "Vehicle library entry not found" }, { status: 404 });
+  }
+
+  const matchedDriverCount = await backfillDriverVehicleImagesForEntry(entry);
+
+  await writeAuditLog({
+    adminUid: session.uid,
+    adminEmail: session.email ?? undefined,
+    action: `Vehicle Library Driver Profile Sync · ${matchedDriverCount} profile${matchedDriverCount === 1 ? "" : "s"} updated`,
+    targetType: "vehicleLibrary",
+    targetId: params.vehicleId
+  });
+
+  return NextResponse.json({ entry, matchedDriverCount });
 }
 
 export async function DELETE(_request: NextRequest, { params }: { params: { vehicleId: string } }) {

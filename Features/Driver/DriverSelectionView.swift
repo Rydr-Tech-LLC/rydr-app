@@ -356,16 +356,23 @@ private struct DriverCard: View {
                 driverMetric(systemName: "mappin.circle.fill", value: distanceText, label: "away")
                 Divider().frame(height: 30)
                 driverMetric(systemName: "timer", value: "\(Int(estimate.durationMinutes)) min", label: "arrival")
-                Divider().frame(height: 30)
-                driverMetric(systemName: "person.badge.shield.checkmark.fill", value: "\(acceptanceRate)%", label: "accept rate")
+                if let acceptanceRate = driver.acceptanceRate {
+                    Divider().frame(height: 30)
+                    driverMetric(systemName: "person.badge.shield.checkmark.fill", value: "\(acceptanceRate)%", label: "accept rate")
+                } else if let completedRideCount = driver.completedRideCount {
+                    Divider().frame(height: 30)
+                    driverMetric(systemName: "checkmark.circle.fill", value: "\(completedRideCount)", label: "trips")
+                }
             }
             .padding(.vertical, 10)
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(displayCompliments, id: \.self) { c in
-                        complimentChip(c)
+            if !displayCompliments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(displayCompliments, id: \.self) { c in
+                            complimentChip(c)
+                        }
                     }
                 }
             }
@@ -438,9 +445,11 @@ private struct DriverCard: View {
                     .foregroundStyle(Color.orange)
                 Text(String(format: "%.1f", driver.rating))
                     .font(.subheadline.weight(.semibold))
-                Text("(\(tripCountText) trips)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if driver.ratingCount > 0 {
+                    Text("(\(driver.ratingCount) ratings)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Text(driver.carMakeModel)
                 .font(.subheadline)
@@ -515,9 +524,16 @@ private struct DriverCard: View {
     @ViewBuilder
     private var vehicleImage: some View {
         VehicleOrDriverImage(source: driver.carImage, contentMode: .fit) {
-            Image(defaultVehicleAssetName)
-                .resizable()
-                .scaledToFit()
+            VStack(spacing: 8) {
+                Image(systemName: "car.fill")
+                    .font(.system(size: 46, weight: .bold))
+                Text(driver.carMakeModel)
+                    .font(.caption.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(.horizontal, 12)
     }
@@ -562,15 +578,6 @@ private struct DriverCard: View {
         case "prestine":  return "Rydr Prestine"
         default:          return rideType
         }
-    }
-
-    private var defaultVehicleAssetName: String {
-        let lower = rideTypeDisplay.lowercased()
-        if lower.contains("eco") { return "RydrEcoVehicle" }
-        if lower.contains("xl") { return "RydrXLVehicle" }
-        if lower.contains("executive") { return "RydrExecutiveVehicle" }
-        if lower.contains("prestine") { return "RydrPrestineVehicle" }
-        return "RydrGoVehicle"
     }
 
     private var rideAccent: Color {
@@ -618,17 +625,7 @@ private struct DriverCard: View {
     }
 
     private var displayCompliments: [String] {
-        let base = driver.compliments.isEmpty ? ["Great Navigation", "Clean Car", "Friendly"] : driver.compliments
-        return Array(base.prefix(4))
-    }
-
-    private var tripCountText: String {
-        let seed = abs(driver.id.hashValue % 900) + 100
-        return "\(seed)"
-    }
-
-    private var acceptanceRate: Int {
-        92 + abs(driver.id.hashValue % 8)
+        Array(driver.compliments.prefix(4))
     }
 
     private func complimentIcon(for text: String) -> String {

@@ -323,7 +323,7 @@ struct DriverSafetyPenalty: Identifiable, Equatable {
     let riderReportId: String?
     let createdAt: Date?
 
-    init?(document: QueryDocumentSnapshot) {
+    nonisolated init?(document: QueryDocumentSnapshot) {
         let data = document.data()
         id = document.documentID
         category = (data["category"] as? String) ?? (data["penaltyCategory"] as? String) ?? "other"
@@ -339,7 +339,7 @@ struct DriverSafetyPenalty: Identifiable, Equatable {
         createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
     }
 
-    var requiresInvestigationHold: Bool {
+    nonisolated var requiresInvestigationHold: Bool {
         let lower = "\(penaltyType) \(category) \(categoryLabel)".lowercased()
         return lower.contains("unprofessional") ||
             lower.contains("flirting") ||
@@ -348,16 +348,16 @@ struct DriverSafetyPenalty: Identifiable, Equatable {
             lower.contains("inappropriate language")
     }
 
-    var isClosed: Bool {
+    nonisolated var isClosed: Bool {
         ["dismissed", "removed", "resolved", "cleared"].contains(status.lowercased()) ||
             ["cleared", "dismissed"].contains(reviewStatus.lowercased())
     }
 
-    static func sort(lhs: DriverSafetyPenalty, rhs: DriverSafetyPenalty) -> Bool {
+    nonisolated static func sort(lhs: DriverSafetyPenalty, rhs: DriverSafetyPenalty) -> Bool {
         (lhs.createdAt ?? .distantPast) > (rhs.createdAt ?? .distantPast)
     }
 
-    static func title(for category: String) -> String {
+    nonisolated static func title(for category: String) -> String {
         category
             .replacingOccurrences(of: "_", with: " ")
             .split(separator: " ")
@@ -372,7 +372,7 @@ struct DriverPenaltyAppeal: Identifiable {
     let status: String
     let createdAt: Date?
 
-    init?(document: QueryDocumentSnapshot) {
+    nonisolated init?(document: QueryDocumentSnapshot) {
         let data = document.data()
         guard let penaltyId = data["penaltyId"] as? String else { return nil }
         id = document.documentID
@@ -381,7 +381,7 @@ struct DriverPenaltyAppeal: Identifiable {
         createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
     }
 
-    static func sort(lhs: DriverPenaltyAppeal, rhs: DriverPenaltyAppeal) -> Bool {
+    nonisolated static func sort(lhs: DriverPenaltyAppeal, rhs: DriverPenaltyAppeal) -> Bool {
         (lhs.createdAt ?? .distantPast) > (rhs.createdAt ?? .distantPast)
     }
 }

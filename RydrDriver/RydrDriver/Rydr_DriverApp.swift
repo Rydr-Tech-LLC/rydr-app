@@ -48,7 +48,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     DriverNotificationManager.shared.configureForLaunch(application: application)
 
     #if DEBUG
-    Auth.auth().settings?.isAppVerificationDisabledForTesting = true
+    if ProcessInfo.processInfo.arguments.contains("-RydrUseFirebaseTestPhoneNumbers") {
+      Auth.auth().settings?.isAppVerificationDisabledForTesting = true
+    }
     #endif
 
     return true

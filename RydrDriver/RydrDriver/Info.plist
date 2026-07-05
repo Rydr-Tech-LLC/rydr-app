@@ -12,6 +12,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>com.googleusercontent.apps.348115924432-1ruqknoqcvar7n6k2s2sg98rp97r4al0</string>
+				<string>app-1-348115924432-ios-6acabd1446edc2700b75d5</string>
 			</array>
 		</dict>
 	</array>
@@ -24,6 +25,7 @@
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
+		<string>fetch</string>
 		<string>remote-notification</string>
 	</array>
 </dict>
