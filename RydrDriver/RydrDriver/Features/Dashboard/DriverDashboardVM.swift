@@ -10,6 +10,7 @@ import Combine
 import MapKit
 import CoreLocation
 import PhotosUI
+import AVFoundation
 #if canImport(_MapKit_SwiftUI)
 import _MapKit_SwiftUI
 #endif
@@ -103,6 +104,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private var seenDemandNotificationBuckets = Set<String>()
     private var readLocalNotificationIDs: Set<String> = []
     private let readLocalNotificationIDsKey = "rydr.driver.notifications.readLocalNotificationIDs"
+    private let cancellationSoundPlayer = DriverCancellationSoundPlayer()
     private var lastTripTelemetryAt: Date?
     private var lastTripTelemetryLocation: CLLocation?
     #if DEBUG
@@ -903,6 +905,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             "rideId": ride.id,
             "riderId": ride.riderId,
             "driverId": uid,
+            "participants": [ride.riderId, uid].sorted(),
             "status": "active",
             "updatedAt": FieldValue.serverTimestamp()
         ], merge: true)
@@ -1455,14 +1458,51 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                         return
                     }
                     guard let doc = snapshot?.documents.first else {
-                        self?.activeRide = nil
-                        self?.resumeStandbyIfWaiting()
+                        if let removedRide = self?.activeRide {
+                            self?.activeRide = nil
+                            self?.handleActiveRideRemovedFromActiveQuery(removedRide)
+                        } else {
+                            self?.resumeStandbyIfWaiting()
+                        }
                         return
                     }
                     self?.activeRide = DriverActiveRide(id: doc.documentID, data: doc.data())
                     self?.isSearchingForRides = false
                 }
             }
+    }
+
+    private func handleActiveRideRemovedFromActiveQuery(_ ride: DriverActiveRide) {
+        db.collection("rides").document(ride.id).getDocument { [weak self] snapshot, _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let status = snapshot?.data()?["status"] as? String
+                if status == "riderCancelled" || status == "cancelled" {
+                    self.presentRiderCancellationAlert(for: ride)
+                }
+                self.resumeStandbyIfWaiting()
+                self.updateDriverPresence(online: self.isOnline)
+            }
+        }
+    }
+
+    private func presentRiderCancellationAlert(for ride: DriverActiveRide) {
+        cancellationSoundPlayer.play()
+        statusMessage = "Rider cancelled. Sorry for the inconvenience. Looking for your next request."
+        let id = "ride-cancelled-\(ride.id)"
+        upsertLocalNotification(
+            DriverNotificationItem(
+                id: id,
+                type: "ride_cancelled",
+                title: "Ride cancelled",
+                message: "The rider cancelled this ride. Sorry for the inconvenience. We'll keep looking for nearby requests.",
+                createdAt: Date(),
+                isRead: readLocalNotificationIDs.contains(id),
+                source: .local,
+                priority: .high,
+                relatedId: ride.id
+            )
+        )
     }
 
     private func resumeStandbyIfWaiting(statusMessage: String? = nil) {
@@ -2104,6 +2144,33 @@ struct DriverDashboardView: View {
     private func tierSort(_ lhs: String, _ rhs: String) -> Bool {
         let ordered = DriverDashboardVM.availableRideTypes
         return (ordered.firstIndex(of: lhs) ?? ordered.endIndex) < (ordered.firstIndex(of: rhs) ?? ordered.endIndex)
+    }
+}
+
+private final class DriverCancellationSoundPlayer {
+    private var player: AVAudioPlayer?
+
+    func play() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default, options: [.duckOthers])
+            try audioSession.setActive(true)
+
+            if player == nil {
+                guard let url = Bundle.main.url(forResource: "ride-cancelled", withExtension: "mp3") else {
+                    return
+                }
+                let audioPlayer = try AVAudioPlayer(contentsOf: url)
+                audioPlayer.numberOfLoops = 0
+                audioPlayer.prepareToPlay()
+                player = audioPlayer
+            }
+
+            player?.currentTime = 0
+            player?.play()
+        } catch {
+            player = nil
+        }
     }
 }
 

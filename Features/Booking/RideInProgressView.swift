@@ -51,7 +51,7 @@ struct RideInProgressView: View {
             }
             .onChange(of: rideManager.state, initial: false) { _, newState in
                 if newState == .completed { showEnd = true }
-                if newState == .selecting { dismiss() }
+                if newState == .selecting || newState == .cancelled { dismiss() }
             }
             // Chat / payment / notes / end sheets
             .sheet(isPresented: $showChat) {
@@ -102,7 +102,15 @@ struct RideInProgressView: View {
                     },
                     onCancel: {
                         showTripOptionsSheet = false
-                        rideManager.riderCancelAndAutoReassign()
+                        if rideManager.currentRide?.status == .enRouteToDropoff {
+                            rideManager.riderCancelRide()
+                        } else {
+                            rideManager.riderCancelAndFindAnother()
+                        }
+                    },
+                    onCancelRide: {
+                        showTripOptionsSheet = false
+                        rideManager.riderCancelRide()
                     }
                 )
                 .presentationDetents([.medium])
@@ -859,7 +867,7 @@ struct RideInProgressView: View {
 
     private var cancelTitle: String {
         rideManager.currentRide?.status == .enRouteToDropoff
-            ? "End ride now"
+            ? "Cancel ride"
             : "Cancel and find another driver"
     }
     
@@ -917,6 +925,7 @@ struct RideInProgressView: View {
         var onPickupNotes: () -> Void
         var onReport: () -> Void
         var onCancel: () -> Void
+        var onCancelRide: () -> Void
 
         var body: some View {
             NavigationStack {
@@ -940,6 +949,11 @@ struct RideInProgressView: View {
                     Section {
                         Button(role: .destructive, action: onCancel) {
                             Label(cancelTitle, systemImage: "xmark.circle.fill")
+                        }
+                        if cancelTitle == "Cancel and find another driver" {
+                            Button(role: .destructive, action: onCancelRide) {
+                                Label("Cancel ride", systemImage: "xmark.octagon.fill")
+                            }
                         }
                     }
                 }

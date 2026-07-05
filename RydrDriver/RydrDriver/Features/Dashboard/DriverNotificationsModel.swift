@@ -74,6 +74,7 @@ struct DriverNotificationItem: Identifiable, Equatable {
     var icon: String {
         switch type {
         case "new_ride_request": return "car.fill"
+        case "ride_cancelled": return "xmark.octagon.fill"
         case "missed_ride_request": return "clock.badge.exclamationmark.fill"
         case "demand_high", "demand_moderate": return "flame.fill"
         case "safety_penalty": return "exclamationmark.shield.fill"
@@ -92,6 +93,7 @@ struct DriverNotificationItem: Identifiable, Equatable {
     private nonisolated static func defaultTitle(for type: String) -> String {
         switch type {
         case "new_ride_request": return "New ride request"
+        case "ride_cancelled": return "Ride cancelled"
         case "missed_ride_request": return "Missed ride request"
         case "demand_high": return "High demand nearby"
         case "demand_moderate": return "Demand building nearby"

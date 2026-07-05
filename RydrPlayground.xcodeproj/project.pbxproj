@@ -38,6 +38,7 @@
 		68988803139FE311F018A213 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80DFFA0B31FD7C4AC0B88A0 /* AppDelegate.swift */; };
 		68B71E7A2E9A100100C0D3F1 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 68B71E792E9A100100C0D3F1 /* GoogleService-Info.plist */; };
 		6C2F41A8B8B64D0F8D4A6D99 /* trip-transition-chime.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 6C2F41A7B8B64D0F8D4A6D99 /* trip-transition-chime.mp3 */; };
+		6C2F41AAB8B64D0F8D4A6D99 /* ride-cancelled.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 6C2F41A9B8B64D0F8D4A6D99 /* ride-cancelled.mp3 */; };
 		6A450C8076DC87897C6F6F00 /* HelpSupportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27D744BC0BE096DB8C00A73B /* HelpSupportView.swift */; };
 		6A9FE600DB0F709B0F10C5D0 /* TermsModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E0F1A6BDC25A2302FCD46A8 /* TermsModalView.swift */; };
 		6B7D35B5794BF6685E0224F7 /* FirestoreRideService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53FE95B67E113FB2FBC7AE64 /* FirestoreRideService.swift */; };
@@ -174,6 +175,7 @@
 		68B71E792E9A100100C0D3F1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		69EB15B8CD81D6C4D18B4448 /* UploadBox.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UploadBox.swift; sourceTree = "<group>"; };
 		6C2F41A7B8B64D0F8D4A6D99 /* trip-transition-chime.mp3 */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.mp3; path = RydrPlayground/Assets/Sounds/trip-transition-chime.mp3; sourceTree = "<group>"; };
+		6C2F41A9B8B64D0F8D4A6D99 /* ride-cancelled.mp3 */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.mp3; path = RydrPlayground/Assets/Sounds/ride-cancelled.mp3; sourceTree = "<group>"; };
 		6CD7CE10B7D1AB994E052AB7 /* PaymentMethodView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaymentMethodView.swift; sourceTree = "<group>"; };
 		726DA696E0CD7332230DF1C5 /* MailComposerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MailComposerView.swift; sourceTree = "<group>"; };
 		75D4705C3E5EA46EBAD4C7EE /* RideInProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RideInProgressView.swift; sourceTree = "<group>"; };
@@ -444,13 +446,14 @@
 		};
 		D9A571DB2DF9C6A900C04006 = {
 			isa = PBXGroup;
-			children = (
-				B9EEAA74573E47F59BD2DEE1 /* Features */,
-				A29FFE4CDAFA68CE02DD0476 /* SharedUI */,
-				2BF1B375BBC02F313445A8F4 /* Core */,
-				53AD180784FDC3214EC26491 /* App */,
-				6C2F41A7B8B64D0F8D4A6D99 /* trip-transition-chime.mp3 */,
-				4E554489F0BCD4BFD1BB61E1 /* RydrPlayground */,
+				children = (
+					B9EEAA74573E47F59BD2DEE1 /* Features */,
+					A29FFE4CDAFA68CE02DD0476 /* SharedUI */,
+					2BF1B375BBC02F313445A8F4 /* Core */,
+					53AD180784FDC3214EC26491 /* App */,
+					6C2F41A7B8B64D0F8D4A6D99 /* trip-transition-chime.mp3 */,
+					6C2F41A9B8B64D0F8D4A6D99 /* ride-cancelled.mp3 */,
+					4E554489F0BCD4BFD1BB61E1 /* RydrPlayground */,
 				02DADFDD0676624FC7A3D68A /* RydrPlaygroundTests */,
 				BA801CAF821DC5558CC5F239 /* RydrPlaygroundUITests */,
 				8B7F67542FE391C30094C08D /* Frameworks */,
@@ -638,12 +641,13 @@
 		D9A571E22DF9C6A900C04006 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (
-				62A9F73246DA56F16620ADF3 /* Assets.xcassets in Resources */,
-				666BC62A2B155A9F28FCB284 /* AnimatedLogo.mp4 in Resources */,
-				68B71E7A2E9A100100C0D3F1 /* GoogleService-Info.plist in Resources */,
-				6C2F41A8B8B64D0F8D4A6D99 /* trip-transition-chime.mp3 in Resources */,
-			);
+				files = (
+					62A9F73246DA56F16620ADF3 /* Assets.xcassets in Resources */,
+					666BC62A2B155A9F28FCB284 /* AnimatedLogo.mp4 in Resources */,
+					68B71E7A2E9A100100C0D3F1 /* GoogleService-Info.plist in Resources */,
+					6C2F41A8B8B64D0F8D4A6D99 /* trip-transition-chime.mp3 in Resources */,
+					6C2F41AAB8B64D0F8D4A6D99 /* ride-cancelled.mp3 in Resources */,
+				);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		D9A571F02DF9C6AB00C04006 /* Resources */ = {
@@ -666,6 +670,7 @@
 /* Begin PBXShellScriptBuildPhase section */
 		8BFA10102E98A12000C0D500 /* Upload dSYMs to Firebase Crashlytics */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);

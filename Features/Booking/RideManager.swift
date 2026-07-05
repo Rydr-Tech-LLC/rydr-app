@@ -414,6 +414,7 @@ enum DriverDecision { case accepted, declined }
 
 struct RideLifecycleSnapshot {
     let status: Ride.Status?
+    let rawStatus: String?
     let driverCoordinate: CLLocationCoordinate2D?
     let pickupCoordinate: CLLocationCoordinate2D?
     let dropoffCoordinate: CLLocationCoordinate2D?
@@ -544,6 +545,7 @@ final class RideManager: ObservableObject {
     private var currentWaitChargePerMinute: Double = 0
     private var hasPlayedTripStartedSoundForCurrentRide = false
     private let tripTransitionSoundPlayer = RiderTripTransitionSoundPlayer()
+    private let cancellationSoundPlayer = RiderCancellationSoundPlayer()
     private let activeRideSnapshotKey = "rydr.activeRideSnapshot.v1"
     private let driverDecisionTimeoutSeconds: UInt64 = 18
 
@@ -807,7 +809,12 @@ final class RideManager: ObservableObject {
 
     /// Rider cancels before pickup → return to driver cards. Mid-ride → end with a prorated receipt.
     func riderCancelAndAutoReassign() {
+        riderCancelAndFindAnother()
+    }
+
+    func riderCancelAndFindAnother() {
         guard let ride = currentRide else { return }
+        cancellationSoundPlayer.play()
 
         switch ride.status {
         case .enRouteToPickup, .waitingForRider:
@@ -817,6 +824,12 @@ final class RideManager: ObservableObject {
         default:
             cancelAll()
         }
+    }
+
+    func riderCancelRide() {
+        guard currentRide != nil else { return }
+        cancellationSoundPlayer.play()
+        cancelRideWithoutReassignment()
     }
 
     /// Complete ride -> create receipt + push to history.
@@ -1066,7 +1079,7 @@ final class RideManager: ObservableObject {
         currentRide?.fare = ((currentBaseFare + pickupWaitCharge) * 100).rounded() / 100
     }
 
-    private func cancelBeforePickupAndReturnToSelection() {
+    private func cancelBeforePickupAndReturnToSelection(notifyBackend: Bool = true) {
         rideLifecycleTask?.cancel()
         decisionTask?.cancel()
         let chatContext = activeRideChatContext
@@ -1089,10 +1102,46 @@ final class RideManager: ObservableObject {
         clearActiveRideSnapshot()
 
         if availableDrivers.isEmpty {
-            requestDrivers(pickup: cachedPickup, dropoff: cachedDropoff, rideType: cachedRideType, near: liveDriverCoordinate, riderVerified: cachedRiderVerified)
+            requestDrivers(
+                pickup: cachedPickup,
+                dropoff: cachedDropoff,
+                rideType: cachedRideType,
+                near: cachedPickupCoordinate ?? liveDriverCoordinate,
+                riderVerified: cachedRiderVerified
+            )
         } else {
+            rideRequestErrorMessage = nil
             state = .selecting
         }
+
+        Task {
+            if notifyBackend, let id = cancelledServiceRideId {
+                try? await rideService.cancelRide(rideId: id)
+            }
+        }
+        closeRideChatIfNeeded(chatContext)
+    }
+
+    private func cancelRideWithoutReassignment() {
+        rideLifecycleTask?.cancel()
+        decisionTask?.cancel()
+        let chatContext = activeRideChatContext
+        let cancelledServiceRideId = currentServiceRideId
+
+        currentRide = nil
+        selectedDriver = nil
+        currentServiceRideId = nil
+        pickupEtaSecondsRemaining = 0
+        destinationEtaSecondsRemaining = 0
+        pickupWaitSecondsRemaining = 180
+        paidPickupWaitSeconds = 0
+        pickupWaitCharge = 0
+        currentBaseFare = 0
+        currentWaitChargePerMinute = 0
+        hasPlayedTripStartedSoundForCurrentRide = false
+        releaseAppliedRydrBankCodeIfNeeded()
+        clearActiveRideSnapshot()
+        state = .cancelled
 
         Task {
             if let id = cancelledServiceRideId {
@@ -1211,11 +1260,21 @@ final class RideManager: ObservableObject {
                 completeRide()
                 return
             case .cancelled:
-                cancelAll()
+                if snapshot.rawStatus == "driverCancelled" {
+                    handleDriverCancelledAndReturnToSelection()
+                } else {
+                    cancelAll()
+                }
                 return
             }
         }
         persistActiveRideSnapshot()
+    }
+
+    private func handleDriverCancelledAndReturnToSelection() {
+        cancellationSoundPlayer.play()
+        rideRequestErrorMessage = "Your driver cancelled. Pick another nearby driver."
+        cancelBeforePickupAndReturnToSelection(notifyBackend: false)
     }
 
     private func closeRideChatIfNeeded(_ context: RideChatContext?) {
@@ -1566,6 +1625,34 @@ final class RideManager: ObservableObject {
         } else {
             paymentStatus = "failed"
             paymentFailureReason = "Payment status could not be confirmed. Please try again."
+        }
+    }
+}
+
+@MainActor
+private final class RiderCancellationSoundPlayer {
+    private var player: AVAudioPlayer?
+
+    func play() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .default, options: [.duckOthers])
+            try audioSession.setActive(true)
+
+            if player == nil {
+                guard let url = Bundle.main.url(forResource: "ride-cancelled", withExtension: "mp3") else {
+                    return
+                }
+                let audioPlayer = try AVAudioPlayer(contentsOf: url)
+                audioPlayer.numberOfLoops = 0
+                audioPlayer.prepareToPlay()
+                player = audioPlayer
+            }
+
+            player?.currentTime = 0
+            player?.play()
+        } catch {
+            player = nil
         }
     }
 }

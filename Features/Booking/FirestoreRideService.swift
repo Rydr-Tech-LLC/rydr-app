@@ -171,8 +171,10 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                     }
 
                     guard let data = snapshot?.data() else { return }
+                    let rawStatus = data["status"] as? String
                     let snapshot = RideLifecycleSnapshot(
-                        status: Self.rideStatus(from: data["status"] as? String),
+                        status: Self.rideStatus(from: rawStatus),
+                        rawStatus: rawStatus,
                         driverCoordinate: Self.coordinate(from: data["driverLocation"]),
                         pickupCoordinate: Self.coordinate(from: data["pickupCoordinate"]) ?? Self.coordinate(from: data["pickupGeoPoint"]),
                         dropoffCoordinate: Self.coordinate(from: data["dropoffCoordinate"]) ?? Self.coordinate(from: data["dropoffGeoPoint"])
@@ -191,8 +193,14 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
     }
 
     func cancelRide(rideId: String) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw RideDispatchError.notSignedIn
+        }
         let update: [String: Any] = [
             "status": "riderCancelled",
+            "cancelledBy": uid,
+            "cancelledByRole": "rider",
+            "cancellationReason": "Rider cancelled",
             "cancelledAt": FieldValue.serverTimestamp(),
             "updatedAt": FieldValue.serverTimestamp()
         ]

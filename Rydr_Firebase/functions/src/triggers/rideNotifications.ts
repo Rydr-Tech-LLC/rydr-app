@@ -117,7 +117,7 @@ export const onRideUpdated = onDocumentUpdated("rides/{rideId}", async (event) =
           audience: "rider",
           uid: riderId,
           title: "Ride cancelled",
-          body: cancelledByDriver ? "Your driver cancelled this ride." : "Your ride was cancelled.",
+          body: cancelledByDriver ? "Your driver cancelled this ride. Choose another nearby driver to keep going." : "Your ride was cancelled.",
           route: { type: "rideCancelled", target: "home", rideId }
         });
       }
@@ -126,7 +126,7 @@ export const onRideUpdated = onDocumentUpdated("rides/{rideId}", async (event) =
           audience: "driver",
           uid: driverId,
           title: "Ride cancelled",
-          body: "The rider cancelled this ride.",
+          body: "The rider cancelled this ride. Sorry for the inconvenience. We'll keep looking for nearby requests.",
           route: { type: "rideCancelled", target: "dashboard", rideId }
         });
       }

@@ -182,7 +182,14 @@ service cloud.firestore {
       return signedIn()
         && requestDoc.data.riderId == request.auth.uid
         && request.resource.data.status in ["riderCancelled", "cancelled"]
-        && request.resource.data.keys().hasOnly(["status", "cancelledAt", "updatedAt"]);
+        && request.resource.data.keys().hasOnly([
+          "cancelledAt",
+          "cancelledBy",
+          "cancelledByRole",
+          "cancellationReason",
+          "status",
+          "updatedAt"
+        ]);
     }
 
     function validRideClaim() {
@@ -246,10 +253,20 @@ service cloud.firestore {
       );
     }
 
+    function validRideChatParticipants(data) {
+      return !("participants" in data)
+        || (
+          data.participants is list
+          && data.participants.size() == 2
+          && data.participants.hasAll([data.riderId, data.driverId])
+        );
+    }
+
     function validRideChatCreate() {
       return signedIn()
         && (request.resource.data.riderId == request.auth.uid || request.resource.data.driverId == request.auth.uid)
         && request.resource.data.status in ["active", "closed"]
+        && validRideChatParticipants(request.resource.data)
         && request.resource.data.keys().hasOnly([
           "createdAt",
           "driverId",
@@ -265,6 +282,7 @@ service cloud.firestore {
       return chatParticipant(resource.data)
         && request.resource.data.riderId == resource.data.riderId
         && request.resource.data.driverId == resource.data.driverId
+        && validRideChatParticipants(request.resource.data)
         && affectedKeys().hasOnly([
           "driverId",
           "participants",

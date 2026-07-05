@@ -59,19 +59,14 @@ final class RideChatService {
         try requireParticipant(riderId: riderId, driverId: driverId)
 
         let chatRef = db.collection("rideChats").document(rideId)
-        let snapshot = try await getDocument(chatRef)
-        var data: [String: Any] = [
+        let data: [String: Any] = [
             "rideId": rideId,
             "riderId": riderId,
             "driverId": driverId,
+            "participants": [riderId, driverId].sorted(),
             "status": "active",
             "updatedAt": FieldValue.serverTimestamp()
         ]
-        if snapshot.exists {
-            try validateChat(snapshot: snapshot, riderId: riderId, driverId: driverId)
-        } else {
-            data["createdAt"] = FieldValue.serverTimestamp()
-        }
         try await setData(data, document: chatRef, merge: true)
     }
 
