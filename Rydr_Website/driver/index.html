@@ -3,11 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Drive with Rydr | Atlanta Driver Beta</title>
-    <meta name="description" content="Drive with Rydr in Atlanta. Set rates, keep 70%, submit beta documents, accept requests, track demand, and manage payouts." />
+    <title>Drive with Rydr | Drive Different</title>
+    <meta
+      name="description"
+      content="Drive with Rydr. Set rates within each ride type, see fare calculations before accepting, keep 70% of mileage and time-based fare, and keep 100% of tips."
+    />
     <link rel="stylesheet" href="../styles.css" />
   </head>
-  <body data-waitlist-endpoint="https://rydr-app-missioncontrol.vercel.app/api/waitlist">
+  <body class="driver-product-page" data-waitlist-endpoint="https://rydr-app-missioncontrol.vercel.app/api/waitlist">
     <header class="site-header" data-header>
       <a class="brand" href="/" aria-label="Rydr home"><span class="brand-mark">R</span><span class="brand-word">Rydr</span></a>
       <button class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" data-nav-toggle><span></span><span></span><span></span></button>
@@ -16,114 +19,188 @@
         <a href="/driver/" aria-current="page">Driver</a>
         <a href="/cashrydr-hub/">CashRydr Hub</a>
         <a href="/privacy/">Privacy</a>
-        <a href="#onboarding">Onboarding</a>
-        <a class="nav-cta" href="#waitlist">Join Beta</a>
+        <a href="#rate-card">Rate Card</a>
+        <a class="nav-cta" href="#driver-signup">Become a Driver</a>
       </nav>
     </header>
 
     <main>
-      <section class="hero page-hero light">
-        <div class="hero-inner">
-          <div class="hero-copy dark reveal">
+      <section class="rider-cinema-hero driver-cinema-hero">
+        <div class="rider-route-field driver-route-field" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+        <div class="rider-hero-glow driver-hero-glow" aria-hidden="true"></div>
+        <div class="rider-hero-inner">
+          <div class="rider-hero-copy driver-hero-copy reveal">
             <p class="eyebrow">Rydr Driver</p>
-            <h1>You stay in control.</h1>
+            <h1>Drive Different.</h1>
             <p class="lead">
-              Rydr Driver is built for transparent requests, controlled beta onboarding, driver-set availability,
-              clear earnings, and a payout flow that does not hide the math.
+              Drivers have spent years asking the same question: "Is this ride worth it?" Rydr was built to give
+              drivers more control over that answer. Set your own rates within each ride type, know exactly how your
+              fares are calculated, and build your driving experience around the way you want to earn. Every trip
+              begins with transparency, not guesswork.
             </p>
             <div class="hero-actions">
-              <a class="btn btn-primary" href="#waitlist">Request driver invite</a>
-              <a class="btn btn-dark" href="#onboarding">Review onboarding</a>
-            </div>
-            <div class="proof-strip dark-chip">
-              <span>Set your rates</span>
-              <span>Drivers keep 70%</span>
-              <span>Mission Control approval</span>
+              <a class="btn btn-primary" href="#driver-signup">Become a Driver</a>
+              <a class="btn btn-secondary" href="#rate-card">Explore Driver Features</a>
             </div>
           </div>
-          <div class="hero-image-stack reveal" aria-label="Rydr Driver screenshots">
-            <div class="phone-frame secondary"><img src="../assets/generated/driver-phone-verification.png" alt="Rydr Driver phone verification screen" /></div>
-            <div class="phone-frame primary"><img src="../assets/generated/driver-incoming-request.png" alt="Rydr Driver incoming request card" /></div>
+          <div class="rider-hero-device driver-hero-device reveal" data-tilt>
+            <img src="../assets/generated/marketing/driver-hero-dashboard.png" alt="Polished Rydr Driver dashboard marketing render" />
+            <span class="glass-sweep" aria-hidden="true"></span>
           </div>
         </div>
       </section>
 
-      <section class="section-band">
+      <section class="rider-pillar-intro driver-pillar-intro">
         <div class="section-heading reveal">
-          <p class="eyebrow">Driver-first economics</p>
-          <h2>Transparent earnings without hidden promo reductions.</h2>
+          <p class="eyebrow">Built for independent drivers</p>
+          <h2>More control over how, where, and when you earn.</h2>
           <p>
-            The driver-facing model should keep rider discounts and promotional credits from reducing the driver's
-            expected ride rate. Rydr shows requests with fare context before acceptance.
+            Rydr gives drivers transparent tools before the ride begins: rate control, live demand awareness,
+            city-event insight, and clear fare math.
           </p>
         </div>
-        <div class="metric-grid">
-          <article class="metric-card reveal"><h3><span data-count="70" data-suffix="%">0%</span></h3><p>Target driver share of the ride rate.</p></article>
-          <article class="metric-card reveal"><h3>No surge</h3><p>Pricing should stay understandable for riders and drivers.</p></article>
-          <article class="metric-card reveal"><h3>Rate control</h3><p>Drivers can manage pricing within platform-defined limits.</p></article>
+        <div class="rider-pillar-strip driver-pillar-strip">
+          <a href="#rate-card" class="reveal"><strong>Rate Card</strong><span>Set Rates That Work for You</span></a>
+          <a href="#driver-dashboard" class="reveal"><strong>Dashboard</strong><span>Know Where Demand Is Moving</span></a>
+          <a href="#earnings" class="reveal"><strong>Earnings</strong><span>Know Where Your Fare Goes</span></a>
         </div>
       </section>
 
-      <section class="showcase">
-        <div class="showcase-inner">
-          <div class="showcase-copy reveal">
-            <p class="eyebrow">Live driver workflow</p>
-            <h2>Online, request, navigate, earn.</h2>
-            <p>
-              The driver app presents request details, pickup and drop-off, timer, fare, cancellation tools,
-              navigation, communication, and safety reporting in the working flow.
-            </p>
-          </div>
-          <div class="screen-gallery reveal">
-            <figure><img loading="lazy" src="../assets/generated/driver-dashboard-online.png" alt="Rydr Driver online dashboard" /><figcaption>Online standby</figcaption></figure>
-            <figure><img loading="lazy" src="../assets/generated/driver-incoming-request.png" alt="Incoming ride request card" /><figcaption>Incoming request</figcaption></figure>
-            <figure><img loading="lazy" src="../assets/generated/driver-side-menu.png" alt="Rydr Driver side menu" /><figcaption>Driver tools</figcaption></figure>
-          </div>
-        </div>
-      </section>
-
-      <section class="section-band" id="onboarding">
-        <div class="section-heading reveal">
-          <p class="eyebrow">Beta onboarding</p>
-          <h2>Controlled access before live driving.</h2>
+      <section class="rider-story-section driver-story-section rate-card-section" id="rate-card">
+        <div class="rider-story-copy reveal">
+          <p class="eyebrow">Rate Card</p>
+          <h2>Set Rates That Work for You.</h2>
           <p>
-            Driver beta access starts with approval, then in-app phone verification, beta waiver acceptance,
-            profile completion, document capture, and Mission Control review.
+            One price doesn't fit every driver. With the Rydr Rate Card, you choose your per-mile and per-minute
+            rates within the limits of each ride type. Suggested pricing is available based on demand in your area,
+            but the final decision is always yours. Adjust your rates while offline, once every hour, to better align
+            with your schedule, driving goals, or changing demand. No surge multipliers. No guessing. Just transparent
+            pricing built around your business.
+          </p>
+          <div class="driver-control-metrics">
+            <div><strong>Your</strong><span>per-mile rate</span></div>
+            <div><strong>Your</strong><span>per-minute rate</span></div>
+            <div><strong>1 hr</strong><span>offline adjustment window</span></div>
+          </div>
+        </div>
+        <div class="rider-product-art driver-product-art reveal" data-tilt>
+          <img loading="lazy" src="../assets/generated/marketing/driver-rate-card.png" alt="Generated Rydr Driver Rate Card product render" />
+          <div class="rate-slider-card floating-ui-card">
+            <span>Per mile</span>
+            <strong>$1.45</strong>
+            <i><b></b></i>
+          </div>
+          <div class="rate-estimate-card floating-ui-card"><span>Estimated fare</span><strong>$17.28</strong></div>
+        </div>
+      </section>
+
+      <section class="rider-story-section driver-story-section choice-section" id="driver-dashboard">
+        <div class="rider-product-art driver-product-art reveal" data-tilt>
+          <img loading="lazy" src="../assets/generated/marketing/driver-dashboard-demand.png" alt="Generated Rydr Driver live demand dashboard render" />
+          <div class="demand-pulse-card floating-ui-card"><span>Nearby requests</span><strong>Live demand rising</strong></div>
+          <div class="demand-position-card floating-ui-card"><span>Positioning</span><strong>3 min away</strong></div>
+        </div>
+        <div class="rider-story-copy reveal">
+          <p class="eyebrow">Driver Dashboard</p>
+          <h2>Know Where Demand Is Moving.</h2>
+          <p>
+            The Driver Dashboard is more than a map. It's your live view of activity across the city. Interactive ride
+            request indicators highlight where riders are requesting trips, helping you identify areas with increasing
+            demand whether you're online preparing to accept rides or offline planning where to drive next. Spend less
+            time wondering where to go and more time positioning yourself where opportunities are growing.
+          </p>
+          <div class="choice-tokens">
+            <span>Live request pings</span>
+            <span>Demand indicators</span>
+            <span>Online or offline insight</span>
+            <span>Smarter positioning</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="rider-story-section driver-story-section community-section driver-community-section" id="driver-community">
+        <div class="rider-story-copy reveal">
+          <p class="eyebrow">Community</p>
+          <h2>Drive Where Opportunity Happens.</h2>
+          <p>
+            Community helps drivers stay connected to what's happening across the city. Discover concerts, sporting
+            events, festivals, and other local gatherings that naturally increase transportation demand. Plan your
+            driving schedule around upcoming events, anticipate busy areas, and position yourself where riders are
+            already headed. It's another way Rydr helps drivers make informed decisions about when and where to drive.
           </p>
         </div>
-        <div class="timeline">
-          <article class="timeline-item reveal"><span>01</span><h3>Beta approval</h3><p>Invite approval controls who can sign up from TestFlight during beta.</p></article>
-          <article class="timeline-item reveal"><span>02</span><h3>Phone and waiver</h3><p>Drivers verify a mobile number and accept the beta waiver before name entry.</p></article>
-          <article class="timeline-item reveal"><span>03</span><h3>Documents</h3><p>License, registration, and insurance images attach to the driver profile for review.</p></article>
-          <article class="timeline-item reveal"><span>04</span><h3>Approval</h3><p>Complete applications can be approved automatically, while Mission Control keeps master override.</p></article>
+        <div class="rider-product-art driver-product-art wide reveal" data-tilt>
+          <img loading="lazy" src="../assets/generated/marketing/driver-community.png" alt="Generated Rydr Driver Community event demand render" />
+          <div class="event-ticket floating-ui-card"><span>Tonight</span><strong>Demand near venues</strong></div>
         </div>
       </section>
 
-      <section class="split-section">
-        <div class="split-inner">
-          <div class="split-copy reveal">
-            <p class="eyebrow">Demand and payouts</p>
-            <h2>Read the city, manage the money.</h2>
-            <p>
-              Drivers can use community demand views, wallet setup, payout method management, earnings context,
-              notifications, documents, safety, and support from the Driver app.
-            </p>
-            <div class="mini-metric"><strong>Demand</strong><span>Hotspots, events, stadiums, and nearby signals</span></div>
-            <div class="mini-metric"><strong>Payouts</strong><span>Bank account, debit card, instant pay, and payout schedule</span></div>
-          </div>
-          <div class="screen-pair reveal">
-            <figure><img loading="lazy" src="../assets/generated/driver-community.png" alt="Rydr Driver community demand screen" /><figcaption>Community demand</figcaption></figure>
-            <figure><img loading="lazy" src="../assets/generated/driver-wallet-payouts.png" alt="Rydr Driver wallet and payouts screen" /><figcaption>Wallet and payouts</figcaption></figure>
-          </div>
+      <section class="driver-standards-section">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Driver Standards</p>
+          <h2>A Better Experience for Riders. A Better Platform for Drivers.</h2>
+          <p>
+            Great transportation starts with reliability and professionalism. Rydr monitors key performance indicators
+            such as acceptance, cancellations, and on-time arrivals to help maintain a dependable experience for
+            everyone using the platform. We understand that situations change and occasional declines or cancellations
+            are part of driving. Rather than focusing on isolated events, we look for consistent driving patterns that
+            support a reliable marketplace while giving drivers the flexibility they need.
+          </p>
+        </div>
+        <div class="driver-standards-grid">
+          <article class="reveal"><span>Acceptance</span><strong>Patterns over isolated moments</strong><p>Reliability matters, but one decision should not define your driving record.</p></article>
+          <article class="reveal"><span>Cancellations</span><strong>Flexibility with accountability</strong><p>Plans change. Rydr looks for consistent behavior, not single exceptions.</p></article>
+          <article class="reveal"><span>On-time arrivals</span><strong>Professional service</strong><p>Riders deserve dependable pickup experiences, and drivers deserve clear standards.</p></article>
         </div>
       </section>
 
-      <section class="waitlist-section" id="waitlist">
+      <section class="driver-qualification-section" id="driver-qualifications">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Driver Qualifications</p>
+          <h2>Ready to Drive?</h2>
+          <p>
+            Getting started is simple. Before accepting rides, every driver completes a short onboarding process
+            designed to help keep the platform safe, reliable, and compliant.
+          </p>
+        </div>
+        <div class="qualification-grid">
+          <article class="reveal"><strong>18+</strong><span>Be at least 18 years old</span></article>
+          <article class="reveal"><strong>2010+</strong><span>Drive a vehicle model year 2010 or newer</span></article>
+          <article class="reveal"><strong>Clear</strong><span>Pass a background check</span></article>
+          <article class="reveal"><strong>ID</strong><span>Complete identity verification</span></article>
+          <article class="reveal"><strong>Valid</strong><span>Maintain driver's license and insurance</span></article>
+        </div>
+      </section>
+
+      <section class="rider-story-section driver-story-section earnings-section" id="earnings">
+        <div class="rider-story-copy reveal">
+          <p class="eyebrow">Earnings</p>
+          <h2>Know Where Your Fare Goes.</h2>
+          <p>
+            Before accepting a ride, drivers should understand the numbers. Rydr is designed to show the rider fare,
+            your mileage and time-based earnings, the booking fee structure, and tips clearly.
+          </p>
+          <div class="fare-flow">
+            <div><span>Rider Fare</span></div>
+            <i></i>
+            <div><strong>70%</strong><span>Driver receives</span></div>
+            <i></i>
+            <div><strong>100%</strong><span>Tips stay yours</span></div>
+          </div>
+        </div>
+        <div class="rider-product-art driver-product-art reveal" data-tilt>
+          <img loading="lazy" src="../assets/generated/marketing/driver-earnings.png" alt="Generated Rydr Driver fare breakdown product render" />
+        </div>
+      </section>
+
+      <section class="rider-final-cta driver-final-cta" id="driver-signup">
         <div class="waitlist-inner">
           <div class="waitlist-copy reveal">
-            <p class="eyebrow">Driver beta</p>
-            <h2>Request a driver invite.</h2>
-            <p>Approved drivers receive next steps by email, then complete the in-app waiver, signup, documents, and review flow.</p>
+            <p class="eyebrow">Drive with Rydr</p>
+            <h2>Build your driving business differently.</h2>
+            <p>
+              Join the driver list for your market. Rydr will send next steps as driver availability opens.
+            </p>
           </div>
           <form class="waitlist-form reveal" data-waitlist-form>
             <div class="form-grid">
@@ -134,7 +211,7 @@
             </div>
             <input type="hidden" name="role" value="driver" />
             <input type="hidden" name="source" value="rydr-go.com/driver" />
-            <button class="btn btn-primary" type="submit">Join driver waitlist</button>
+            <button class="btn btn-primary" type="submit">Become a Driver</button>
             <p class="form-note" data-form-note aria-live="polite"></p>
           </form>
         </div>
@@ -142,7 +219,7 @@
     </main>
 
     <footer class="site-footer">
-      <div><strong>Rydr</strong><span>Ride Different.</span></div>
+      <div><strong>Rydr</strong><span>Drive Different.</span></div>
       <nav><a href="/rider/">Rider</a><a href="/driver/">Driver</a><a href="/cashrydr-hub/">CashRydr Hub</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a></nav>
     </footer>
     <script src="../script.js"></script>

@@ -5,6 +5,12 @@ const revealItems = document.querySelectorAll(".reveal");
 const forms = document.querySelectorAll("[data-waitlist-form]");
 const parallaxItems = document.querySelectorAll("[data-parallax]");
 const counters = document.querySelectorAll("[data-count]");
+const tiltItems = document.querySelectorAll("[data-tilt]");
+const legalPage = document.querySelector("[data-legal-page]");
+const legalSearch = document.querySelector("[data-legal-search]");
+const legalSearchStatus = document.querySelector("[data-legal-search-status]");
+const legalSections = document.querySelectorAll("[data-legal-section]");
+const legalTocLinks = document.querySelectorAll("[data-legal-toc-link]");
 
 const updateHeader = () => {
   if (header) header.classList.toggle("is-scrolled", window.scrollY > 8);
@@ -48,6 +54,52 @@ if (navToggle && nav && header) {
   nav.addEventListener("click", (event) => {
     if (event.target instanceof HTMLAnchorElement) closeNav();
   });
+}
+
+tiltItems.forEach((item) => {
+  item.addEventListener("pointermove", (event) => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const rect = item.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width - 0.5;
+    const y = (event.clientY - rect.top) / rect.height - 0.5;
+    item.style.transform = `perspective(1200px) rotateX(${(-y * 5).toFixed(2)}deg) rotateY(${(x * 5).toFixed(2)}deg)`;
+  });
+
+  item.addEventListener("pointerleave", () => {
+    item.style.transform = "";
+  });
+});
+
+const setActiveLegalLink = (id) => {
+  legalTocLinks.forEach((link) => {
+    link.classList.toggle("is-active", link.getAttribute("href") === `#${id}`);
+  });
+};
+
+if (legalPage && legalSections.length) {
+  legalTocLinks.forEach((link) => {
+    link.addEventListener("click", () => {
+      const mobileMenu = link.closest("details");
+      if (mobileMenu) mobileMenu.removeAttribute("open");
+    });
+  });
+
+  if (legalSearch) {
+    legalSearch.addEventListener("input", () => {
+      const query = legalSearch.value.trim().toLowerCase();
+      let visibleCount = 0;
+
+      legalSections.forEach((section) => {
+        const matches = !query || section.textContent.toLowerCase().includes(query);
+        section.classList.toggle("is-filtered-out", !matches);
+        if (matches) visibleCount += 1;
+      });
+
+      if (legalSearchStatus) {
+        legalSearchStatus.textContent = query ? `${visibleCount} section${visibleCount === 1 ? "" : "s"} found.` : "";
+      }
+    });
+  }
 }
 
 forms.forEach((form) => {
@@ -129,7 +181,25 @@ if ("IntersectionObserver" in window) {
   );
 
   counters.forEach((item) => counterObserver.observe(item));
+
+  if (legalSections.length) {
+    const legalObserver = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (visible?.target?.id) setActiveLegalLink(visible.target.id);
+      },
+      {
+        rootMargin: "-24% 0px -58% 0px",
+        threshold: [0.08, 0.24, 0.5]
+      }
+    );
+
+    legalSections.forEach((section) => legalObserver.observe(section));
+  }
 } else {
   revealItems.forEach((item) => item.classList.add("is-visible"));
   counters.forEach(runCounter);
+  if (legalSections[0]?.id) setActiveLegalLink(legalSections[0].id);
 }

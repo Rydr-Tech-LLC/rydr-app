@@ -3,11 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CashRydr Hub | Community Transportation Marketplace</title>
-    <meta name="description" content="CashRydr Hub is Rydr's coming community transportation marketplace for errands, appointments, round trips, personal drivers, requests, offers, and negotiated rides." />
+    <title>CashRydr Hub | Transportation, Your Way</title>
+    <meta
+      name="description"
+      content="CashRydr Hub is a community-driven transportation marketplace where riders post ride requests and drivers choose opportunities that fit."
+    />
     <link rel="stylesheet" href="../styles.css" />
   </head>
-  <body data-waitlist-endpoint="https://rydr-app-missioncontrol.vercel.app/api/waitlist">
+  <body class="cash-product-page" data-waitlist-endpoint="https://rydr-app-missioncontrol.vercel.app/api/waitlist">
     <header class="site-header" data-header>
       <a class="brand" href="/" aria-label="Rydr home"><span class="brand-mark">R</span><span class="brand-word">Rydr</span></a>
       <button class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" data-nav-toggle><span></span><span></span><span></span></button>
@@ -16,100 +19,190 @@
         <a href="/driver/">Driver</a>
         <a href="/cashrydr-hub/" aria-current="page">CashRydr Hub</a>
         <a href="/privacy/">Privacy</a>
-        <a href="#marketplace">Marketplace</a>
-        <a class="nav-cta" href="#waitlist">Join Waitlist</a>
+        <a href="#how-it-works">How It Works</a>
+        <a class="nav-cta" href="#cash-access">Request Access</a>
       </nav>
     </header>
 
     <main>
-      <section class="hero page-hero light">
-        <div class="hero-inner">
-          <div class="hero-copy dark reveal">
+      <section class="rider-cinema-hero cash-cinema-hero">
+        <div class="rider-route-field cash-route-field" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+        <div class="rider-hero-glow cash-hero-glow" aria-hidden="true"></div>
+        <div class="rider-hero-inner">
+          <div class="rider-hero-copy cash-hero-copy reveal">
             <p class="eyebrow">CashRydr Hub</p>
-            <h1>Community rides, negotiated.</h1>
+            <h1>
+              <span>Transportation,</span>
+              <span>Your</span>
+              <span>Way.</span>
+            </h1>
             <p class="lead">
-              CashRydr Hub is Rydr's coming marketplace for errands, doctor appointments, round trips, personal
-              drivers, repeat rides, offers, favorites, and transportation requests that need more flexibility.
+              CashRydr Hub is a community-driven transportation marketplace that connects riders and drivers beyond
+              traditional ride dispatching. Create a ride request, receive interest from nearby drivers, discuss trip
+              details together, and arrange transportation in a way that works best for everyone involved.
             </p>
             <div class="hero-actions">
-              <a class="btn btn-primary" href="#waitlist">Join the beta waitlist</a>
-              <a class="btn btn-dark" href="#marketplace">See the hub</a>
+              <a class="btn btn-primary" href="#marketplace">Explore CashRydr Hub</a>
+              <a class="btn btn-secondary" href="#how-it-works">How It Works</a>
             </div>
           </div>
-          <div class="map-panel reveal" aria-label="CashRydr marketplace map illustration">
-            <span class="route-pill one">Round trip requested</span>
-            <span class="route-pill two">Favorite driver offer</span>
-            <span class="map-pin">R</span>
-            <span class="map-stop">$</span>
+          <div class="rider-hero-device cash-hero-device reveal" data-tilt>
+            <img src="../assets/generated/marketing/cashrydr-hero-marketplace.png" alt="Polished CashRydr Hub marketplace product render" />
+            <span class="glass-sweep" aria-hidden="true"></span>
           </div>
         </div>
       </section>
 
-      <section class="section-band" id="marketplace">
+      <section class="rider-pillar-intro cash-pillar-intro" id="marketplace">
         <div class="section-heading reveal">
-          <p class="eyebrow">Beyond standard rides</p>
-          <h2>Built for real-life transportation needs.</h2>
+          <p class="eyebrow">A marketplace inside Rydr</p>
+          <h2>Not dispatched. Discovered.</h2>
           <p>
-            CashRydr Hub is designed for trips that do not always fit a simple pickup-to-drop-off model. Riders can
-            request help, drivers can make offers, and repeat relationships can become part of the marketplace.
+            CashRydr Hub expands transportation beyond the standard request-and-match model. Riders post what they
+            need, drivers decide what makes sense, and both sides can connect before the trip begins.
           </p>
         </div>
-        <div class="cash-grid">
-          <article class="cash-card reveal"><strong>Doctor appointments</strong><p>Request pickup, wait time, return trips, or recurring appointment support.</p></article>
-          <article class="cash-card reveal"><strong>Errands and pickups</strong><p>Coordinate local transportation needs with more context than a standard ride card.</p></article>
-          <article class="cash-card reveal"><strong>Personal drivers</strong><p>Favorite drivers, request repeat rides, and build trusted local relationships.</p></article>
-          <article class="cash-card reveal"><strong>Offers and negotiation</strong><p>Post the need, receive driver offers, compare details, and confirm the best fit.</p></article>
+        <div class="rider-pillar-strip cash-pillar-strip">
+          <a href="#post-a-ride" class="reveal"><strong>Post</strong><span>Create a ride request with destination, time, and offer.</span></a>
+          <a href="#conversations" class="reveal"><strong>Connect</strong><span>Discuss details before anyone commits.</span></a>
+          <a href="#driver-opportunities" class="reveal"><strong>Choose</strong><span>Drivers browse opportunities that fit.</span></a>
         </div>
       </section>
 
-      <section class="showcase">
-        <div class="showcase-inner">
-          <div class="showcase-copy reveal">
-            <p class="eyebrow">Connected to Rydr</p>
-            <h2>The hub grows from the ride platform.</h2>
-            <p>
-              CashRydr Hub will build on the same rider account, trip planning, driver selection, and reward systems
-              already visible in the Rider app.
-            </p>
+      <section class="rider-story-section cash-story-section" id="post-a-ride">
+        <div class="rider-story-copy reveal">
+          <p class="eyebrow">Rider Experience</p>
+          <h2>Post a Ride. Connect with Drivers.</h2>
+          <p>
+            Getting started is simple. CashRydr Hub has its own quick signup experience, allowing anyone to join the
+            marketplace without creating a full Rydr rider account. Once inside, create a transportation request by
+            choosing your destination, preferred pickup time, and the amount you're willing to offer. Nearby drivers
+            can review your request and decide whether they're interested, giving both sides the opportunity to
+            connect before the trip begins.
+          </p>
+          <div class="cash-mini-flow">
+            <span>Destination</span>
+            <i></i>
+            <span>Pickup time</span>
+            <i></i>
+            <span>Offer</span>
           </div>
-          <div class="screen-pair reveal">
-            <figure><img loading="lazy" src="../assets/generated/rider-booking.png" alt="Rydr route planning screen" /><figcaption>Trip planning</figcaption></figure>
-            <figure><img loading="lazy" src="../assets/generated/rider-rydrbank.png" alt="RydrBank ride value screen" /><figcaption>Banked ride value</figcaption></figure>
+        </div>
+        <div class="rider-product-art cash-product-art reveal" data-tilt>
+          <img loading="lazy" src="../assets/generated/marketing/cashrydr-rider-request.png" alt="Generated CashRydr Hub ride request creation product render" />
+          <div class="cash-offer-card floating-ui-card"><span>Request live</span><strong>Drivers can respond</strong></div>
+          <div class="cash-driver-interest floating-ui-card"><span>Interested</span><strong>6 nearby drivers</strong></div>
+        </div>
+      </section>
+
+      <section class="rider-story-section cash-story-section choice-section" id="conversations">
+        <div class="rider-product-art cash-product-art reveal" data-tilt>
+          <img loading="lazy" src="../assets/generated/marketing/cashrydr-conversations.png" alt="Generated CashRydr Hub conversation and offer product render" />
+          <div class="cash-chat-card floating-ui-card"><span>Message</span><strong>Discuss pickup details</strong></div>
+          <div class="cash-offer-update floating-ui-card"><span>Offer update</span><strong>Responsive marketplace</strong></div>
+        </div>
+        <div class="rider-story-copy reveal">
+          <p class="eyebrow">Conversations</p>
+          <h2>Discuss the Details Together.</h2>
+          <p>
+            CashRydr Hub encourages direct communication between riders and drivers before a trip begins. Once a
+            driver expresses interest, both parties can discuss trip details, pickup expectations, and pricing
+            adjustments when appropriate. Because requests are visible to multiple drivers, another driver may accept
+            the original offer before negotiations conclude, creating a dynamic marketplace where responsiveness
+            matters.
+          </p>
+          <div class="choice-tokens">
+            <span>Message before the ride</span>
+            <span>Clarify expectations</span>
+            <span>Adjust when appropriate</span>
+            <span>Respond quickly</span>
           </div>
         </div>
       </section>
 
-      <section class="split-section dark-section">
-        <div class="split-inner">
-          <div class="split-copy reveal">
-            <p class="eyebrow">Marketplace design</p>
-            <h2>Requests, offers, favorites, repeat rides.</h2>
-            <p>
-              CashRydr Hub will expand from the same Rydr account system and beta controls, giving the platform a
-              separate product lane for community transportation instead of forcing every use case into a standard ride.
-            </p>
-            <div class="chip-row">
-              <span>Request posts</span>
-              <span>Driver offers</span>
-              <span>Negotiated terms</span>
-              <span>Favorite drivers</span>
-            </div>
+      <section class="rider-story-section cash-story-section" id="driver-opportunities">
+        <div class="rider-story-copy reveal">
+          <p class="eyebrow">Driver Experience</p>
+          <h2>Choose Opportunities That Make Sense for You.</h2>
+          <p>
+            Drivers browse available ride requests and decide which opportunities fit their schedule and earning
+            goals. CashRydr Hub requests are completely separate from dispatched Rydr rides and do not affect driver
+            performance metrics such as acceptance rate, cancellation history, or overall driver standing within the
+            Rydr platform.
+          </p>
+          <div class="choice-tokens">
+            <span>Browse requests</span>
+            <span>Choose what fits</span>
+            <span>Separate from dispatched rides</span>
+            <span>No acceptance-rate impact</span>
           </div>
-          <div class="executive-panel reveal">
-            <h3>Coming Soon to Beta</h3>
-            <p>Rydr will launch the core ride beta first, then grow CashRydr Hub with controlled users and measured demand.</p>
-            <div class="stat-line"><strong>Phase 1</strong><span>Invite-controlled ride beta</span></div>
-            <div class="stat-line"><strong>Phase 2</strong><span>Hub requests and repeat rides</span></div>
-          </div>
+        </div>
+        <div class="rider-product-art cash-product-art reveal" data-tilt>
+          <img loading="lazy" src="../assets/generated/marketing/cashrydr-driver-opportunities.png" alt="Generated CashRydr Hub driver marketplace opportunities render" />
+          <div class="cash-driver-feed floating-ui-card"><span>Available requests</span><strong>Choose your opportunity</strong></div>
         </div>
       </section>
 
-      <section class="waitlist-section" id="waitlist">
+      <section class="rider-story-section cash-story-section cash-navigation-section" id="navigation">
+        <div class="rider-product-art cash-product-art reveal" data-tilt>
+          <img loading="lazy" src="../assets/generated/marketing/cashrydr-navigation.png" alt="Generated CashRydr Hub trip navigation product render" />
+          <div class="cash-trip-control floating-ui-card"><span>Trip tools</span><strong>Arrived - Complete Trip</strong></div>
+        </div>
+        <div class="rider-story-copy reveal">
+          <p class="eyebrow">Navigation</p>
+          <h2>Built-In Navigation for Every Trip.</h2>
+          <p>
+            While transportation arrangements are made directly between riders and drivers, CashRydr Hub still
+            provides helpful trip tools inside the app. Drivers have access to turn-by-turn navigation along with
+            simple trip controls for indicating arrival and trip completion, making it easier to stay organized
+            throughout the journey.
+          </p>
+        </div>
+      </section>
+
+      <section class="cash-expectations-section" id="how-it-works">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Marketplace Expectations</p>
+          <h2>Designed for flexibility, clarity, and respectful participation.</h2>
+        </div>
+        <div class="cash-expectation-grid">
+          <article class="reveal"><strong>Flexible Offers</strong><p>Riders suggest the amount they're willing to pay.</p></article>
+          <article class="reveal"><strong>Driver Choice</strong><p>Drivers decide which requests interest them.</p></article>
+          <article class="reveal"><strong>Conversations</strong><p>Discuss trip details before confirming.</p></article>
+          <article class="reveal"><strong>Advance Requests</strong><p>Submit requests at least two hours before pickup so drivers have time to respond.</p></article>
+          <article class="reveal"><strong>Direct Payments</strong><p>Payments are arranged directly between riders and drivers.</p></article>
+          <article class="reveal"><strong>Community Standards</strong><p>Respectful communication helps maintain a healthy marketplace.</p></article>
+        </div>
+      </section>
+
+      <section class="cash-standards-section">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Community Standards</p>
+          <h2>Supporting a Safe and Respectful Community.</h2>
+          <p>
+            CashRydr Hub is designed to help riders and drivers connect through a trusted marketplace. While
+            transportation arrangements and payments are made directly between participants, Rydr provides community
+            standards, reporting tools, and incident reporting features to help maintain a respectful environment.
+            Reports submitted through the platform may be reviewed internally, and appropriate action may be taken
+            when community standards are violated.
+          </p>
+        </div>
+        <div class="driver-standards-grid cash-standards-grid">
+          <article class="reveal"><span>Respect</span><strong>Clear communication</strong><p>Marketplace experiences work best when expectations are discussed before the trip.</p></article>
+          <article class="reveal"><span>Reporting</span><strong>Tools when something feels wrong</strong><p>Participants can submit reports for internal review when standards are violated.</p></article>
+          <article class="reveal"><span>Responsibility</span><strong>Healthy participation</strong><p>Direct arrangements depend on responsible riders and drivers using the marketplace well.</p></article>
+        </div>
+      </section>
+
+      <section class="rider-final-cta cash-final-cta" id="cash-access">
         <div class="waitlist-inner">
           <div class="waitlist-copy reveal">
-            <p class="eyebrow">CashRydr beta</p>
-            <h2>Join the waitlist.</h2>
-            <p>CashRydr Hub will grow from the same beta list. Choose whether you want to start as a rider or driver.</p>
+            <p class="eyebrow">CashRydr Hub access</p>
+            <h2>Join the transportation marketplace.</h2>
+            <p>
+              Request access and choose how you want to participate. CashRydr Hub grows from the same Rydr ecosystem,
+              but it opens a different way for riders and drivers to connect.
+            </p>
           </div>
           <form class="waitlist-form reveal" data-waitlist-form>
             <div class="form-grid">
@@ -124,7 +217,7 @@
               <label><input type="radio" name="role" value="driver" /> Driver</label>
             </fieldset>
             <input type="hidden" name="source" value="rydr-go.com/cashrydr-hub" />
-            <button class="btn btn-primary" type="submit">Join waitlist</button>
+            <button class="btn btn-primary" type="submit">Request Access</button>
             <p class="form-note" data-form-note aria-live="polite"></p>
           </form>
         </div>
@@ -132,7 +225,7 @@
     </main>
 
     <footer class="site-footer">
-      <div><strong>Rydr</strong><span>Ride Different.</span></div>
+      <div><strong>CashRydr Hub</strong><span>Transportation, your way.</span></div>
       <nav><a href="/rider/">Rider</a><a href="/driver/">Driver</a><a href="/cashrydr-hub/">CashRydr Hub</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a></nav>
     </footer>
     <script src="../script.js"></script>

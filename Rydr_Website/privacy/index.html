@@ -21,24 +21,78 @@
       </nav>
     </header>
 
-    <main class="legal-page">
-      <div class="legal-inner">
-        <p class="eyebrow">Privacy URL</p>
-        <h1>Privacy & Third-Party Data Sharing</h1>
-        <p class="lead">
-          This page explains how Rydr Tech LLC collects, uses, protects, and shares information for the Rydr website,
-          mobile apps, beta program, rider services, driver services, waitlist, and related operations.
-        </p>
-        <div class="legal-meta dark-chip"><span>Last updated: July 4, 2026</span><span>Applies to riders, drivers, beta testers, applicants, and visitors</span></div>
+    <main class="legal-page legal-redesign" data-legal-page>
+      <section class="legal-hero">
+        <div class="legal-hero-inner">
+          <p class="eyebrow">Privacy URL</p>
+          <h1>Privacy & Third-Party Data Sharing</h1>
+          <p class="lead">
+            This page explains how Rydr Tech LLC collects, uses, protects, and shares information for the Rydr website,
+            mobile apps, beta program, rider services, driver services, waitlist, and related operations.
+          </p>
+          <div class="legal-meta dark-chip"><span>Last updated: July 4, 2026</span><span>Applies to riders, drivers, beta testers, applicants, and visitors</span></div>
+          <form class="legal-search" role="search">
+            <label for="privacy-search">Search this policy</label>
+            <div class="legal-search-field">
+              <span aria-hidden="true"></span>
+              <input id="privacy-search" type="search" placeholder="Search payments, location, data, contact..." data-legal-search />
+            </div>
+            <p class="legal-search-status" data-legal-search-status aria-live="polite"></p>
+          </form>
+        </div>
+      </section>
+
+      <div class="legal-shell">
+        <aside class="legal-toc" aria-label="Privacy policy sections">
+          <details class="legal-toc-mobile">
+            <summary>Policy Sections</summary>
+            <nav>
+              <a href="#privacy-overview" data-legal-toc-link>Privacy Overview</a>
+              <a href="#information-we-collect" data-legal-toc-link>Information We Collect</a>
+              <a href="#how-information-is-used" data-legal-toc-link>How Information Is Used</a>
+              <a href="#third-party-services" data-legal-toc-link>Third-Party Services</a>
+              <a href="#data-security" data-legal-toc-link>Data Security</a>
+              <a href="#user-rights" data-legal-toc-link>User Rights</a>
+              <a href="#cookies" data-legal-toc-link>Cookies</a>
+              <a href="#contact-information" data-legal-toc-link>Contact Information</a>
+            </nav>
+          </details>
+          <nav class="legal-toc-desktop">
+            <p>On this page</p>
+            <a href="#privacy-overview" data-legal-toc-link>Privacy Overview</a>
+            <a href="#information-we-collect" data-legal-toc-link>Information We Collect</a>
+            <a href="#how-information-is-used" data-legal-toc-link>How Information Is Used</a>
+            <a href="#third-party-services" data-legal-toc-link>Third-Party Services</a>
+            <a href="#data-security" data-legal-toc-link>Data Security</a>
+            <a href="#user-rights" data-legal-toc-link>User Rights</a>
+            <a href="#cookies" data-legal-toc-link>Cookies</a>
+            <a href="#contact-information" data-legal-toc-link>Contact Information</a>
+          </nav>
+        </aside>
 
         <section class="legal-content">
-          <article><h2>Information We Collect</h2><ul><li>Account details such as name, email, phone number, login identifiers, preferred name, and profile information.</li><li>Driver onboarding information such as license details, vehicle information, insurance and registration documents, uploaded photos, verification state, and background-check status where applicable.</li><li>Ride and marketplace information such as pickup, drop-off, stops, route, ride type, driver availability, trip status, fares, fees, ratings, messages, support requests, and safety reports.</li><li>Device, app, diagnostic, crash, performance, notification, analytics, and usage information used to operate, secure, and improve Rydr.</li></ul></article>
-          <article><h2>Permissions and Location Usage</h2><p>Rydr may request permissions for location, notifications, camera, photos, and related device features. Precise location supports ride requests, matching, trip progress, driver navigation, safety, fraud prevention, service-area analysis, and operational improvements.</p></article>
-          <article><h2>Payments and Payouts</h2><p>Payment and payout information may be processed by payment providers. Rydr does not intend to store full card numbers on its own servers. Providers may support payment credentials, authorization holds, refunds, driver payouts, connected accounts, identity-supported payment workflows, and financial connections.</p></article>
-          <article><h2>Push Notifications</h2><p>Rydr may use push notifications for ride requests, driver alerts, trip status, account security, beta updates, support, safety, payout events, and other service-related communications. Users can manage notification preferences through device settings or app controls where available.</p></article>
-          <article>
-            <h2>Third-Party Data Sharing</h2>
-            <p>Rydr may share information with providers that help deliver, secure, measure, review, or improve the platform.</p>
+          <article id="privacy-overview" class="legal-section reveal" data-legal-section data-search-content>
+            <div class="legal-section-heading"><span class="legal-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6l7-3z"></path><path d="M9 12l2 2 4-5"></path></svg></span><div><p class="eyebrow">Overview</p><h2>Privacy Overview</h2></div></div>
+            <p>This page explains how Rydr Tech LLC collects, uses, protects, and shares information for the Rydr website, mobile apps, beta program, rider services, driver services, waitlist, and related operations.</p>
+          </article>
+
+          <article id="information-we-collect" class="legal-section reveal" data-legal-section data-search-content>
+            <div class="legal-section-heading"><span class="legal-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16"></path><path d="M4 12h16"></path><path d="M4 19h10"></path></svg></span><div><p class="eyebrow">Data</p><h2>Information We Collect</h2></div></div>
+            <ul><li>Account details such as name, email, phone number, login identifiers, preferred name, and profile information.</li><li>Driver onboarding information such as license details, vehicle information, insurance and registration documents, uploaded photos, verification state, and background-check status where applicable.</li><li>Ride and marketplace information such as pickup, drop-off, stops, route, ride type, driver availability, trip status, fares, fees, ratings, messages, support requests, and safety reports.</li><li>Device, app, diagnostic, crash, performance, notification, analytics, and usage information used to operate, secure, and improve Rydr.</li></ul>
+          </article>
+
+          <article id="how-information-is-used" class="legal-section reveal" data-legal-section data-search-content>
+            <div class="legal-section-heading"><span class="legal-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21s7-5 7-11a7 7 0 0 0-14 0c0 6 7 11 7 11z"></path><path d="M12 10h.01"></path></svg></span><div><p class="eyebrow">Use</p><h2>How Information Is Used</h2></div></div>
+            <div class="legal-card-row">
+              <section class="legal-mini-card"><h3>Permissions and Location Usage</h3><p>Rydr may request permissions for location, notifications, camera, photos, and related device features. Precise location supports ride requests, matching, trip progress, driver navigation, safety, fraud prevention, service-area analysis, and operational improvements.</p></section>
+              <section class="legal-mini-card"><h3>Payments and Payouts</h3><p>Payment and payout information may be processed by payment providers. Rydr does not intend to store full card numbers on its own servers. Providers may support payment credentials, authorization holds, refunds, driver payouts, connected accounts, identity-supported payment workflows, and financial connections.</p></section>
+              <section class="legal-mini-card"><h3>Push Notifications</h3><p>Rydr may use push notifications for ride requests, driver alerts, trip status, account security, beta updates, support, safety, payout events, and other service-related communications. Users can manage notification preferences through device settings or app controls where available.</p></section>
+            </div>
+          </article>
+
+          <article id="third-party-services" class="legal-section legal-section-wide reveal" data-legal-section data-search-content>
+            <div class="legal-section-heading"><span class="legal-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 12h8"></path><path d="M7 7h.01"></path><path d="M17 17h.01"></path><path d="M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"></path></svg></span><div><p class="eyebrow">Third parties</p><h2>Third-Party Data Sharing</h2></div></div>
+            <div class="legal-callout"><strong>Third-Party Services</strong><p>Rydr may share information with providers that help deliver, secure, measure, review, or improve the platform.</p></div>
             <div class="legal-table-wrap">
               <table class="legal-table">
                 <thead><tr><th>Category</th><th>Examples</th><th>Purpose</th></tr></thead>
@@ -53,16 +107,38 @@
               </table>
             </div>
           </article>
-          <article><h2>Security and Retention</h2><p>Rydr uses reasonable administrative, technical, and organizational safeguards intended to protect information. No system can guarantee absolute security. Rydr retains information for operational, legal, accounting, fraud prevention, safety, beta testing, support, and dispute-resolution purposes.</p></article>
-          <article><h2>Your Choices</h2><p>Users may update account information, manage certain notification preferences, request account closure, or exercise rights available under applicable law. Some information may need to be retained for legal, safety, accounting, fraud prevention, or dispute-resolution purposes.</p></article>
-          <article><h2>Contact</h2><p>Questions can be sent to <a href="mailto:support@rydr-go.com">support@rydr-go.com</a>.</p></article>
+
+          <article id="data-security" class="legal-section reveal" data-legal-section data-search-content>
+            <div class="legal-section-heading"><span class="legal-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 11V8a5 5 0 0 1 10 0v3"></path><path d="M6 11h12v9H6z"></path></svg></span><div><p class="eyebrow">Protection</p><h2>Data Security</h2></div></div>
+            <p>Rydr uses reasonable administrative, technical, and organizational safeguards intended to protect information. No system can guarantee absolute security. Rydr retains information for operational, legal, accounting, fraud prevention, safety, beta testing, support, and dispute-resolution purposes.</p>
+          </article>
+
+          <article id="user-rights" class="legal-section reveal" data-legal-section data-search-content>
+            <div class="legal-section-heading"><span class="legal-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-5"></path><path d="M5 4h14v16H5z"></path></svg></span><div><p class="eyebrow">Choices</p><h2>User Rights</h2></div></div>
+            <div class="legal-callout"><strong>Your Rights</strong><p>Users may update account information, manage certain notification preferences, request account closure, or exercise rights available under applicable law. Some information may need to be retained for legal, safety, accounting, fraud prevention, or dispute-resolution purposes.</p></div>
+          </article>
+
+          <article id="cookies" class="legal-section reveal" data-legal-section data-search-content>
+            <div class="legal-section-heading"><span class="legal-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7c-3 0-6-3-6-6-4 0-8 3-8 6z"></path><path d="M9 12h.01"></path><path d="M13 15h.01"></path></svg></span><div><p class="eyebrow">Technology</p><h2>Cookies</h2></div></div>
+            <p>Device, app, diagnostic, crash, performance, notification, analytics, and usage information used to operate, secure, and improve Rydr.</p>
+          </article>
+
+          <article id="contact-information" class="legal-section reveal" data-legal-section data-search-content>
+            <div class="legal-section-heading"><span class="legal-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"></path><path d="M4 7l8 6 8-6"></path></svg></span><div><p class="eyebrow">Support</p><h2>Contact Information</h2></div></div>
+            <p>Questions can be sent to <a href="mailto:support@rydr-go.com">support@rydr-go.com</a>.</p>
+          </article>
+
+          <section class="legal-support-card reveal" aria-labelledby="privacy-support-title">
+            <div><p class="eyebrow">Questions?</p><h2 id="privacy-support-title">Need clarification?</h2><p>Contact Rydr Support.</p></div>
+            <a class="btn btn-primary" href="mailto:support@rydr-go.com">Contact Support</a>
+          </section>
         </section>
       </div>
     </main>
 
-    <footer class="site-footer">
+    <footer class="site-footer legal-footer">
       <div><strong>Rydr</strong><span>Ride Different.</span></div>
-      <nav><a href="/rider/">Rider</a><a href="/driver/">Driver</a><a href="/cashrydr-hub/">CashRydr Hub</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a></nav>
+      <nav><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a><a href="/driver/">Driver</a><a href="/rider/">Rider</a><a href="/cashrydr-hub/">CashRydr Hub</a><a href="/rider/#community">Community</a><a href="mailto:support@rydr-go.com">Support</a><a href="https://www.instagram.com/rydr.go" rel="noreferrer">Instagram</a></nav>
     </footer>
     <script src="../script.js"></script>
   </body>
