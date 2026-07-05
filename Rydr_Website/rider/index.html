@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rydr for Riders | Ride Different in Atlanta</title>
+    <meta name="description" content="Choose your ride, compare nearby drivers, avoid surge pricing, use RydrBank, and join the Rydr rider beta in Atlanta." />
+    <link rel="stylesheet" href="../styles.css" />
+  </head>
+  <body data-waitlist-endpoint="https://rydr-app-missioncontrol.vercel.app/api/waitlist">
+    <header class="site-header" data-header>
+      <a class="brand" href="/" aria-label="Rydr home"><span class="brand-mark">R</span><span class="brand-word">Rydr</span></a>
+      <button class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" data-nav-toggle><span></span><span></span><span></span></button>
+      <nav class="site-nav" data-nav>
+        <a href="/rider/" aria-current="page">Rider</a>
+        <a href="/driver/">Driver</a>
+        <a href="/cashrydr-hub/">CashRydr Hub</a>
+        <a href="/privacy/">Privacy</a>
+        <a href="#ride-types">Ride Types</a>
+        <a class="nav-cta" href="#waitlist">Join Beta</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero page-hero light">
+        <div class="hero-inner">
+          <div class="hero-copy dark reveal">
+            <p class="eyebrow">Rydr for riders</p>
+            <h1>Ride Different.</h1>
+            <p class="lead">
+              Choose the ride that fits the moment, review nearby driver details before confirming, and move through
+              Atlanta without surge pricing changing the story.
+            </p>
+            <div class="hero-actions">
+              <a class="btn btn-primary" href="#waitlist">Join rider waitlist</a>
+              <a class="btn btn-dark" href="#choice">See rider flow</a>
+            </div>
+            <div class="proof-strip dark-chip">
+              <span>Choose your driver</span>
+              <span>No surge pricing</span>
+              <span>RydrBank rewards</span>
+            </div>
+          </div>
+          <div class="hero-image-stack reveal" aria-label="Rydr rider app screenshots">
+            <div class="phone-frame secondary"><img src="../assets/generated/rider-welcome.png" alt="Rydr rider welcome screen" /></div>
+            <div class="phone-frame primary"><img src="../assets/generated/rider-nearby-drivers.png" alt="Rydr nearby driver confirmation screen" /></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-band" id="choice">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Choose before you commit</p>
+          <h2>See the ride, driver, route, and context first.</h2>
+          <p>
+            Rydr is designed around a more informed booking moment: pickup, drop-off, route preview, ride class,
+            estimated arrival, vehicle details, driver profile, and fare context before confirmation.
+          </p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card reveal"><span>01</span><h3>Nearby drivers</h3><p>Review first name, rating, vehicle, distance, arrival estimate, and service tags.</p></article>
+          <article class="feature-card reveal"><span>02</span><h3>Transparent pricing</h3><p>No surge pricing. Promotions should lower rider cost without lowering driver pay.</p></article>
+          <article class="feature-card reveal"><span>03</span><h3>Comfort preferences</h3><p>Save preferences for music, climate, conversation, and matching style.</p></article>
+        </div>
+      </section>
+
+      <section class="showcase">
+        <div class="showcase-inner">
+          <div class="showcase-copy reveal">
+            <p class="eyebrow">Booking flow</p>
+            <h2>From route preview to driver selection.</h2>
+            <p>
+              Riders can set pickup and destination, preview the route, choose a ride category, and review nearby
+              drivers before confirming.
+            </p>
+          </div>
+          <div class="screen-gallery reveal">
+            <figure><img loading="lazy" src="../assets/generated/rider-booking.png" alt="Rydr route preview and address entry" /><figcaption>Route setup</figcaption></figure>
+            <figure><img loading="lazy" src="../assets/generated/rider-choose-ride.png" alt="Rydr ride type selection" /><figcaption>Choose your ride</figcaption></figure>
+            <figure><img loading="lazy" src="../assets/generated/rider-nearby-drivers.png" alt="Rydr nearby drivers card" /><figcaption>Confirm driver</figcaption></figure>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-band" id="ride-types">
+        <div class="section-heading reveal">
+          <p class="eyebrow">Ride types</p>
+          <h2>Everyday, spacious, efficient, premium.</h2>
+        </div>
+        <div class="ride-grid">
+          <article class="ride-card reveal"><h3>Rydr Go</h3><p>Standard everyday rides with clear pricing and driver context.</p></article>
+          <article class="ride-card reveal"><h3>Rydr Eco</h3><p>Eco-friendly and EV-focused options as eligible vehicles come online.</p></article>
+          <article class="ride-card reveal"><h3>Rydr XL</h3><p>Spacious rides for groups, luggage, and larger everyday needs.</p></article>
+          <article class="ride-card reveal"><h3>Rydr Pristine</h3><p>Premium clean-car experiences for riders who want extra polish.</p></article>
+          <article class="ride-card executive reveal"><h3>Rydr Executive</h3><p>Black car service rides with a dedicated premium visual identity.</p></article>
+          <article class="ride-card reveal"><h3>CashRydr Hub</h3><p>Community requests, repeat drivers, errands, appointments, and negotiated rides.</p></article>
+        </div>
+      </section>
+
+      <section class="split-section">
+        <div class="split-inner">
+          <div class="split-copy reveal">
+            <p class="eyebrow">Community and RydrBank</p>
+            <h2>The rider app is more than a request button.</h2>
+            <p>
+              RydrBank gives riders a place for earned ride value and transfer-ready codes. Community screens help
+              riders connect city plans to transportation decisions.
+            </p>
+            <div class="mini-metric"><strong>Events</strong><span>Atlanta plans and ticket links</span></div>
+            <div class="mini-metric"><strong>Codes</strong><span>Banked ride value and transfers</span></div>
+          </div>
+          <div class="screen-pair reveal">
+            <figure><img loading="lazy" src="../assets/generated/rider-rydrbank.png" alt="RydrBank screen" /><figcaption>RydrBank</figcaption></figure>
+            <figure><img loading="lazy" src="../assets/generated/rider-community-events.png" alt="Rydr community events screen" /><figcaption>Community</figcaption></figure>
+          </div>
+        </div>
+      </section>
+
+      <section class="waitlist-section" id="waitlist">
+        <div class="waitlist-inner">
+          <div class="waitlist-copy reveal">
+            <p class="eyebrow">Rider beta</p>
+            <h2>Request a rider invite.</h2>
+            <p>Approved beta riders receive next steps by email for TestFlight access and in-app signup.</p>
+          </div>
+          <form class="waitlist-form reveal" data-waitlist-form>
+            <div class="form-grid">
+              <label>First name<input name="firstName" autocomplete="given-name" required /></label>
+              <label>Last name<input name="lastName" autocomplete="family-name" required /></label>
+              <label>Email<input name="email" type="email" autocomplete="email" required /></label>
+              <label>Phone<input name="phoneNumber" type="tel" autocomplete="tel" required /></label>
+            </div>
+            <input type="hidden" name="role" value="rider" />
+            <input type="hidden" name="source" value="rydr-go.com/rider" />
+            <button class="btn btn-primary" type="submit">Join rider waitlist</button>
+            <p class="form-note" data-form-note aria-live="polite"></p>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div><strong>Rydr</strong><span>Ride Different.</span></div>
+      <nav><a href="/rider/">Rider</a><a href="/driver/">Driver</a><a href="/cashrydr-hub/">CashRydr Hub</a><a href="/privacy/">Privacy</a><a href="/terms/">Terms</a></nav>
+    </footer>
+    <script src="../script.js"></script>
+  </body>
+</html>
