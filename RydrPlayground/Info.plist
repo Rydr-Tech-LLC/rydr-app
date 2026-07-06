@@ -17,6 +17,8 @@
 	</array>
 	<key>NSApplicationCrashOnExceptions</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>RYDR_BACKEND_BASE_URL</key>
 	<string>https://rydr-backend-2cl9.onrender.com</string>
 	<key>RYDR_STRIPE_BACKEND_BASE_URL</key>

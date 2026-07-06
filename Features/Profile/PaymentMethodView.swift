@@ -287,14 +287,23 @@ private extension PaymentMethodView {
             return
         }
         isLoading = true
-        ensureCustomer(for: user) { result in
-            switch result {
-            case .success(let cid):
-                self.customerId = cid
-                self.refreshPaymentMethods(for: cid)
-            case .failure(let e):
-                self.errorMessage = e.localizedDescription
+        Task { @MainActor in
+            await RydrStripeBackendConfig.configureStripePublishableKeyIfNeeded()
+            guard RydrStripeBackendConfig.hasConfiguredPublishableKey else {
                 self.isLoading = false
+                self.errorMessage = "Stripe is not configured. Check the Stripe backend publishable key."
+                return
+            }
+
+            ensureCustomer(for: user) { result in
+                switch result {
+                case .success(let cid):
+                    self.customerId = cid
+                    self.refreshPaymentMethods(for: cid)
+                case .failure(let e):
+                    self.errorMessage = e.localizedDescription
+                    self.isLoading = false
+                }
             }
         }
     }
@@ -831,11 +840,21 @@ private struct AddOrReplaceCardSheet: View {
                     Button("Cancel") { dismiss() }
                 }
             }
+            .task {
+                await RydrStripeBackendConfig.configureStripePublishableKeyIfNeeded()
+            }
             .background(PresenterResolver { vc in presentingVC = vc })
         }
     }
 
     private func addCard() {
+        guard RydrStripeBackendConfig.hasConfiguredPublishableKey else {
+            errorText = "Payment setup is still loading. Try again in a moment."
+            Task { @MainActor in
+                await RydrStripeBackendConfig.configureStripePublishableKeyIfNeeded()
+            }
+            return
+        }
         guard let pmParams = cardParams else { return }
         errorText = nil; isWorking = true
 

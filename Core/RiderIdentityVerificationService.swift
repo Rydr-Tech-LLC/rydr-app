@@ -1,8 +1,16 @@
 import FirebaseAuth
+import Stripe
 import StripeIdentity
 import UIKit
 
 enum RydrStripeBackendConfig {
+    private struct StripeRuntimeConfig: Decodable {
+        let publishableKey: String
+        let mode: String?
+    }
+
+    @MainActor private static var configuredPublishableKey: String?
+
     static var baseURL: URL {
         if let raw = Bundle.main.object(forInfoDictionaryKey: "RYDR_STRIPE_BACKEND_BASE_URL") as? String,
            let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -10,6 +18,55 @@ enum RydrStripeBackendConfig {
             return url
         }
         return URL(string: "https://rydr-stripe-backend.onrender.com")!
+    }
+
+    @MainActor
+    static var hasConfiguredPublishableKey: Bool {
+        configuredPublishableKey != nil
+    }
+
+    @MainActor
+    static func configureStripePublishableKeyIfNeeded() async {
+        if configuredPublishableKey != nil { return }
+
+        do {
+            let config = try await fetchRuntimeConfig()
+            guard isValidPublishableKey(config.publishableKey) else {
+                print("⚠️ Stripe config endpoint returned an invalid publishable key.")
+                return
+            }
+
+            StripeAPI.defaultPublishableKey = config.publishableKey
+            configuredPublishableKey = config.publishableKey
+            print("💳 Stripe \(config.mode ?? "unknown") publishable key loaded from backend")
+        } catch {
+            if let bundledKey = bundledPublishableKey(), isValidPublishableKey(bundledKey) {
+                StripeAPI.defaultPublishableKey = bundledKey
+                configuredPublishableKey = bundledKey
+                print("💳 Stripe publishable key loaded from Info.plist fallback")
+            } else {
+                print("⚠️ Stripe publishable key is not configured: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private static func fetchRuntimeConfig() async throws -> StripeRuntimeConfig {
+        var request = URLRequest(url: baseURL.appendingPathComponent("config"))
+        request.timeoutInterval = 8
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(StripeRuntimeConfig.self, from: data)
+    }
+
+    private static func bundledPublishableKey() -> String? {
+        (Bundle.main.object(forInfoDictionaryKey: "STRIPE_PUBLISHABLE_KEY") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func isValidPublishableKey(_ key: String) -> Bool {
+        key.hasPrefix("pk_test_") || key.hasPrefix("pk_live_")
     }
 }
 

@@ -147,6 +147,19 @@ struct RideInProgressView: View {
             awaitingPickupUI
         } else {
             ProgressView("Updating ride...")
+                .task {
+                    dismissIfRideWasCleared()
+                }
+        }
+    }
+
+    private func dismissIfRideWasCleared() {
+        guard rideManager.currentRide == nil else { return }
+        switch rideManager.state {
+        case .idle, .selecting, .cancelled:
+            dismiss()
+        case .awaitingDriver, .inProgress, .completed:
+            break
         }
     }
 

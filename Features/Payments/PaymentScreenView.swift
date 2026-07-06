@@ -142,13 +142,22 @@ struct PaymentScreenView: View {
             return
         }
         isLoading = true
-        ensureCustomer(for: user) { result in
-            DispatchQueue.main.async {
-                self.isLoading = false
-                if case .success(let cid) = result {
-                    self.customerId = cid
-                } else if case .failure(let e) = result {
-                    self.error(e.localizedDescription)
+        Task { @MainActor in
+            await RydrStripeBackendConfig.configureStripePublishableKeyIfNeeded()
+            guard RydrStripeBackendConfig.hasConfiguredPublishableKey else {
+                isLoading = false
+                error("Stripe is not configured. Check the Stripe backend publishable key.")
+                return
+            }
+
+            ensureCustomer(for: user) { result in
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    if case .success(let cid) = result {
+                        self.customerId = cid
+                    } else if case .failure(let e) = result {
+                        self.error(e.localizedDescription)
+                    }
                 }
             }
         }
@@ -236,6 +245,13 @@ struct PaymentScreenView: View {
     }
 
     private func addCard() {
+        guard RydrStripeBackendConfig.hasConfiguredPublishableKey else {
+            error("Payment setup is still loading. Try again in a moment.")
+            Task { @MainActor in
+                await RydrStripeBackendConfig.configureStripePublishableKeyIfNeeded()
+            }
+            return
+        }
         guard customerId != nil else {
             error("Payment setup is still loading.")
             return

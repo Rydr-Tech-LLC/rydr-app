@@ -222,6 +222,14 @@ struct BookingView: View {
         }) {
             RideInProgressView(rideManager: rideManager)
         }
+        .onChange(of: rideManager.state, initial: false) { _, newState in
+            syncRidePresentation(with: newState)
+        }
+        .onChange(of: rideManager.currentRide?.id, initial: false) { _, rideId in
+            if rideId == nil && rideManager.state != .completed {
+                syncRidePresentation(with: rideManager.state)
+            }
+        }
         .sheet(isPresented: $showRoutePreview) {
             RoutePreviewSheet(
                 rideType: rideType,
@@ -259,6 +267,31 @@ struct BookingView: View {
                     dismissBookingKeyboard()
                 }
             }
+        }
+    }
+
+    private func syncRidePresentation(with state: RideManager.State) {
+        switch state {
+        case .inProgress:
+            if rideManager.currentRide != nil {
+                showDriverSheet = false
+                showInProgress = true
+            }
+        case .selecting:
+            showInProgress = false
+            presentDriverSelectionAfterDismissal()
+        case .cancelled, .idle:
+            showInProgress = false
+        case .awaitingDriver, .completed:
+            break
+        }
+    }
+
+    private func presentDriverSelectionAfterDismissal() {
+        guard !showDriverSheet else { return }
+        DispatchQueue.main.async {
+            guard rideManager.state == .selecting else { return }
+            showDriverSheet = true
         }
     }
 

@@ -625,6 +625,22 @@ app.use(cors({
 // --- Health ---
 app.get("/", (_req, res) => res.send("✅ Rydr Stripe backend is running"));
 
+// --- Public runtime config ---
+// The publishable key is intentionally safe to send to apps. Keep the
+// STRIPE_SECRET_KEY backend-only; use STRIPE_PUBLISHABLE_KEY here so mobile
+// builds can switch test/live mode by backend environment instead of source.
+app.get("/config", (_req, res) => {
+  const publishableKey = String(process.env.STRIPE_PUBLISHABLE_KEY || "").trim();
+  if (!/^pk_(test|live)_/.test(publishableKey)) {
+    return res.status(500).json({ error: "stripe_publishable_key_not_configured" });
+  }
+
+  res.json({
+    publishableKey,
+    mode: publishableKey.startsWith("pk_live_") ? "live" : "test"
+  });
+});
+
 // --- Webhook (RAW body; mount BEFORE json parser) ---
 app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
   const sig = req.headers["stripe-signature"];

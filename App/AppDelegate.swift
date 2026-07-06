@@ -10,7 +10,6 @@ import FirebaseCore
 import FirebaseAuth
 import FirebaseAppCheck
 import FirebaseMessaging
-import Stripe
 import UserNotifications
 
 private final class RydrAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
@@ -70,19 +69,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     // dedicated local/debug harness so production-like builds still send and
     // verify real SMS codes.
 
-    // ✅ Stripe publishable key
-    if let configuredKey = Bundle.main.object(forInfoDictionaryKey: "STRIPE_PUBLISHABLE_KEY") as? String,
-       !configuredKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-      StripeAPI.defaultPublishableKey = configuredKey
-      print("💳 Stripe PK loaded from Info.plist")
-    } else {
-      #if DEBUG
-      StripeAPI.defaultPublishableKey = "pk_test_51RcVGmBOkTOLtDHQgAvZmOvsvTxIqlcD3zLFgpkWD5pCQawjrFRBV3SjufrmGRb15GjVA7i351P1zfF7vbZ2J5gc00VuR0AYPc"
-      print("💳 Stripe test PK loaded for DEBUG")
-      #else
-      assertionFailure("Missing STRIPE_PUBLISHABLE_KEY in Info.plist for Release builds.")
-      StripeAPI.defaultPublishableKey = ""
-      #endif
+    Task { @MainActor in
+      await RydrStripeBackendConfig.configureStripePublishableKeyIfNeeded()
     }
 
     return true

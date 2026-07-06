@@ -530,6 +530,7 @@ final class RideManager: ObservableObject {
 
     // Internals used across steps
     private var attemptedDriverIDs: Set<String> = []
+    private var activeMatchmakingKey = ""
     private var cachedEstimate: RideEstimate = .init(distanceMiles: 6.2, durationMinutes: 18)
     private var cachedPickup = ""
     private var cachedDropoff = ""
@@ -614,6 +615,38 @@ final class RideManager: ObservableObject {
         }
     }
 
+    private func resetMatchmakingAttempt() {
+        activeMatchmakingKey = ""
+        attemptedDriverIDs.removeAll()
+    }
+
+    private static func matchmakingKey(
+        pickup: String,
+        dropoff: String,
+        rideType: String,
+        pickupCoordinate: CLLocationCoordinate2D?,
+        dropoffCoordinate: CLLocationCoordinate2D?
+    ) -> String {
+        [
+            normalizedMatchmakingText(pickup),
+            normalizedMatchmakingText(dropoff),
+            normalizedMatchmakingText(rideType),
+            coordinateKey(pickupCoordinate),
+            coordinateKey(dropoffCoordinate)
+        ].joined(separator: "|")
+    }
+
+    private static func normalizedMatchmakingText(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private static func coordinateKey(_ coordinate: CLLocationCoordinate2D?) -> String {
+        guard let coordinate else { return "" }
+        return String(format: "%.5f,%.5f", coordinate.latitude, coordinate.longitude)
+    }
+
     // MARK: - Public API used by the UI
 
     /// Step 1: fetch nearest drivers (via service)
@@ -627,13 +660,30 @@ final class RideManager: ObservableObject {
         estimate: RideEstimate? = nil,
         riderVerified: Bool = false
     ) {
+        let isSameTripDetails = Self.normalizedMatchmakingText(pickup) == Self.normalizedMatchmakingText(cachedPickup)
+            && Self.normalizedMatchmakingText(dropoff) == Self.normalizedMatchmakingText(cachedDropoff)
+            && Self.normalizedMatchmakingText(rideType) == Self.normalizedMatchmakingText(cachedRideType)
+        let effectivePickupCoordinate = pickupCoordinate ?? (isSameTripDetails ? cachedPickupCoordinate : nil)
+        let effectiveDropoffCoordinate = dropoffCoordinate ?? (isSameTripDetails ? cachedDropoffCoordinate : nil)
+
         cachedPickup = pickup
         cachedDropoff = dropoff
         cachedRideType = rideType
-        cachedPickupCoordinate = pickupCoordinate
-        cachedDropoffCoordinate = dropoffCoordinate
+        cachedPickupCoordinate = effectivePickupCoordinate
+        cachedDropoffCoordinate = effectiveDropoffCoordinate
         cachedRiderVerified = riderVerified
         cachedRidePreferences = nil
+        let matchmakingKey = Self.matchmakingKey(
+            pickup: pickup,
+            dropoff: dropoff,
+            rideType: rideType,
+            pickupCoordinate: effectivePickupCoordinate,
+            dropoffCoordinate: effectiveDropoffCoordinate
+        )
+        if matchmakingKey != activeMatchmakingKey {
+            activeMatchmakingKey = matchmakingKey
+            attemptedDriverIDs.removeAll()
+        }
         guard let estimate else {
             availableDrivers = []
             selectedDriver = nil
@@ -646,7 +696,6 @@ final class RideManager: ObservableObject {
         cachedEstimate = estimate
 
         driverSearchTask?.cancel()
-        attemptedDriverIDs.removeAll()
         selectedDriver = nil
         availableDrivers = []
         driverSearchCompletedCount = 0
@@ -665,16 +714,17 @@ final class RideManager: ObservableObject {
                     dropoff: dropoff,
                     rideType: rideType,
                     near: center,
-                    pickupCoordinate: pickupCoordinate,
-                    dropoffCoordinate: dropoffCoordinate,
+                    pickupCoordinate: effectivePickupCoordinate,
+                    dropoffCoordinate: effectiveDropoffCoordinate,
                     riderPreferences: preferences
                 )
 
                 guard !Task.isCancelled else { return }
 
-                let previewDrivers = Array(drivers.prefix(3))
+                let eligibleDrivers = drivers.filter { !self.attemptedDriverIDs.contains($0.id) }
+                let previewDrivers = Array(eligibleDrivers.prefix(3))
                 self.driverSearchTargetCount = 3
-                if drivers.isEmpty {
+                if eligibleDrivers.isEmpty {
                     self.availableDrivers = []
                     self.driverSearchCompletedCount = 0
                     self.isLoadingDrivers = false
@@ -692,7 +742,7 @@ final class RideManager: ObservableObject {
                     self.driverSearchCompletedCount = min(self.availableDrivers.count, self.driverSearchTargetCount)
                 }
 
-                self.availableDrivers = drivers
+                self.availableDrivers = eligibleDrivers
                 self.isLoadingDrivers = false
             } catch {
                 guard !Task.isCancelled else { return }
@@ -797,6 +847,7 @@ final class RideManager: ObservableObject {
     /// If driver declines, take user back to selection (remove that driver).
     func handleDecline(message: String? = nil) {
         if let declined = selectedDriver {
+            attemptedDriverIDs.insert(declined.id)
             availableDrivers.removeAll { $0.id == declined.id }
         }
         selectedDriver = nil
@@ -869,6 +920,7 @@ final class RideManager: ObservableObject {
         currentWaitChargePerMinute = 0
         hasPlayedTripStartedSoundForCurrentRide = false
         clearActiveRideSnapshot()
+        resetMatchmakingAttempt()
         state = .completed
         closeRideChatIfNeeded(chatContext)
 
@@ -963,6 +1015,7 @@ final class RideManager: ObservableObject {
         hasPlayedTripStartedSoundForCurrentRide = false
         releaseAppliedRydrBankCodeIfNeeded()
         clearActiveRideSnapshot()
+        resetMatchmakingAttempt()
         state = .cancelled
         closeRideChatIfNeeded(chatContext)
     }
@@ -1085,6 +1138,7 @@ final class RideManager: ObservableObject {
         let chatContext = activeRideChatContext
 
         if let selectedDriver {
+            attemptedDriverIDs.insert(selectedDriver.id)
             availableDrivers.removeAll { $0.id == selectedDriver.id }
         }
 
@@ -1107,6 +1161,9 @@ final class RideManager: ObservableObject {
                 dropoff: cachedDropoff,
                 rideType: cachedRideType,
                 near: cachedPickupCoordinate ?? liveDriverCoordinate,
+                pickupCoordinate: cachedPickupCoordinate,
+                dropoffCoordinate: cachedDropoffCoordinate,
+                estimate: cachedEstimate,
                 riderVerified: cachedRiderVerified
             )
         } else {
@@ -1141,6 +1198,7 @@ final class RideManager: ObservableObject {
         hasPlayedTripStartedSoundForCurrentRide = false
         releaseAppliedRydrBankCodeIfNeeded()
         clearActiveRideSnapshot()
+        resetMatchmakingAttempt()
         state = .cancelled
 
         Task {
@@ -1197,6 +1255,7 @@ final class RideManager: ObservableObject {
         hasPlayedTripStartedSoundForCurrentRide = false
         releaseAppliedRydrBankCodeIfNeeded()
         clearActiveRideSnapshot()
+        resetMatchmakingAttempt()
         state = .completed
         closeRideChatIfNeeded(chatContext)
 

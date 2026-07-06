@@ -30,6 +30,16 @@ struct MainTabView: View {
         .onChange(of: rideManager.hasRecoveredActiveRide, initial: false) { _, recovered in
             showRecoveredRide = recovered
         }
+        .onChange(of: rideManager.state, initial: false) { _, newState in
+            if newState == .idle || newState == .selecting || newState == .cancelled {
+                showRecoveredRide = false
+            }
+        }
+        .onChange(of: rideManager.currentRide?.id, initial: false) { _, rideId in
+            if rideId == nil && rideManager.state != .completed {
+                showRecoveredRide = false
+            }
+        }
         .fullScreenCover(isPresented: $showRecoveredRide, onDismiss: {
             rideManager.hasRecoveredActiveRide = false
         }) {
