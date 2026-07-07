@@ -7,7 +7,6 @@ import Foundation
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseMessaging
-import Security
 import UIKit
 import UserNotifications
 
@@ -197,12 +196,10 @@ final class DriverNotificationManager {
     private var apnsEnvironment: String {
         #if targetEnvironment(simulator)
         return "simulator"
+        #elseif DEBUG
+        return "development"
         #else
-        guard let task = SecTaskCreateFromSelf(nil),
-              let value = SecTaskCopyValueForEntitlement(task, "aps-environment" as CFString, nil) as? String else {
-            return "missing"
-        }
-        return value
+        return "production"
         #endif
     }
 
