@@ -2084,7 +2084,7 @@ struct DrawerDestinationView: View {
             } else if item == .documents {
                 DriverDocumentsView(vm: vm)
             } else if item == .settings {
-                DriverSettingsView()
+                DriverSettingsView(vm: vm)
             } else if item == .safety {
                 DriverSafetyCenterView(vm: vm)
             } else if item == .notifications {

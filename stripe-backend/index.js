@@ -451,7 +451,9 @@ async function driverAccountForRide(rideData) {
 const PLATFORM_MIN_FEE_SHARE = 0.30;
 
 const PAYMENT_STATUSES = new Set(["pending", "processing", "succeeded", "failed", "refunded"]);
-const CHARGEABLE_RIDE_STATUSES = new Set(["completed"]);
+const CANCELLATION_CHARGE_STATUSES = new Set(["riderCancelled", "cancelled"]);
+const PRORATED_CANCELLATION_STATUSES = new Set(["riderCancelled", "driverCancelled", "cancelled"]);
+const CHARGEABLE_RIDE_STATUSES = new Set(["completed", "driverCancelled", ...CANCELLATION_CHARGE_STATUSES]);
 
 function integerField(data, key) {
   const value = data?.[key];
@@ -512,6 +514,29 @@ function pickupWaitChargeCents(ride) {
 }
 
 function resolvedRideCharge(ride) {
+  if (PRORATED_CANCELLATION_STATUSES.has(ride?.status)) {
+    const proratedAmount = nonNegativeIntegerField(ride, "proratedCancellationChargeCents");
+    if (proratedAmount !== null) {
+      return {
+        amount: proratedAmount,
+        baseAmount: proratedAmount,
+        pickupPaidWaitSeconds: 0,
+        pickupWaitChargeCents: 0,
+      };
+    }
+  }
+
+  if (CANCELLATION_CHARGE_STATUSES.has(ride?.status)) {
+    const cancellationAmount = nonNegativeIntegerField(ride, "cancellationTotalChargeCents");
+    if (cancellationAmount === null) return null;
+    return {
+      amount: cancellationAmount,
+      baseAmount: cancellationAmount,
+      pickupPaidWaitSeconds: 0,
+      pickupWaitChargeCents: 0,
+    };
+  }
+
   const baseAmount = authorizedRideChargeCents(ride);
   if (baseAmount === null) return null;
   const wait = pickupWaitChargeCents(ride);
@@ -524,6 +549,20 @@ function resolvedRideCharge(ride) {
 }
 
 function platformFeeCents(ride, chargeAmountCents, resolvedCharge = null) {
+  if (PRORATED_CANCELLATION_STATUSES.has(ride?.status)) {
+    const proratedPlatformFee = nonNegativeIntegerField(ride, "proratedCancellationPlatformFeeCents");
+    if (proratedPlatformFee !== null) {
+      return Math.min(proratedPlatformFee, chargeAmountCents);
+    }
+  }
+
+  if (CANCELLATION_CHARGE_STATUSES.has(ride?.status)) {
+    const cancellationPlatformFee = nonNegativeIntegerField(ride, "cancellationPlatformFeeCents");
+    if (cancellationPlatformFee !== null) {
+      return Math.min(cancellationPlatformFee, chargeAmountCents);
+    }
+  }
+
   const explicitPlatformShare = nonNegativeIntegerField(ride, "estimatedPlatformShareCents");
   const promoDiscount = nonNegativeIntegerField(ride, "promoDiscountCents") ?? 0;
   const waitCharge = resolvedCharge?.pickupWaitChargeCents ?? 0;
@@ -535,6 +574,15 @@ function platformFeeCents(ride, chargeAmountCents, resolvedCharge = null) {
 }
 
 function driverPayoutCents(ride, resolvedCharge = null) {
+  if (PRORATED_CANCELLATION_STATUSES.has(ride?.status)) {
+    const proratedDriverPayout = nonNegativeIntegerField(ride, "proratedCancellationDriverPayoutCents");
+    if (proratedDriverPayout !== null) return proratedDriverPayout;
+  }
+
+  if (CANCELLATION_CHARGE_STATUSES.has(ride?.status)) {
+    return nonNegativeIntegerField(ride, "cancellationDriverPayoutCents") ?? 0;
+  }
+
   const explicitDriverPayout = nonNegativeIntegerField(ride, "estimatedDriverPayoutCents");
   const waitCharge = resolvedCharge?.pickupWaitChargeCents ?? 0;
   const waitDriverPayout = Math.max(0, waitCharge - Math.round(waitCharge * PLATFORM_MIN_FEE_SHARE));
@@ -983,6 +1031,9 @@ async function chargeRideAttempt({
     return { httpStatus: 404, body: { error: "ride_not_found_or_not_owned" } };
   }
   const { ref: rideRef, data: ride } = owned;
+  const paymentType = nonNegativeIntegerField(ride, "proratedCancellationChargeCents") !== null
+    ? "prorated_cancellation_fare"
+    : CANCELLATION_CHARGE_STATUSES.has(ride.status) ? "cancellation_fee" : "ride_fare";
   const attempt = (ride.retryCount || 0) + 1;
   const resolvedCharge = resolvedRideCharge(ride);
 
@@ -1154,7 +1205,7 @@ async function chargeRideAttempt({
     payment_method: resolvedPaymentMethodId,
     confirm: true,
     off_session: true,
-    metadata: { rideId, riderId: uid, driverId: ride.driverId || "", attempt: String(attempt) },
+    metadata: { rideId, riderId: uid, driverId: ride.driverId || "", attempt: String(attempt), paymentType },
   };
   if (driverAccountId) {
     params.application_fee_amount = applicationFeeAmount;

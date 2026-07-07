@@ -24,6 +24,7 @@ type RideStatus =
   | "cancelled"
   | "riderCancelled"
   | "driverCancelled"
+  | "adminCancelled"
   | "declined"
   | string;
 
@@ -46,7 +47,7 @@ function normalizeStatus(status: RideStatus | undefined): string {
 
 const ARRIVED_STATUSES = new Set(["arrived", "arrivedAtPickup", "waitingForRider"]);
 const IN_PROGRESS_STATUSES = new Set(["inProgress", "in_progress"]);
-const CANCELLED_STATUSES = new Set(["cancelled", "riderCancelled", "driverCancelled"]);
+const CANCELLED_STATUSES = new Set(["cancelled", "riderCancelled", "driverCancelled", "adminCancelled"]);
 
 /**
  * Fires on every write to `rides/{rideId}`. Only acts on the specific
@@ -112,12 +113,17 @@ export const onRideUpdated = onDocumentUpdated("rides/{rideId}", async (event) =
       }
     } else if (CANCELLED_STATUSES.has(afterStatus) && !CANCELLED_STATUSES.has(beforeStatus)) {
       const cancelledByDriver = afterStatus === "driverCancelled";
+      const cancelledByAdmin = afterStatus === "adminCancelled";
       if (riderId) {
         await sendPushToUser({
           audience: "rider",
           uid: riderId,
           title: "Ride cancelled",
-          body: cancelledByDriver ? "Your driver cancelled this ride. Choose another nearby driver to keep going." : "Your ride was cancelled.",
+          body: cancelledByDriver
+            ? "Your driver cancelled this ride. Choose another nearby driver to keep going."
+            : cancelledByAdmin
+              ? "Support cancelled this ride. Open Rydr to request another ride."
+              : "Your ride was cancelled.",
           route: { type: "rideCancelled", target: "home", rideId }
         });
       }

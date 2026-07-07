@@ -182,6 +182,7 @@ export interface AuditLogEntry {
   targetType:
     | "driver"
     | "rider"
+    | "ride"
     | "report"
     | "vehicleLibrary"
     | "accountDeletion"
@@ -191,6 +192,7 @@ export interface AuditLogEntry {
     | "betaWaitlist";
   targetId: string;
   reason?: string;
+  metadata?: Record<string, unknown>;
   createdAt: unknown;
 }
 

@@ -10,6 +10,7 @@ import { VEHICLE_COLORS, type VehicleColor, type VehicleBodyStyle } from "./type
 // rider/driver apps and Mission Control already write/read, so every
 // notification is a reflection of real, persisted server state.
 export { onRideUpdated } from "./triggers/rideNotifications";
+export { onRideRequestCreated, onRideChatMessageCreated } from "./triggers/rideRequestNotifications";
 export { onSupportMessageCreated } from "./triggers/supportNotifications";
 export { onDriverApprovalDecision } from "./triggers/driverApprovalNotifications";
 export { onDriverAutoApprovalEligibility } from "./triggers/driverAutoApproval";

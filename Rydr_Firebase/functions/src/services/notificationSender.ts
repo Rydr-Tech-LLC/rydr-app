@@ -18,6 +18,7 @@ export type NotificationAudience = "rider" | "driver";
 
 /** Matches NotificationRoute/DriverNotificationRoute's `type` field on the client. */
 export type NotificationType =
+  | "newRideRequest"
   | "rideAccepted"
   | "driverArrived"
   | "rideStarted"
@@ -25,6 +26,7 @@ export type NotificationType =
   | "rideCancelled"
   | "paymentFailed"
   | "paymentPending"
+  | "rideMessage"
   | "supportReply"
   | "driverApprovalDecision"
   | "rydrBankCode"

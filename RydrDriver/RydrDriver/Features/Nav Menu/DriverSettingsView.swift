@@ -3,6 +3,7 @@ import FirebaseAuth
 import FirebaseFirestore
 
 struct DriverSettingsView: View {
+    @ObservedObject var vm: DriverDashboardVM
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(DriverNavigationHandoff.preferenceKey) private var defaultNavigationProvider = DriverNavigationProvider.rydr.rawValue
 
@@ -13,6 +14,7 @@ struct DriverSettingsView: View {
         List {
             accountSection
             navigationSection
+            queuedRideSection
             driverAppSection
         }
         .listStyle(.insetGrouped)
@@ -116,6 +118,25 @@ struct DriverSettingsView: View {
             Text("Navigation")
         } footer: {
             Text("Rydr Map is the default in-app driver map. External apps are optional handoffs for turn-by-turn navigation.")
+        }
+    }
+
+    private var queuedRideSection: some View {
+        Section {
+            Toggle(isOn: $vm.autoAcceptQueuedRides) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Auto-Accept Queued Rides")
+                        .font(.body.weight(.semibold))
+                    Text("When a rider selects you during an active trip, add the request to your queue automatically.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        } header: {
+            Text("Ride Queue")
+        } footer: {
+            Text("Queued rides wait until your current ride ends. If this is off, you can accept or decline queued requests manually.")
         }
     }
 

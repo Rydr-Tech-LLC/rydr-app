@@ -14,12 +14,16 @@ import StatusPill from "@/components/StatusPill";
 import ImageViewer from "@/components/ImageViewer";
 import RequirementChecklist from "@/components/RequirementChecklist";
 import TripSafetyAnalytics from "@/components/TripSafetyAnalytics";
+import { findActiveRideForDriver } from "@/lib/activeRides";
 import DriverActions from "./DriverActions";
 
 export const dynamic = "force-dynamic";
 
 export default async function DriverReviewPage({ params }: { params: { uid: string } }) {
-  const snap = await adminDb.collection("drivers").doc(params.uid).get();
+  const [snap, activeRide] = await Promise.all([
+    adminDb.collection("drivers").doc(params.uid).get(),
+    findActiveRideForDriver(params.uid)
+  ]);
   if (!snap.exists) notFound();
 
   const driver = { ...(snap.data() as DriverRecord), uid: snap.id };
@@ -198,7 +202,7 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
             <RequirementChecklist checks={checks} />
           </Section>
 
-          <DriverActions uid={driver.uid} missing={missing} />
+          <DriverActions uid={driver.uid} missing={missing} activeRide={activeRide} />
         </div>
       </div>
     </div>

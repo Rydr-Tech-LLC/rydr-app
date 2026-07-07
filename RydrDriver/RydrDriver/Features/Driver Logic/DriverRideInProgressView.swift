@@ -345,10 +345,6 @@ struct DriverRideInProgressView: View {
             }
 
             VStack(spacing: 0) {
-                navigationOption("Message Rider", icon: "message.fill") {
-                    showMessageSheet = true
-                }
-                Divider().padding(.leading, 58)
                 navigationOption("Open in \(DriverNavigationHandoff.currentProvider.title)", icon: DriverNavigationHandoff.currentProvider.icon) {
                     openNavigation(provider: DriverNavigationHandoff.currentProvider)
                 }
@@ -501,7 +497,7 @@ struct DriverRideInProgressView: View {
     }
 
     private var shouldShowCancelRideButton: Bool {
-        [.accepted, .navigatingToPickup, .waitingForRider].contains(lifecyclePhase)
+        lifecyclePhase != .completed
     }
 
     private var driverCancellationReasons: [String] {

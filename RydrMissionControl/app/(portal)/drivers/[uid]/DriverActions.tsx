@@ -2,13 +2,16 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import type { ActiveRideSummary } from "@/lib/activeRideTypes";
 
 export default function DriverActions({
   uid,
-  missing
+  missing,
+  activeRide
 }: {
   uid: string;
   missing: string[];
+  activeRide: ActiveRideSummary | null;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
@@ -57,6 +60,30 @@ export default function DriverActions({
     }
   }
 
+  async function cancelActiveRide() {
+    if (!activeRide) return;
+    const confirmed = window.confirm(`Cancel active ride ${activeRide.id}? This will end the ride for both rider and driver.`);
+    if (!confirmed) return;
+
+    setLoading("cancel_ride");
+    setError(null);
+    try {
+      const response = await fetch(`/api/rides/${activeRide.id}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reason || undefined })
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setError(body.error ?? "Something went wrong.");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setLoading(null);
+    }
+  }
+
   async function deleteDriver() {
     const confirmed = window.confirm(
       "This permanently deletes this driver's account, sign-in, and Stripe records. This cannot be undone and is separate from the account deletion request queue. Continue?"
@@ -98,7 +125,7 @@ export default function DriverActions({
       <textarea
         value={reason}
         onChange={(e) => setReason(e.target.value)}
-        placeholder="Optional reason (used for beta deferral / Needs Attention / Reject)"
+        placeholder="Optional reason"
         className="mb-3 w-full rounded-md border border-line bg-grouped px-3 py-2 text-xs outline-none focus:border-ink"
         rows={2}
       />
@@ -135,6 +162,22 @@ export default function DriverActions({
           {loading === "rejected" ? "Rejecting…" : "Reject Driver"}
         </button>
       </div>
+
+      {activeRide && (
+        <div className="mt-5 border-t border-line pt-4">
+          <p className="mb-2 text-[11px] font-medium text-muted">
+            Active ride {activeRide.id} · {activeRide.status}
+            {activeRide.pickup ? ` · ${activeRide.pickup}` : ""}
+          </p>
+          <button
+            disabled={loading !== null}
+            onClick={cancelActiveRide}
+            className="w-full rounded-md border border-rydr-red bg-white py-2 text-xs font-semibold text-rydr-red transition hover:bg-rydr-red/5 disabled:opacity-40"
+          >
+            {loading === "cancel_ride" ? "Cancelling…" : "Cancel Active Ride"}
+          </button>
+        </div>
+      )}
 
       <div className="mt-5 border-t border-line pt-4">
         <p className="mb-2 text-[11px] font-medium text-muted">

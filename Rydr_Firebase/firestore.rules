@@ -186,7 +186,26 @@ service cloud.firestore {
           "cancelledAt",
           "cancelledBy",
           "cancelledByRole",
+          "cancellationBookingFeeCents",
+          "cancellationDriverPayoutCents",
+          "cancellationFeeApplies",
+          "cancellationFeeCents",
+          "cancellationFeeRateBasisPoints",
+          "cancellationMode",
+          "cancellationPickupEtaSeconds",
+          "cancellationPlatformFeeCents",
           "cancellationReason",
+          "cancellationRideSubtotalCents",
+          "cancellationTotalChargeCents",
+          "driverPayoutCents",
+          "finalRiderChargeCents",
+          "paymentStatus",
+          "proratedCancellation",
+          "proratedCancellationChargeCents",
+          "proratedCancellationDistanceMiles",
+          "proratedCancellationDriverPayoutCents",
+          "proratedCancellationPlatformFeeCents",
+          "proratedCancellationReason",
           "status",
           "updatedAt"
         ]);
@@ -196,7 +215,17 @@ service cloud.firestore {
       return isUnclaimedRideRequest(resource.data)
         && request.resource.data.acceptedDriverId == request.auth.uid
         && request.resource.data.status == "accepted"
-        && affectedKeys().hasOnly(["status", "acceptedAt", "acceptedDriverId", "rideId", "updatedAt"]);
+        && affectedKeys().hasOnly([
+          "acceptedAt",
+          "acceptedDriverId",
+          "activeAt",
+          "driverQueueStatus",
+          "queuedAt",
+          "rideId",
+          "riderStatusMessage",
+          "status",
+          "updatedAt"
+        ]);
     }
 
     function validRideLifecycleUpdate() {
@@ -209,7 +238,17 @@ service cloud.firestore {
           "cancelledAt",
           "cancelledBy",
           "cancelledByRole",
+          "cancellationBookingFeeCents",
+          "cancellationDriverPayoutCents",
+          "cancellationFeeApplies",
+          "cancellationFeeCents",
+          "cancellationFeeRateBasisPoints",
+          "cancellationMode",
+          "cancellationPickupEtaSeconds",
+          "cancellationPlatformFeeCents",
           "cancellationReason",
+          "cancellationRideSubtotalCents",
+          "cancellationTotalChargeCents",
           "cashCompletedAt",
           "cashRideStartedAt",
           "completedAt",
@@ -219,9 +258,11 @@ service cloud.firestore {
           "driverLocation",
           "driverLocationUpdatedAt",
           "driverMarkedMissedAt",
+          "driverPayoutCents",
           "driverQueueStatus",
           "driverRiderRating",
           "enRouteToPickupAt",
+          "finalRiderChargeCents",
           "headedToDropoffAt",
           "hasActiveRide",
           "missedAt",
@@ -232,6 +273,16 @@ service cloud.firestore {
           "pickupComplimentaryWaitSeconds",
           "pickupPaidWaitStartedAt",
           "pickupWaitStartedAt",
+          "paymentStatus",
+          "proratedCancellation",
+          "proratedCancellationChargeCents",
+          "proratedCancellationDistanceMiles",
+          "proratedCancellationDriverPayoutCents",
+          "proratedCancellationPlatformFeeCents",
+          "proratedCancellationProgress",
+          "proratedCancellationReason",
+          "queuedAt",
+          "queuedRideStartedAt",
           "releasedAt",
           "riderRideState",
           "riderDriverRating",
@@ -582,6 +633,7 @@ service cloud.firestore {
       allow create, update: if isSelf(uid)
         && request.resource.data.keys().hasOnly([
           "availabilityStatus",
+          "autoAcceptQueuedRides",
           "course",
           "hasActiveRide",
           "isOnline",

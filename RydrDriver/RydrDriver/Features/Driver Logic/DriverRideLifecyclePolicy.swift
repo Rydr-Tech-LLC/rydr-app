@@ -15,7 +15,7 @@ enum DriverRideLifecyclePolicy {
             return "inProgress"
         case "dropoffArrived":
             return "arrivedAtDropoff"
-        case "driverCancelled":
+        case "driverCancelled", "riderCancelled", "adminCancelled":
             return "cancelled"
         default:
             return status

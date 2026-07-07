@@ -4,6 +4,7 @@ import type { RiderRecord } from "@/lib/types";
 import { toDateSafe, fullName } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
 import TripSafetyAnalytics from "@/components/TripSafetyAnalytics";
+import { findActiveRideForRider } from "@/lib/activeRides";
 import RiderActions from "./RiderActions";
 import RydrBankMintPanel from "./RydrBankMintPanel";
 
@@ -20,10 +21,11 @@ interface RydrBankCodeRecord {
 }
 
 export default async function RiderReviewPage({ params }: { params: { uid: string } }) {
-  const [snap, userSnap, codesSnap] = await Promise.all([
+  const [snap, userSnap, codesSnap, activeRide] = await Promise.all([
     adminDb.collection("riders").doc(params.uid).get(),
     adminDb.collection("users").doc(params.uid).get(),
-    adminDb.collection("users").doc(params.uid).collection("rydrBankCodes").orderBy("createdAt", "desc").limit(20).get()
+    adminDb.collection("users").doc(params.uid).collection("rydrBankCodes").orderBy("createdAt", "desc").limit(20).get(),
+    findActiveRideForRider(params.uid)
   ]);
   if (!snap.exists) notFound();
 
@@ -150,6 +152,7 @@ export default async function RiderReviewPage({ params }: { params: { uid: strin
             uid={rider.uid}
             accountStatus={accountStatus}
             hasStudentAmbassadorBadge={hasStudentAmbassadorBadge}
+            activeRide={activeRide}
           />
         </div>
       </div>

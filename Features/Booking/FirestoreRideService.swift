@@ -177,7 +177,11 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                         rawStatus: rawStatus,
                         driverCoordinate: Self.coordinate(from: data["driverLocation"]),
                         pickupCoordinate: Self.coordinate(from: data["pickupCoordinate"]) ?? Self.coordinate(from: data["pickupGeoPoint"]),
-                        dropoffCoordinate: Self.coordinate(from: data["dropoffCoordinate"]) ?? Self.coordinate(from: data["dropoffGeoPoint"])
+                        dropoffCoordinate: Self.coordinate(from: data["dropoffCoordinate"]) ?? Self.coordinate(from: data["dropoffGeoPoint"]),
+                        pickupWaitStartedAt: Self.date(from: data["pickupWaitStartedAt"] ?? data["arrivedAtPickupAt"]),
+                        pickupComplimentaryWaitSeconds: Self.intValue(data["pickupComplimentaryWaitSeconds"]),
+                        proratedCancellationChargeCents: Self.intValue(data["proratedCancellationChargeCents"]),
+                        proratedCancellationDistanceMiles: Self.doubleValue(data["proratedCancellationDistanceMiles"])
                     )
                     continuation.yield(snapshot)
 
@@ -192,18 +196,39 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         }
     }
 
-    func cancelRide(rideId: String) async throws {
+    func cancelRide(rideId: String, mode: RideCancellationMode, quote: RideCancellationQuote?) async throws {
         guard let uid = Auth.auth().currentUser?.uid else {
             throw RideDispatchError.notSignedIn
         }
-        let update: [String: Any] = [
+        var update: [String: Any] = [
             "status": "riderCancelled",
             "cancelledBy": uid,
             "cancelledByRole": "rider",
-            "cancellationReason": "Rider cancelled",
+            "cancellationReason": mode == .findAnotherDriver ? "Rider cancelled to find another driver" : "Rider cancelled",
             "cancelledAt": FieldValue.serverTimestamp(),
             "updatedAt": FieldValue.serverTimestamp()
         ]
+        update.merge(quote?.asFirestoreFields ?? [:]) { _, new in new }
+        try await db.collection("rideRequests").document(rideId).setData(update, merge: true)
+        try await db.collection("rides").document(rideId).setData(update, merge: true)
+    }
+
+    func cancelMidRide(rideId: String, quote: ProratedRideCancellationQuote) async throws {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            throw RideDispatchError.notSignedIn
+        }
+        var update: [String: Any] = [
+            "status": "riderCancelled",
+            "cancelledBy": uid,
+            "cancelledByRole": "rider",
+            "cancellationReason": "Rider cancelled mid-ride",
+            "cancelledAt": FieldValue.serverTimestamp(),
+            "riderRideState": "cancelled",
+            "riderStatusMessage": "Ride cancelled.",
+            "paymentStatus": "pending",
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        update.merge(quote.asFirestoreFields) { _, new in new }
         try await db.collection("rideRequests").document(rideId).setData(update, merge: true)
         try await db.collection("rides").document(rideId).setData(update, merge: true)
     }
@@ -240,10 +265,10 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             dropoffCoordinate: dropoffCoordinate
         ) else { return nil }
 
-        let rating = doubleValue(data["rating"]) ?? 5.0
-        let ratingCount = intValue(data["ratingCount"]) ?? 0
-        let completedRideCount = intValue(data["completedRideCount"] ?? data["lifetimeRideCount"])
-        let acceptanceRate = intValue(data["acceptanceRate"])
+        let rating = Self.doubleValue(data["rating"]) ?? 5.0
+        let ratingCount = Self.intValue(data["ratingCount"]) ?? 0
+        let completedRideCount = Self.intValue(data["completedRideCount"] ?? data["lifetimeRideCount"])
+        let acceptanceRate = Self.intValue(data["acceptanceRate"])
         let pricing = RydrPricing.config(for: rideType)
         let rate = driverRate(from: data, rideType: rideType, pricing: pricing)
         let gender = driverGender(from: data)
@@ -286,7 +311,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             return .enRouteToDropoff
         case "completed":
             return .completed
-        case "cancelled", "riderCancelled", "driverCancelled":
+        case "cancelled", "riderCancelled", "driverCancelled", "adminCancelled":
             return .cancelled
         default:
             return nil
@@ -304,6 +329,12 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         return CLLocationCoordinate2D(latitude: lat, longitude: lng)
     }
 
+    private static func date(from raw: Any?) -> Date? {
+        if let timestamp = raw as? Timestamp { return timestamp.dateValue() }
+        if let date = raw as? Date { return date }
+        return nil
+    }
+
     private static func number(_ raw: Any?) -> CLLocationDegrees? {
         if let value = raw as? CLLocationDegrees { return value }
         if let value = raw as? NSNumber { return value.doubleValue }
@@ -317,7 +348,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func intValue(_ raw: Any?) -> Int? {
+    private static func intValue(_ raw: Any?) -> Int? {
         if let value = raw as? Int { return value }
         if let value = raw as? NSNumber { return value.intValue }
         if let value = raw as? Double { return Int(value) }
@@ -334,7 +365,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         guard let filters else { return true }
 
         if (filters["workZoneEnabled"] as? Bool) == true {
-            let radiusMiles = doubleValue(filters["workZoneRadiusMiles"]) ?? 0
+            let radiusMiles = Self.doubleValue(filters["workZoneRadiusMiles"]) ?? 0
             let pickupMiles = CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
                 .distance(from: CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)) / 1609.344
             guard radiusMiles > 0, pickupMiles <= radiusMiles else { return false }
@@ -355,7 +386,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         let pickupToDestinationMiles = pickupLocation.distance(from: destinationLocation) / 1609.344
         let dropoffToDestinationMiles = dropoffLocation.distance(from: destinationLocation) / 1609.344
         let corridorMiles = distanceFromPointToSegmentMiles(point: dropoffCoordinate, start: driverCoordinate, end: destinationCoordinate)
-        let allowedCorridorMiles = doubleValue(filters["destinationCorridorMiles"]) ?? 5
+        let allowedCorridorMiles = Self.doubleValue(filters["destinationCorridorMiles"]) ?? 5
 
         return dropoffToDestinationMiles <= pickupToDestinationMiles
             && corridorMiles <= allowedCorridorMiles
@@ -370,8 +401,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         let canonical = canonicalRideType(rideType)
         let rawRate = tierRates?[canonical] as? [String: Any]
             ?? tierRates?[pricing.title] as? [String: Any]
-        let rawPerMile = doubleValue(rawRate?["perMile"]) ?? doubleValue(data["perMile"]) ?? pricing.minPerMile
-        let rawPerMinute = doubleValue(rawRate?["perMinute"]) ?? doubleValue(data["perMinute"]) ?? pricing.minPerMinute
+        let rawPerMile = Self.doubleValue(rawRate?["perMile"]) ?? Self.doubleValue(data["perMile"]) ?? pricing.minPerMile
+        let rawPerMinute = Self.doubleValue(rawRate?["perMinute"]) ?? Self.doubleValue(data["perMinute"]) ?? pricing.minPerMinute
         return (
             perMile: pricing.clampedPerMile(rawPerMile),
             perMinute: pricing.clampedPerMinute(rawPerMinute)
@@ -404,8 +435,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             return CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
         }
         guard let data = value as? [String: Any] else { return nil }
-        let lat = doubleValue(data["lat"] ?? data["latitude"])
-        let lng = doubleValue(data["lng"] ?? data["longitude"])
+        let lat = Self.doubleValue(data["lat"] ?? data["latitude"])
+        let lng = Self.doubleValue(data["lng"] ?? data["longitude"])
         guard let lat, let lng else { return nil }
         return CLLocationCoordinate2D(latitude: lat, longitude: lng)
     }
@@ -522,7 +553,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         return key
     }
 
-    private func doubleValue(_ value: Any?) -> Double? {
+    private static func doubleValue(_ value: Any?) -> Double? {
         if let double = value as? Double { return double }
         if let int = value as? Int { return Double(int) }
         if let number = value as? NSNumber { return number.doubleValue }

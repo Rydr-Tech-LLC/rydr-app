@@ -156,7 +156,7 @@ struct DriverRideWorkPanel: View {
 
     var body: some View {
         Group {
-            if let request = vm.pendingRequests.first, vm.activeRide == nil {
+            if let request = vm.pendingRequests.first {
                 IncomingRideRequestCard(
                     request: request,
                     driverCoordinate: vm.lastLocation?.coordinate,

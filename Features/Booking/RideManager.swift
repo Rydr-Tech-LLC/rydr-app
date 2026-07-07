@@ -412,12 +412,72 @@ struct RideChatContext: Equatable {
 // MARK: - Service protocol
 enum DriverDecision { case accepted, declined }
 
+enum RideCancellationMode: String, Codable {
+    case cancelRide
+    case findAnotherDriver
+}
+
+struct RideCancellationQuote {
+    let mode: RideCancellationMode
+    let appliesFee: Bool
+    let pickupEtaSeconds: Int
+    let rideSubtotalCents: Int
+    let bookingFeeCents: Int
+    let cancellationFeeCents: Int
+    let platformFeeCents: Int
+    let driverPayoutCents: Int
+    let totalChargeCents: Int
+
+    var asFirestoreFields: [String: Any] {
+        [
+            "cancellationMode": mode.rawValue,
+            "cancellationFeeApplies": appliesFee,
+            "cancellationPickupEtaSeconds": pickupEtaSeconds,
+            "cancellationRideSubtotalCents": rideSubtotalCents,
+            "cancellationFeeRateBasisPoints": 2000,
+            "cancellationFeeCents": cancellationFeeCents,
+            "cancellationBookingFeeCents": bookingFeeCents,
+            "cancellationPlatformFeeCents": platformFeeCents,
+            "cancellationDriverPayoutCents": driverPayoutCents,
+            "cancellationTotalChargeCents": totalChargeCents,
+            "finalRiderChargeCents": totalChargeCents,
+            "driverPayoutCents": driverPayoutCents
+        ]
+    }
+}
+
+struct ProratedRideCancellationQuote {
+    let chargeCents: Int
+    let distanceMiles: Double
+    let driverPayoutCents: Int
+    let platformFeeCents: Int
+    let cancelledByRole: String
+
+    var asFirestoreFields: [String: Any] {
+        [
+            "proratedCancellation": true,
+            "proratedCancellationReason": "midRide",
+            "proratedCancellationDistanceMiles": distanceMiles,
+            "proratedCancellationChargeCents": chargeCents,
+            "proratedCancellationDriverPayoutCents": driverPayoutCents,
+            "proratedCancellationPlatformFeeCents": platformFeeCents,
+            "finalRiderChargeCents": chargeCents,
+            "driverPayoutCents": driverPayoutCents,
+            "cancelledByRole": cancelledByRole
+        ]
+    }
+}
+
 struct RideLifecycleSnapshot {
     let status: Ride.Status?
     let rawStatus: String?
     let driverCoordinate: CLLocationCoordinate2D?
     let pickupCoordinate: CLLocationCoordinate2D?
     let dropoffCoordinate: CLLocationCoordinate2D?
+    let pickupWaitStartedAt: Date?
+    let pickupComplimentaryWaitSeconds: Int?
+    let proratedCancellationChargeCents: Int?
+    let proratedCancellationDistanceMiles: Double?
 }
 
 enum RideRequestError: LocalizedError {
@@ -462,7 +522,8 @@ protocol RideService: AnyObject, Sendable {
     func awaitDriverDecision(rideId: String) async throws -> DriverDecision
     func rideLifecycleStream(rideId: String) -> AsyncThrowingStream<RideLifecycleSnapshot, Error>
     func driverLocationStream(rideId: String) -> AsyncStream<CLLocationCoordinate2D>
-    func cancelRide(rideId: String) async throws
+    func cancelRide(rideId: String, mode: RideCancellationMode, quote: RideCancellationQuote?) async throws
+    func cancelMidRide(rideId: String, quote: ProratedRideCancellationQuote) async throws
 }
 
 // MARK: - Manager (rider app)
@@ -527,6 +588,8 @@ final class RideManager: ObservableObject {
     private var driverSearchTask: Task<Void, Never>?
     private var decisionTask: Task<Void, Never>?
     private var rideLifecycleTask: Task<Void, Never>?
+    private var pickupWaitCountdownTask: Task<Void, Never>?
+    private var chargedProratedCancellationRideIDs = Set<String>()
 
     // Internals used across steps
     private var attemptedDriverIDs: Set<String> = []
@@ -549,6 +612,7 @@ final class RideManager: ObservableObject {
     private let cancellationSoundPlayer = RiderCancellationSoundPlayer()
     private let activeRideSnapshotKey = "rydr.activeRideSnapshot.v1"
     private let driverDecisionTimeoutSeconds: UInt64 = 18
+    private let cancellationFeeWindowSeconds = 120
 
     init(rideService: RideService = FirestoreRideService()) {
         self.rideService = rideService
@@ -562,6 +626,7 @@ final class RideManager: ObservableObject {
     deinit {
         decisionTask?.cancel()
         rideLifecycleTask?.cancel()
+        pickupWaitCountdownTask?.cancel()
     }
 
     // Remaining minutes (toy ETA for the chip)
@@ -834,7 +899,7 @@ final class RideManager: ObservableObject {
             fare: fareAfterPromo
         )
         liveDriverCoordinate = start
-        pickupEtaSecondsRemaining = max(60, Int((cachedEstimate.durationMinutes * 0.4 * 60).rounded()))
+        pickupEtaSecondsRemaining = estimatedPickupEtaSeconds(from: start, to: pickup)
         destinationEtaSecondsRemaining = max(60, Int((cachedEstimate.durationMinutes * 0.6 * 60).rounded()))
         pickupWaitSecondsRemaining = 180
         paidPickupWaitSeconds = 0
@@ -869,7 +934,7 @@ final class RideManager: ObservableObject {
 
         switch ride.status {
         case .enRouteToPickup, .waitingForRider:
-            cancelBeforePickupAndReturnToSelection()
+            cancelBeforePickupAndReturnToSelection(mode: .findAnotherDriver)
         case .enRouteToDropoff:
             cancelMidRideAndComplete()
         default:
@@ -880,7 +945,7 @@ final class RideManager: ObservableObject {
     func riderCancelRide() {
         guard currentRide != nil else { return }
         cancellationSoundPlayer.play()
-        cancelRideWithoutReassignment()
+        cancelRideWithoutReassignment(mode: .cancelRide)
     }
 
     /// Complete ride -> create receipt + push to history.
@@ -1006,6 +1071,7 @@ final class RideManager: ObservableObject {
     func cancelAll() {
         decisionTask?.cancel()
         rideLifecycleTask?.cancel()
+        pickupWaitCountdownTask?.cancel()
         let chatContext = activeRideChatContext
         currentRide = nil
         selectedDriver = nil
@@ -1092,6 +1158,51 @@ final class RideManager: ObservableObject {
         )
     }
 
+    private func cancellationQuote(for ride: Ride, mode: RideCancellationMode) -> RideCancellationQuote {
+        let breakdown = Self.fareBreakdown(estimate: ride.estimate, with: ride.driver, rideType: ride.rideType)
+        let pickupEtaSeconds = currentPickupEtaSeconds(for: ride)
+        let appliesFee = ride.status == .waitingForRider || pickupEtaSeconds <= cancellationFeeWindowSeconds
+        let rideSubtotalCents = Self.cents(breakdown.rideSubtotal)
+        let bookingFeeCents = appliesFee && mode == .cancelRide ? Self.cents(breakdown.bookingFee) : 0
+        let cancellationFeeCents = appliesFee ? Int((Double(rideSubtotalCents) * 0.20).rounded()) : 0
+        let totalChargeCents = bookingFeeCents + cancellationFeeCents
+
+        return RideCancellationQuote(
+            mode: mode,
+            appliesFee: appliesFee,
+            pickupEtaSeconds: pickupEtaSeconds,
+            rideSubtotalCents: rideSubtotalCents,
+            bookingFeeCents: bookingFeeCents,
+            cancellationFeeCents: cancellationFeeCents,
+            platformFeeCents: bookingFeeCents,
+            driverPayoutCents: cancellationFeeCents,
+            totalChargeCents: totalChargeCents
+        )
+    }
+
+    private func currentPickupEtaSeconds(for ride: Ride) -> Int {
+        if ride.status == .waitingForRider { return 0 }
+        if let pickupCoordinate {
+            return estimatedPickupEtaSeconds(from: liveDriverCoordinate, to: pickupCoordinate)
+        }
+        return max(0, pickupEtaSecondsRemaining)
+    }
+
+    private func estimatedPickupEtaSeconds(
+        from driverCoordinate: CLLocationCoordinate2D,
+        to pickupCoordinate: CLLocationCoordinate2D
+    ) -> Int {
+        let driverLocation = CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
+        let pickupLocation = CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)
+        let distanceMeters = max(0, driverLocation.distance(from: pickupLocation))
+        guard distanceMeters > 20 else { return 0 }
+
+        // Conservative city pickup speed. This replaces the old trip-duration
+        // percentage estimate, which made same-device tests look 10+ minutes away.
+        let metersPerSecond = 8.0
+        return Int(ceil(distanceMeters / metersPerSecond))
+    }
+
     private func receiptChargeBreakdown(
         for ride: Ride,
         finalFare: Double,
@@ -1132,10 +1243,20 @@ final class RideManager: ObservableObject {
         currentRide?.fare = ((currentBaseFare + pickupWaitCharge) * 100).rounded() / 100
     }
 
-    private func cancelBeforePickupAndReturnToSelection(notifyBackend: Bool = true) {
+    private func cancelBeforePickupAndReturnToSelection(
+        mode: RideCancellationMode = .findAnotherDriver,
+        notifyBackend: Bool = true
+    ) {
         rideLifecycleTask?.cancel()
         decisionTask?.cancel()
+        pickupWaitCountdownTask?.cancel()
         let chatContext = activeRideChatContext
+        let cancellationQuote: RideCancellationQuote?
+        if let ride = currentRide {
+            cancellationQuote = self.cancellationQuote(for: ride, mode: mode)
+        } else {
+            cancellationQuote = nil
+        }
 
         if let selectedDriver {
             attemptedDriverIDs.insert(selectedDriver.id)
@@ -1173,17 +1294,27 @@ final class RideManager: ObservableObject {
 
         Task {
             if notifyBackend, let id = cancelledServiceRideId {
-                try? await rideService.cancelRide(rideId: id)
+                try? await rideService.cancelRide(rideId: id, mode: mode, quote: cancellationQuote)
+                if (cancellationQuote?.totalChargeCents ?? 0) > 0 {
+                    await chargeCancellationFee(rideId: id)
+                }
             }
         }
         closeRideChatIfNeeded(chatContext)
     }
 
-    private func cancelRideWithoutReassignment() {
+    private func cancelRideWithoutReassignment(mode: RideCancellationMode) {
         rideLifecycleTask?.cancel()
         decisionTask?.cancel()
+        pickupWaitCountdownTask?.cancel()
         let chatContext = activeRideChatContext
         let cancelledServiceRideId = currentServiceRideId
+        let cancellationQuote: RideCancellationQuote?
+        if let ride = currentRide {
+            cancellationQuote = self.cancellationQuote(for: ride, mode: mode)
+        } else {
+            cancellationQuote = nil
+        }
 
         currentRide = nil
         selectedDriver = nil
@@ -1203,7 +1334,10 @@ final class RideManager: ObservableObject {
 
         Task {
             if let id = cancelledServiceRideId {
-                try? await rideService.cancelRide(rideId: id)
+                try? await rideService.cancelRide(rideId: id, mode: mode, quote: cancellationQuote)
+                if (cancellationQuote?.totalChargeCents ?? 0) > 0 {
+                    await chargeCancellationFee(rideId: id)
+                }
             }
         }
         closeRideChatIfNeeded(chatContext)
@@ -1227,6 +1361,16 @@ final class RideManager: ObservableObject {
             for: ride,
             finalFare: proratedFare,
             includeRideTimeAdjustment: true
+        )
+        let proratedChargeCents = Self.cents(proratedFare)
+        let proratedPlatformFeeCents = Int((Double(proratedChargeCents) * 0.30).rounded())
+        let proratedDriverPayoutCents = max(0, proratedChargeCents - proratedPlatformFeeCents)
+        let proratedQuote = ProratedRideCancellationQuote(
+            chargeCents: proratedChargeCents,
+            distanceMiles: proratedDistance,
+            driverPayoutCents: proratedDriverPayoutCents,
+            platformFeeCents: proratedPlatformFeeCents,
+            cancelledByRole: "rider"
         )
 
         lastReceipt = Receipt(
@@ -1260,7 +1404,8 @@ final class RideManager: ObservableObject {
         closeRideChatIfNeeded(chatContext)
 
         Task {
-            print("ℹ️ Mid-ride rider cancellation payment capture waits for backend cancellation adjudication (rideId: \(backendRideId)).")
+            try? await rideService.cancelMidRide(rideId: backendRideId, quote: proratedQuote)
+            await chargeCancellationFee(rideId: backendRideId)
         }
     }
 
@@ -1290,6 +1435,9 @@ final class RideManager: ObservableObject {
 
         if let driverCoordinate = snapshot.driverCoordinate {
             liveDriverCoordinate = driverCoordinate
+            if currentRide?.status == .enRouteToPickup, let pickupCoordinate {
+                pickupEtaSecondsRemaining = estimatedPickupEtaSeconds(from: driverCoordinate, to: pickupCoordinate)
+            }
         }
         if let pickup = snapshot.pickupCoordinate {
             pickupCoordinate = pickup
@@ -1304,10 +1452,18 @@ final class RideManager: ObservableObject {
             currentRide?.status = status
             switch status {
             case .enRouteToPickup:
-                pickupEtaSecondsRemaining = max(60, pickupEtaSecondsRemaining)
+                pickupWaitCountdownTask?.cancel()
+                if let pickupCoordinate {
+                    pickupEtaSecondsRemaining = estimatedPickupEtaSeconds(from: liveDriverCoordinate, to: pickupCoordinate)
+                }
             case .waitingForRider:
                 pickupEtaSecondsRemaining = 0
+                startPickupWaitCountdown(
+                    startedAt: snapshot.pickupWaitStartedAt,
+                    complimentarySeconds: snapshot.pickupComplimentaryWaitSeconds ?? 180
+                )
             case .enRouteToDropoff:
+                pickupWaitCountdownTask?.cancel()
                 pickupEtaSecondsRemaining = 0
                 pickupWaitSecondsRemaining = 0
                 if previousStatus != .enRouteToDropoff,
@@ -1320,6 +1476,13 @@ final class RideManager: ObservableObject {
                 return
             case .cancelled:
                 if snapshot.rawStatus == "driverCancelled" {
+                    if let chargeCents = snapshot.proratedCancellationChargeCents,
+                       chargeCents > 0,
+                       let rideId = currentServiceRideId,
+                       !chargedProratedCancellationRideIDs.contains(rideId) {
+                        chargedProratedCancellationRideIDs.insert(rideId)
+                        Task { await chargeCancellationFee(rideId: rideId) }
+                    }
                     handleDriverCancelledAndReturnToSelection()
                 } else {
                     cancelAll()
@@ -1334,6 +1497,31 @@ final class RideManager: ObservableObject {
         cancellationSoundPlayer.play()
         rideRequestErrorMessage = "Your driver cancelled. Pick another nearby driver."
         cancelBeforePickupAndReturnToSelection(notifyBackend: false)
+    }
+
+    private func startPickupWaitCountdown(startedAt: Date?, complimentarySeconds: Int) {
+        pickupWaitCountdownTask?.cancel()
+        let graceSeconds = max(0, complimentarySeconds)
+        let start = startedAt ?? Date()
+
+        pickupWaitCountdownTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                let elapsed = max(0, Int(Date().timeIntervalSince(start)))
+                let remaining = max(0, graceSeconds - elapsed)
+                await MainActor.run {
+                    self.pickupWaitSecondsRemaining = remaining
+                    if remaining == 0 {
+                        self.updatePaidPickupWait(seconds: elapsed - graceSeconds)
+                    } else {
+                        self.paidPickupWaitSeconds = 0
+                        self.pickupWaitCharge = 0
+                    }
+                    self.persistActiveRideSnapshot()
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
     }
 
     private func closeRideChatIfNeeded(_ context: RideChatContext?) {
@@ -1573,6 +1761,10 @@ final class RideManager: ObservableObject {
             print("❌ Stripe request to \(path) failed: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    private func chargeCancellationFee(rideId: String) async {
+        await performChargeRequest(path: "create-payment-intent", body: ["rideId": rideId, "currency": "usd"])
     }
 
     /// Looks up (or creates, idempotently) the signed-in rider's Stripe customerId.
