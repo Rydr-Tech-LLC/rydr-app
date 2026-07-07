@@ -54,10 +54,11 @@ export async function POST(request: NextRequest) {
     return json(request, { error: `Missing required fields: ${missing.join(", ")}` }, 400);
   }
 
+  const waitlistRole = role as WaitlistRole;
   const waitlistRef = adminDb.collection("betaWaitlist");
   const existing = await waitlistRef
     .where("emailLower", "==", email)
-    .where("role", "==", role)
+    .where("role", "==", waitlistRole)
     .limit(1)
     .get();
 
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
     email,
     emailLower: email,
     phoneNumber,
-    role,
+    role: waitlistRole,
     source,
     status: "pending",
     updatedAt: FieldValue.serverTimestamp()
@@ -100,6 +101,27 @@ export async function POST(request: NextRequest) {
       confirmationEmailSentAt: emailResult.ok ? FieldValue.serverTimestamp() : null,
       confirmationEmailError: emailResult.ok ? FieldValue.delete() : emailResult.error,
       confirmationEmailProviderId: emailResult.providerMessageId ?? null
+    },
+    { merge: true }
+  );
+
+  const internalAlertResult = await notificationService.sendWaitlistInternalAlert({
+    applicationId,
+    firstName,
+    lastName,
+    email,
+    phoneNumber,
+    role: waitlistRole,
+    source,
+    created
+  });
+
+  await waitlistRef.doc(applicationId).set(
+    {
+      internalAlertEmailStatus: internalAlertResult.ok ? "sent" : "failed",
+      internalAlertEmailSentAt: internalAlertResult.ok ? FieldValue.serverTimestamp() : null,
+      internalAlertEmailError: internalAlertResult.ok ? FieldValue.delete() : internalAlertResult.error,
+      internalAlertEmailProviderId: internalAlertResult.providerMessageId ?? null
     },
     { merge: true }
   );

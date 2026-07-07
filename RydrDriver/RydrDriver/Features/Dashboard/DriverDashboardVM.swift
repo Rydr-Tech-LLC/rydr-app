@@ -113,7 +113,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private var seenPendingRideRequestIDs = Set<String>()
     private var seenDemandNotificationBuckets = Set<String>()
     private var readLocalNotificationIDs: Set<String> = []
+    private var dismissedLocalNotificationIDs: Set<String> = []
     private let readLocalNotificationIDsKey = "rydr.driver.notifications.readLocalNotificationIDs"
+    private let dismissedLocalNotificationIDsKey = "rydr.driver.notifications.dismissedLocalNotificationIDs"
     private let autoAcceptQueuedRidesKey = "rydr.driver.settings.autoAcceptQueuedRides"
     private let cancellationSoundPlayer = DriverCancellationSoundPlayer()
     private var lastTripTelemetryAt: Date?
@@ -150,6 +152,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     func startDashboard() {
         loadReadLocalNotificationIDs()
+        loadDismissedLocalNotificationIDs()
         #if DEBUG
         if shouldUseAtlantaPilotLocationInSimulator {
             applyAtlantaPilotLocation()
@@ -1196,6 +1199,11 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                     }
                     self.notificationErrorMessage = nil
                     self.systemNotifications = (snapshot?.documents ?? [])
+                        .filter { document in
+                            let data = document.data()
+                            return (data["isDismissed"] as? Bool ?? false) == false
+                                && data["dismissedAt"] == nil
+                        }
                         .map(DriverNotificationItem.init(document:))
                     self.refreshNotifications()
                 }
@@ -1293,6 +1301,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func upsertLocalNotification(_ item: DriverNotificationItem) {
+        guard !dismissedLocalNotificationIDs.contains(item.id) else { return }
         var next = item
         if readLocalNotificationIDs.contains(item.id) {
             next.isRead = true
@@ -1336,6 +1345,26 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         driverNotifications.forEach { markNotificationRead($0) }
     }
 
+    func dismissNotification(_ notification: DriverNotificationItem) {
+        switch notification.source {
+        case .system:
+            guard let uid = Auth.auth().currentUser?.uid else { return }
+            db.collection("drivers")
+                .document(uid)
+                .collection("notifications")
+                .document(notification.id)
+                .updateData([
+                    "isDismissed": true,
+                    "dismissedAt": FieldValue.serverTimestamp()
+                ])
+        case .local:
+            dismissedLocalNotificationIDs.insert(notification.id)
+            persistDismissedLocalNotificationIDs()
+            localNotifications.removeValue(forKey: notification.id)
+            refreshNotifications()
+        }
+    }
+
     private func loadReadLocalNotificationIDs() {
         let stored = UserDefaults.standard.stringArray(forKey: readLocalNotificationIDsKey) ?? []
         readLocalNotificationIDs = Set(stored)
@@ -1343,6 +1372,15 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     private func persistReadLocalNotificationIDs() {
         UserDefaults.standard.set(Array(readLocalNotificationIDs), forKey: readLocalNotificationIDsKey)
+    }
+
+    private func loadDismissedLocalNotificationIDs() {
+        let stored = UserDefaults.standard.stringArray(forKey: dismissedLocalNotificationIDsKey) ?? []
+        dismissedLocalNotificationIDs = Set(stored)
+    }
+
+    private func persistDismissedLocalNotificationIDs() {
+        UserDefaults.standard.set(Array(dismissedLocalNotificationIDs), forKey: dismissedLocalNotificationIDsKey)
     }
 
     private func startMapRequestBlipListener() {
@@ -1379,12 +1417,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         guard !isRadarBlipExpired(request) else { return false }
 
         let eligible = Set(eligibleRideTypes.map(RydrRideTierCatalog.canonicalRideType))
-        guard eligible.contains(RydrRideTierCatalog.canonicalRideType(request.rideType)) else { return false }
+        guard eligible.isEmpty || eligible.contains(RydrRideTierCatalog.canonicalRideType(request.rideType)) else { return false }
 
-        let selected = Set(selectedRideTypes.map(RydrRideTierCatalog.canonicalRideType))
-        guard selected.isEmpty || selected.contains(RydrRideTierCatalog.canonicalRideType(request.rideType)) else { return false }
-
-        return matchesRideFilters(request)
+        return true
     }
 
     private func demandSnapshot(from requests: [DriverRideRequest]) -> DriverDemandSnapshot {

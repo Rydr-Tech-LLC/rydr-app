@@ -10,6 +10,7 @@
 
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { sendPushToUser } from "../services/notificationSender";
+import { db, FieldValue } from "../admin";
 
 type RideStatus =
   | "pending"
@@ -39,15 +40,56 @@ interface RideDoc {
   riderName?: string;
   pickup?: string;
   dropoff?: string;
+  driverLocation?: CoordinateLike;
+  pickupCoordinate?: CoordinateLike;
+  pickupGeoPoint?: CoordinateLike;
+  pickupEtaTwoMinuteNotifiedAt?: unknown;
+}
+
+interface CoordinateLike {
+  lat?: number;
+  lng?: number;
+  latitude?: number;
+  longitude?: number;
 }
 
 function normalizeStatus(status: RideStatus | undefined): string {
   return (status ?? "").trim();
 }
 
+function coordinate(raw: CoordinateLike | undefined): { lat: number; lng: number } | null {
+  if (!raw) return null;
+  const lat = typeof raw.lat === "number" ? raw.lat : raw.latitude;
+  const lng = typeof raw.lng === "number" ? raw.lng : raw.longitude;
+  if (typeof lat !== "number" || typeof lng !== "number") return null;
+  return { lat, lng };
+}
+
+function distanceMeters(from: { lat: number; lng: number }, to: { lat: number; lng: number }): number {
+  const earthRadiusMeters = 6371000;
+  const dLat = ((to.lat - from.lat) * Math.PI) / 180;
+  const dLng = ((to.lng - from.lng) * Math.PI) / 180;
+  const fromLat = (from.lat * Math.PI) / 180;
+  const toLat = (to.lat * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(fromLat) * Math.cos(toLat) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function pickupEtaSeconds(after: RideDoc): number | null {
+  const driver = coordinate(after.driverLocation);
+  const pickup = coordinate(after.pickupCoordinate ?? after.pickupGeoPoint);
+  if (!driver || !pickup) return null;
+  const meters = distanceMeters(driver, pickup);
+  if (meters <= 20) return 0;
+  return Math.ceil(meters / 8.0);
+}
+
 const ARRIVED_STATUSES = new Set(["arrived", "arrivedAtPickup", "waitingForRider"]);
 const IN_PROGRESS_STATUSES = new Set(["inProgress", "in_progress"]);
 const CANCELLED_STATUSES = new Set(["cancelled", "riderCancelled", "driverCancelled", "adminCancelled"]);
+const EN_ROUTE_TO_PICKUP_STATUSES = new Set(["accepted", "enRouteToPickup", "navigatingToPickup"]);
 
 /**
  * Fires on every write to `rides/{rideId}`. Only acts on the specific
@@ -136,6 +178,28 @@ export const onRideUpdated = onDocumentUpdated("rides/{rideId}", async (event) =
           route: { type: "rideCancelled", target: "dashboard", rideId }
         });
       }
+    }
+  }
+
+  if (
+    riderId &&
+    EN_ROUTE_TO_PICKUP_STATUSES.has(afterStatus) &&
+    !after.pickupEtaTwoMinuteNotifiedAt
+  ) {
+    const etaSeconds = pickupEtaSeconds(after);
+    if (etaSeconds !== null && etaSeconds > 0 && etaSeconds <= 120) {
+      await sendPushToUser({
+        audience: "rider",
+        uid: riderId,
+        title: "Driver is close",
+        body: after.driverName
+          ? `${after.driverName} is about 2 minutes away.`
+          : "Your driver is about 2 minutes away.",
+        route: { type: "driverArrived", target: "activeRide", rideId }
+      });
+      await db.collection("rides").doc(rideId).set({
+        pickupEtaTwoMinuteNotifiedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
     }
   }
 

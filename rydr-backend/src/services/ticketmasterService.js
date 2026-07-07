@@ -2,6 +2,9 @@ const DISCOVERY_ROOT = "https://app.ticketmaster.com/discovery/v2";
 const DEFAULT_CITY = "Atlanta";
 const DEFAULT_STATE = "GA";
 const DEFAULT_COUNTRY = "US";
+const EVENT_CACHE_TTL_MS = Number(process.env.EVENT_CACHE_TTL_MS || 5 * 60 * 1000);
+
+const eventCache = new Map();
 
 const categoryMap = {
   all: undefined,
@@ -149,6 +152,19 @@ async function getEvents(options = {}) {
   const city = options.city || DEFAULT_CITY;
   const stateCode = options.stateCode || DEFAULT_STATE;
   const classificationName = categoryMap[categoryKey];
+  const cacheKey = JSON.stringify({
+    categoryKey,
+    size,
+    city,
+    stateCode,
+    countryCode: options.countryCode || DEFAULT_COUNTRY,
+    keyword: options.keyword || "",
+    classificationName: classificationName || ""
+  });
+  const cached = eventCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.payload;
+  }
 
   const payload = await ticketmasterFetch("/events.json", {
     city,
@@ -162,11 +178,16 @@ async function getEvents(options = {}) {
   });
 
   const events = payload?._embedded?.events || [];
-  return {
+  const normalizedPayload = {
     city,
     stateCode,
     events: events.filter(isUsableEvent).map(normalizeEvent)
   };
+  eventCache.set(cacheKey, {
+    expiresAt: Date.now() + EVENT_CACHE_TTL_MS,
+    payload: normalizedPayload
+  });
+  return normalizedPayload;
 }
 
 async function getEventById(id) {

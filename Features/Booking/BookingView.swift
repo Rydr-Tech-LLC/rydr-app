@@ -34,6 +34,8 @@ struct BookingView: View {
     @State private var routeRequestID = UUID()
     @State private var isResolvingLocations = false
     @State private var showRoutePreview = false
+    @State private var showAllRecents = false
+    @State private var recentSelectionTarget: Field = .dropoff
 
     // Fields
     @State private var pickupText = ""
@@ -180,11 +182,11 @@ struct BookingView: View {
                     )
 
                 // Slider panel
-                slider
+                slider(availableHeight: geo.size.height)
                     .offset(y: sliderOffset)
                     .animation(.interactiveSpring(), value: sliderOffset)
                     .contentShape(Rectangle())            // make whole surface draggable
-                    .highPriorityGesture(sheetDrag)       // <- key: sheet drag beats ScrollView
+                    .simultaneousGesture(sheetDrag)
             }
         }
         // 🔹 Present driver selection (RideManager-powered)
@@ -259,6 +261,26 @@ struct BookingView: View {
             )
             .presentationDetents([.large])
         }
+        .sheet(isPresented: $showAllRecents) {
+            RecentAddressesSheet(
+                recentDropoffs: recentDropoffs,
+                selectionLabel: recentSelectionLabel,
+                onSelect: { address in
+                    handleRecentSelection(address, target: recentSelectionTarget)
+                    showAllRecents = false
+                },
+                onClear: { address in
+                    recentDropoffs.removeAll { $0 == address }
+                    saveRecents(recentDropoffs)
+                },
+                onClearAll: {
+                    recentDropoffs = []
+                    saveRecents([])
+                }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.hidden)
+        }
         .navigationBarBackButtonHidden(false)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
@@ -317,7 +339,7 @@ struct BookingView: View {
     }
 
     // MARK: - Slider content (structured like Apple Maps panel)
-    private var slider: some View {
+    private func slider(availableHeight: CGFloat) -> some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 14) {
                 // Grabber
@@ -395,7 +417,10 @@ struct BookingView: View {
                                 Text("Recents")
                                     .font(.headline.weight(.bold))
                                 Spacer()
-                                Text("See all")
+                                Button("See all") {
+                                    recentSelectionTarget = targetFieldForRecents()
+                                    showAllRecents = true
+                                }
                                     .font(.caption.weight(.bold))
                                     .foregroundStyle(Styles.rydrGradient)
                             }
@@ -418,13 +443,14 @@ struct BookingView: View {
                 }
             }
             .padding(.horizontal)
-            .padding(.bottom, 8)
+            .padding(.bottom, 18)
         }
         .background(Color(.systemBackground).opacity(0.94))
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(Color.white.opacity(0.72), lineWidth: 1))
         .shadow(color: Color.black.opacity(0.12), radius: 24, y: 10)
-        .frame(maxHeight: .infinity, alignment: .bottom)
+        .frame(height: max(320, availableHeight - sliderOffset + 10), alignment: .top)
+        .frame(maxHeight: .infinity, alignment: .top)
         .scrollDismissesKeyboard(.immediately)
         .onChange(of: focusedField) { _, newValue in
             if newValue == .pickup || newValue == .stop || newValue == .dropoff {
@@ -614,9 +640,13 @@ struct BookingView: View {
     }
 
     private func handleRecentSelection(_ addr: String) {
-        if focusedField == .pickup {
+        handleRecentSelection(addr, target: targetFieldForRecents())
+    }
+
+    private func handleRecentSelection(_ addr: String, target: Field) {
+        if target == .pickup {
             pickupText = addr
-        } else if focusedField == .dropoff {
+        } else if target == .dropoff {
             dropoffText = addr
         } else {
             if pickupText.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -627,6 +657,17 @@ struct BookingView: View {
         }
         clearRouteResolution()
         focusedField = nil
+    }
+
+    private func targetFieldForRecents() -> Field {
+        if focusedField == .pickup || focusedField == .dropoff {
+            return focusedField ?? .dropoff
+        }
+        return pickupText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .pickup : .dropoff
+    }
+
+    private var recentSelectionLabel: String {
+        recentSelectionTarget == .pickup ? "Pickup" : "Dropoff"
     }
 
     private func cityText(for address: String) -> String? {
@@ -1591,6 +1632,190 @@ private extension MKPolyline {
         var coordinates = Array(repeating: kCLLocationCoordinate2DInvalid, count: pointCount)
         getCoordinates(&coordinates, range: NSRange(location: 0, length: pointCount))
         return coordinates
+    }
+}
+
+private struct RecentAddressesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let recentDropoffs: [String]
+    let selectionLabel: String
+    let onSelect: (String) -> Void
+    let onClear: (String) -> Void
+    let onClearAll: () -> Void
+
+    private var sections: [(title: String, items: [String])] {
+        let week = Array(recentDropoffs.prefix(4))
+        let month = Array(recentDropoffs.dropFirst(4).prefix(3))
+        let older = Array(recentDropoffs.dropFirst(7))
+        return [
+            ("This Week", week),
+            ("This Month", month),
+            ("Older", older)
+        ].filter { !$0.items.isEmpty }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 24) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Recents")
+                                .font(.system(size: 38, weight: .heavy, design: .rounded))
+                            Text("Choose a saved address for \(selectionLabel.lowercased()).")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.primary)
+                                .frame(width: 54, height: 54)
+                                .background(Color(.secondarySystemGroupedBackground), in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Close recents")
+                    }
+                    .padding(.top, 18)
+
+                    if recentDropoffs.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 34, weight: .bold))
+                                .foregroundStyle(Styles.rydrGradient)
+                            Text("No recent addresses")
+                                .font(.headline.weight(.bold))
+                            Text("Addresses appear here after you request rides.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 46)
+                        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    } else {
+                        ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                            RecentAddressSection(
+                                title: section.title,
+                                items: section.items,
+                                onSelect: onSelect,
+                                onClear: onClear
+                            )
+                        }
+                    }
+                }
+                .padding(.horizontal, 22)
+                .padding(.bottom, 36)
+            }
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Clear") {
+                        onClearAll()
+                    }
+                    .font(.subheadline.weight(.bold))
+                    .disabled(recentDropoffs.isEmpty)
+                }
+            }
+        }
+    }
+}
+
+private struct RecentAddressSection: View {
+    let title: String
+    let items: [String]
+    let onSelect: (String) -> Void
+    let onClear: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(title)
+                    .font(.title3.weight(.heavy))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear") {
+                    items.forEach(onClear)
+                }
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.blue)
+            }
+
+            VStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element) { index, address in
+                    RecentAddressRow(address: address) {
+                        onSelect(address)
+                    } onClear: {
+                        onClear(address)
+                    }
+
+                    if index < items.count - 1 {
+                        Divider()
+                            .padding(.leading, 76)
+                    }
+                }
+            }
+            .padding(.vertical, 6)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        }
+    }
+}
+
+private struct RecentAddressRow: View {
+    let address: String
+    let onSelect: () -> Void
+    let onClear: () -> Void
+
+    private var title: String {
+        address.split(separator: ",").first.map(String.init) ?? address
+    }
+
+    private var subtitle: String {
+        let parts = address.split(separator: ",").dropFirst().map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return parts.isEmpty ? "From My Location" : parts.joined(separator: ", ")
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Button(action: onSelect) {
+                HStack(spacing: 14) {
+                    Image(systemName: "arrow.turn.up.right")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(Color(.systemGray), in: Circle())
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .font(.headline.weight(.heavy))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text(subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onClear) {
+                Image(systemName: "ellipsis")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remove \(title)")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 }
 

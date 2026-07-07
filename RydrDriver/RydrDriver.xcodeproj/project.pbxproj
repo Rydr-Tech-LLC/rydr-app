@@ -545,6 +545,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RydrDriver/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Rydr Driver";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Rydr Driver uses your camera if you choose to capture driver documents or profile photos during onboarding.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Rydr Driver uses your location to show nearby ride requests and share trip progress with riders while you are online.";
@@ -587,6 +588,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = RydrDriver/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Rydr Driver";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Rydr Driver uses your camera if you choose to capture driver documents or profile photos during onboarding.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Rydr Driver uses your location to show nearby ride requests and share trip progress with riders while you are online.";

@@ -63,6 +63,7 @@ final class RiderNotificationInboxViewModel: ObservableObject {
     private var riderItems: [RiderNotificationItem] = []
     private var platformItems: [RiderNotificationItem] = []
     private let platformReadKey = "rydr.rider.notifications.platformReadIds"
+    private let platformDismissedKey = "rydr.rider.notifications.platformDismissedIds"
 
     var unreadCount: Int {
         items.filter { !$0.isRead }.count
@@ -120,6 +121,31 @@ final class RiderNotificationInboxViewModel: ObservableObject {
         items.filter { !$0.isRead }.forEach(markRead)
     }
 
+    func dismiss(_ item: RiderNotificationItem) {
+        switch item.source {
+        case .rider:
+            guard let uid = Auth.auth().currentUser?.uid else { return }
+            db.collection("riders")
+                .document(uid)
+                .collection("notifications")
+                .document(item.documentId)
+                .updateData([
+                    "isDismissed": true,
+                    "dismissedAt": FieldValue.serverTimestamp()
+                ]) { [weak self] error in
+                    if let error {
+                        Task { @MainActor in self?.errorMessage = error.localizedDescription }
+                    }
+                }
+        case .platform:
+            var ids = platformDismissedIds()
+            ids.insert(item.documentId)
+            defaults.set(Array(ids), forKey: platformDismissedKey)
+            platformItems.removeAll { $0.documentId == item.documentId }
+            publishCombinedItems()
+        }
+    }
+
     private func listenForRiderNotifications(uid: String) {
         riderListener = db.collection("riders")
             .document(uid)
@@ -155,7 +181,9 @@ final class RiderNotificationInboxViewModel: ObservableObject {
                         return
                     }
                     let readIds = self.platformReadIds()
+                    let dismissedIds = self.platformDismissedIds()
                     self.platformItems = (snapshot?.documents ?? [])
+                        .filter { !dismissedIds.contains($0.documentID) }
                         .compactMap { Self.item(from: $0, source: .platform, platformReadIds: readIds) }
                     self.publishCombinedItems()
                 }
@@ -172,6 +200,10 @@ final class RiderNotificationInboxViewModel: ObservableObject {
         Set(defaults.stringArray(forKey: platformReadKey) ?? [])
     }
 
+    private func platformDismissedIds() -> Set<String> {
+        Set(defaults.stringArray(forKey: platformDismissedKey) ?? [])
+    }
+
     private static func item(
         from document: QueryDocumentSnapshot,
         source: RiderNotificationSource,
@@ -184,6 +216,9 @@ final class RiderNotificationInboxViewModel: ObservableObject {
             let expiresAt = (data["expiresAt"] as? Timestamp)?.dateValue()
             guard published, audience == "all" || audience == "rider" else { return nil }
             if let expiresAt, expiresAt < Date() { return nil }
+        } else {
+            let isDismissed = data["isDismissed"] as? Bool ?? false
+            if isDismissed || data["dismissedAt"] != nil { return nil }
         }
 
         let title = data["title"] as? String ?? ""
@@ -327,55 +362,68 @@ struct NotificationView: View {
     }
 
     private func notificationRow(_ item: RiderNotificationItem) -> some View {
-        Button {
-            vm.markRead(item)
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: item.icon)
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(item.tint)
-                    .frame(width: 42, height: 42)
-                    .background(item.tint.opacity(0.12), in: Circle())
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: item.icon)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(item.tint)
+                .frame(width: 42, height: 42)
+                .background(item.tint.opacity(0.12), in: Circle())
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(item.title)
-                            .font(.subheadline.weight(.heavy))
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
-                        Spacer(minLength: 8)
-                        Text(item.relativeTime)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Text(item.body)
-                        .font(.caption.weight(.medium))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(item.title)
+                        .font(.subheadline.weight(.heavy))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                    Spacer(minLength: 8)
+                    Text(item.relativeTime)
+                        .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if item.source == .platform {
-                        Text("Rydr")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.purple)
-                    }
                 }
+
+                Text(item.body)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if item.source == .platform {
+                    Text("Rydr")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.purple)
+                }
+            }
+
+            VStack(spacing: 12) {
+                Button {
+                    vm.dismiss(item)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(Color(.secondarySystemGroupedBackground), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss notification")
 
                 if !item.isRead {
                     Circle()
                         .fill(Color.red)
                         .frame(width: 9, height: 9)
-                        .padding(.top, 6)
                 }
             }
-            .padding(14)
-            .background(cardBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(item.isRead ? Color.clear : Color.red.opacity(0.18), lineWidth: 1)
-            )
+            .padding(.top, 2)
         }
-        .buttonStyle(.plain)
+        .padding(14)
+        .background(cardBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(item.isRead ? Color.clear : Color.red.opacity(0.18), lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            vm.markRead(item)
+        }
     }
 
     private var cardBackground: Color {

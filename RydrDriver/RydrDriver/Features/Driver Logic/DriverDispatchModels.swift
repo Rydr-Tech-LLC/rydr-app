@@ -33,6 +33,7 @@ struct DriverRideRequest: Identifiable, Equatable {
     let dropoff: String
     let rideType: String
     let estimatedFare: Double?
+    let estimatedDriverPayout: Double?
     let estimatedDistanceMiles: Double?
     let estimatedDurationMinutes: Double?
     let pickupCoordinate: CLLocationCoordinate2D?
@@ -53,6 +54,7 @@ struct DriverRideRequest: Identifiable, Equatable {
         dropoff: String,
         rideType: String,
         estimatedFare: Double? = nil,
+        estimatedDriverPayout: Double? = nil,
         estimatedDistanceMiles: Double? = nil,
         estimatedDurationMinutes: Double? = nil,
         pickupCoordinate: CLLocationCoordinate2D? = nil,
@@ -72,6 +74,7 @@ struct DriverRideRequest: Identifiable, Equatable {
         self.dropoff = dropoff
         self.rideType = rideType
         self.estimatedFare = estimatedFare
+        self.estimatedDriverPayout = estimatedDriverPayout
         self.estimatedDistanceMiles = estimatedDistanceMiles
         self.estimatedDurationMinutes = estimatedDurationMinutes
         self.pickupCoordinate = pickupCoordinate
@@ -94,6 +97,9 @@ struct DriverRideRequest: Identifiable, Equatable {
         dropoff = data["dropoff"] as? String ?? "Drop-off location"
         rideType = data["rideType"] as? String ?? "Rydr"
         estimatedFare = Self.doubleValue(data["estimatedFare"] ?? data["upfrontFare"])
+        estimatedDriverPayout = Self.dollarsFromCents(data["estimatedDriverPayoutCents"] ?? data["driverPayoutCents"])
+            ?? Self.doubleValue(data["estimatedDriverPayout"] ?? data["driverPayout"])
+            ?? estimatedFare
         estimatedDistanceMiles = Self.doubleValue(data["estimatedDistanceMiles"] ?? data["distanceMiles"])
         estimatedDurationMinutes = Self.doubleValue(data["estimatedDurationMinutes"] ?? data["durationMinutes"])
         pickupCoordinate = Self.coordinate(from: data["pickupCoordinate"] ?? data["pickupLocation"] ?? data["pickupGeoPoint"])
@@ -124,6 +130,11 @@ struct DriverRideRequest: Identifiable, Equatable {
         if let int = value as? Int { return Double(int) }
         if let number = value as? NSNumber { return number.doubleValue }
         return nil
+    }
+
+    nonisolated private static func dollarsFromCents(_ value: Any?) -> Double? {
+        guard let cents = doubleValue(value) else { return nil }
+        return cents / 100.0
     }
 }
 
@@ -224,6 +235,7 @@ struct DriverActiveRide: Identifiable, Equatable {
         rideType = data["rideType"] as? String ?? "Rydr"
         status = data["status"] as? String ?? "accepted"
         estimatedFare = Self.doubleValue(data["estimatedFare"] ?? data["upfrontFare"] ?? data["fare"])
+            ?? Self.dollarsFromCents(data["estimatedDriverPayoutCents"] ?? data["driverPayoutCents"])
         estimatedDistanceMiles = Self.doubleValue(data["estimatedDistanceMiles"] ?? data["distanceMiles"])
         estimatedDurationMinutes = Self.doubleValue(data["estimatedDurationMinutes"] ?? data["durationMinutes"])
         pickupCoordinate = Self.coordinate(from: data["pickupCoordinate"] ?? data["pickupLocation"] ?? data["pickupGeoPoint"])
@@ -260,6 +272,11 @@ struct DriverActiveRide: Identifiable, Equatable {
         if let int = value as? Int { return Double(int) }
         if let number = value as? NSNumber { return number.doubleValue }
         return nil
+    }
+
+    nonisolated private static func dollarsFromCents(_ value: Any?) -> Double? {
+        guard let cents = doubleValue(value) else { return nil }
+        return cents / 100.0
     }
 
     nonisolated private static func intValue(_ value: Any?) -> Int? {

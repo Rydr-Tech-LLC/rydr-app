@@ -8,6 +8,7 @@ import SwiftUI
 
 struct RideTypeSelectionView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var notificationVM = RiderNotificationInboxViewModel()
     var userName: String = "Rydr User" // Replace with actual user data in future
 
     private let options: [RideTypeOption] = [
@@ -87,6 +88,8 @@ struct RideTypeSelectionView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { notificationVM.start() }
+        .onDisappear { notificationVM.stop() }
     }
 
     private var pageBackground: LinearGradient {
@@ -131,8 +134,8 @@ struct RideTypeSelectionView: View {
 
             Spacer()
 
-            Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            NavigationLink {
+                NotificationView()
             } label: {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "bell")
@@ -143,12 +146,17 @@ struct RideTypeSelectionView: View {
                         .clipShape(Circle())
                         .shadow(color: Color.red.opacity(0.10), radius: 16, x: 0, y: 8)
 
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 7, height: 7)
-                        .offset(x: -9, y: 9)
+                    if notificationVM.unreadCount > 0 {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 7, height: 7)
+                            .offset(x: -9, y: 9)
+                    }
                 }
             }
+            .simultaneousGesture(TapGesture().onEnded {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            })
             .accessibilityLabel("Notifications")
         }
         .padding(.top, 4)

@@ -32,12 +32,13 @@ WAITLIST_FROM_EMAIL="Rydr Beta <beta@rydr-go.com>"
 Optional:
 
 ```bash
+WAITLIST_INTERNAL_NOTIFY_EMAIL="support@rydr-go.com"
 TESTFLIGHT_RIDER_URL=
 TESTFLIGHT_DRIVER_URL=
 DISCORD_INVITE_URL=
 ```
 
-Optional values may be omitted. Missing TestFlight or Discord URLs simply hide those buttons in the beta approval email.
+Optional values may be omitted. `WAITLIST_INTERNAL_NOTIFY_EMAIL` defaults to `support@rydr-go.com`. Missing TestFlight or Discord URLs simply hide those buttons in the beta approval email.
 
 ## Sending A Notification
 

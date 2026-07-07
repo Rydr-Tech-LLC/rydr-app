@@ -1679,6 +1679,8 @@ struct DriverNotificationsView: View {
                         ForEach(vm.driverNotifications) { notification in
                             DriverNotificationRow(notification: notification) {
                                 vm.markNotificationRead(notification)
+                            } onDismiss: {
+                                vm.dismissNotification(notification)
                             }
                         }
                     }
@@ -1748,47 +1750,57 @@ struct DriverNotificationsView: View {
 private struct DriverNotificationRow: View {
     let notification: DriverNotificationItem
     let onRead: () -> Void
+    let onDismiss: () -> Void
 
     var body: some View {
-        Button(action: onRead) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: notification.icon)
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(iconColor)
-                    .frame(width: 40, height: 40)
-                    .background(Circle().fill(iconColor.opacity(0.12)))
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: notification.icon)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(iconColor)
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(iconColor.opacity(0.12)))
 
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(notification.title)
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.primary)
-                        if !notification.isRead {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 7, height: 7)
-                        }
-                        Spacer()
-                        Text(relativeTime)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(notification.title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.primary)
+                    if !notification.isRead {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 7, height: 7)
                     }
-
-                    Text(notification.message)
-                        .font(.footnote)
+                    Spacer()
+                    Text(relativeTime)
+                        .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Text(notification.message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(14)
-            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(notification.isRead ? Color.black.opacity(0.05) : Color.red.opacity(0.24), lineWidth: 1)
-            )
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.heavy))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(Color(.secondarySystemGroupedBackground), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss notification")
         }
-        .buttonStyle(.plain)
+        .padding(14)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(notification.isRead ? Color.black.opacity(0.05) : Color.red.opacity(0.24), lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onRead)
     }
 
     private var iconColor: Color {

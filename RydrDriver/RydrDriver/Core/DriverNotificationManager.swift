@@ -7,6 +7,7 @@ import Foundation
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseMessaging
+import Security
 import UIKit
 import UserNotifications
 
@@ -35,9 +36,12 @@ final class DriverNotificationManager {
     }
 
     func handleAPNSTokenRegistration(_ deviceToken: Data) {
-        Messaging.messaging().apnsToken = deviceToken
+        Messaging.messaging().setAPNSToken(deviceToken, type: apnsTokenType)
         let tokenDescription = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-        Self.log("apns_token_registered", ["tokenPrefix": String(tokenDescription.prefix(12))])
+        Self.log("apns_token_registered", [
+            "environment": apnsEnvironment,
+            "tokenPrefix": String(tokenDescription.prefix(12))
+        ])
     }
 
     func handleAPNSTokenRegistrationFailure(_ error: Error) {
@@ -127,6 +131,7 @@ final class DriverNotificationManager {
             "platform": "ios",
             "app": "driver",
             "bundleId": Bundle.main.bundleIdentifier ?? "unknown",
+            "apnsEnvironment": apnsEnvironment,
             "fcmToken": token,
             "enabled": true,
             "createdAt": FieldValue.serverTimestamp(),
@@ -179,6 +184,26 @@ final class DriverNotificationManager {
                 continuation.resume(returning: token)
             }
         }
+    }
+
+    private var apnsTokenType: MessagingAPNSTokenType {
+        switch apnsEnvironment {
+        case "development": return .sandbox
+        case "production": return .prod
+        default: return .unknown
+        }
+    }
+
+    private var apnsEnvironment: String {
+        #if targetEnvironment(simulator)
+        return "simulator"
+        #else
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(task, "aps-environment" as CFString, nil) as? String else {
+            return "missing"
+        }
+        return value
+        #endif
     }
 
     private func setData(_ data: [String: Any], document: DocumentReference, merge: Bool) async throws {

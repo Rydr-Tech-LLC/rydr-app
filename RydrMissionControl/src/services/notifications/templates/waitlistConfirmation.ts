@@ -10,14 +10,23 @@ export function waitlistConfirmationTemplate({ firstName }: WaitlistConfirmation
 
   const html = genericTemplate({
     title: subject,
-    previewText: "Thanks for joining the Rydr beta waitlist.",
+    eyebrow: "Beta Waitlist",
+    previewText: "Your Rydr beta waitlist request has been received.",
     children: `
-      <h1 style="margin:0 0 18px;color:#151515;font-size:28px;line-height:1.18;font-weight:900;">You're on the Rydr Beta Waitlist</h1>
+      <p style="margin:0 0 12px;color:#e11d2e;font-size:12px;line-height:1.4;font-weight:900;letter-spacing:1.7px;text-transform:uppercase;">Request received</p>
+      <h1 style="margin:0 0 18px;color:#111827;font-size:30px;line-height:1.18;font-weight:900;">You're on the Rydr Beta Waitlist</h1>
       ${paragraph(greeting)}
-      ${paragraph("Thank you for joining the Rydr beta waitlist. We are currently preparing for an invite-only beta in Atlanta.")}
-      ${paragraph("You will receive another email once your beta access is approved. No further action is needed right now.")}
+      ${paragraph("Thank you for joining the Rydr beta waitlist. We have received your request for the invite-only Atlanta beta.")}
+      ${paragraph("Mission Control reviews each request before opening access. If your beta access is approved, we will send a separate email with your next steps.")}
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;margin:22px 0;border:1px solid #e5e7eb;border-radius:14px;background:#fafafa;">
+        <tr>
+          <td style="padding:18px 20px;">
+            <p style="margin:0 0 6px;color:#111827;font-size:14px;line-height:1.5;font-weight:800;">Current status</p>
+            <p style="margin:0;color:#4b5563;font-size:14px;line-height:1.6;">Your request is pending review. No further action is needed right now.</p>
+          </td>
+        </tr>
+      </table>
       ${paragraph("We appreciate your interest in helping shape a safer, more intentional rideshare experience.")}
-      ${paragraph("The Rydr Team")}
     `
   });
 
@@ -28,7 +37,9 @@ export function waitlistConfirmationTemplate({ firstName }: WaitlistConfirmation
 
 Thank you for joining the Rydr beta waitlist. We are currently preparing for an invite-only beta in Atlanta.
 
-You will receive another email once your beta access is approved. No further action is needed right now.
+Mission Control reviews each request before opening access. If your beta access is approved, we will send a separate email with your next steps.
+
+Current status: Pending review. No further action is needed right now.
 
 We appreciate your interest in helping shape a safer, more intentional rideshare experience.
 

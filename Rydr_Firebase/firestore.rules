@@ -540,8 +540,9 @@ service cloud.firestore {
         allow read: if isSelf(uid) || isAdmin();
         allow create, delete: if isAdmin();
         allow update: if isSelf(uid)
-          && affectedKeys().hasOnly(["isRead", "readAt"])
-          && request.resource.data.isRead == true;
+          && affectedKeys().hasOnly(["isRead", "readAt", "isDismissed", "dismissedAt"])
+          && (!affectedKeys().hasAny(["isRead"]) || request.resource.data.isRead == true)
+          && (!affectedKeys().hasAny(["isDismissed"]) || request.resource.data.isDismissed == true);
       }
 
       match /cashHubFavoriteDrivers/{driverUid} {
@@ -579,8 +580,9 @@ service cloud.firestore {
         allow read: if isSelf(uid) || isAdmin();
         allow create, delete: if isAdmin();
         allow update: if isSelf(uid)
-          && affectedKeys().hasOnly(["isRead", "readAt"])
-          && request.resource.data.isRead == true;
+          && affectedKeys().hasOnly(["isRead", "readAt", "isDismissed", "dismissedAt"])
+          && (!affectedKeys().hasAny(["isRead"]) || request.resource.data.isRead == true)
+          && (!affectedKeys().hasAny(["isDismissed"]) || request.resource.data.isDismissed == true);
       }
 
       match /cashHubPenaltyMarkers/{markerId} {

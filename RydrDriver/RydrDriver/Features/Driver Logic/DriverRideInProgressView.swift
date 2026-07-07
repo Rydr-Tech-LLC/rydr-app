@@ -349,6 +349,12 @@ struct DriverRideInProgressView: View {
                     openNavigation(provider: DriverNavigationHandoff.currentProvider)
                 }
                 Divider().padding(.leading, 58)
+                if canMessageRider {
+                    navigationOption("Message Rider", icon: "message.fill") {
+                        showMessageSheet = true
+                    }
+                    Divider().padding(.leading, 58)
+                }
                 navigationOption("Report an Incident", icon: "exclamationmark.bubble.fill", color: .red) {
                     showIncidentConfirm = true
                 }
@@ -498,6 +504,10 @@ struct DriverRideInProgressView: View {
 
     private var shouldShowCancelRideButton: Bool {
         lifecyclePhase != .completed
+    }
+
+    private var canMessageRider: Bool {
+        [.accepted, .navigatingToPickup, .waitingForRider].contains(lifecyclePhase)
     }
 
     private var driverCancellationReasons: [String] {

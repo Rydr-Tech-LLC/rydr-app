@@ -4,10 +4,6 @@
 <dict>
 	<key>CFBundleGetInfoString</key>
 	<string></string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-	<key>RYDR_BACKEND_BASE_URL</key>
-	<string>https://rydr-backend-2cl9.onrender.com</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -25,9 +21,10 @@
 	</array>
 	<key>NSApplicationCrashOnExceptions</key>
 	<true/>
+	<key>RYDR_BACKEND_BASE_URL</key>
+	<string>https://rydr-backend-2cl9.onrender.com</string>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>fetch</string>
 		<string>remote-notification</string>
 	</array>
 </dict>

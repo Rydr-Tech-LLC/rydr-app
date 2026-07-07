@@ -25,6 +25,8 @@ struct IncomingRideRequestCard: View {
     @State private var secondsRemaining = 15
     @State private var didRespond = false
 
+    private let driverPayoutShare = 0.70
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
@@ -159,14 +161,21 @@ struct IncomingRideRequestCard: View {
     }
 
     private var upfrontFare: Double {
+        if let payout = request.estimatedDriverPayout {
+            return roundedCurrency(payout)
+        }
         if let leg = fareBaseLeg {
             let gross = (leg.distanceMiles * rate.perMile) + (leg.durationMinutes * rate.perMinute)
-            return (gross * 100).rounded() / 100
+            return roundedCurrency(gross * driverPayoutShare)
         }
         if let fare = request.estimatedFare {
-            return (fare * 100).rounded() / 100
+            return roundedCurrency(fare)
         }
         return 0
+    }
+
+    private func roundedCurrency(_ value: Double) -> Double {
+        (value * 100).rounded() / 100
     }
 
     private func loadRouteEstimates() async {
