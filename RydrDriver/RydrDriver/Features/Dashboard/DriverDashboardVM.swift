@@ -2235,19 +2235,22 @@ struct DriverDashboardView: View {
 
                 SideMenuView(vm: vm, isOpen: $vm.showMenu, onSelect: handleMenu(_:))
 
-                DriverDashboardActionDock(
-                    vm: vm,
-                    isCompact: metrics.compactHeight || metrics.narrowWidth,
-                    onFiltersTapped: { activeSheet = .rideFilters },
-                    onRateCardTapped: { openPrimaryRateCard() },
-                    onCashHubTapped: { activeSheet = .menu(.community) },
-                    onProfileTapped: { activeSheet = .menu(.profile) }
-                )
-                .padding(.horizontal, metrics.horizontalPadding)
-                .padding(.top, 4)
-                .padding(.bottom, metrics.bottomDockLift)
-                .background(Color.clear)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                if !vm.showMenu {
+                    DriverDashboardActionDock(
+                        vm: vm,
+                        isCompact: metrics.compactHeight || metrics.narrowWidth,
+                        onFiltersTapped: { activeSheet = .rideFilters },
+                        onRateCardTapped: { openPrimaryRateCard() },
+                        onCashHubTapped: { activeSheet = .menu(.community) },
+                        onProfileTapped: { activeSheet = .menu(.profile) }
+                    )
+                    .padding(.horizontal, metrics.horizontalPadding)
+                    .padding(.top, 4)
+                    .padding(.bottom, metrics.bottomDockLift)
+                    .background(Color.clear)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
         }
         .toolbar(.hidden, for: .navigationBar)

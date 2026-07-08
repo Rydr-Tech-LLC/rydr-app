@@ -55,36 +55,21 @@ struct SideMenuView: View {
                     .onTapGesture { withAnimation(.spring) { isOpen = false } }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                profileHeader
+            VStack(alignment: .leading, spacing: 0) {
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        profileHeader
 
-                ForEach(SideMenuItem.allCases.filter { $0 != .logout }) { item in
-                    Button { onSelect(item) } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: item.icon)
-                                .font(.body.weight(.semibold))
-                                .frame(width: 24)
-                            Text(item.rawValue)
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            if item == .notifications, vm.unreadNotificationCount > 0 {
-                                Text(vm.notificationBadgeText)
-                                    .font(.caption2.weight(.heavy))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 3)
-                                    .background(Capsule().fill(Color.red))
-                            }
+                        ForEach(SideMenuItem.allCases.filter { $0 != .logout }) { item in
+                            menuButton(for: item)
                         }
-                        .padding(.vertical, 9)
-                        .padding(.horizontal, 10)
-                        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.systemBackground).opacity(0.001)))
                     }
-                    .foregroundStyle(.primary)
+                    .padding(.top, 60)
+                    .padding(.bottom, 18)
                 }
 
-                Spacer()
                 Divider()
+
                 Button { onSelect(.logout) } label: {
                     HStack(spacing: 12) {
                         Image(systemName: SideMenuItem.logout.icon).frame(width: 22)
@@ -98,9 +83,10 @@ struct SideMenuView: View {
                 Text("Help · Learning Center")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                    .padding(.top, 4)
             }
             .padding(.horizontal, 20)
-            .padding(.top, 60)
+            .padding(.bottom, 28)
             .frame(width: width)
             .frame(maxHeight: .infinity)
             .background(.regularMaterial)
@@ -133,6 +119,31 @@ struct SideMenuView: View {
                 }
             }
         }
+    }
+
+    private func menuButton(for item: SideMenuItem) -> some View {
+        Button { onSelect(item) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: item.icon)
+                    .font(.body.weight(.semibold))
+                    .frame(width: 24)
+                Text(item.rawValue)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if item == .notifications, vm.unreadNotificationCount > 0 {
+                    Text(vm.notificationBadgeText)
+                        .font(.caption2.weight(.heavy))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.red))
+                }
+            }
+            .padding(.vertical, 9)
+            .padding(.horizontal, 10)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color(.systemBackground).opacity(0.001)))
+        }
+        .foregroundStyle(.primary)
     }
 
     private var profileHeader: some View {
