@@ -6,6 +6,7 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 const admin = require("firebase-admin");
 const Stripe = require("stripe");
+const { randomInt } = require("crypto");
 
 dotenv.config();
 
@@ -471,6 +472,279 @@ function positiveIntegerField(data, key) {
 function nonNegativeIntegerField(data, key) {
   const value = integerField(data, key);
   return value !== null && value >= 0 ? value : null;
+}
+
+const RYDR_BANK_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+function randomRydrBankCode() {
+  let value = "";
+  for (let i = 0; i < 8; i += 1) {
+    value += RYDR_BANK_ALPHABET[randomInt(RYDR_BANK_ALPHABET.length)];
+  }
+  return `RB-${value.slice(0, 4)}-${value.slice(4, 8)}`;
+}
+
+async function reserveUniqueRydrBankCode(transaction) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const code = randomRydrBankCode();
+    const indexRef = admin.firestore().collection("codes_index").doc(code);
+    const indexSnap = await transaction.get(indexRef);
+    if (!indexSnap.exists) return { code, indexRef };
+  }
+  throw new Error("Could not reserve a unique RydrBank code.");
+}
+
+function normalizeToken(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function timestampValueMillis(value) {
+  if (!value) return null;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") return value.toDate().getTime();
+  if (value instanceof Date) return value.getTime();
+  if (Number.isFinite(value?._seconds)) return value._seconds * 1000 + Math.round((value._nanoseconds || 0) / 1_000_000);
+  if (Number.isFinite(value?.seconds)) return value.seconds * 1000 + Math.round((value.nanoseconds || 0) / 1_000_000);
+  return null;
+}
+
+function rideMarket(ride) {
+  return normalizeToken(ride?.market || ride?.marketCode || ride?.serviceMarket || ride?.pickupMarket || ride?.region);
+}
+
+function rideType(ride) {
+  return normalizeToken(ride?.rideType || ride?.selectedRideType || ride?.serviceType || ride?.vehicleClass);
+}
+
+function listContainsNormalized(list, value) {
+  if (!Array.isArray(list) || list.length === 0) return true;
+  if (!value) return false;
+  return list.map(normalizeToken).includes(value);
+}
+
+function promotionAppliesToRide(promotion, ride, appliesTo, nowMillis) {
+  if (!promotion || !["active", "scheduled"].includes(promotion.status)) return false;
+  if (!(promotion.appliesTo === "both" || promotion.appliesTo === appliesTo)) return false;
+  const startsAt = timestampValueMillis(promotion.startsAt);
+  const endsAt = timestampValueMillis(promotion.endsAt);
+  if (!startsAt || !endsAt || nowMillis < startsAt || nowMillis > endsAt) return false;
+  if (promotion.betaOnly === true && !(ride?.betaRide === true || ride?.isBeta === true || ride?.betaTestRide === true)) return false;
+  if (!listContainsNormalized(promotion.markets, rideMarket(ride))) return false;
+  if (!listContainsNormalized(promotion.rideTypes, rideType(ride))) return false;
+  return true;
+}
+
+async function activePromotionsForRide(ride, appliesTo) {
+  initializeFirebase();
+  const nowMillis = Date.now();
+  const snap = await admin.firestore()
+    .collection("promotions")
+    .where("status", "in", ["active", "scheduled"])
+    .get();
+  return snap.docs
+    .map((doc) => ({ id: doc.id, ...doc.data() }))
+    .filter((promotion) => promotionAppliesToRide(promotion, ride, appliesTo, nowMillis));
+}
+
+async function redemptionCountForPromotion(promotionId, field, value) {
+  let query = admin.firestore().collection("promotionRedemptions").where("promotionId", "==", promotionId);
+  if (field && value) query = query.where(field, "==", value);
+  const snap = await query.count().get();
+  return snap.data().count || 0;
+}
+
+async function promotionLimitAvailable(promotion, userField, userId) {
+  const maxRedemptions = nonNegativeIntegerField(promotion, "maxRedemptions");
+  if (maxRedemptions !== null) {
+    const total = await redemptionCountForPromotion(promotion.id);
+    if (total >= maxRedemptions) return false;
+  }
+  const perUserLimit = nonNegativeIntegerField(promotion, "perUserLimit");
+  if (perUserLimit !== null && userId) {
+    const userTotal = await redemptionCountForPromotion(promotion.id, userField, userId);
+    if (userTotal >= perUserLimit) return false;
+  }
+  return true;
+}
+
+function riderPromotionDiscountCents(promotion, chargeCents) {
+  let discount = 0;
+  if (promotion.discountKind === "percent") {
+    const percent = nonNegativeIntegerField(promotion, "discountPercent") || 0;
+    discount = Math.round(chargeCents * Math.min(percent, 100) / 100);
+  } else {
+    discount = nonNegativeIntegerField(promotion, "discountCents") || 0;
+  }
+  const maxDiscount = nonNegativeIntegerField(promotion, "maxDiscountCents");
+  if (maxDiscount !== null) discount = Math.min(discount, maxDiscount);
+  return Math.min(Math.max(0, discount), chargeCents);
+}
+
+async function bestRiderFarePromotion({ ride, riderId, chargeCents }) {
+  if (chargeCents <= 0) return null;
+  const promotions = await activePromotionsForRide(ride, "normalRydr");
+  let best = null;
+  for (const promotion of promotions) {
+    if (promotion.type !== "rider_fare_discount") continue;
+    if (!(await promotionLimitAvailable(promotion, "riderId", riderId))) continue;
+    const discountCents = riderPromotionDiscountCents(promotion, chargeCents);
+    if (discountCents > 0 && (!best || discountCents > best.discountCents)) {
+      best = { promotion, discountCents };
+    }
+  }
+  return best;
+}
+
+async function recordRiderPromotionRedemption({ rideId, riderId, driverId, promotion, discountCents }) {
+  if (!promotion || discountCents <= 0) return;
+  const ref = admin.firestore().collection("promotionRedemptions").doc(`${promotion.id}_${rideId}_${riderId}`);
+  await ref.set(
+    {
+      promotionId: promotion.id,
+      promotionTitle: promotion.title || null,
+      promotionType: promotion.type,
+      rideId,
+      riderId,
+      driverId: driverId || null,
+      discountCents,
+      rewardCents: null,
+      status: "applied",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
+}
+
+async function applyDriverPromotionRewards({ rideId, ride }) {
+  const driverId = ride?.driverId;
+  if (!driverId) return;
+  const promotions = await activePromotionsForRide(ride, "normalRydr");
+  const db = admin.firestore();
+  for (const promotion of promotions) {
+    if (promotion.type === "driver_per_ride_bonus") {
+      if (!(await promotionLimitAvailable(promotion, "driverId", driverId))) continue;
+      const bonusCents = nonNegativeIntegerField(promotion, "bonusCents") || 0;
+      if (bonusCents <= 0) continue;
+      await db.collection("promotionRedemptions").doc(`${promotion.id}_${rideId}_${driverId}`).set(
+        {
+          promotionId: promotion.id,
+          promotionTitle: promotion.title || null,
+          promotionType: promotion.type,
+          rideId,
+          driverId,
+          riderId: ride.riderId || null,
+          rewardKind: "cash_bonus",
+          rewardCents: bonusCents,
+          status: "pending_payout",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        },
+        { merge: true }
+      );
+    }
+
+    if (promotion.type === "driver_milestone_reward") {
+      const milestoneRideCount = nonNegativeIntegerField(promotion, "milestoneRideCount") || 0;
+      if (milestoneRideCount <= 0) continue;
+      const rideProgressRef = db.collection("promotionRedemptions").doc(`${promotion.id}_${rideId}_${driverId}_progress`);
+      const progressRef = db.collection("promotionProgress").doc(`${promotion.id}_${driverId}`);
+      await db.runTransaction(async (transaction) => {
+        const rideProgressSnap = await transaction.get(rideProgressRef);
+        if (rideProgressSnap.exists) return;
+
+        const progressSnap = await transaction.get(progressRef);
+        const currentCount = progressSnap.exists ? (nonNegativeIntegerField(progressSnap.data(), "eligibleRideCount") || 0) : 0;
+        const nextCount = currentCount + 1;
+        const alreadyGranted = progressSnap.exists && progressSnap.data().rewardGranted === true;
+        const shouldGrantReward = !alreadyGranted && nextCount >= milestoneRideCount;
+        const shouldGrantRydrBankCredit = shouldGrantReward && (promotion.rewardKind || "rydr_bank_credit") === "rydr_bank_credit";
+        const codeReservation = shouldGrantRydrBankCredit ? await reserveUniqueRydrBankCode(transaction) : null;
+        const codeRef = codeReservation ? db.collection("users").doc(driverId).collection("rydrBankCodes").doc() : null;
+
+        transaction.set(rideProgressRef, {
+          promotionId: promotion.id,
+          promotionTitle: promotion.title || null,
+          promotionType: promotion.type,
+          rideId,
+          driverId,
+          riderId: ride.riderId || null,
+          status: "progress_recorded",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        transaction.set(progressRef, {
+          promotionId: promotion.id,
+          promotionTitle: promotion.title || null,
+          driverId,
+          userId: driverId,
+          eligibleRideCount: nextCount,
+          milestoneRideCount,
+          rewardGranted: alreadyGranted || shouldGrantReward,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: progressSnap.exists ? progressSnap.data().createdAt || admin.firestore.FieldValue.serverTimestamp() : admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+
+        if (shouldGrantReward) {
+          const rewardRef = db.collection("promotionRedemptions").doc(`${promotion.id}_${driverId}_milestone`);
+          const rewardKind = promotion.rewardKind || "rydr_bank_credit";
+          const rewardLabel = "Rydr Go / Rydr Eco";
+          transaction.set(rewardRef, {
+            promotionId: promotion.id,
+            promotionTitle: promotion.title || null,
+            promotionType: promotion.type,
+            driverId,
+            userId: driverId,
+            rewardKind,
+            rewardQuantity: nonNegativeIntegerField(promotion, "rewardQuantity") || null,
+            rewardCents: nonNegativeIntegerField(promotion, "rewardCents"),
+            rydrBankCode: codeReservation?.code || null,
+            milestoneRideCount,
+            eligibleRideCount: nextCount,
+            status: rewardKind === "cash_bonus" ? "pending_payout" : "granted",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          if (codeReservation && codeRef) {
+            transaction.set(codeReservation.indexRef, {
+              code: codeReservation.code,
+              currentOwnerUid: driverId,
+              codeDocPath: codeRef.path,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              rewardGroup: "go_eco",
+              rewardLabel,
+              maxMiles: 15,
+              status: "active",
+              source: "promotion",
+              promotionId: promotion.id
+            });
+            transaction.set(codeRef, {
+              code: codeReservation.code,
+              status: "active",
+              maxMiles: 15,
+              rewardGroup: "go_eco",
+              rewardLabel,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              reservedRideId: null,
+              usedRideId: null,
+              originalOwnerUid: driverId,
+              transferCount: 0,
+              transferable: true,
+              source: "promotion",
+              promotionId: promotion.id
+            });
+            transaction.set(db.collection("users").doc(driverId), {
+              rydrBank: {
+                codesAvailable: admin.firestore.FieldValue.increment(1),
+                codesEarned: admin.firestore.FieldValue.increment(1)
+              },
+              updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+          }
+        }
+      });
+    }
+  }
 }
 
 function authorizedRideChargeCents(ride) {
@@ -1052,8 +1326,23 @@ async function chargeRideAttempt({
     });
     return { httpStatus: 409, body: { error: "fare_not_authoritative", message } };
   }
-  const authoritativeAmount = resolvedCharge.amount;
-  const targetDriverPayout = driverPayoutCents(ride, resolvedCharge);
+  const baseAuthoritativeAmount = resolvedCharge.amount;
+  const riderPromotion = paymentType === "ride_fare"
+    ? await bestRiderFarePromotion({ ride, riderId: uid, chargeCents: baseAuthoritativeAmount })
+    : null;
+  const backendPromotionDiscountCents = riderPromotion?.discountCents || 0;
+  const authoritativeAmount = Math.max(0, baseAuthoritativeAmount - backendPromotionDiscountCents);
+  const existingPromoDiscountCents = nonNegativeIntegerField(ride, "promoDiscountCents") || 0;
+  const effectivePromoDiscountCents = existingPromoDiscountCents + backendPromotionDiscountCents;
+  const effectiveRide = backendPromotionDiscountCents > 0
+    ? {
+        ...ride,
+        promoDiscountCents: effectivePromoDiscountCents,
+        appliedPromotionId: riderPromotion.promotion.id,
+        appliedPromotionTitle: riderPromotion.promotion.title || null,
+      }
+    : ride;
+  const targetDriverPayout = driverPayoutCents(effectiveRide, resolvedCharge);
   if (authoritativeAmount <= 0) {
     const driverAccountId = await driverAccountForRide(ride);
     let subsidyResult = { subsidyCents: 0, transferId: null, transferStatus: "not_needed" };
@@ -1061,7 +1350,7 @@ async function chargeRideAttempt({
       subsidyResult = await transferPromoSubsidyIfNeeded({
         rideRef,
         rideId,
-        ride,
+        ride: effectiveRide,
         driverAccountId,
         targetDriverPayoutCents: targetDriverPayout,
         amountTransferredFromChargeCents: 0,
@@ -1086,6 +1375,10 @@ async function chargeRideAttempt({
       noCharge: true,
       authorizedRiderChargeCents: resolvedCharge.baseAmount,
       finalRiderChargeCents: 0,
+      promoDiscountCents: effectivePromoDiscountCents,
+      backendPromotionDiscountCents,
+      appliedPromotionId: riderPromotion?.promotion.id || null,
+      appliedPromotionTitle: riderPromotion?.promotion.title || null,
       pickupPaidWaitSeconds: resolvedCharge.pickupPaidWaitSeconds,
       pickupWaitChargeCents: resolvedCharge.pickupWaitChargeCents,
       driverPayoutCents: targetDriverPayout,
@@ -1093,6 +1386,16 @@ async function chargeRideAttempt({
       promoSubsidyTransferId: subsidyResult.transferId,
       promoSubsidyTransferStatus: subsidyResult.transferStatus,
     });
+    if (paymentType === "ride_fare") {
+      await recordRiderPromotionRedemption({
+        rideId,
+        riderId: uid,
+        driverId: effectiveRide.driverId || null,
+        promotion: riderPromotion?.promotion,
+        discountCents: backendPromotionDiscountCents
+      });
+      await applyDriverPromotionRewards({ rideId, ride: effectiveRide });
+    }
     return {
       httpStatus: 200,
       body: {
@@ -1101,13 +1404,15 @@ async function chargeRideAttempt({
         status: "succeeded",
         noCharge: true,
         driverPayoutCents: targetDriverPayout,
+        backendPromotionDiscountCents,
+        appliedPromotionId: riderPromotion?.promotion.id || null,
         promoSubsidyTransferStatus: subsidyResult.transferStatus,
       },
     };
   }
   if (amount !== undefined && amount !== null) {
     const suppliedAmount = Number(amount);
-    if (!Number.isInteger(suppliedAmount) || suppliedAmount !== authoritativeAmount) {
+    if (!Number.isInteger(suppliedAmount) || (suppliedAmount !== authoritativeAmount && suppliedAmount !== baseAuthoritativeAmount)) {
       const message = "Client fare does not match the authorized ride fare.";
       await recordPaymentStatus(rideRef, "failed", {
         retryCount: attempt,
@@ -1115,6 +1420,7 @@ async function chargeRideAttempt({
         failureCode: "amount_mismatch",
         suppliedAmountCents: Number.isFinite(suppliedAmount) ? suppliedAmount : null,
         authorizedAmountCents: authoritativeAmount,
+        authorizedPrePromotionAmountCents: baseAuthoritativeAmount,
         authorizedBaseAmountCents: resolvedCharge.baseAmount,
         pickupPaidWaitSeconds: resolvedCharge.pickupPaidWaitSeconds,
         pickupWaitChargeCents: resolvedCharge.pickupWaitChargeCents,
@@ -1126,6 +1432,7 @@ async function chargeRideAttempt({
           message,
           suppliedAmountCents: Number.isFinite(suppliedAmount) ? suppliedAmount : null,
           authorizedAmountCents: authoritativeAmount,
+          authorizedPrePromotionAmountCents: baseAuthoritativeAmount,
           authorizedBaseAmountCents: resolvedCharge.baseAmount,
           pickupPaidWaitSeconds: resolvedCharge.pickupPaidWaitSeconds,
           pickupWaitChargeCents: resolvedCharge.pickupWaitChargeCents,
@@ -1181,7 +1488,7 @@ async function chargeRideAttempt({
     // ride discounts reduce Rydr's platform economics first; if the rider
     // charge is lower than the driver payout, Rydr funds the difference with
     // a separate transfer after payment succeeds.
-    applicationFeeAmount = applicationFeeForGuaranteedDriverPayout(ride, authoritativeAmount, resolvedCharge);
+    applicationFeeAmount = applicationFeeForGuaranteedDriverPayout(effectiveRide, authoritativeAmount, resolvedCharge);
     amountTransferredFromChargeCents = Math.max(0, authoritativeAmount - applicationFeeAmount);
   }
 
@@ -1193,6 +1500,10 @@ async function chargeRideAttempt({
     failureCode: null,
     authorizedRiderChargeCents: resolvedCharge.baseAmount,
     finalRiderChargeCents: authoritativeAmount,
+    promoDiscountCents: effectivePromoDiscountCents,
+    backendPromotionDiscountCents,
+    appliedPromotionId: riderPromotion?.promotion.id || null,
+    appliedPromotionTitle: riderPromotion?.promotion.title || null,
     pickupPaidWaitSeconds: resolvedCharge.pickupPaidWaitSeconds,
     pickupWaitChargeCents: resolvedCharge.pickupWaitChargeCents,
     driverPayoutCents: targetDriverPayout,
@@ -1220,7 +1531,7 @@ async function chargeRideAttempt({
         subsidyResult = await transferPromoSubsidyIfNeeded({
           rideRef,
           rideId,
-          ride,
+          ride: effectiveRide,
           driverAccountId,
           targetDriverPayoutCents: targetDriverPayout,
           amountTransferredFromChargeCents,
@@ -1244,6 +1555,16 @@ async function chargeRideAttempt({
       promoSubsidyTransferId: subsidyResult.transferId,
       promoSubsidyTransferStatus: subsidyResult.transferStatus,
     });
+    if (pi.status === "succeeded" && paymentType === "ride_fare") {
+      await recordRiderPromotionRedemption({
+        rideId,
+        riderId: uid,
+        driverId: effectiveRide.driverId || null,
+        promotion: riderPromotion?.promotion,
+        discountCents: backendPromotionDiscountCents
+      });
+      await applyDriverPromotionRewards({ rideId, ride: effectiveRide });
+    }
     return {
       httpStatus: 200,
       body: {
@@ -1251,6 +1572,8 @@ async function chargeRideAttempt({
         paymentIntentId: pi.id,
         status: pi.status,
         driverPayoutCents: targetDriverPayout,
+        backendPromotionDiscountCents,
+        appliedPromotionId: riderPromotion?.promotion.id || null,
         promoSubsidyTransferStatus: subsidyResult.transferStatus,
       },
     };

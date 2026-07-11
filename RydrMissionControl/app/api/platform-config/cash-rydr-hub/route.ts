@@ -6,6 +6,10 @@ import { writeAuditLog } from "@/lib/auditLog";
 
 const configRef = () => adminDb.collection("platformConfig").doc("cashRydrHub");
 
+function newTermsVersion() {
+  return `cash-hub-${Date.now()}`;
+}
+
 export async function GET() {
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -15,6 +19,7 @@ export async function GET() {
 
   return NextResponse.json({
     termsAcceptanceEnabled: data.termsAcceptanceEnabled === true,
+    cashHubTermsVersion: typeof data.cashHubTermsVersion === "string" ? data.cashHubTermsVersion : null,
     updatedAt: data.updatedAt ?? null,
     updatedBy: data.updatedBy ?? null
   });
@@ -32,24 +37,36 @@ export async function PATCH(request: NextRequest) {
   const enabled = body.termsAcceptanceEnabled;
   const reason = typeof body.reason === "string" ? body.reason : undefined;
 
-  await configRef().set(
-    {
+  const updatedConfig = await adminDb.runTransaction(async (transaction) => {
+    const ref = configRef();
+    const snap = await transaction.get(ref);
+    const current = snap.data() ?? {};
+    const currentVersion = typeof current.cashHubTermsVersion === "string" ? current.cashHubTermsVersion : null;
+    const currentEnabled = current.termsAcceptanceEnabled === true;
+    const nextVersion = !enabled || !currentVersion ? newTermsVersion() : currentVersion;
+
+    transaction.set(ref, {
       termsAcceptanceEnabled: enabled,
+      cashHubTermsVersion: nextVersion,
+      disabledAt: !enabled && currentEnabled ? FieldValue.serverTimestamp() : current.disabledAt ?? null,
+      enabledAt: enabled && !currentEnabled ? FieldValue.serverTimestamp() : current.enabledAt ?? null,
       updatedAt: FieldValue.serverTimestamp(),
       updatedBy: session.uid,
       updatedByEmail: session.email ?? null
-    },
-    { merge: true }
-  );
+    }, { merge: true });
+
+    return { termsAcceptanceEnabled: enabled, cashHubTermsVersion: nextVersion };
+  });
 
   await writeAuditLog({
     adminUid: session.uid,
     adminEmail: session.email ?? undefined,
-    action: enabled ? "Cash Hub Terms Acceptance Enabled" : "Cash Hub Terms Acceptance Disabled",
+    action: enabled ? "Cash Hub Terms Acceptance Enabled" : "Cash Hub Terms Acceptance Disabled and Reset",
     targetType: "platformConfig",
     targetId: "cashRydrHub",
-    reason
+    reason,
+    metadata: { cashHubTermsVersion: updatedConfig.cashHubTermsVersion }
   });
 
-  return NextResponse.json({ ok: true, termsAcceptanceEnabled: enabled });
+  return NextResponse.json({ ok: true, ...updatedConfig });
 }

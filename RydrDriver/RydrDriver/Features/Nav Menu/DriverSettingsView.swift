@@ -2,6 +2,53 @@ import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
 
+private enum CashHubDriverBillingStatus: String {
+    case active
+    case feePending
+    case partiallyCollected
+    case collected
+    case unknown
+
+    init(rawFirestoreValue: String?) {
+        switch rawFirestoreValue {
+        case "active": self = .active
+        case "feePending", "fee_pending": self = .feePending
+        case "partiallyCollected", "partially_collected": self = .partiallyCollected
+        case "collected": self = .collected
+        default: self = .unknown
+        }
+    }
+
+    func title(periodLabel: String) -> String {
+        switch self {
+        case .active: return "Active"
+        case .feePending: return "Fee pending"
+        case .partiallyCollected: return "Partially collected"
+        case .collected: return "Collected for \(periodLabel)"
+        case .unknown: return "Not available"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .active: return "checkmark.seal.fill"
+        case .feePending: return "clock.badge.exclamationmark.fill"
+        case .partiallyCollected: return "chart.pie.fill"
+        case .collected: return "checkmark.circle.fill"
+        case .unknown: return "questionmark.circle"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .active, .collected: return .green
+        case .feePending: return .orange
+        case .partiallyCollected: return .blue
+        case .unknown: return .secondary
+        }
+    }
+}
+
 struct DriverSettingsView: View {
     @ObservedObject var vm: DriverDashboardVM
     @Environment(\.colorScheme) private var colorScheme
@@ -9,10 +56,23 @@ struct DriverSettingsView: View {
 
     @State private var showLinkPhoneSheet = false
     @State private var phoneProviderLinked = Auth.auth().currentUser?.providerData.contains { $0.providerID == PhoneAuthProviderID } ?? false
+    @State private var cashHubTermsAccepted = false
+    @State private var cashHubOptedOut = false
+    @State private var isLoadingCashHubAccess = true
+    @State private var isUpdatingCashHubAccess = false
+    @State private var showCashHubOptOutConfirmation = false
+    @State private var cashHubAccessAlert: CashHubAccessAlert?
+    @State private var isLoadingCashHubBilling = false
+    @State private var cashHubBillingStatus: CashHubDriverBillingStatus = .active
+    @State private var cashHubBillingPeriodLabel = Self.currentCashHubBillingPeriod().label
+    @State private var cashHubBillingFeeCents = 499
+    @State private var cashHubBillingCollectedCents = 0
+    @State private var cashHubBillingRemainingCents = 499
 
     var body: some View {
         List {
             accountSection
+            cashRydrHubSection
             navigationSection
             queuedRideSection
             driverAppSection
@@ -26,6 +86,28 @@ struct DriverSettingsView: View {
             DriverLinkPhoneView { linked in
                 if linked { phoneProviderLinked = true }
             }
+        }
+        .confirmationDialog(
+            "Opt out of CashRydr Hub?",
+            isPresented: $showCashHubOptOutConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Opt Out", role: .destructive) {
+                optOutOfCashRydrHub()
+            }
+            Button("Keep CashRydr Hub", role: .cancel) {}
+        } message: {
+            Text("Driver access will be turned off and CashRydr Hub will return to the terms screen. You can turn it back on later by accepting the driver terms again.")
+        }
+        .alert(item: $cashHubAccessAlert) { alert in
+            Alert(
+                title: Text(alert.title),
+                message: Text(alert.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+        .onAppear {
+            loadCashHubAccess()
         }
     }
 
@@ -76,6 +158,73 @@ struct DriverSettingsView: View {
             }
         } header: {
             Text("Account")
+        }
+    }
+
+    private var cashRydrHubSection: some View {
+        Section {
+            Label {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("CashRydr Hub Driver Access")
+                        .font(.body.weight(.semibold))
+                    Text(cashHubAccessSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } icon: {
+                Image(systemName: cashHubDriverAccessActive ? "checkmark.seal.fill" : "xmark.seal")
+                    .foregroundStyle(cashHubDriverAccessActive ? Color.green : Color.secondary)
+                    .frame(width: 28)
+            }
+
+            if cashHubDriverAccessActive || isLoadingCashHubBilling {
+                Label {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(cashHubBillingStatus.title(periodLabel: cashHubBillingPeriodLabel))
+                            .font(.body.weight(.semibold))
+                        Text(cashHubBillingSubtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } icon: {
+                    Image(systemName: cashHubBillingStatus.systemImage)
+                        .foregroundStyle(cashHubBillingStatus.color)
+                        .frame(width: 28)
+                }
+            }
+
+            if cashHubDriverAccessActive {
+                Button(role: .destructive) {
+                    showCashHubOptOutConfirmation = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "person.crop.circle.badge.xmark")
+                            .frame(width: 28)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(isUpdatingCashHubAccess ? "Updating..." : "Opt Out of CashRydr Hub")
+                                .font(.body.weight(.semibold))
+                            Text("Turn off driver access and return CashRydr Hub to the terms screen.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer(minLength: 12)
+
+                        if isUpdatingCashHubAccess {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(isUpdatingCashHubAccess)
+            }
+        } header: {
+            Text("CashRydr Hub")
+        } footer: {
+            Text("CashRydr Hub is free for riders. Driver access includes a $4.99 monthly platform fee collected from eligible standard Rydr driver earnings, never from Cash Hub ride payments.")
         }
     }
 
@@ -163,6 +312,194 @@ struct DriverSettingsView: View {
     private var backgroundColor: Color {
         colorScheme == .dark ? .black : Color(.systemGroupedBackground)
     }
+
+    private var cashHubDriverAccessActive: Bool {
+        cashHubTermsAccepted && !cashHubOptedOut
+    }
+
+    private var cashHubAccessSubtitle: String {
+        if isLoadingCashHubAccess {
+            return "Checking CashRydr Hub access..."
+        }
+        if cashHubDriverAccessActive {
+            return "$4.99 monthly access fee acknowledged. CashRydr Hub driver access is active."
+        }
+        if cashHubOptedOut {
+            return "Opted out. Open CashRydr Hub to review the terms and turn driver access back on."
+        }
+        return "Not active. Open CashRydr Hub to review the driver terms."
+    }
+
+    private var cashHubBillingSubtitle: String {
+        if isLoadingCashHubBilling {
+            return "Checking \(cashHubBillingPeriodLabel) billing..."
+        }
+
+        switch cashHubBillingStatus {
+        case .active:
+            return "CashRydr Hub access is active. No current monthly fee collection has been recorded for \(cashHubBillingPeriodLabel)."
+        case .feePending:
+            return "\(formatCents(cashHubBillingFeeCents)) fee pending for \(cashHubBillingPeriodLabel). It will be collected from eligible standard Rydr earnings."
+        case .partiallyCollected:
+            return "Collected \(formatCents(cashHubBillingCollectedCents)) of \(formatCents(cashHubBillingFeeCents)). Remaining \(formatCents(cashHubBillingRemainingCents))."
+        case .collected:
+            return "Monthly CashRydr Hub access fee is paid for \(cashHubBillingPeriodLabel)."
+        case .unknown:
+            return "Billing status is not available right now."
+        }
+    }
+
+    private func loadCashHubAccess() {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            isLoadingCashHubAccess = false
+            return
+        }
+        isLoadingCashHubAccess = true
+        let db = Firestore.firestore()
+        db.collection("platformConfig").document("cashRydrHub").getDocument { configSnapshot, _ in
+            db.collection("drivers").document(uid).getDocument { snapshot, error in
+                DispatchQueue.main.async {
+                    isLoadingCashHubAccess = false
+                    if let error {
+                        cashHubAccessAlert = CashHubAccessAlert(
+                            title: "CashRydr Hub",
+                            message: error.localizedDescription
+                        )
+                        return
+                    }
+                    let config = configSnapshot?.data() ?? [:]
+                    let termsAcceptanceEnabled = config["termsAcceptanceEnabled"] as? Bool ?? false
+                    let currentTermsVersion = config["cashHubTermsVersion"] as? String ?? "legacy"
+                    let data = snapshot?.data() ?? [:]
+                    let termsAccepted = data["cashHubTermsAccepted"] as? Bool ?? false
+                    let acceptedVersion = data["cashHubTermsVersion"] as? String
+                    let acceptedCurrentTerms = acceptedVersion == currentTermsVersion || (acceptedVersion == nil && currentTermsVersion == "legacy")
+                    let optedOut = data["cashHubOptedOut"] as? Bool ?? false
+                    cashHubTermsAccepted = termsAcceptanceEnabled && termsAccepted && acceptedCurrentTerms
+                    cashHubOptedOut = optedOut
+                    if cashHubTermsAccepted && !optedOut {
+                        loadCashHubBilling(for: uid)
+                    } else {
+                        resetCashHubBilling()
+                    }
+                }
+            }
+        }
+    }
+
+    private func loadCashHubBilling(for uid: String) {
+        let period = Self.currentCashHubBillingPeriod()
+        cashHubBillingPeriodLabel = period.label
+        isLoadingCashHubBilling = true
+
+        Firestore.firestore().collection("drivers").document(uid)
+            .collection("cashHubBilling").document(period.id)
+            .getDocument { snapshot, _ in
+                DispatchQueue.main.async {
+                    isLoadingCashHubBilling = false
+                    let data = snapshot?.data() ?? [:]
+                    guard snapshot?.exists == true else {
+                        cashHubBillingStatus = .active
+                        cashHubBillingFeeCents = 499
+                        cashHubBillingCollectedCents = 0
+                        cashHubBillingRemainingCents = 499
+                        return
+                    }
+
+                    cashHubBillingStatus = CashHubDriverBillingStatus(rawFirestoreValue: data["status"] as? String)
+                    cashHubBillingFeeCents = intValue(data["feeCents"]) ?? 499
+                    cashHubBillingCollectedCents = intValue(data["collectedCents"]) ?? 0
+                    cashHubBillingRemainingCents = intValue(data["remainingCents"]) ?? max(0, cashHubBillingFeeCents - cashHubBillingCollectedCents)
+                }
+            }
+    }
+
+    private func resetCashHubBilling() {
+        isLoadingCashHubBilling = false
+        cashHubBillingStatus = .active
+        cashHubBillingPeriodLabel = Self.currentCashHubBillingPeriod().label
+        cashHubBillingFeeCents = 499
+        cashHubBillingCollectedCents = 0
+        cashHubBillingRemainingCents = 499
+    }
+
+    private func optOutOfCashRydrHub() {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            cashHubAccessAlert = CashHubAccessAlert(title: "CashRydr Hub", message: "Sign in before changing CashRydr Hub access.")
+            return
+        }
+
+        isUpdatingCashHubAccess = true
+        let db = Firestore.firestore()
+        let batch = db.batch()
+        let driverRef = db.collection("drivers").document(uid)
+        let cashHubProfileRef = db.collection("cashHubDriverProfiles").document(uid)
+
+        batch.setData([
+            "cashHubTermsAccepted": false,
+            "cashHubOptedOut": true,
+            "cashHubOptedOutAt": FieldValue.serverTimestamp(),
+            "cashHubAccessStatus": "optedOut",
+            "cashHubRole": "driver",
+            "updatedAt": FieldValue.serverTimestamp()
+        ], forDocument: driverRef, merge: true)
+
+        batch.setData([
+            "isOnline": false,
+            "cashHubOptedOut": true,
+            "cashHubAccessStatus": "optedOut",
+            "updatedAt": FieldValue.serverTimestamp()
+        ], forDocument: cashHubProfileRef, merge: true)
+
+        batch.commit { error in
+            DispatchQueue.main.async {
+                isUpdatingCashHubAccess = false
+                if let error {
+                    cashHubAccessAlert = CashHubAccessAlert(title: "CashRydr Hub", message: error.localizedDescription)
+                    return
+                }
+                cashHubTermsAccepted = false
+                cashHubOptedOut = true
+                resetCashHubBilling()
+                cashHubAccessAlert = CashHubAccessAlert(
+                    title: "CashRydr Hub",
+                    message: "Driver access has been turned off. Open CashRydr Hub to review the terms and turn it back on."
+                )
+            }
+        }
+    }
+
+    private static func currentCashHubBillingPeriod(from date: Date = Date()) -> (id: String, label: String) {
+        let idFormatter = DateFormatter()
+        idFormatter.calendar = Calendar(identifier: .gregorian)
+        idFormatter.locale = Locale(identifier: "en_US_POSIX")
+        idFormatter.dateFormat = "yyyy-MM"
+
+        let labelFormatter = DateFormatter()
+        labelFormatter.calendar = Calendar(identifier: .gregorian)
+        labelFormatter.locale = Locale(identifier: "en_US_POSIX")
+        labelFormatter.dateFormat = "MMMM"
+
+        return (idFormatter.string(from: date), labelFormatter.string(from: date))
+    }
+
+    private func formatCents(_ cents: Int) -> String {
+        let dollars = Double(cents) / 100.0
+        return dollars.formatted(.currency(code: "USD"))
+    }
+
+    private func intValue(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber { return value.intValue }
+        if let value = value as? String { return Int(value) }
+        return nil
+    }
+}
+
+private struct CashHubAccessAlert: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
 
 // MARK: - Link phone number for sign-in (self-heal for pre-fix accounts)

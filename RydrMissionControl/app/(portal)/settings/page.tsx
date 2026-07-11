@@ -7,6 +7,7 @@ export default async function SettingsPage() {
   const cashHubConfigSnap = await adminDb.collection("platformConfig").doc("cashRydrHub").get().catch(() => null);
   const cashHubConfig = cashHubConfigSnap?.data() ?? {};
   const cashHubTermsAcceptanceEnabled = cashHubConfig.termsAcceptanceEnabled === true;
+  const cashHubTermsVersion = typeof cashHubConfig.cashHubTermsVersion === "string" ? cashHubConfig.cashHubTermsVersion : null;
 
   return (
     <div className="space-y-6">
@@ -21,7 +22,7 @@ export default async function SettingsPage() {
         <p className="mt-1 text-xs text-muted">Role: {session?.role}</p>
       </div>
 
-      <CashHubBetaToggle initialEnabled={cashHubTermsAcceptanceEnabled} />
+      <CashHubBetaToggle initialEnabled={cashHubTermsAcceptanceEnabled} initialTermsVersion={cashHubTermsVersion} />
 
       <div className="rounded-lg border border-line bg-white p-5 shadow-sm">
         <h2 className="mb-2 text-sm font-semibold text-ink">Granting access</h2>

@@ -4,10 +4,12 @@ import { useState, useTransition } from "react";
 
 type Props = {
   initialEnabled: boolean;
+  initialTermsVersion: string | null;
 };
 
-export default function CashHubBetaToggle({ initialEnabled }: Props) {
+export default function CashHubBetaToggle({ initialEnabled, initialTermsVersion }: Props) {
   const [enabled, setEnabled] = useState(initialEnabled);
+  const [termsVersion, setTermsVersion] = useState(initialTermsVersion);
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -33,7 +35,9 @@ export default function CashHubBetaToggle({ initialEnabled }: Props) {
         return;
       }
 
-      setMessage(nextEnabled ? "Terms acceptance is enabled." : "Terms acceptance is disabled.");
+      const data = (await res.json().catch(() => null)) as { cashHubTermsVersion?: string } | null;
+      setTermsVersion(data?.cashHubTermsVersion ?? null);
+      setMessage(nextEnabled ? "Terms acceptance is enabled." : "Terms acceptance is disabled and prior acceptances were reset.");
     });
   }
 
@@ -72,6 +76,7 @@ export default function CashHubBetaToggle({ initialEnabled }: Props) {
           {enabled ? "Acceptance enabled" : "Acceptance disabled for live beta"}
         </p>
       </div>
+      <p className="mt-2 text-xs text-muted">Current terms version: {termsVersion ?? "Not set"}</p>
 
       {message ? <p className="mt-3 text-sm text-muted">{message}</p> : null}
     </div>

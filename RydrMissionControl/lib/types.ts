@@ -120,6 +120,18 @@ export interface DriverRecord {
   missionControlApprovalOverrideReason?: string;
   needsAttentionReason?: string;
 
+  // CashRydr Hub driver access / billing acknowledgement
+  cashHubTermsAccepted?: boolean;
+  cashHubTermsAcceptedAt?: { toDate?: () => Date } | null;
+  cashHubTermsVersion?: string;
+  cashHubOptedOut?: boolean;
+  cashHubOptedOutAt?: { toDate?: () => Date } | null;
+  cashHubAccessStatus?: string;
+  cashHubDriverAccessFeeAcknowledged?: boolean;
+  cashHubDriverAccessFeeAcknowledgedAt?: { toDate?: () => Date } | null;
+  cashHubDriverAccessFeeCents?: number;
+  cashHubDriverAccessFeeVersion?: string;
+
   // Vehicle Library System
   vinDecodeStatus?: "pending" | "decoded" | "failed";
   vehicleImageStatus?: "matched" | "fallback" | "missing";
@@ -165,6 +177,9 @@ export type SafetyReportStatus = "open" | "dismissed" | "escalated";
 export interface SafetyReport {
   id: string;
   reportType?: string;
+  surface?: "ride" | "cashHub";
+  cashHubRequestId?: string;
+  cashHubConversationId?: string;
   rideId?: string;
   driverId?: string;
   riderId?: string;
@@ -187,6 +202,7 @@ export interface AuditLogEntry {
     | "vehicleLibrary"
     | "accountDeletion"
     | "payment"
+    | "promotion"
     | "supportTicket"
     | "platformConfig"
     | "betaWaitlist";

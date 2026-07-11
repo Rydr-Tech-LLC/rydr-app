@@ -19,7 +19,7 @@ export default async function ReportsPage() {
 
       {reports.length === 0 ? (
         <div className="rounded-lg border border-dashed border-line bg-white p-10 text-center text-sm text-muted">
-          No reports yet. Rider incident reports submitted from active rides will appear here.
+          No reports yet. Rider, driver, and Cash Hub safety cases will appear here.
         </div>
       ) : (
         <div className="space-y-2">
@@ -34,8 +34,9 @@ export default async function ReportsPage() {
                       <StatusPill status={report.status} />
                     </div>
                     <p className="mt-0.5 text-xs text-muted">
-                      Ride {report.rideId ?? "—"} · Driver {report.driverName ?? report.driverId ?? "—"} · Rider{" "}
-                      {report.riderName ?? report.riderId ?? "—"} · {created ? created.toLocaleString() : "—"}
+                      {report.cashHubRequestId ? `Cash Hub ${report.cashHubRequestId}` : `Ride ${report.rideId ?? "—"}`} · Driver{" "}
+                      {report.driverName ?? report.driverId ?? "—"} · Rider {report.riderName ?? report.riderId ?? "—"} ·{" "}
+                      {created ? created.toLocaleString() : "—"}
                     </p>
                     {report.description && <p className="mt-2 text-sm text-ink">{report.description}</p>}
                   </div>

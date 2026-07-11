@@ -74,6 +74,10 @@ struct CashHubResponse: Identifiable, Equatable {
     var isDriverOffer: Bool { authorRole == "driver" && (kind == "offer" || kind.isEmpty) }
 }
 
+private func cashHubConversationId(requestId: String, driverUid: String) -> String {
+    "\(requestId)_\(driverUid)"
+}
+
 private struct CashHubFavoriteDriver: Identifiable, Equatable {
     let id: String
     var driverUid: String
@@ -240,8 +244,8 @@ private enum CashHubMessageMode: String {
 
     var title: String {
         switch self {
-        case .requestThread: return "Request Thread"
-        case .directConnection: return "Direct Message"
+        case .requestThread: return "Offer Conversation"
+        case .directConnection: return "Trip Chat"
         }
     }
 
@@ -256,15 +260,27 @@ private enum CashHubMessageMode: String {
 private struct CashHubMessageContext: Identifiable {
     let request: CashRydrRequest
     let mode: CashHubMessageMode
+    let conversationId: String?
+    let driverUid: String?
+    let driverName: String?
 
-    var id: String { "\(request.id)-\(mode.rawValue)" }
+    init(request: CashRydrRequest, mode: CashHubMessageMode, offer: CashHubResponse? = nil) {
+        self.request = request
+        self.mode = mode
+        let resolvedDriverUid = offer?.authorUid ?? request.connectedDriverUid
+        self.driverUid = resolvedDriverUid
+        self.driverName = offer?.authorName ?? request.connectedDriverName
+        self.conversationId = resolvedDriverUid.map { cashHubConversationId(requestId: request.id, driverUid: $0) }
+    }
+
+    var id: String { "\(request.id)-\(mode.rawValue)-\(conversationId ?? "none")" }
 }
 
 private enum CashHubFeedCategory: String, CaseIterable, Identifiable {
     case all = "All"
     case posts = "Posts"
     case offers = "Offers"
-    case messages = "Messages"
+    case messages = "Chats"
     case favorites = "Favorites"
     case trips = "Trips"
 
@@ -303,10 +319,13 @@ private final class CashRydrHubVM: ObservableObject {
     @Published var termsAcceptanceEnabled = false
     @Published var onlineDriverCount = 0
 
+    private var cashHubTermsVersion = "legacy"
     private let favoriteDriverLimit = 10
     private let db = Firestore.firestore()
     private var requestListener: ListenerRegistration?
     private var responseListeners: [String: ListenerRegistration] = [:]
+    private var messageListeners: [String: ListenerRegistration] = [:]
+    private var messagesByConversation: [String: [CashHubResponse]] = [:]
     private var favoriteDriversListener: ListenerRegistration?
     private var favoriteProfileListeners: [String: ListenerRegistration] = [:]
 
@@ -344,9 +363,12 @@ private final class CashRydrHubVM: ObservableObject {
 
                     let config = configSnap?.data() ?? [:]
                     self.termsAcceptanceEnabled = config["termsAcceptanceEnabled"] as? Bool ?? false
+                    self.cashHubTermsVersion = config["cashHubTermsVersion"] as? String ?? "legacy"
 
                     let data = snap?.data() ?? [:]
-                    self.termsAccepted = data["cashHubTermsAccepted"] as? Bool ?? false
+                    let acceptedVersion = data["cashHubTermsVersion"] as? String
+                    let acceptedCurrentTerms = acceptedVersion == self.cashHubTermsVersion || (acceptedVersion == nil && self.cashHubTermsVersion == "legacy")
+                    self.termsAccepted = (data["cashHubTermsAccepted"] as? Bool ?? false) && acceptedCurrentTerms
                     if self.termsAcceptanceEnabled && self.termsAccepted {
                         self.startMarketplace()
                         self.startFavoriteDrivers()
@@ -371,6 +393,7 @@ private final class CashRydrHubVM: ObservableObject {
         db.collection("riders").document(uid).setData([
             "cashHubTermsAccepted": true,
             "cashHubTermsAcceptedAt": FieldValue.serverTimestamp(),
+            "cashHubTermsVersion": cashHubTermsVersion,
             "cashHubRole": CashHubRole.rider.rawValue
         ], merge: true) { [weak self] error in
             Task { @MainActor in
@@ -428,6 +451,9 @@ private final class CashRydrHubVM: ObservableObject {
         requestListener = nil
         responseListeners.values.forEach { $0.remove() }
         responseListeners.removeAll()
+        messageListeners.values.forEach { $0.remove() }
+        messageListeners.removeAll()
+        messagesByConversation.removeAll()
         favoriteDriversListener?.remove()
         favoriteDriversListener = nil
         favoriteProfileListeners.values.forEach { $0.remove() }
@@ -498,6 +524,53 @@ private final class CashRydrHubVM: ObservableObject {
                     if error == nil {
                         self?.confirmationMessage = "\(driver.name) has been blocked."
                     }
+                }
+            }
+        }
+    }
+
+    func blockDriver(_ offer: CashHubResponse) {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            errorMessage = "Please log in to block a driver."
+            return
+        }
+        let riderDocument = db.collection("riders").document(uid)
+        riderDocument.collection("cashHubBlockedDrivers").document(offer.authorUid).setData([
+            "driverUid": offer.authorUid,
+            "driverName": offer.authorName,
+            "conversationId": offer.id,
+            "blockedAt": FieldValue.serverTimestamp()
+        ], merge: true) { [weak self] error in
+            Task { @MainActor [weak self] in
+                self?.errorMessage = error?.localizedDescription
+                if error == nil {
+                    self?.confirmationMessage = "\(offer.authorName) has been blocked."
+                }
+            }
+        }
+    }
+
+    func reportDriver(_ offer: CashHubResponse, for request: CashRydrRequest) {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            errorMessage = "Please log in to report a driver."
+            return
+        }
+        db.collection("safetyReports").addDocument(data: [
+            "reportType": "Cash Hub driver report",
+            "surface": "cashHub",
+            "cashHubRequestId": request.id,
+            "cashHubConversationId": offer.id,
+            "riderId": uid,
+            "driverId": offer.authorUid,
+            "driverName": offer.authorName,
+            "description": "Rider reported a Cash Hub driver conversation for review.",
+            "status": "open",
+            "createdAt": FieldValue.serverTimestamp()
+        ]) { [weak self] error in
+            Task { @MainActor in
+                self?.errorMessage = error?.localizedDescription
+                if error == nil {
+                    self?.confirmationMessage = "Driver reported to Rydr safety support."
                 }
             }
         }
@@ -661,35 +734,73 @@ private final class CashRydrHubVM: ObservableObject {
             return false
         }
 
-        var data: [String: Any] = [
-            "authorUid": uid,
-            "authorName": displayName(driverName, fallback: "Cash Hub Driver"),
-            "authorRole": "driver",
-            "kind": "offer",
-            "status": "pending",
-            "message": draft.message.trimmingCharacters(in: .whitespacesAndNewlines),
+        let driverName = displayName(driverName, fallback: "Cash Hub Driver")
+        let conversationId = cashHubConversationId(requestId: request.id, driverUid: uid)
+        var conversationData: [String: Any] = [
+            "requestId": request.id,
+            "riderUid": request.riderUid,
+            "riderName": request.riderName,
+            "driverUid": uid,
+            "driverName": driverName,
+            "participants": [request.riderUid, uid].sorted(),
+            "status": "open",
+            "offerStatus": "pending",
             "availability": availability,
             "vehicleInfo": vehicleInfo,
+            "lastMessage": draft.message.trimmingCharacters(in: .whitespacesAndNewlines),
+            "lastMessageAt": FieldValue.serverTimestamp(),
+            "cashHubOnly": true,
+            "managedByRydr": false,
+            "paymentHandledBy": "rider_driver_direct",
+            "updatedAt": FieldValue.serverTimestamp(),
             "createdAt": FieldValue.serverTimestamp()
         ]
         if let amount = cleanAmount(draft.offerAmount) {
-            data["offerAmount"] = amount
+            conversationData["offerAmount"] = amount
         }
-        addResponse(data, to: request)
+        let conversationRef = db.collection("cashHubConversations").document(conversationId)
+        let messageRef = conversationRef.collection("messages").document()
+        var messageData: [String: Any] = [
+            "requestId": request.id,
+            "conversationId": conversationId,
+            "senderUid": uid,
+            "senderName": driverName,
+            "senderRole": "driver",
+            "kind": "offer",
+            "text": draft.message.trimmingCharacters(in: .whitespacesAndNewlines),
+            "availability": availability,
+            "vehicleInfo": vehicleInfo,
+            "auditVisibleToAdmin": true,
+            "createdAt": FieldValue.serverTimestamp()
+        ]
+        if let amount = conversationData["offerAmount"] {
+            messageData["offerAmount"] = amount
+        }
+        let batch = db.batch()
+        batch.setData(conversationData, forDocument: conversationRef, merge: true)
+        batch.setData(messageData, forDocument: messageRef)
+        batch.commit { [weak self] error in
+            Task { @MainActor in self?.errorMessage = error?.localizedDescription }
+        }
         return true
     }
 
-    func sendMessage(to request: CashRydrRequest, message: String, authorName: String, mode: CashHubMessageMode = .requestThread) -> Bool {
+    func sendMessage(to context: CashHubMessageContext, message: String, authorName: String) -> Bool {
         guard let uid = Auth.auth().currentUser?.uid else {
             errorMessage = "Please log in to send a message."
             return false
         }
-        if mode == .requestThread && request.isConnected {
-            errorMessage = "This request thread is closed because a driver has accepted the request."
+        let request = context.request
+        if context.mode == .requestThread && request.isConnected {
+            errorMessage = "Offer conversations close after you connect with a driver."
             return false
         }
-        if mode == .directConnection && !request.isConnected {
-            errorMessage = "Direct messages open after a driver accepts the request."
+        if context.mode == .directConnection && !request.isConnected {
+            errorMessage = "Trip Chat opens after you connect with a driver."
+            return false
+        }
+        guard let conversationId = context.conversationId, let driverUid = context.driverUid else {
+            errorMessage = "Choose a driver conversation first."
             return false
         }
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -698,14 +809,39 @@ private final class CashRydrHubVM: ObservableObject {
             return false
         }
 
-        addResponse([
-            "authorUid": uid,
-            "authorName": displayName(authorName, fallback: "Cash Hub User"),
-            "authorRole": CashHubRole.rider.rawValue,
-            "kind": mode.responseKind,
-            "message": trimmed,
+        let senderName = displayName(authorName, fallback: "Cash Hub User")
+        let conversationRef = db.collection("cashHubConversations").document(conversationId)
+        let messageRef = conversationRef.collection("messages").document()
+        let batch = db.batch()
+        batch.setData([
+            "requestId": request.id,
+            "riderUid": request.riderUid,
+            "riderName": request.riderName,
+            "driverUid": driverUid,
+            "driverName": context.driverName ?? request.connectedDriverName ?? "Cash Hub Driver",
+            "participants": [request.riderUid, driverUid].sorted(),
+            "status": request.isConnected ? "connected" : "open",
+            "lastMessage": trimmed,
+            "lastMessageAt": FieldValue.serverTimestamp(),
+            "cashHubOnly": true,
+            "managedByRydr": false,
+            "paymentHandledBy": "rider_driver_direct",
+            "updatedAt": FieldValue.serverTimestamp()
+        ], forDocument: conversationRef, merge: true)
+        batch.setData([
+            "requestId": request.id,
+            "conversationId": conversationId,
+            "senderUid": uid,
+            "senderName": senderName,
+            "senderRole": CashHubRole.rider.rawValue,
+            "kind": context.mode.responseKind,
+            "text": trimmed,
+            "auditVisibleToAdmin": true,
             "createdAt": FieldValue.serverTimestamp()
-        ], to: request)
+        ], forDocument: messageRef)
+        batch.commit { [weak self] error in
+            Task { @MainActor in self?.errorMessage = error?.localizedDescription }
+        }
         return true
     }
 
@@ -729,7 +865,17 @@ private final class CashRydrHubVM: ObservableObject {
         if let amount = offer.offerAmount {
             data["agreedPrice"] = amount
         }
-        db.collection("cashRydrRequests").document(request.id).setData(data, merge: true) { [weak self] error in
+        let requestRef = db.collection("cashRydrRequests").document(request.id)
+        let conversationRef = db.collection("cashHubConversations").document(offer.id)
+        let batch = db.batch()
+        batch.setData(data, forDocument: requestRef, merge: true)
+        batch.setData([
+            "status": "connected",
+            "offerStatus": "accepted",
+            "connectedAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ], forDocument: conversationRef, merge: true)
+        batch.commit { [weak self] error in
             Task { @MainActor in
                 self?.errorMessage = error?.localizedDescription
                 if error == nil {
@@ -744,9 +890,8 @@ private final class CashRydrHubVM: ObservableObject {
             errorMessage = "Only the rider who posted this request can decline an offer."
             return
         }
-        db.collection("cashRydrRequests").document(request.id)
-            .collection("responses").document(offer.id)
-            .setData(["status": "declined"], merge: true) { [weak self] error in
+        db.collection("cashHubConversations").document(offer.id)
+            .setData(["offerStatus": "declined", "updatedAt": FieldValue.serverTimestamp()], merge: true) { [weak self] error in
                 Task { @MainActor in self?.errorMessage = error?.localizedDescription }
             }
     }
@@ -774,13 +919,9 @@ private final class CashRydrHubVM: ObservableObject {
         return responsesByRequest[request.id]?.first { $0.id == selectedOfferId }
     }
 
-    private func addResponse(_ data: [String: Any], to request: CashRydrRequest) {
-        db.collection("cashRydrRequests")
-            .document(request.id)
-            .collection("responses")
-            .addDocument(data: data) { [weak self] error in
-                Task { @MainActor in self?.errorMessage = error?.localizedDescription }
-            }
+    func messages(for context: CashHubMessageContext) -> [CashHubResponse] {
+        guard let conversationId = context.conversationId else { return [] }
+        return messagesByConversation[conversationId] ?? []
     }
 
     private func validate(_ draft: CashHubRequestDraft) -> Bool {
@@ -803,6 +944,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     private func syncResponseListeners(for requests: [CashRydrRequest]) {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
         let activeIDs = Set(requests.map(\.id))
         for (id, listener) in responseListeners where !activeIDs.contains(id) {
             listener.remove()
@@ -811,9 +953,38 @@ private final class CashRydrHubVM: ObservableObject {
         }
 
         for request in requests where responseListeners[request.id] == nil {
-            responseListeners[request.id] = db.collection("cashRydrRequests")
-                .document(request.id)
-                .collection("responses")
+            responseListeners[request.id] = db.collection("cashHubConversations")
+                .whereField("requestId", isEqualTo: request.id)
+                .whereField("riderUid", isEqualTo: uid)
+                .addSnapshotListener { [weak self] snap, error in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        if let error {
+                            self.errorMessage = error.localizedDescription
+                            return
+                        }
+                        let conversations = (snap?.documents ?? [])
+                            .compactMap(Self.makeConversationSummary)
+                            .sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+                        self.responsesByRequest[request.id] = conversations
+                        self.syncMessageListeners(for: conversations)
+                    }
+                }
+        }
+    }
+
+    private func syncMessageListeners(for conversations: [CashHubResponse]) {
+        let activeIDs = Set(conversations.map(\.id))
+        for (id, listener) in messageListeners where !activeIDs.contains(id) {
+            listener.remove()
+            messageListeners[id] = nil
+            messagesByConversation[id] = nil
+        }
+
+        for conversation in conversations where messageListeners[conversation.id] == nil {
+            messageListeners[conversation.id] = db.collection("cashHubConversations")
+                .document(conversation.id)
+                .collection("messages")
                 .order(by: "createdAt", descending: false)
                 .addSnapshotListener { [weak self] snap, error in
                     Task { @MainActor in
@@ -822,7 +993,7 @@ private final class CashRydrHubVM: ObservableObject {
                             self.errorMessage = error.localizedDescription
                             return
                         }
-                        self.responsesByRequest[request.id] = (snap?.documents ?? []).compactMap(Self.makeResponse)
+                        self.messagesByConversation[conversation.id] = (snap?.documents ?? []).compactMap(Self.makeConversationMessage)
                     }
                 }
         }
@@ -887,26 +1058,47 @@ private final class CashRydrHubVM: ObservableObject {
         )
     }
 
-    private static func makeResponse(_ doc: QueryDocumentSnapshot) -> CashHubResponse? {
+    private static func makeConversationSummary(_ doc: QueryDocumentSnapshot) -> CashHubResponse? {
         let data = doc.data()
-        guard let authorUid = data["authorUid"] as? String,
-              let authorName = data["authorName"] as? String,
-              let authorRole = data["authorRole"] as? String else { return nil }
+        guard let driverUid = data["driverUid"] as? String else { return nil }
         return CashHubResponse(
             id: doc.documentID,
-            authorUid: authorUid,
-            authorName: authorName,
-            authorRole: authorRole,
-            kind: data["kind"] as? String ?? "",
-            status: data["status"] as? String ?? "pending",
-            message: data["message"] as? String ?? "",
-            offerAmount: data["offerAmount"] as? Double ?? data["counterAmount"] as? Double,
+            authorUid: driverUid,
+            authorName: data["driverName"] as? String ?? "Cash Hub Driver",
+            authorRole: "driver",
+            kind: "offer",
+            status: data["offerStatus"] as? String ?? "pending",
+            message: data["lastMessage"] as? String ?? "",
+            offerAmount: data["offerAmount"] as? Double,
             availability: data["availability"] as? String ?? "Availability provided by message",
             vehicleInfo: data["vehicleInfo"] as? String ?? "Vehicle details not provided",
             cashHubRating: data["cashHubRating"] as? Double,
             isIdentityVerified: data["isIdentityVerified"] as? Bool ?? false,
             isLicenseVerified: data["isLicenseVerified"] as? Bool ?? false,
             isRydrVerifiedDriver: data["isRydrVerifiedDriver"] as? Bool ?? false,
+            createdAt: (data["lastMessageAt"] as? Timestamp)?.dateValue() ?? (data["createdAt"] as? Timestamp)?.dateValue()
+        )
+    }
+
+    private static func makeConversationMessage(_ doc: QueryDocumentSnapshot) -> CashHubResponse? {
+        let data = doc.data()
+        guard let senderUid = data["senderUid"] as? String,
+              let senderRole = data["senderRole"] as? String else { return nil }
+        return CashHubResponse(
+            id: doc.documentID,
+            authorUid: senderUid,
+            authorName: data["senderName"] as? String ?? "Cash Hub User",
+            authorRole: senderRole,
+            kind: data["kind"] as? String ?? "message",
+            status: "sent",
+            message: data["text"] as? String ?? "",
+            offerAmount: data["offerAmount"] as? Double,
+            availability: data["availability"] as? String ?? "",
+            vehicleInfo: data["vehicleInfo"] as? String ?? "",
+            cashHubRating: nil,
+            isIdentityVerified: false,
+            isLicenseVerified: false,
+            isRydrVerifiedDriver: false,
             createdAt: (data["createdAt"] as? Timestamp)?.dateValue()
         )
     }
@@ -1048,14 +1240,14 @@ struct CashRydrHubView: View {
             if request.status == "completed" {
                 events.append(.init(
                     id: "completed-\(request.id)",
-                    title: "You completed a Cash Hub ride!",
-                    detail: "Great job! You completed your ride with \(request.connectedDriverName ?? "your driver").",
+                    title: "You closed a Cash Hub listing",
+                    detail: "Your listing with \(request.connectedDriverName ?? "your driver") is closed.",
                     cta: nil,
                     systemImage: "checkmark.seal.fill",
                     date: request.createdAt ?? request.scheduledTime,
                     tint: .green,
                     category: .trips,
-                    accessory: .badge("Completed", .green)
+                    accessory: .badge("Closed", .green)
                 ))
             } else if request.isConnected {
                 events.append(.init(
@@ -1086,7 +1278,7 @@ struct CashRydrHubView: View {
         if completedCashRideCount >= 10 {
             events.append(.init(
                 id: "milestone-10",
-                title: "You completed your 10th Cash Hub ride",
+                title: "You closed your 10th Cash Hub listing",
                 detail: "Cash Hub milestone reached",
                 cta: nil,
                 systemImage: "10.circle.fill",
@@ -1097,7 +1289,7 @@ struct CashRydrHubView: View {
         } else if completedCashRideCount >= 1 {
             events.append(.init(
                 id: "milestone-1",
-                title: "You completed your first Cash Hub ride",
+                title: "You closed your first Cash Hub listing",
                 detail: "Cash Hub milestone reached",
                 cta: nil,
                 systemImage: "1.circle.fill",
@@ -1144,14 +1336,13 @@ struct CashRydrHubView: View {
             }
         }
         .sheet(item: $messagingContext) { context in
-            let responses = vm.responsesByRequest[context.request.id] ?? []
             CashHubMessageForm(
                 request: context.request,
                 mode: context.mode,
-                messages: responses.filter { $0.kind == context.mode.responseKind },
-                mentionCandidates: mentionCandidates(for: context.request, responses: responses)
+                messages: vm.messages(for: context),
+                mentionCandidates: context.driverName.map { [$0] } ?? []
             ) { text in
-                if vm.sendMessage(to: context.request, message: text, authorName: session.userName, mode: context.mode) {
+                if vm.sendMessage(to: context, message: text, authorName: session.userName) {
                     messagingContext = nil
                 }
             }
@@ -1162,7 +1353,7 @@ struct CashRydrHubView: View {
                 offer: vm.selectedOffer(for: request),
                 onMessage: {
                     viewingConnection = nil
-                    messagingContext = CashHubMessageContext(request: request, mode: .directConnection)
+                    messagingContext = CashHubMessageContext(request: request, mode: .directConnection, offer: vm.selectedOffer(for: request))
                 },
                 onCancel: {
                     vm.cancelConnection(for: request)
@@ -1180,11 +1371,13 @@ struct CashRydrHubView: View {
                 onDelete: { vm.removeRequest($0) },
                 onVisibilityChange: { request, visibility in vm.updateVisibility(for: request, to: visibility) },
                 onOpenConnection: { viewingConnection = $0 },
-                onMessage: { request, mode in messagingContext = CashHubMessageContext(request: request, mode: mode) },
+                onMessage: { request, mode, offer in messagingContext = CashHubMessageContext(request: request, mode: mode, offer: offer) },
                 onFavorite: { vm.addFavoriteDriver(from: $0) },
                 onViewFavoriteDriver: { viewingFavoriteDriver = $0 },
                 onRemoveFavoriteDriver: { vm.removeFavoriteDriver($0) },
                 onBlockFavoriteDriver: { driverPendingBlock = $0 },
+                onBlockOfferDriver: { vm.blockDriver($0) },
+                onReportOfferDriver: { offer, request in vm.reportDriver(offer, for: request) },
                 onAcceptOffer: { offer, request in vm.acceptOffer(offer, for: request) },
                 onDeclineOffer: { offer, request in vm.declineOffer(offer, for: request) }
             )
@@ -1290,7 +1483,7 @@ struct CashRydrHubView: View {
                                     responses: vm.responsesByRequest[request.id] ?? [],
                                     onEdit: { editingRequest = request },
                                     onOffers: { riderPanel = .offers },
-                                    onMessage: { messagingContext = CashHubMessageContext(request: request, mode: request.isConnected ? .directConnection : .requestThread) },
+                                    onTripChat: { messagingContext = CashHubMessageContext(request: request, mode: .directConnection, offer: vm.selectedOffer(for: request)) },
                                     onConnection: { viewingConnection = request },
                                     onDelete: { requestPendingDeletion = request }
                                 )
@@ -1316,12 +1509,12 @@ struct CashRydrHubView: View {
 
                         if activityRequests.isEmpty {
                             CashHubSocialEmptyState(
-                                title: "No completed Cash Hub rides yet",
-                                message: "Ride activity appears here once a driver marks a Cash Hub ride as completed."
+                                title: "No closed Cash Hub listings yet",
+                                message: "Listing activity appears here once a connected listing is marked closed."
                             )
                         } else {
                             HStack {
-                                Text("Recent Rides")
+                                Text("Recent Listings")
                                     .font(.headline.weight(.black))
                                 Spacer()
                             }
@@ -1333,7 +1526,7 @@ struct CashRydrHubView: View {
                                 )
                             }
 
-                            Text("Cash Hub rides are settled directly between you and the driver — no in-app receipt is issued.")
+                            Text("Cash Hub listings are settled directly between you and the driver — no in-app receipt is issued.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -1804,7 +1997,7 @@ private struct CashHubDriversOnlineBanner: View {
                             .fill(Color.green)
                             .frame(width: 7, height: 7)
                     }
-                    Text("Find a cash ride today")
+                    Text("Find a Cash Hub listing today")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1864,7 +2057,7 @@ private struct CashHubFeedTimelineCard: View {
 
             if filteredEvents.isEmpty {
                 Text(events.isEmpty
-                     ? "Your CashRydr Hub updates will appear here as you post rides, favorite drivers, complete trips, and update your profile."
+                     ? "Your CashRydr Hub updates will appear here as you post ride needs, favorite drivers, close listings, and update your profile."
                      : "Nothing in this category yet.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -2034,7 +2227,7 @@ private struct CashHubPostManagementCard: View {
     let responses: [CashHubResponse]
     let onEdit: () -> Void
     let onOffers: () -> Void
-    let onMessage: () -> Void
+    let onTripChat: () -> Void
     let onConnection: () -> Void
     let onDelete: () -> Void
 
@@ -2126,7 +2319,7 @@ private struct CashHubPostManagementCard: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(request.isConnected ? "Connection" : "View Offers") {
+                Button(request.isConnected ? "Details" : "View Offers") {
                     request.isConnected ? onConnection() : onOffers()
                 }
                 .font(.caption.weight(.bold))
@@ -2137,9 +2330,13 @@ private struct CashHubPostManagementCard: View {
             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.red.opacity(0.06)))
 
             HStack(spacing: 10) {
-                CashHubPostActionButton(icon: "pencil", label: "Edit Post", action: onEdit)
-                CashHubPostActionButton(icon: "bubble.left.and.bubble.right", label: "Messages", action: onMessage)
-                CashHubPostActionButton(icon: "tag.fill", label: "Offers (\(offers.count))", tint: .red, action: onOffers)
+                if request.isConnected {
+                    CashHubPostActionButton(icon: "bubble.left.and.bubble.right", label: "Trip Chat", action: onTripChat)
+                    CashHubPostActionButton(icon: "checkmark.seal.fill", label: "Details", tint: .green, action: onConnection)
+                } else {
+                    CashHubPostActionButton(icon: "pencil", label: "Edit Post", action: onEdit)
+                    CashHubPostActionButton(icon: "tag.fill", label: "Offers (\(offers.count))", tint: .red, action: onOffers)
+                }
                 CashHubPostActionButton(icon: "trash.fill", tint: .red, background: Color.red.opacity(0.1), action: onDelete)
             }
         }
@@ -2176,9 +2373,9 @@ private struct CashHubActivityHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Ride History")
+                Text("Listing History")
                     .font(.title2.weight(.black))
-                Text("Your completed cash rides at a glance.")
+                Text("Your closed Cash Hub listings at a glance.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -2462,7 +2659,7 @@ private struct CashHubSafetyFooter: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
-                Label("Cash rides are arranged directly between rider and driver.", systemImage: "shield.checkered")
+                Label("Cash Hub listings are arranged directly between rider and driver.", systemImage: "shield.checkered")
                 Spacer(minLength: 8)
                 Button(action: onDismiss) {
                     Image(systemName: "xmark.circle.fill")
@@ -2525,8 +2722,8 @@ private struct CashHubStatusBadge: View {
 
     private var label: String {
         switch status {
-        case "connected", "accepted": return "Accepted"
-        case "completed": return "Completed"
+        case "connected", "accepted": return "Connected"
+        case "completed": return "Closed"
         case "cancelled", "canceled": return "Canceled"
         case "expired": return "Expired"
         default: return "Open"
@@ -2606,7 +2803,7 @@ private struct CashHubActionGrid: View {
             CashHubActionCard(title: "Post Ride Request", icon: "plus.circle.fill", action: onPost)
             CashHubActionCard(title: "My Requests", icon: "list.bullet.clipboard", action: onRequests)
             CashHubActionCard(title: "Driver Offers", icon: "person.badge.plus", action: onOffers)
-            CashHubActionCard(title: "Messages", icon: "bubble.left.and.bubble.right", action: onMessages)
+            CashHubActionCard(title: "Trip Chats", icon: "bubble.left.and.bubble.right", action: onMessages)
             CashHubActionCard(
                 title: "Favorite Drivers",
                 icon: "star.fill",
@@ -2914,10 +3111,10 @@ private struct CashHubRequestCard: View {
                 .foregroundStyle(.secondary)
 
             HStack {
-                Button("Send Offer", action: onPrimary)
+                Button("Make Offer", action: onPrimary)
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
-                Button("Message", action: onMessage)
+                Button("Open", action: onMessage)
                     .buttonStyle(.bordered)
             }
         }
@@ -2937,11 +3134,13 @@ private struct CashHubRiderPanelView: View {
     let onDelete: (CashRydrRequest) -> Void
     let onVisibilityChange: (CashRydrRequest, String) -> Void
     let onOpenConnection: (CashRydrRequest) -> Void
-    let onMessage: (CashRydrRequest, CashHubMessageMode) -> Void
+    let onMessage: (CashRydrRequest, CashHubMessageMode, CashHubResponse?) -> Void
     let onFavorite: (CashHubResponse) -> Void
     let onViewFavoriteDriver: (CashHubFavoriteDriver) -> Void
     let onRemoveFavoriteDriver: (CashHubFavoriteDriver) -> Void
     let onBlockFavoriteDriver: (CashHubFavoriteDriver) -> Void
+    let onBlockOfferDriver: (CashHubResponse) -> Void
+    let onReportOfferDriver: (CashHubResponse, CashRydrRequest) -> Void
     let onAcceptOffer: (CashHubResponse, CashRydrRequest) -> Void
     let onDeclineOffer: (CashHubResponse, CashRydrRequest) -> Void
 
@@ -2952,7 +3151,7 @@ private struct CashHubRiderPanelView: View {
         switch panel {
         case .requests: return "My Requests"
         case .offers: return "Driver Offers"
-        case .messages: return "Messages"
+        case .messages: return "Trip Chats"
         case .favorites: return "Favorite Drivers"
         }
     }
@@ -2985,12 +3184,14 @@ private struct CashHubRiderPanelView: View {
                                     if request.isConnected {
                                         Button("View Connection") { onOpenConnection(request) }
                                             .buttonStyle(.borderedProminent).tint(.green)
-                                        Text("Thread closed")
+                                        Text("Offers closed")
                                             .font(.caption.weight(.semibold))
                                             .foregroundStyle(.secondary)
                                     } else {
                                         Button("Edit") { onEdit(request) }.buttonStyle(.bordered)
-                                        Button("Message") { onMessage(request, .requestThread) }.buttonStyle(.bordered)
+                                        Button("Offer Conversation") {
+                                            onMessage(request, .requestThread, (responses[request.id] ?? []).first)
+                                        }.buttonStyle(.bordered)
                                     }
                                     Button("Delete", role: .destructive) { requestPendingDeletion = request }
                                         .buttonStyle(.bordered)
@@ -3004,8 +3205,10 @@ private struct CashHubRiderPanelView: View {
                                 CashHubOfferCard(
                                     offer: offer,
                                     isConnected: request.isConnected,
-                                    onMessage: { onMessage(request, request.isConnected ? .directConnection : .requestThread) },
+                                    onMessage: { onMessage(request, request.isConnected ? .directConnection : .requestThread, offer) },
                                     onFavorite: { onFavorite(offer) },
+                                    onReport: { onReportOfferDriver(offer, request) },
+                                    onBlock: { onBlockOfferDriver(offer) },
                                     onAccept: { onAcceptOffer(offer, request) },
                                     onDecline: { onDeclineOffer(offer, request) }
                                 )
@@ -3013,26 +3216,26 @@ private struct CashHubRiderPanelView: View {
                         }
                     case .messages:
                         ForEach(connectedRequests) { request in
-                            let messages = (responses[request.id] ?? []).filter { $0.kind == CashHubMessageMode.directConnection.responseKind && !$0.message.isEmpty }
-                            if !messages.isEmpty {
+                            let conversations = responses[request.id] ?? []
+                            if !conversations.isEmpty {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("\(request.pickup) to \(request.destination)").font(.headline)
-                                    ForEach(messages.suffix(3)) { response in
-                                        Text("\(response.authorName): \(response.message)")
+                                    ForEach(conversations.prefix(3)) { response in
+                                        Text("\(response.authorName): \(response.message.isEmpty ? "Conversation open" : response.message)")
                                             .font(.subheadline)
                                             .foregroundStyle(.secondary)
                                     }
-                                    Button("Message") { onMessage(request, .directConnection) }
+                                    Button("Open Trip Chat") { onMessage(request, .directConnection, conversations.first) }
                                         .buttonStyle(.bordered)
                                 }
                                 .cashHubCard()
                             } else {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("\(request.pickup) to \(request.destination)").font(.headline)
-                                    Text("No direct messages yet.")
+                                    Text("No trip chat messages yet.")
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
-                                    Button("Message") { onMessage(request, .directConnection) }
+                                    Button("Open Trip Chat") { onMessage(request, .directConnection, (responses[request.id] ?? []).first) }
                                         .buttonStyle(.bordered)
                                 }
                                 .cashHubCard()
@@ -3102,6 +3305,8 @@ private struct CashHubOfferCard: View {
     let isConnected: Bool
     let onMessage: () -> Void
     let onFavorite: () -> Void
+    let onReport: () -> Void
+    let onBlock: () -> Void
     let onAccept: () -> Void
     let onDecline: () -> Void
 
@@ -3131,7 +3336,7 @@ private struct CashHubOfferCard: View {
                 Text(offer.message).font(.footnote).foregroundStyle(.secondary)
             }
             HStack {
-                Button("Message", action: onMessage).buttonStyle(.bordered)
+                Button(isConnected ? "Trip Chat" : "Open", action: onMessage).buttonStyle(.bordered)
                 Button("Favorite", action: onFavorite).buttonStyle(.bordered)
                 Button(offer.status == "declined" ? "Declined" : "Accept Offer", action: onAccept)
                     .buttonStyle(.borderedProminent)
@@ -3140,6 +3345,13 @@ private struct CashHubOfferCard: View {
                 Button("Decline", action: onDecline)
                     .buttonStyle(.bordered)
                     .disabled(isConnected || offer.status == "declined")
+                Menu {
+                    Button("Report Driver", role: .destructive, action: onReport)
+                    Button("Block Driver", role: .destructive, action: onBlock)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                }
             }
         }
         .cashHubCard()
@@ -3174,7 +3386,7 @@ private struct CashHubAcceptedRequestView: View {
                 Section("Request") {
                     LabeledContent("Pickup", value: request.pickup)
                     LabeledContent("Destination", value: request.destination)
-                    LabeledContent("Scheduled time", value: request.scheduledTime.formatted(date: .abbreviated, time: .shortened))
+                    LabeledContent("Requested time", value: request.scheduledTime.formatted(date: .abbreviated, time: .shortened))
                     if let driverQueueStatus = request.driverQueueStatus, !driverQueueStatus.isEmpty {
                         LabeledContent("Driver status", value: driverQueueStatus.capitalized)
                     }
@@ -3187,7 +3399,7 @@ private struct CashHubAcceptedRequestView: View {
                         .font(.footnote)
                 }
                 Section {
-                    Button("Message Driver", action: onMessage)
+                    Button("Open Trip Chat", action: onMessage)
                     Button("Cancel Connection", role: .destructive, action: onCancel)
                 }
             }
@@ -3438,7 +3650,7 @@ private struct CashHubMessageForm: View {
                 }
                 Section(mode.title) {
                     if messages.isEmpty {
-                        Text(mode == .requestThread ? "No thread messages yet." : "No direct messages yet.")
+                        Text(mode == .requestThread ? "No offer conversation yet." : "No trip chat messages yet.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
@@ -3453,7 +3665,7 @@ private struct CashHubMessageForm: View {
                         }
                     }
                 }
-                Section("Message") {
+                Section(mode == .requestThread ? "Reply" : "Trip Chat") {
                     if canSend {
                         TextField("Use @ to mention someone by profile name", text: $message, axis: .vertical)
                             .lineLimit(5, reservesSpace: true)
@@ -3472,8 +3684,8 @@ private struct CashHubMessageForm: View {
                         }
                     } else {
                         Text(mode == .requestThread
-                             ? "This request thread is closed because a driver has accepted the request."
-                             : "Direct messages open after a driver accepts the request.")
+                             ? "Offer conversations close after you connect with a driver."
+                             : "Trip Chat opens after you connect with a driver.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }

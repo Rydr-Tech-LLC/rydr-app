@@ -15,16 +15,24 @@ import ImageViewer from "@/components/ImageViewer";
 import RequirementChecklist from "@/components/RequirementChecklist";
 import TripSafetyAnalytics from "@/components/TripSafetyAnalytics";
 import { findActiveRideForDriver } from "@/lib/activeRides";
+import { cashHubBillingDisplay, formatCents, getCurrentCashHubBilling } from "@/lib/cashHubBilling";
 import DriverActions from "./DriverActions";
 
 export const dynamic = "force-dynamic";
 
 export default async function DriverReviewPage({ params }: { params: { uid: string } }) {
-  const [snap, activeRide] = await Promise.all([
+  const [snap, activeRide, cashHubBilling, cashHubConfigSnap] = await Promise.all([
     adminDb.collection("drivers").doc(params.uid).get(),
-    findActiveRideForDriver(params.uid)
+    findActiveRideForDriver(params.uid),
+    getCurrentCashHubBilling(params.uid),
+    adminDb.collection("platformConfig").doc("cashRydrHub").get().catch(() => null)
   ]);
   if (!snap.exists) notFound();
+  const cashHubConfigData = cashHubConfigSnap?.data() ?? {};
+  const cashHubGateConfig = {
+    termsAcceptanceEnabled: cashHubConfigData.termsAcceptanceEnabled === true,
+    cashHubTermsVersion: typeof cashHubConfigData.cashHubTermsVersion === "string" ? cashHubConfigData.cashHubTermsVersion : null
+  };
 
   const driver = { ...(snap.data() as DriverRecord), uid: snap.id };
   const { checks, missing } = evaluateDriverRequirements(driver);
@@ -38,6 +46,7 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
   const registrationBackUrl = driverDocumentBackUrl(driver, "registration");
   const identityStatus = driverIdentityStatus(driver);
   const connectStatus = driverConnectStatus(driver);
+  const cashHubDisplay = cashHubBillingDisplay(driver, cashHubBilling, cashHubGateConfig);
 
   return (
     <div className="space-y-6">
@@ -196,6 +205,29 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
               <Field label="Payouts enabled" value={driver.stripePayoutsEnabled ? "Yes" : "No"} />
               <Field label="Beta Agreement" value={driver.betaAgreementAccepted ? "Accepted" : "Not accepted"} />
             </Grid>
+          </Section>
+
+          <Section title="CashRydr Hub">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <StatusPill status={cashHubDisplay.status} label={cashHubDisplay.label} />
+              </div>
+              <p className="text-xs text-muted">{cashHubDisplay.detail}</p>
+              <Grid cols={1}>
+                <Field
+                  label="Access"
+                  value={cashHubDisplay.label}
+                />
+                <Field label="Monthly fee" value={formatCents(cashHubBilling?.feeCents ?? driver.cashHubDriverAccessFeeCents ?? 499)} />
+                <Field label="Collected" value={cashHubBilling ? formatCents(cashHubBilling.collectedCents) : "—"} />
+                <Field label="Remaining" value={cashHubBilling ? formatCents(cashHubBilling.remainingCents) : "—"} />
+                <Field label="Last collection ride" value={cashHubBilling?.lastCollectionRideId} />
+                <Field label="Terms accepted" value={toDateSafe(driver.cashHubTermsAcceptedAt)?.toLocaleString() ?? "—"} />
+                <Field label="Opted out" value={toDateSafe(driver.cashHubOptedOutAt)?.toLocaleString() ?? "—"} />
+                <Field label="Accepted terms version" value={driver.cashHubTermsVersion} />
+                <Field label="Fee terms version" value={driver.cashHubDriverAccessFeeVersion} />
+              </Grid>
+            </div>
           </Section>
 
           <Section title="Approval Requirements">

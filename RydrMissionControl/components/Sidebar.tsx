@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: "/drivers", label: "Driver Verification" },
   { href: "/drivers/all", label: "Drivers" },
   { href: "/riders", label: "Riders" },
+  { href: "/promotions", label: "Promotions" },
   { href: "/reports", label: "Reports" },
   { href: "/analytics", label: "Analytics" },
   { href: "/payment-failures", label: "Payment Failures" },

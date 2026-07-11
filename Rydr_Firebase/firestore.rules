@@ -127,12 +127,45 @@ service cloud.firestore {
     }
 
     function cashHubTermsAcceptanceFields() {
-      return ["cashHubTermsAccepted", "cashHubTermsAcceptedAt"];
+      return ["cashHubTermsAccepted", "cashHubTermsAcceptedAt", "cashHubTermsVersion"];
+    }
+
+    function cashHubOptOutFields() {
+      return [
+        "cashHubAccessStatus",
+        "cashHubOptedOut",
+        "cashHubOptedOutAt",
+        "cashHubRole",
+        "cashHubTermsAccepted",
+        "updatedAt"
+      ];
     }
 
     function cashHubTermsAcceptanceEnabled() {
       return exists(/databases/$(database)/documents/platformConfig/cashRydrHub)
         && get(/databases/$(database)/documents/platformConfig/cashRydrHub).data.termsAcceptanceEnabled == true;
+    }
+
+    function cashHubCurrentTermsAcceptedIn(path) {
+      let profile = get(path);
+      let config = get(/databases/$(database)/documents/platformConfig/cashRydrHub);
+      return profile.data.cashHubTermsAccepted == true
+        && profile.data.cashHubTermsVersion == config.data.cashHubTermsVersion;
+    }
+
+    function cashHubCurrentTermsAccepted() {
+      return signedIn()
+        && cashHubTermsAcceptanceEnabled()
+        && (
+          (
+            exists(/databases/$(database)/documents/riders/$(request.auth.uid))
+            && cashHubCurrentTermsAcceptedIn(/databases/$(database)/documents/riders/$(request.auth.uid))
+          ) ||
+          (
+            exists(/databases/$(database)/documents/drivers/$(request.auth.uid))
+            && cashHubCurrentTermsAcceptedIn(/databases/$(database)/documents/drivers/$(request.auth.uid))
+          )
+        );
     }
 
     function noCashHubTermsAcceptanceOnCreateWhenDisabled() {
@@ -142,7 +175,12 @@ service cloud.firestore {
 
     function noCashHubTermsAcceptanceChangedWhenDisabled() {
       return cashHubTermsAcceptanceEnabled()
-        || !affectedKeys().hasAny(cashHubTermsAcceptanceFields());
+        || !affectedKeys().hasAny(cashHubTermsAcceptanceFields())
+        || (
+          affectedKeys().hasOnly(cashHubOptOutFields())
+          && request.resource.data.cashHubTermsAccepted == false
+          && request.resource.data.cashHubOptedOut == true
+        );
     }
 
     function rideParticipant(data) {
@@ -381,7 +419,7 @@ service cloud.firestore {
     function cashHubPublicOpenRequest(data) {
       return signedIn()
         && data.status == "open"
-        && data.visibility == "public";
+        && data.visibility in ["public", "Public CashRydr Hub Community"];
     }
 
     function cashHubRequestReadable(data) {
@@ -393,12 +431,25 @@ service cloud.firestore {
 
     function validCashHubRequestCreate() {
       return signedIn()
+        && cashHubCurrentTermsAccepted()
         && request.resource.data.riderUid == request.auth.uid
-        && request.resource.data.status == "open";
+        && request.resource.data.status == "open"
+        && !request.resource.data.keys().hasAny([
+          "acceptedDriverId",
+          "authorizedRiderChargeCents",
+          "driverId",
+          "finalRiderChargeCents",
+          "paymentIntentId",
+          "paymentStatus",
+          "receiptId",
+          "rideId",
+          "stripeTransferId"
+        ]);
     }
 
     function validCashHubOwnerUpdate() {
       return cashHubRequestOwner(resource.data)
+        && cashHubCurrentTermsAccepted()
         && affectedKeys().hasOnly([
           "agreedPrice",
           "budgetRange",
@@ -420,6 +471,7 @@ service cloud.firestore {
 
     function validCashHubDriverConnect() {
       return signedIn()
+        && cashHubCurrentTermsAccepted()
         && resource.data.status == "open"
         && (!("connectedDriverUid" in resource.data) || resource.data.connectedDriverUid == null || resource.data.connectedDriverUid == "")
         && request.resource.data.connectedDriverUid == request.auth.uid
@@ -438,8 +490,100 @@ service cloud.firestore {
         ]);
     }
 
+    function cashHubConversationParticipant(data) {
+      return signedIn() && (
+        data.riderUid == request.auth.uid ||
+        data.driverUid == request.auth.uid ||
+        (("participants" in data) && data.participants is list && data.participants.hasAny([request.auth.uid]))
+      );
+    }
+
+    function validCashHubConversationParticipants(data) {
+      return data.participants is list
+        && data.participants.size() == 2
+        && data.participants.hasAll([data.riderUid, data.driverUid]);
+    }
+
+    function validCashHubConversationCreate() {
+      let requestDoc = get(/databases/$(database)/documents/cashRydrRequests/$(request.resource.data.requestId));
+      return signedIn()
+        && cashHubCurrentTermsAccepted()
+        && requestDoc.data.status in ["open", "connected"]
+        && request.resource.data.riderUid == requestDoc.data.riderUid
+        && request.resource.data.driverUid == request.auth.uid
+        && validCashHubConversationParticipants(request.resource.data)
+        && request.resource.data.cashHubOnly == true
+        && request.resource.data.managedByRydr == false
+        && request.resource.data.paymentHandledBy == "rider_driver_direct"
+        && !request.resource.data.keys().hasAny([
+          "paymentIntentId",
+          "paymentStatus",
+          "receiptId",
+          "rideId",
+          "stripeTransferId"
+        ]);
+    }
+
+    function validCashHubConversationUpdate() {
+      return cashHubConversationParticipant(resource.data)
+        && cashHubCurrentTermsAccepted()
+        && request.resource.data.riderUid == resource.data.riderUid
+        && request.resource.data.driverUid == resource.data.driverUid
+        && validCashHubConversationParticipants(request.resource.data)
+        && affectedKeys().hasOnly([
+          "availability",
+          "cashHubOnly",
+          "connectedAt",
+          "createdAt",
+          "driverName",
+          "isIdentityVerified",
+          "isLicenseVerified",
+          "isRydrVerifiedDriver",
+          "lastMessage",
+          "lastMessageAt",
+          "managedByRydr",
+          "offerAmount",
+          "offerStatus",
+          "participants",
+          "paymentHandledBy",
+          "riderName",
+          "status",
+          "updatedAt",
+          "vehicleInfo"
+        ])
+        && request.resource.data.cashHubOnly == true
+        && request.resource.data.managedByRydr == false
+        && request.resource.data.paymentHandledBy == "rider_driver_direct";
+    }
+
+    function validCashHubConversationMessageCreate(conversationId) {
+      let conversationDoc = get(/databases/$(database)/documents/cashHubConversations/$(conversationId));
+      return signedIn()
+        && cashHubCurrentTermsAccepted()
+        && cashHubConversationParticipant(conversationDoc.data)
+        && request.resource.data.senderUid == request.auth.uid
+        && request.resource.data.senderRole in ["rider", "driver", "system"]
+        && request.resource.data.text is string
+        && request.resource.data.auditVisibleToAdmin == true
+        && request.resource.data.keys().hasOnly([
+          "auditVisibleToAdmin",
+          "availability",
+          "conversationId",
+          "createdAt",
+          "kind",
+          "offerAmount",
+          "requestId",
+          "senderName",
+          "senderRole",
+          "senderUid",
+          "text",
+          "vehicleInfo"
+        ]);
+    }
+
     function validCashHubConnectedDriverUpdate() {
       return cashHubConnectedDriver(resource.data)
+        && cashHubCurrentTermsAccepted()
         && affectedKeys().hasOnly([
           "acceptedByName",
           "acceptedByUid",
@@ -464,6 +608,7 @@ service cloud.firestore {
     function validCashHubResponseCreate(requestId) {
       let requestDoc = get(/databases/$(database)/documents/cashRydrRequests/$(requestId));
       return signedIn()
+        && cashHubCurrentTermsAccepted()
         && cashHubRequestReadable(requestDoc.data)
         && requestDoc.data.status in ["open", "connected"]
         && request.resource.data.authorUid == request.auth.uid
@@ -473,6 +618,7 @@ service cloud.firestore {
     function validCashHubResponseUpdate(requestId) {
       let requestDoc = get(/databases/$(database)/documents/cashRydrRequests/$(requestId));
       return signedIn()
+        && cashHubCurrentTermsAccepted()
         && (
           resource.data.authorUid == request.auth.uid ||
           cashHubRequestOwner(requestDoc.data)
@@ -588,6 +734,15 @@ service cloud.firestore {
       match /cashHubPenaltyMarkers/{markerId} {
         allow read: if isSelf(uid) || isAdmin();
         allow create, update, delete: if isAdmin();
+      }
+
+      match /cashHubBilling/{periodId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow create, update, delete: if isAdmin();
+      }
+
+      match /cashHubBlockedRiders/{riderUid} {
+        allow read, create, update, delete: if isSelf(uid);
       }
 
       match /documentReviews/{reviewId} {
@@ -811,6 +966,31 @@ service cloud.firestore {
       }
     }
 
+    match /cashHubConversations/{conversationId} {
+      allow read: if cashHubConversationParticipant(resource.data) || isAdmin();
+      allow create: if validCashHubConversationCreate() || isAdmin();
+      allow update: if validCashHubConversationUpdate() || isAdmin();
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if cashHubConversationParticipant(get(/databases/$(database)/documents/cashHubConversations/$(conversationId)).data) || isAdmin();
+        allow create: if validCashHubConversationMessageCreate(conversationId) || isAdmin();
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    match /cashHubLateReleaseMarkers/{markerId} {
+      allow read: if signedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        resource.data.riderId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if signedIn()
+        && request.resource.data.driverId == request.auth.uid
+        && request.resource.data.status == "open";
+      allow update, delete: if isAdmin();
+    }
+
     match /supportTickets/{ticketId} {
       allow read: if supportOwner(resource.data) || isAdmin();
       allow create: if signedIn()
@@ -875,6 +1055,33 @@ service cloud.firestore {
 
     match /platformConfig/{configId} {
       allow get, list: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /promotions/{promotionId} {
+      allow read: if signedIn()
+        && resource.data.status in ["active", "scheduled"]
+        && resource.data.keys().hasAll(["title", "type", "audience", "startsAt", "endsAt"]);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /promotionRedemptions/{redemptionId} {
+      allow read: if signedIn() && (
+        resource.data.riderId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        resource.data.userId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /promotionProgress/{progressId} {
+      allow read: if signedIn() && (
+        resource.data.riderId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        resource.data.userId == request.auth.uid ||
+        isAdmin()
+      );
       allow create, update, delete: if isAdmin();
     }
 
