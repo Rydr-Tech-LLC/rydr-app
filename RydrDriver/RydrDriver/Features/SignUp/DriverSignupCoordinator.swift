@@ -10,6 +10,7 @@
 
 import SwiftUI
 import PhotosUI
+import AuthenticationServices
 import FirebaseAuth
 import FirebaseFirestore
 
@@ -168,14 +169,17 @@ struct DriverSignupCoordinator: View {
 
                 case .nameDOB:
                     NameDOBView(firstName: $firstName, lastName: $lastName, dob: $dob) {
-                        let displayName = [firstName, lastName]
+                        let legalName = [firstName, lastName]
                             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                             .filter { !$0.isEmpty }
                             .joined(separator: " ")
                         upsertDriver([
                             "firstName": firstName,
                             "lastName": lastName,
-                            "displayName": displayName,
+                            "legalFirstName": firstName,
+                            "legalLastName": lastName,
+                            "legalName": legalName,
+                            "displayName": legalName,
                             "dob": Timestamp(date: dob),
                             "nameDOBStepCompleted": true
                         ])
@@ -186,10 +190,17 @@ struct DriverSignupCoordinator: View {
                     EmailAndPasswordView(
                         email: $email,
                         password: $password,
-                        confirmPassword: $confirmPassword
-                    ) {
-                        completeEmailPasswordStep()
-                    }
+                        confirmPassword: $confirmPassword,
+                        onNext: {
+                            completeEmailPasswordStep()
+                        },
+                        onContinueWithGoogle: {
+                            completeSocialAuthStepWithGoogle()
+                        },
+                        onContinueWithApple: { authorization, nonce in
+                            completeSocialAuthStepWithApple(authorization: authorization, nonce: nonce)
+                        }
+                    )
 
                 case .address:
                     AddressInfoView(
@@ -526,7 +537,7 @@ struct DriverSignupCoordinator: View {
     }
 
     private func finishEmailPasswordStep(uid: String) {
-        let displayName = [firstName, lastName]
+        let legalName = [firstName, lastName]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
@@ -535,9 +546,93 @@ struct DriverSignupCoordinator: View {
             "email": email,
             "firstName": firstName,
             "lastName": lastName,
-            "displayName": displayName,
+            "legalFirstName": firstName,
+            "legalLastName": lastName,
+            "legalName": legalName,
+            "displayName": legalName,
             "phoneNumber": phoneNumber,
             "phoneE164": phoneNumber,
+            "createdAt": FieldValue.serverTimestamp(),
+            "emailPasswordStepCompleted": true
+        ])
+        writePhoneIndex(phoneE164: phoneNumber, uid: uid)
+        path.append(.address)
+    }
+
+    private func completeSocialAuthStepWithGoogle() {
+        DriverSocialAuthService.signInWithGoogle { result in
+            Task { @MainActor in
+                switch result {
+                case .success(let payload):
+                    linkSocialCredential(payload.0, profile: payload.1)
+                case .failure(let error):
+                    flowAlertText = "Google sign-up failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func completeSocialAuthStepWithApple(authorization: ASAuthorization, nonce: String) {
+        switch DriverSocialAuthService.credential(from: authorization, nonce: nonce) {
+        case .success(let payload):
+            linkSocialCredential(payload.0, profile: payload.1)
+        case .failure(let error):
+            flowAlertText = "Apple sign-up failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func linkSocialCredential(_ credential: AuthCredential, profile: DriverSocialAuthProfile) {
+        guard let phoneUser = Auth.auth().currentUser else {
+            flowAlertText = "Your phone verification session expired. Please restart signup."
+            return
+        }
+
+        phoneUser.link(with: credential) { result, error in
+            Task { @MainActor in
+                if let error = error as NSError? {
+                    if error.code == AuthErrorCode.providerAlreadyLinked.rawValue {
+                        finishSocialAuthStep(uid: phoneUser.uid, profile: profile)
+                        return
+                    }
+                    flowAlertText = "Social sign-up failed: \(error.localizedDescription)"
+                    return
+                }
+
+                finishSocialAuthStep(uid: result?.user.uid ?? phoneUser.uid, profile: profile)
+            }
+        }
+    }
+
+    private func finishSocialAuthStep(uid: String, profile: DriverSocialAuthProfile) {
+        let resolvedFirstName = firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? profile.firstName : firstName
+        let resolvedLastName = lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? profile.lastName : lastName
+        let resolvedEmail = profile.email.isEmpty ? Auth.auth().currentUser?.email ?? email : profile.email
+        let legalName = [resolvedFirstName, resolvedLastName]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        firstName = resolvedFirstName
+        lastName = resolvedLastName
+        email = resolvedEmail
+
+        upsertDriver([
+            "uid": uid,
+            "email": resolvedEmail,
+            "firstName": resolvedFirstName,
+            "lastName": resolvedLastName,
+            "legalFirstName": resolvedFirstName,
+            "legalLastName": resolvedLastName,
+            "legalName": legalName,
+            "displayName": legalName,
+            "phoneNumber": phoneNumber,
+            "phoneE164": phoneNumber,
+            "authProvider": profile.providerID,
+            "authProviderFirstName": profile.firstName,
+            "authProviderLastName": profile.lastName,
+            "authProviderDisplayName": profile.displayName,
+            "socialAuthLinked": true,
+            "socialAuthLinkedAt": FieldValue.serverTimestamp(),
             "createdAt": FieldValue.serverTimestamp(),
             "emailPasswordStepCompleted": true
         ])

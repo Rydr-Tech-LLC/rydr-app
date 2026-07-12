@@ -9,19 +9,30 @@ import GoogleSignIn
 import AuthenticationServices
 import FirebaseCore
 import FirebaseFirestore
+import CryptoKit
+import Security
+
+struct RiderSocialAuthProfile {
+    let firstName: String
+    let lastName: String
+    let email: String
+    let providerID: String
+}
 
 struct NameEntryView: View {
     @Binding var firstName: String
     @Binding var lastName: String
     @Binding var preferredName: String
+    @Binding var email: String
     var allowsSocialSignup = true
 
     var onContinueWithForm: () -> Void
-    var onContinueWithSocial: () -> Void
+    var onContinueWithSocial: (RiderSocialAuthProfile) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var errorMessage = ""
     @State private var isSaving = false
+    @State private var currentNonce: String?
 
     private var canContinue: Bool {
         !firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
@@ -89,6 +100,9 @@ struct NameEntryView: View {
                                 .signUp,
                                 onRequest: { request in
                                     request.requestedScopes = [.fullName, .email]
+                                    let nonce = randomNonceString()
+                                    currentNonce = nonce
+                                    request.nonce = sha256(nonce)
                                 },
                                 onCompletion: { result in
                                     switch result {
@@ -162,13 +176,61 @@ struct NameEntryView: View {
             }
             let accessToken = user.accessToken.tokenString
             let cred = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
-            Auth.auth().signIn(with: cred) { _, err in
-                if let err = err {
-                    errorMessage = "Firebase Google auth failed: \(err.localizedDescription)"
-                } else {
-                    onContinueWithSocial()
+
+            let profile = googleProfile(from: user)
+            authenticateWithSocialCredential(cred, profile: profile)
+        }
+    }
+
+    private func googleProfile(from user: GIDGoogleUser) -> RiderSocialAuthProfile {
+        let givenName = user.profile?.givenName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let familyName = user.profile?.familyName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let displayName = user.profile?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let splitName = splitDisplayName(displayName)
+        return RiderSocialAuthProfile(
+            firstName: givenName.isEmpty ? splitName.first : givenName,
+            lastName: familyName.isEmpty ? splitName.last : familyName,
+            email: user.profile?.email ?? "",
+            providerID: GoogleAuthProviderID
+        )
+    }
+
+    private func authenticateWithSocialCredential(_ credential: AuthCredential, profile: RiderSocialAuthProfile) {
+        if let currentUser = Auth.auth().currentUser {
+            currentUser.link(with: credential) { _, err in
+                if let err = err as NSError? {
+                    if err.code == AuthErrorCode.providerAlreadyLinked.rawValue {
+                        applySocialProfile(profile)
+                        onContinueWithSocial(profile)
+                        return
+                    }
+                    errorMessage = "Social sign-up failed: \(err.localizedDescription)"
+                    return
                 }
+                applySocialProfile(profile)
+                onContinueWithSocial(profile)
             }
+        } else {
+            Auth.auth().signIn(with: credential) { _, err in
+                if let err {
+                    errorMessage = "Social sign-up failed: \(err.localizedDescription)"
+                    return
+                }
+                applySocialProfile(profile)
+                onContinueWithSocial(profile)
+            }
+        }
+    }
+
+    private func applySocialProfile(_ profile: RiderSocialAuthProfile) {
+        if firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            firstName = profile.firstName
+        }
+        if lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lastName = profile.lastName
+        }
+        if email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            email = profile.email
         }
     }
 
@@ -181,19 +243,64 @@ struct NameEntryView: View {
             return
         }
 
-        let oauth = OAuthProvider.credential(
-            providerID: .apple,
-            idToken: tokenStr,
-            rawNonce: ""
+        guard let nonce = currentNonce else {
+            errorMessage = "Apple sign-up could not verify this request. Please try again."
+            return
+        }
+
+        let oauth = OAuthProvider.appleCredential(
+            withIDToken: tokenStr,
+            rawNonce: nonce,
+            fullName: appleCred.fullName
         )
 
-        Auth.auth().signIn(with: oauth) { _, err in
-            if let err = err {
-                errorMessage = "Apple sign-up failed: \(err.localizedDescription)"
-            } else {
-                onContinueWithSocial()
+        let splitName = splitDisplayName(Auth.auth().currentUser?.displayName ?? "")
+        let profile = RiderSocialAuthProfile(
+            firstName: appleCred.fullName?.givenName ?? splitName.first,
+            lastName: appleCred.fullName?.familyName ?? splitName.last,
+            email: appleCred.email ?? Auth.auth().currentUser?.email ?? "",
+            providerID: "apple.com"
+        )
+
+        authenticateWithSocialCredential(oauth, profile: profile)
+    }
+
+    private func splitDisplayName(_ displayName: String) -> (first: String, last: String) {
+        let parts = displayName
+            .split(separator: " ")
+            .map(String.init)
+        guard let first = parts.first else { return ("", "") }
+        return (first, parts.dropFirst().joined(separator: " "))
+    }
+
+    private func randomNonceString(length: Int = 32) -> String {
+        precondition(length > 0)
+        let charset = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        var result = ""
+        var remainingLength = length
+
+        while remainingLength > 0 {
+            var randoms = [UInt8](repeating: 0, count: 16)
+            let status = SecRandomCopyBytes(kSecRandomDefault, randoms.count, &randoms)
+            if status != errSecSuccess {
+                fatalError("Unable to generate nonce. SecRandomCopyBytes failed with OSStatus \(status)")
+            }
+
+            randoms.forEach { random in
+                if remainingLength == 0 { return }
+                if random < UInt8(charset.count) {
+                    result.append(charset[Int(random)])
+                    remainingLength -= 1
+                }
             }
         }
+        return result
+    }
+
+    private func sha256(_ input: String) -> String {
+        let inputData = Data(input.utf8)
+        let hashedData = SHA256.hash(data: inputData)
+        return hashedData.map { String(format: "%02x", $0) }.joined()
     }
 }
 

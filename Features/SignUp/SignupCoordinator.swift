@@ -112,6 +112,7 @@ struct SignupCoordinator: View {
                         firstName: $firstName,
                         lastName: $lastName,
                         preferredName: $preferredName,
+                        email: $email,
                         allowsSocialSignup: !upgradingCashHubAccount,
                         onContinueWithForm: {
                             upsertRider([
@@ -123,15 +124,8 @@ struct SignupCoordinator: View {
                                 path.append(upgradingCashHubAccount ? .addressEntry : .emailPassword)
                             }
                         },
-                        onContinueWithSocial: {
-                            upsertRider([
-                                "firstName": firstName,
-                                "lastName": lastName,
-                                "preferredName": preferredName
-                            ])
-                            Task { @MainActor in
-                                path.append(.addressEntry)
-                            }
+                        onContinueWithSocial: { socialProfile in
+                            finishSocialAuthAccountSetup(profile: socialProfile)
                         }
                     )
 
@@ -292,6 +286,38 @@ struct SignupCoordinator: View {
         ])
         writePhoneIndex(phoneE164: e164Phone, uid: user.uid)
 
+        provisionStripeCustomerIfNeeded()
+
+        Task { @MainActor in
+            path.append(.addressEntry)
+        }
+    }
+
+    private func finishSocialAuthAccountSetup(profile: RiderSocialAuthProfile) {
+        guard let user = Auth.auth().currentUser else { return }
+        let resolvedFirstName = firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? profile.firstName : firstName
+        let resolvedLastName = lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? profile.lastName : lastName
+        let resolvedEmail = profile.email.isEmpty ? user.email ?? email : profile.email
+        let e164Phone = normalizedE164Phone(phoneNumber)
+
+        firstName = resolvedFirstName
+        lastName = resolvedLastName
+        email = resolvedEmail
+
+        upsertRider([
+            "uid": user.uid,
+            "email": resolvedEmail,
+            "firstName": resolvedFirstName,
+            "lastName": resolvedLastName,
+            "preferredName": preferredName,
+            "phoneNumber": e164Phone,
+            "phoneE164": e164Phone,
+            "authProvider": profile.providerID,
+            "socialAuthLinked": true,
+            "socialAuthLinkedAt": FieldValue.serverTimestamp(),
+            "createdAt": FieldValue.serverTimestamp()
+        ])
+        writePhoneIndex(phoneE164: e164Phone, uid: user.uid)
         provisionStripeCustomerIfNeeded()
 
         Task { @MainActor in

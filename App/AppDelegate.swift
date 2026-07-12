@@ -10,6 +10,7 @@ import FirebaseCore
 import FirebaseAuth
 import FirebaseAppCheck
 import FirebaseMessaging
+import GoogleSignIn
 import UserNotifications
 
 private final class RydrAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
@@ -82,7 +83,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     open url: URL,
     options: [UIApplication.OpenURLOptionsKey : Any] = [:]
   ) -> Bool {
-    return Auth.auth().canHandle(url)
+    return GIDSignIn.sharedInstance.handle(url) || Auth.auth().canHandle(url)
   }
 
   // Remote notifications passthrough (leave as-is)

@@ -9,6 +9,7 @@
 //
 
 import SwiftUI
+import AuthenticationServices
 import FirebaseAuth
 
 struct EmailAndPasswordView: View {
@@ -20,10 +21,13 @@ struct EmailAndPasswordView: View {
     var totalSteps: Int = 8
 
     var onNext: () -> Void
+    var onContinueWithGoogle: (() -> Void)? = nil
+    var onContinueWithApple: ((ASAuthorization, String) -> Void)? = nil
 
     @State private var errorMessage = ""
     @State private var isPasswordVisible = false
     @State private var isConfirmVisible = false
+    @State private var currentNonce: String?
 
     private let rules: [(key: String, label: String)] = [
         ("length", "8 characters"),
@@ -100,6 +104,68 @@ struct EmailAndPasswordView: View {
                 }
 
                 SignupContinueButton(title: "Continue", isEnabled: allValid, action: onNext)
+
+                if onContinueWithGoogle != nil || onContinueWithApple != nil {
+                    VStack(spacing: 12) {
+                        HStack {
+                            Divider()
+                            Text("or continue with")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Divider()
+                        }
+
+                        if let onContinueWithApple {
+                            SignInWithAppleButton(
+                                .signUp,
+                                onRequest: { request in
+                                    request.requestedScopes = [.fullName, .email]
+                                    let nonce = DriverSocialAuthService.randomNonceString()
+                                    currentNonce = nonce
+                                    request.nonce = DriverSocialAuthService.sha256(nonce)
+                                },
+                                onCompletion: { result in
+                                    switch result {
+                                    case .success(let authorization):
+                                        guard let nonce = currentNonce else {
+                                            errorMessage = "Apple sign-up could not verify this request. Please try again."
+                                            return
+                                        }
+                                        onContinueWithApple(authorization, nonce)
+                                    case .failure(let error):
+                                        errorMessage = "Apple sign-up failed: \(error.localizedDescription)"
+                                    }
+                                }
+                            )
+                            .signInWithAppleButtonStyle(.black)
+                            .frame(height: 54)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+
+                        if let onContinueWithGoogle {
+                            Button(action: onContinueWithGoogle) {
+                                HStack {
+                                    Image(systemName: "g.circle.fill")
+                                    Text("Continue with Google")
+                                        .fontWeight(.semibold)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 18)
+                                .frame(height: 54)
+                            }
+                            .foregroundColor(.primary)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(Color(.systemBackground))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(Color(.systemGray4), lineWidth: 1)
+                            )
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
 
                 SignupInfoCard(
                     icon: "lock.shield.fill",

@@ -11,6 +11,7 @@ import FirebaseCore
 import FirebaseAuth
 import FirebaseAppCheck
 import FirebaseMessaging
+import GoogleSignIn
 import UserNotifications
 
 private final class RydrDriverAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
@@ -118,7 +119,7 @@ struct Rydr_DriverApp: App {
       }
       .environmentObject(session)
       .onOpenURL { url in
-        _ = Auth.auth().canHandle(url)
+        _ = GIDSignIn.sharedInstance.handle(url) || Auth.auth().canHandle(url)
       }
     }
   }

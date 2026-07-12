@@ -7,6 +7,11 @@
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseCore
+import GoogleSignIn
+import AuthenticationServices
+import CryptoKit
+import Security
 
 struct LoginView: View {
     private enum Palette {
@@ -45,6 +50,7 @@ struct LoginView: View {
     @State private var pendingPhoneLoginRepair: PhoneLoginRepair?
     @State private var phoneRepairPassword = ""
     @State private var isRepairingPhoneLogin = false
+    @State private var currentNonce: String?
     
     private var formattedPhoneNumber: String {
         let digits = phoneNumber.filter { $0.isNumber }.prefix(10)
@@ -342,7 +348,46 @@ struct LoginView: View {
     }
 
     private var socialLoginSection: some View {
-        EmptyView()
+        VStack(spacing: 12) {
+            SignInWithAppleButton(
+                .signIn,
+                onRequest: { request in
+                    request.requestedScopes = [.fullName, .email]
+                    let nonce = randomNonceString()
+                    currentNonce = nonce
+                    request.nonce = sha256(nonce)
+                },
+                onCompletion: { result in
+                    switch result {
+                    case .success(let authorization):
+                        handleAppleSignIn(authorization)
+                    case .failure(let error):
+                        errorMessage = "Apple sign-in failed: \(error.localizedDescription)"
+                    }
+                }
+            )
+            .signInWithAppleButtonStyle(.black)
+            .frame(height: 56)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            Button(action: handleGoogleSignIn) {
+                HStack(spacing: 10) {
+                    Image(systemName: "g.circle.fill")
+                        .font(.system(size: 21, weight: .bold))
+                    Text("Continue with Google")
+                        .font(.headline.weight(.bold))
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+                .background(Color.white.opacity(0.96), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Palette.inputBorder, lineWidth: 1)
+                )
+                .foregroundColor(Palette.googleInk)
+            }
+            .buttonStyle(.plain)
+        }
     }
     
     // MARK: - Password Reset
@@ -435,6 +480,78 @@ struct LoginView: View {
                 }
 
                 completeEmailLogin(for: user, fallbackEmail: email)
+            }
+        }
+    }
+
+    private func handleGoogleSignIn() {
+        guard FirebaseApp.app()?.options.clientID != nil else {
+            errorMessage = "Missing Firebase client ID for Google sign-in."
+            return
+        }
+
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let rootVC = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController ?? windowScene.windows.first?.rootViewController else {
+            errorMessage = "Unable to open Google sign-in."
+            return
+        }
+
+        errorMessage = ""
+        GIDSignIn.sharedInstance.signIn(withPresenting: rootVC) { result, error in
+            if let error {
+                Task { @MainActor in errorMessage = "Google sign-in failed: \(error.localizedDescription)" }
+                return
+            }
+
+            guard let googleUser = result?.user,
+                  let idToken = googleUser.idToken?.tokenString else {
+                Task { @MainActor in errorMessage = "Google sign-in did not return a valid token." }
+                return
+            }
+
+            let credential = GoogleAuthProvider.credential(
+                withIDToken: idToken,
+                accessToken: googleUser.accessToken.tokenString
+            )
+            signInWithSocialCredential(credential, fallbackEmail: googleUser.profile?.email ?? "")
+        }
+    }
+
+    private func handleAppleSignIn(_ authorization: ASAuthorization) {
+        guard let appleIDCredential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let appleIDToken = appleIDCredential.identityToken,
+              let idTokenString = String(data: appleIDToken, encoding: .utf8) else {
+            errorMessage = "Apple sign-in did not return a valid token."
+            return
+        }
+
+        guard let nonce = currentNonce else {
+            errorMessage = "Apple sign-in could not verify this request. Please try again."
+            return
+        }
+
+        let credential = OAuthProvider.appleCredential(
+            withIDToken: idTokenString,
+            rawNonce: nonce,
+            fullName: appleIDCredential.fullName
+        )
+        signInWithSocialCredential(credential, fallbackEmail: appleIDCredential.email ?? "")
+    }
+
+    private func signInWithSocialCredential(_ credential: AuthCredential, fallbackEmail: String) {
+        Auth.auth().signIn(with: credential) { result, error in
+            Task { @MainActor in
+                if let error {
+                    errorMessage = "Sign-in failed: \(error.localizedDescription)"
+                    return
+                }
+
+                guard let user = result?.user else {
+                    errorMessage = "Sign-in failed. Please try again."
+                    return
+                }
+
+                completeEmailLogin(for: user, fallbackEmail: fallbackEmail)
             }
         }
     }
@@ -634,6 +751,36 @@ struct LoginView: View {
                 }
             }
         }
+    }
+
+    private func randomNonceString(length: Int = 32) -> String {
+        precondition(length > 0)
+        let charset = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        var result = ""
+        var remainingLength = length
+
+        while remainingLength > 0 {
+            var randoms = [UInt8](repeating: 0, count: 16)
+            let status = SecRandomCopyBytes(kSecRandomDefault, randoms.count, &randoms)
+            if status != errSecSuccess {
+                fatalError("Unable to generate nonce. SecRandomCopyBytes failed with OSStatus \(status)")
+            }
+
+            randoms.forEach { random in
+                if remainingLength == 0 { return }
+                if random < UInt8(charset.count) {
+                    result.append(charset[Int(random)])
+                    remainingLength -= 1
+                }
+            }
+        }
+        return result
+    }
+
+    private func sha256(_ input: String) -> String {
+        let inputData = Data(input.utf8)
+        let hashedData = SHA256.hash(data: inputData)
+        return hashedData.map { String(format: "%02x", $0) }.joined()
     }
 }
 

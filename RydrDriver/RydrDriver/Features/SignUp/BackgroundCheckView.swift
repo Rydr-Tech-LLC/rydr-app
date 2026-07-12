@@ -27,9 +27,12 @@ struct BackgroundCheckView: View {
 
     var onNext: () -> Void
 
+    @Environment(\.openURL) private var openURL
     @State private var isSaving = false
     @State private var message: String?
     @State private var messageIsError = false
+
+    private let checkrURL = URL(string: "https://candidate.checkr.com/")!
 
     var body: some View {
         ScrollView {
@@ -39,16 +42,17 @@ struct BackgroundCheckView: View {
                 heroIllustration
 
                 VStack(spacing: 8) {
-                    Text("Background Check (Beta)")
+                    Text("Background Check")
                         .font(.system(size: 26, weight: .heavy, design: .rounded))
                         .foregroundStyle(Styles.rydrGradient)
-                    Text("Background checks are required for all Rydr drivers.")
+                    Text("Background checks are required for all Rydr drivers. Use your legal name exactly as it appears on your driver license.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
 
                 infoCard
+                checkrRedirectButton
                 warningCard
                 acknowledgementCheckbox
 
@@ -92,15 +96,37 @@ struct BackgroundCheckView: View {
             Text("Rydr is committed to rider and driver safety.")
                 .font(.headline.weight(.bold))
 
-            Text("All drivers are normally required to complete a background check before becoming eligible to accept rides.")
-            Text("As part of this closed beta program, background checks are temporarily deferred for approved beta participants while we complete integration with our background screening provider.")
-            Text("Participation in the beta does not waive this requirement. A successful background check will be required before public launch or continued access to the Rydr Driver platform.")
+            Text("For this beta, Rydr is using an external Checkr flow and manual review instead of an in-app Checkr API integration.")
+            Text("Your legal name, date of birth, license details, email, and phone number are saved to your driver profile so Mission Control can monitor background-check readiness.")
+            Text("After you continue, your background-check status will be marked as manual pending until Rydr reviews the external Checkr result.")
         }
         .font(.subheadline)
         .foregroundStyle(.primary)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
+    }
+
+    private var checkrRedirectButton: some View {
+        Button(action: openCheckr) {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.up.forward.app.fill")
+                Text("Open Checkr")
+                    .fontWeight(.semibold)
+                Spacer()
+                Image(systemName: "safari.fill")
+                    .font(.caption.weight(.bold))
+            }
+            .padding(.horizontal, 18)
+            .frame(height: 54)
+        }
+        .foregroundColor(.white)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Styles.rydrGradient)
+        )
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open Checkr background check")
     }
 
     private var warningCard: some View {
@@ -144,7 +170,7 @@ struct BackgroundCheckView: View {
                     .foregroundStyle(acknowledged ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.secondary))
                     .frame(width: 28)
 
-                Text("I understand that a background check is required to drive on the Rydr platform. I acknowledge that this requirement is temporarily deferred only for the beta program, and I agree to complete a background check when required. I also understand that misconduct during beta may result in immediate removal from testing and may affect my future eligibility to drive with Rydr.")
+                Text("I understand that a background check is required to drive on the Rydr platform. I acknowledge that Rydr is using an external Checkr/manual review flow during beta, and I agree to complete any requested background screening steps. I also understand that misconduct during beta may result in immediate removal from testing and may affect my future eligibility to drive with Rydr.")
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -162,6 +188,28 @@ struct BackgroundCheckView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private func openCheckr() {
+        recordCheckrRedirect()
+        openURL(checkrURL)
+    }
+
+    private func recordCheckrRedirect() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        Firestore.firestore().collection("drivers").document(uid).setData([
+            "backgroundCheckProvider": "checkr",
+            "backgroundCheckFlow": "external_redirect",
+            "backgroundCheckStatus": "manual_pending",
+            "backgroundCheckRedirectURL": checkrURL.absoluteString,
+            "backgroundCheckRedirectedAt": FieldValue.serverTimestamp(),
+            "backgroundCheckLegalFirstName": firstName,
+            "backgroundCheckLegalLastName": lastName,
+            "backgroundCheckEmail": email,
+            "backgroundCheckPhone": phone,
+            "backgroundCheckLicenseState": licenseState,
+            "backgroundCheckSource": "driver-ios-signup"
+        ], merge: true)
     }
 
     private func bullet(_ text: String) -> some View {
@@ -206,6 +254,18 @@ struct BackgroundCheckView: View {
             "backgroundCheckAcknowledged": true,
             "backgroundCheckAcknowledgedAt": FieldValue.serverTimestamp(),
             "backgroundAcknowledgementVersion": 1,
+            "backgroundCheckProvider": "checkr",
+            "backgroundCheckFlow": "external_redirect",
+            "backgroundCheckStatus": "manual_pending",
+            "backgroundCheckManualReviewRequired": true,
+            "backgroundCheckLegalFirstName": firstName,
+            "backgroundCheckLegalLastName": lastName,
+            "backgroundCheckEmail": email,
+            "backgroundCheckPhone": phone,
+            "backgroundCheckDob": Timestamp(date: dob),
+            "backgroundCheckLicenseNumberLast4": String(licenseNumber.suffix(4)),
+            "backgroundCheckLicenseState": licenseState,
+            "backgroundCheckSource": "driver-ios-signup",
             "backgroundCheckStepCompleted": true,
             "betaAgreementAccepted": true,
             "betaAgreementAcceptedAt": FieldValue.serverTimestamp()

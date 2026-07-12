@@ -28,6 +28,8 @@
 		8B2459472E98190C00931537 /* FirebaseRemoteConfig in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459462E98190C00931537 /* FirebaseRemoteConfig */; };
 		8B2459492E98190C00931537 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 8B2459482E98190C00931537 /* FirebaseStorage */; };
 		8B24594B2E98190C00931537 /* FirebaseStorageCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 8B24594A2E98190C00931537 /* FirebaseStorageCombine-Community */; };
+		8B88C0012F12345600A11C01 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 8B88C0032F12345600A11C01 /* GoogleSignIn */; };
+		8B88C0022F12345600A11C01 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 8B88C0042F12345600A11C01 /* GoogleSignInSwift */; };
 		8BDB1CDF2E980E860049E21E /* Stripe in Frameworks */ = {isa = PBXBuildFile; productRef = 8BDB1CDE2E980E860049E21E /* Stripe */; };
 		8BDB1CE12E980E860049E21E /* StripeConnect in Frameworks */ = {isa = PBXBuildFile; productRef = 8BDB1CE02E980E860049E21E /* StripeConnect */; };
 		8BDB1CE32E980E860049E21E /* StripeFinancialConnections in Frameworks */ = {isa = PBXBuildFile; productRef = 8BDB1CE22E980E860049E21E /* StripeFinancialConnections */; };
@@ -119,6 +121,8 @@
 				8B2459492E98190C00931537 /* FirebaseStorage in Frameworks */,
 				8B24593F2E98190C00931537 /* FirebaseInAppMessaging-Beta in Frameworks */,
 				8B24594B2E98190C00931537 /* FirebaseStorageCombine-Community in Frameworks */,
+				8B88C0012F12345600A11C01 /* GoogleSignIn in Frameworks */,
+				8B88C0022F12345600A11C01 /* GoogleSignInSwift in Frameworks */,
 				8B24592D2E98190C00931537 /* FirebaseAuth in Frameworks */,
 				8B2459332E98190C00931537 /* FirebaseCrashlytics in Frameworks */,
 				8B2459472E98190C00931537 /* FirebaseRemoteConfig in Frameworks */,
@@ -221,6 +225,8 @@
 				8B2459462E98190C00931537 /* FirebaseRemoteConfig */,
 				8B2459482E98190C00931537 /* FirebaseStorage */,
 				8B24594A2E98190C00931537 /* FirebaseStorageCombine-Community */,
+				8B88C0032F12345600A11C01 /* GoogleSignIn */,
+				8B88C0042F12345600A11C01 /* GoogleSignInSwift */,
 			);
 			productName = "Rydr Driver";
 			productReference = 8B2D1EF22E98039B00229527 /* RydrDriver.app */;
@@ -307,6 +313,7 @@
 			packageReferences = (
 				8BDB1CDD2E980E860049E21E /* XCRemoteSwiftPackageReference "stripe-ios" */,
 				8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				8B88C0002F12345600A11C01 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8B2D1EF32E98039B00229527 /* Products */;
@@ -752,6 +759,14 @@
 				minimumVersion = 12.4.0;
 			};
 		};
+		8B88C0002F12345600A11C01 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.0.0;
+			};
+		};
 		8BDB1CDD2E980E860049E21E /* XCRemoteSwiftPackageReference "stripe-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/stripe/stripe-ios";
@@ -867,6 +882,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 8B2459212E98190C00931537 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = "FirebaseStorageCombine-Community";
+		};
+		8B88C0032F12345600A11C01 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B88C0002F12345600A11C01 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		8B88C0042F12345600A11C01 /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8B88C0002F12345600A11C01 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
 		};
 		8BDB1CDE2E980E860049E21E /* Stripe */ = {
 			isa = XCSwiftPackageProductDependency;

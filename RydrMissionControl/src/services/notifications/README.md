@@ -35,7 +35,8 @@ Optional:
 WAITLIST_INTERNAL_NOTIFY_EMAIL="support@rydr-go.com"
 TESTFLIGHT_RIDER_URL=
 TESTFLIGHT_DRIVER_URL=
-DISCORD_INVITE_URL=
+DISCORD_RIDER_INVITE_URL=
+DISCORD_DRIVER_INVITE_URL=
 ```
 
 Optional values may be omitted. `WAITLIST_INTERNAL_NOTIFY_EMAIL` defaults to `support@rydr-go.com`. Missing TestFlight or Discord URLs simply hide those buttons in the beta approval email.

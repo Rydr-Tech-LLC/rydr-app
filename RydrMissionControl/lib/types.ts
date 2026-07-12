@@ -204,6 +204,12 @@ export interface AuditLogEntry {
     | "payment"
     | "promotion"
     | "supportTicket"
+    | "campusTarget"
+    | "campusStudentOrganization"
+    | "campusEvent"
+    | "campusOutreachDraft"
+    | "campusAmbassador"
+    | "campusDiscoveredLead"
     | "platformConfig"
     | "betaWaitlist";
   targetId: string;

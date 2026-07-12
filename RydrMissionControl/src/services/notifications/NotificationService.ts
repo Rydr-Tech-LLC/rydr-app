@@ -30,6 +30,7 @@ export interface WaitlistInternalAlertInput {
 export interface BetaApprovalInput {
   to: string;
   firstName?: string;
+  role?: "rider" | "driver";
 }
 
 export interface GenericEmailInput {
@@ -120,7 +121,7 @@ export class NotificationService {
       firstName: input.firstName,
       riderTestFlightUrl: optionalEnv("TESTFLIGHT_RIDER_URL"),
       driverTestFlightUrl: optionalEnv("TESTFLIGHT_DRIVER_URL"),
-      discordInviteUrl: optionalEnv("DISCORD_INVITE_URL")
+      discordInviteUrl: discordInviteUrlForRole(input.role)
     });
 
     return this.toNotificationResult(
@@ -161,9 +162,26 @@ export class NotificationService {
   }
 }
 
-function optionalEnv(name: "TESTFLIGHT_RIDER_URL" | "TESTFLIGHT_DRIVER_URL" | "DISCORD_INVITE_URL"): string | undefined {
+function optionalEnv(
+  name:
+    | "TESTFLIGHT_RIDER_URL"
+    | "TESTFLIGHT_DRIVER_URL"
+    | "DISCORD_INVITE_URL"
+    | "DISCORD_DRIVER_INVITE_URL"
+    | "DISCORD_RIDER_INVITE_URL"
+): string | undefined {
   const value = process.env[name]?.trim();
   return value ? value : undefined;
+}
+
+function discordInviteUrlForRole(role?: "rider" | "driver"): string | undefined {
+  if (role === "driver") {
+    return optionalEnv("DISCORD_DRIVER_INVITE_URL") ?? optionalEnv("DISCORD_INVITE_URL");
+  }
+  if (role === "rider") {
+    return optionalEnv("DISCORD_RIDER_INVITE_URL") ?? optionalEnv("DISCORD_INVITE_URL");
+  }
+  return optionalEnv("DISCORD_INVITE_URL");
 }
 
 function waitlistInternalRecipient(): string {

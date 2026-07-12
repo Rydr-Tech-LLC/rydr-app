@@ -40,15 +40,15 @@ struct NameDOBView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 22) {
-                DriverOnboardingStepIndicator(currentStep: currentStep, totalSteps: totalSteps, stepTitle: "Your Details")
+                DriverOnboardingStepIndicator(currentStep: currentStep, totalSteps: totalSteps, stepTitle: "Legal Name")
 
                 logoLockup
 
                 VStack(spacing: 8) {
-                    Text("Tell us about yourself")
+                    Text("Enter Your Legal Name")
                         .font(.system(size: 26, weight: .heavy, design: .rounded))
                         .foregroundStyle(Styles.rydrGradient)
-                    Text("We use this to verify your identity and set up your driver profile.")
+                    Text("Use the name exactly as it appears on your driver license. This is used for identity verification, payouts, and background screening.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -56,9 +56,9 @@ struct NameDOBView: View {
                 }
 
                 VStack(spacing: 14) {
-                    iconField(icon: "person.fill", placeholder: "First Name", text: $firstName)
+                    iconField(icon: "person.fill", placeholder: "Legal First Name", text: $firstName)
                         .focused($focusedField, equals: .first)
-                    iconField(icon: "person.fill", placeholder: "Last Name", text: $lastName)
+                    iconField(icon: "person.fill", placeholder: "Legal Last Name", text: $lastName)
                         .focused($focusedField, equals: .last)
 
                     HStack {
@@ -93,8 +93,8 @@ struct NameDOBView: View {
 
                 SignupInfoCard(
                     icon: "lock.shield.fill",
-                    title: "Your information is safe",
-                    message: "We use bank-level encryption to protect your personal details and never share them without your consent."
+                    title: "Legal name required",
+                    message: "Google or Apple may show a nickname. Rydr uses the legal name you enter here for verification and screening."
                 )
 
                 Spacer(minLength: 8)

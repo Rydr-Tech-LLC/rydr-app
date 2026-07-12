@@ -110,7 +110,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   let emailProviderId: string | null | undefined;
 
   if (decision === "approved" && email) {
-    const result = await notificationService.sendBetaApproval({ to: email, firstName });
+    const result = await notificationService.sendBetaApproval({ to: email, firstName, role });
     emailStatus = result.ok ? "sent" : "failed";
     emailError = result.error;
     emailProviderId = result.providerMessageId;

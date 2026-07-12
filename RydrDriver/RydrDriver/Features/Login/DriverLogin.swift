@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Combine
+import AuthenticationServices
 import FirebaseAuth
 import FirebaseFirestore
 
@@ -26,6 +27,7 @@ struct DriverLoginView: View {
     @State private var showPasswordResetAlert = false
     @State private var isLoggingIn = false
     @State private var showingSignup = false
+    @State private var currentNonce: String?
 
     // Dedicated full-screen phone verification flow (shared with driver signup).
     @State private var showPhoneFlow = false
@@ -53,6 +55,8 @@ struct DriverLoginView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
+
+                socialLoginFields
 
                 signupPrompt
 
@@ -275,6 +279,52 @@ struct DriverLoginView: View {
         .padding(.vertical, 4)
     }
 
+    private var socialLoginFields: some View {
+        VStack(spacing: 12) {
+            SignInWithAppleButton(
+                .signIn,
+                onRequest: { request in
+                    request.requestedScopes = [.fullName, .email]
+                    let nonce = DriverSocialAuthService.randomNonceString()
+                    currentNonce = nonce
+                    request.nonce = DriverSocialAuthService.sha256(nonce)
+                },
+                onCompletion: { result in
+                    switch result {
+                    case .success(let authorization):
+                        socialLoginWithApple(authorization)
+                    case .failure(let error):
+                        errorMessage = "Apple sign-in failed: \(error.localizedDescription)"
+                    }
+                }
+            )
+            .signInWithAppleButtonStyle(.black)
+            .frame(height: 54)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            Button(action: socialLoginWithGoogle) {
+                HStack {
+                    Image(systemName: "g.circle.fill")
+                    Text("Continue with Google")
+                        .fontWeight(.semibold)
+                    Spacer()
+                }
+                .padding(.horizontal, 18)
+                .frame(height: 54)
+            }
+            .foregroundColor(.primary)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(.systemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color(.systemGray4), lineWidth: 1)
+            )
+            .buttonStyle(.plain)
+        }
+    }
+
     private var emailLoginFields: some View {
         VStack(spacing: 12) {
             HStack(spacing: 10) {
@@ -397,6 +447,57 @@ struct DriverLoginView: View {
                 }
 
                 loadDriverProfile(for: user, fallbackEmail: email)
+            }
+        }
+    }
+
+    private func socialLoginWithGoogle() {
+        errorMessage = ""
+        isLoggingIn = true
+        DriverSocialAuthService.signInWithGoogle { result in
+            switch result {
+            case .success(let payload):
+                signInWithSocialCredential(payload.0, fallbackEmail: payload.1.email)
+            case .failure(let error):
+                Task { @MainActor in
+                    isLoggingIn = false
+                    errorMessage = "Google sign-in failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func socialLoginWithApple(_ authorization: ASAuthorization) {
+        guard let nonce = currentNonce else {
+            errorMessage = "Apple sign-in could not verify this request. Please try again."
+            return
+        }
+
+        switch DriverSocialAuthService.credential(from: authorization, nonce: nonce) {
+        case .success(let payload):
+            errorMessage = ""
+            isLoggingIn = true
+            signInWithSocialCredential(payload.0, fallbackEmail: payload.1.email)
+        case .failure(let error):
+            errorMessage = "Apple sign-in failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func signInWithSocialCredential(_ credential: AuthCredential, fallbackEmail: String) {
+        Auth.auth().signIn(with: credential) { result, error in
+            Task { @MainActor in
+                isLoggingIn = false
+                if let error {
+                    errorMessage = "Sign-in failed: \(error.localizedDescription)"
+                    return
+                }
+
+                guard let user = result?.user else {
+                    errorMessage = "Sign-in failed: missing user."
+                    return
+                }
+
+                loadDriverProfile(for: user, fallbackEmail: fallbackEmail)
             }
         }
     }
