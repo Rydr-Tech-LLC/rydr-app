@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
   if (!body) return NextResponse.json({ error: "Invalid discovery payload." }, { status: 400 });
 
   const result = await discoverCampusLeads({
+    discoveryGoal: body.discoveryGoal,
     campusNames: body.campusNames,
     categories: body.categories,
     manualUrls: body.manualUrls,

@@ -23,10 +23,16 @@ export default async function LeadDiscoveryPage({ searchParams }: { searchParams
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-ink">AI Lead Discovery</h1>
+        <h1 className="text-xl font-semibold text-ink">Run AI Search</h1>
         <p className="mt-1 text-sm text-muted">
-          Discover public campus leads, then approve or reject before they become usable CRM records.
+          Enter what support outreach needs, run the AI search, then review the pending leads.
         </p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <StepCard number="1" title="Describe the lead" body="Use the Search goal box for the kind of campus lead you need." />
+        <StepCard number="2" title="Choose targets" body="Select campuses, categories, or paste approved public URLs." />
+        <StepCard number="3" title="Run and review" body="Click Run AI Search. Results land below as pending review." />
       </div>
 
       <LeadDiscoveryPanel campuses={DEFAULT_TARGET_CAMPUSES} categories={DEFAULT_PRIORITY_CATEGORIES} />
@@ -93,6 +99,18 @@ export default async function LeadDiscoveryPage({ searchParams }: { searchParams
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function StepCard({ number, title, body }: { number: string; title: string; body: string }) {
+  return (
+    <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">{number}</span>
+        <h2 className="text-sm font-semibold text-ink">{title}</h2>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-muted">{body}</p>
     </div>
   );
 }

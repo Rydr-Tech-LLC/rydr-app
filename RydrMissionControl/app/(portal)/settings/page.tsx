@@ -1,11 +1,27 @@
 import { getAdminSession } from "@/lib/session";
 import { adminDb } from "@/lib/firebaseAdmin";
+import AdminUsersPanel from "./AdminUsersPanel";
 import CashHubBetaToggle from "./CashHubBetaToggle";
 
 export default async function SettingsPage() {
   const session = await getAdminSession();
-  const cashHubConfigSnap = await adminDb.collection("platformConfig").doc("cashRydrHub").get().catch(() => null);
+  const [cashHubConfigSnap, adminUsersSnap] = await Promise.all([
+    adminDb.collection("platformConfig").doc("cashRydrHub").get().catch(() => null),
+    adminDb.collection("missionControlAdmins").orderBy("email", "asc").limit(250).get().catch(() => null)
+  ]);
   const cashHubConfig = cashHubConfigSnap?.data() ?? {};
+  const adminUsers =
+    adminUsersSnap?.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        uid: typeof data.uid === "string" ? data.uid : doc.id,
+        email: typeof data.email === "string" ? data.email : "",
+        status: typeof data.status === "string" ? data.status : "active",
+        grantedByEmail: typeof data.grantedByEmail === "string" ? data.grantedByEmail : null,
+        revokedByEmail: typeof data.revokedByEmail === "string" ? data.revokedByEmail : null
+      };
+    }) ?? [];
   const cashHubTermsAcceptanceEnabled = cashHubConfig.termsAcceptanceEnabled === true;
   const cashHubTermsVersion = typeof cashHubConfig.cashHubTermsVersion === "string" ? cashHubConfig.cashHubTermsVersion : null;
 
@@ -24,14 +40,7 @@ export default async function SettingsPage() {
 
       <CashHubBetaToggle initialEnabled={cashHubTermsAcceptanceEnabled} initialTermsVersion={cashHubTermsVersion} />
 
-      <div className="rounded-lg border border-line bg-white p-5 shadow-sm">
-        <h2 className="mb-2 text-sm font-semibold text-ink">Granting access</h2>
-        <p className="text-sm text-muted">
-          Mission Control access is controlled by a Firebase custom claim (<code className="rounded bg-grouped px-1">role: &quot;admin&quot;</code>),
-          not by anything in this UI. Run <code className="rounded bg-grouped px-1">npm run set-admin -- someone@rydr-go.com</code> from
-          the project root (server credentials required) to grant or revoke it. See SETUP.md for details.
-        </p>
-      </div>
+      <AdminUsersPanel admins={adminUsers} />
 
       <div className="rounded-lg border border-line bg-white p-5 shadow-sm">
         <h2 className="mb-2 text-sm font-semibold text-ink">Future modules</h2>

@@ -210,6 +210,7 @@ export interface AuditLogEntry {
     | "campusOutreachDraft"
     | "campusAmbassador"
     | "campusDiscoveredLead"
+    | "missionControlAdmin"
     | "platformConfig"
     | "betaWaitlist";
   targetId: string;
