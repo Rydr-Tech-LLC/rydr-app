@@ -73,6 +73,12 @@ export interface SearchResult {
   query: string;
 }
 
+export interface SearchProviderError {
+  query: string;
+  status?: number;
+  error: string;
+}
+
 export interface AILeadCandidate {
   kind: DiscoveredLeadKind;
   campusName: string;
@@ -121,6 +127,9 @@ export interface DiscoveryResult {
   runId: string;
   model: string;
   searchStrategies: string[];
+  searchProviderConfigured: boolean;
+  searchErrors: SearchProviderError[];
+  warnings: string[];
   searchResults: SearchResult[];
   leads: AILeadCandidate[];
   rejectedSources: Array<{ url: string; reason: string }>;
@@ -129,6 +138,7 @@ export interface DiscoveryResult {
 const BLOCKED_HOSTS = ["tiktok.com"];
 const BLOCKED_PATH_TERMS = ["login", "signin", "sign-in", "auth", "portal", "blackboard", "canvas", "people", "person", "profile"];
 const SEARCH_CACHE = new Map<string, { expiresAt: number; results: SearchResult[] }>();
+const DEFAULT_MAX_SEARCH_STRATEGIES = 15;
 
 export function discoveryFingerprint(lead: Pick<AILeadCandidate, "campusName" | "name" | "sourceUrl">) {
   return crypto
@@ -145,11 +155,13 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
   const maxSearchResults = clamp(Number(input.maxSearchResults) || 5, 1, 10);
   const runId = crypto.randomUUID();
   const searchStrategies = await planSearchStrategies(campusNames, categories, discoveryGoal, leadIntents);
+  const searchBatch = await runGoogleSearches(searchStrategies, maxSearchResults);
 
   const rawResults = [
-    ...(await runGoogleSearches(searchStrategies, maxSearchResults)),
+    ...searchBatch.results,
     ...manualUrlResults(input.manualUrls)
   ];
+  const warnings = [...searchBatch.warnings];
 
   const rejectedSources: DiscoveryResult["rejectedSources"] = [];
   const searchResults = uniqueByUrl(rawResults).filter((result) => {
@@ -159,7 +171,24 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
   });
 
   if (!searchResults.length) {
-    return { runId, model: aiModel(), searchStrategies, searchResults, leads: [], rejectedSources };
+    if (!searchBatch.providerConfigured) {
+      warnings.push("Google Custom Search is not configured. Add GOOGLE_CUSTOM_SEARCH_API_KEY and GOOGLE_CUSTOM_SEARCH_ENGINE_ID, or paste approved public URLs.");
+    } else if (searchBatch.errors.length) {
+      warnings.push("Google Custom Search returned errors. Check API enablement, quota, billing, and search engine settings.");
+    } else {
+      warnings.push("No public search results were returned. Try broader categories, fewer filters, or paste approved public URLs.");
+    }
+    return {
+      runId,
+      model: aiModel(),
+      searchStrategies,
+      searchProviderConfigured: searchBatch.providerConfigured,
+      searchErrors: searchBatch.errors,
+      warnings,
+      searchResults,
+      leads: [],
+      rejectedSources
+    };
   }
 
   const leads = await extractLeadsWithAI({ campusNames, categories, leadIntents, discoveryGoal, searchStrategies, searchResults });
@@ -168,12 +197,27 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
     .filter((lead): lead is AILeadCandidate => Boolean(lead))
     .slice(0, 50);
 
-  return { runId, model: aiModel(), searchStrategies, searchResults, leads: cleaned, rejectedSources };
+  if (!cleaned.length) {
+    warnings.push("Public results were found, but the AI did not extract usable leads. Try a broader search goal or paste approved public URLs.");
+  }
+
+  return {
+    runId,
+    model: aiModel(),
+    searchStrategies,
+    searchProviderConfigured: searchBatch.providerConfigured,
+    searchErrors: searchBatch.errors,
+    warnings,
+    searchResults,
+    leads: cleaned,
+    rejectedSources
+  };
 }
 
 async function planSearchStrategies(campusNames: string[], categories: string[], discoveryGoal: string, leadIntents: string[]): Promise<string[]> {
   const fallback = buildFallbackQueries(campusNames, categories);
   const apiKey = process.env.OPENAI_API_KEY;
+  const maxStrategies = maxSearchStrategies();
   if (!apiKey) return fallback;
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -227,7 +271,7 @@ async function planSearchStrategies(campusNames: string[], categories: string[],
             properties: {
               queries: {
                 type: "array",
-                maxItems: 60,
+                maxItems: maxStrategies,
                 items: { type: "string" }
               }
             },
@@ -245,19 +289,34 @@ async function planSearchStrategies(campusNames: string[], categories: string[],
   try {
     const parsed = JSON.parse(jsonText) as { queries?: string[] };
     const planned = (parsed.queries ?? []).map((query) => cleanText(query, 240)).filter(Boolean);
-    return planned.length ? uniqueStrings([...planned, ...fallback]).slice(0, 60) : fallback;
+    return planned.length ? uniqueStrings([...planned, ...fallback]).slice(0, maxStrategies) : fallback;
   } catch {
     return fallback;
   }
 }
 
-async function runGoogleSearches(queries: string[], maxSearchResults: number): Promise<SearchResult[]> {
+async function runGoogleSearches(
+  queries: string[],
+  maxSearchResults: number
+): Promise<{ providerConfigured: boolean; results: SearchResult[]; errors: SearchProviderError[]; warnings: string[] }> {
   const apiKey = process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
   const cx = process.env.GOOGLE_CUSTOM_SEARCH_ENGINE_ID;
-  if (!apiKey || !cx) return [];
+  if (!apiKey || !cx) {
+    return {
+      providerConfigured: false,
+      results: [],
+      errors: [],
+      warnings: ["Google Custom Search credentials are missing in Mission Control environment variables."]
+    };
+  }
 
   const batches = await Promise.all(queries.map((query) => googleSearch(query, apiKey, cx, maxSearchResults)));
-  return batches.flat();
+  return {
+    providerConfigured: true,
+    results: batches.flatMap((batch) => batch.results),
+    errors: batches.flatMap((batch) => (batch.error ? [batch.error] : [])),
+    warnings: []
+  };
 }
 
 function buildFallbackQueries(campusNames: string[], categories: string[]) {
@@ -280,13 +339,17 @@ function buildFallbackQueries(campusNames: string[], categories: string[]) {
       queries.push(`"${campus}" "${category}" "student organization"`);
     }
   }
-  return uniqueStrings(queries).slice(0, 60);
+  return uniqueStrings(queries).slice(0, maxSearchStrategies());
 }
 
-async function googleSearch(query: string, apiKey: string, cx: string, maxSearchResults: number): Promise<SearchResult[]> {
+function maxSearchStrategies() {
+  return clamp(Number(process.env.CAMPUS_DISCOVERY_MAX_STRATEGIES) || DEFAULT_MAX_SEARCH_STRATEGIES, 5, 25);
+}
+
+async function googleSearch(query: string, apiKey: string, cx: string, maxSearchResults: number): Promise<{ results: SearchResult[]; error?: SearchProviderError }> {
   const cacheKey = `${query}|${maxSearchResults}`;
   const cached = SEARCH_CACHE.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.results;
+  if (cached && cached.expiresAt > Date.now()) return { results: cached.results };
 
   const params = new URLSearchParams({
     key: apiKey,
@@ -296,8 +359,20 @@ async function googleSearch(query: string, apiKey: string, cx: string, maxSearch
     safe: "active"
   });
   const response = await fetch(`https://www.googleapis.com/customsearch/v1?${params.toString()}`, { cache: "no-store" });
-  if (!response.ok) return [];
-  const data = (await response.json()) as { items?: Array<{ title?: string; link?: string; snippet?: string }> };
+  const data = (await response.json().catch(() => ({}))) as {
+    items?: Array<{ title?: string; link?: string; snippet?: string }>;
+    error?: { message?: string };
+  };
+  if (!response.ok) {
+    return {
+      results: [],
+      error: {
+        query,
+        status: response.status,
+        error: data.error?.message || `Google Custom Search returned HTTP ${response.status}.`
+      }
+    };
+  }
   const results = (data.items ?? [])
     .map((item) => ({
       title: cleanText(item.title, 300),
@@ -307,7 +382,7 @@ async function googleSearch(query: string, apiKey: string, cx: string, maxSearch
     }))
     .filter((item) => item.title && item.link);
   SEARCH_CACHE.set(cacheKey, { expiresAt: Date.now() + 1000 * 60 * 30, results });
-  return results;
+  return { results };
 }
 
 function manualUrlResults(urls: unknown): SearchResult[] {

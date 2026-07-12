@@ -106,6 +106,9 @@ export async function POST(request: NextRequest) {
       savedCount: savedIds.length,
       searchResultCount: result.searchResults.length,
       searchStrategyCount: result.searchStrategies.length,
+      searchProviderConfigured: result.searchProviderConfigured,
+      searchErrorCount: result.searchErrors.length,
+      warnings: result.warnings,
       rejectedSourceCount: result.rejectedSources.length,
       model: result.model
     }
@@ -116,6 +119,9 @@ export async function POST(request: NextRequest) {
     savedCount: savedIds.length,
     searchResultCount: result.searchResults.length,
     searchStrategyCount: result.searchStrategies.length,
+    searchProviderConfigured: result.searchProviderConfigured,
+    searchErrors: result.searchErrors.slice(0, 10),
+    warnings: result.warnings,
     rejectedSources: result.rejectedSources
   });
 }

@@ -11,10 +11,36 @@ const LEAD_INTENTS = [
   { label: "Events", value: "campus events" }
 ];
 
+interface DiscoveryRunResponse {
+  savedCount?: number;
+  searchResultCount?: number;
+  searchStrategyCount?: number;
+  searchProviderConfigured?: boolean;
+  searchErrors?: Array<{ query?: string; status?: number; error?: string }>;
+  warnings?: string[];
+  rejectedSources?: Array<{ url?: string; reason?: string }>;
+}
+
+interface SearchHealthResponse {
+  ok?: boolean;
+  configured?: boolean;
+  hasApiKey?: boolean;
+  hasSearchEngineId?: boolean;
+  status?: number;
+  googleErrorCode?: number;
+  googleErrorStatus?: string;
+  error?: string;
+  resultCount?: number;
+  totalResults?: string;
+}
+
 export function LeadDiscoveryPanel({ campuses, categories, pendingCount }: { campuses: string[]; categories: string[]; pendingCount: number }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [healthBusy, setHealthBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [lastRun, setLastRun] = useState<DiscoveryRunResponse | null>(null);
+  const [searchHealth, setSearchHealth] = useState<SearchHealthResponse | null>(null);
   const [goal, setGoal] = useState("Find campus organizations that can help recruit commuter riders, student ambassadors, interns, or beta testers.");
   const [selectedIntents, setSelectedIntents] = useState<string[]>(LEAD_INTENTS.map((intent) => intent.value));
   const [selectedCampuses, setSelectedCampuses] = useState<string[]>(campuses);
@@ -38,6 +64,7 @@ export function LeadDiscoveryPanel({ campuses, categories, pendingCount }: { cam
     event.preventDefault();
     setBusy(true);
     setMessage(null);
+    setLastRun(null);
     try {
       const payload = {
         discoveryGoal: goal,
@@ -58,17 +85,41 @@ export function LeadDiscoveryPanel({ campuses, categories, pendingCount }: { cam
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "Unable to run lead discovery.");
+      setLastRun(body);
 
-      setMessage(
-        `Search complete. Planned ${body.searchStrategyCount ?? 0} searches and saved ${body.savedCount ?? 0} pending leads from ${
-          body.searchResultCount ?? 0
-        } public results. Blocked ${body.rejectedSources?.length ?? 0} sources.`
-      );
+      const resultCount = body.searchResultCount ?? 0;
+      const savedCount = body.savedCount ?? 0;
+      if (resultCount === 0) {
+        setMessage("No public search results came back, so the AI had no source pages to turn into leads.");
+      } else if (savedCount === 0) {
+        setMessage("Public pages were found, but no usable leads were extracted. Try a broader goal or add approved URLs.");
+      } else {
+        setMessage(`Search complete. Saved ${savedCount} pending leads from ${resultCount} public results.`);
+      }
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to run lead discovery.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function testSearchConnection() {
+    setHealthBusy(true);
+    setSearchHealth(null);
+    try {
+      const response = await fetch("/api/campus-growth/ai/search-health", { method: "GET" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? "Unable to test Google Search.");
+      setSearchHealth(body);
+    } catch (error) {
+      setSearchHealth({
+        ok: false,
+        configured: false,
+        error: error instanceof Error ? error.message : "Unable to test Google Search."
+      });
+    } finally {
+      setHealthBusy(false);
     }
   }
 
@@ -213,10 +264,63 @@ export function LeadDiscoveryPanel({ campuses, categories, pendingCount }: { cam
           >
             {busy ? "Running AI Search..." : "Run AI Search"}
           </button>
+          <button
+            type="button"
+            onClick={testSearchConnection}
+            disabled={healthBusy}
+            className="mt-3 w-full rounded-md border border-line bg-white px-4 py-2.5 text-sm font-semibold text-ink shadow-sm hover:border-rydr-red hover:text-rydr-red disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {healthBusy ? "Testing Google Search..." : "Test Google Search"}
+          </button>
           <p className="mt-3 text-center text-xs text-muted">
             Every result enters Pending Review. Nothing is contacted automatically.
           </p>
+          {searchHealth ? (
+            <div
+              className={`mt-4 rounded-md border px-3 py-3 text-xs leading-5 ${
+                searchHealth.ok ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"
+              }`}
+            >
+              <p className="font-semibold">{searchHealth.ok ? "Google Search connected" : "Google Search needs attention"}</p>
+              {searchHealth.ok ? (
+                <p className="mt-1">
+                  Test returned {searchHealth.resultCount ?? 0} result preview from {searchHealth.totalResults ?? "0"} indexed matches.
+                </p>
+              ) : (
+                <ul className="mt-2 list-disc space-y-1 pl-4">
+                  {searchHealth.configured === false && <li>Mission Control is missing one or both Google Custom Search env vars.</li>}
+                  {searchHealth.status && <li>Google HTTP status: {searchHealth.status}</li>}
+                  {searchHealth.googleErrorStatus && <li>Google error status: {searchHealth.googleErrorStatus}</li>}
+                  {searchHealth.error && <li>{searchHealth.error}</li>}
+                  <li>
+                    Env check: API key {searchHealth.hasApiKey ? "present" : "missing"}, search engine ID{" "}
+                    {searchHealth.hasSearchEngineId ? "present" : "missing"}.
+                  </li>
+                </ul>
+              )}
+            </div>
+          ) : null}
           {message && <p className="mt-4 rounded-md bg-grouped px-3 py-2 text-xs leading-5 text-muted">{message}</p>}
+          {lastRun && (lastRun.warnings?.length || lastRun.searchErrors?.length || (lastRun.searchResultCount ?? 0) === 0) ? (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900">
+              <p className="font-semibold">Search diagnostics</p>
+              <ul className="mt-2 list-disc space-y-1 pl-4">
+                {(lastRun.warnings ?? []).map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+                {lastRun.searchProviderConfigured === false && <li>Google Custom Search is not connected, so only approved URLs can produce leads.</li>}
+                {(lastRun.searchErrors ?? []).slice(0, 3).map((error, index) => (
+                  <li key={`${error.query ?? "query"}-${index}`}>
+                    {error.status ? `Google status ${error.status}: ` : ""}
+                    {error.error ?? "Search provider error."}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2">
+                Next step: verify Google Custom Search env vars and engine settings, or paste one official campus organization/event URL into Approved public URLs and run again.
+              </p>
+            </div>
+          ) : null}
         </div>
 
         <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
