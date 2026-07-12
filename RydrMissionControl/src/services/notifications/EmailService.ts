@@ -3,7 +3,9 @@ import "server-only";
 import { Resend } from "resend";
 
 export interface SendEmailInput {
+  from?: string;
   to: string | string[];
+  bcc?: string | string[];
   subject: string;
   html: string;
   text?: string;
@@ -33,11 +35,12 @@ export class EmailService {
   }
 
   async sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
+    const from = input.from ?? this.fromEmail;
     if (!this.apiKey) {
       return this.fail("Resend API key is not configured.", input);
     }
-    if (!this.fromEmail) {
-      return this.fail("Waitlist sender email is not configured.", input);
+    if (!from) {
+      return this.fail("Sender email is not configured.", input);
     }
     if (!hasRecipient(input.to)) {
       return this.fail("Email recipient is missing.", input);
@@ -45,8 +48,9 @@ export class EmailService {
 
     try {
       const response = await this.client().emails.send({
-        from: this.fromEmail,
+        from,
         to: input.to,
+        bcc: input.bcc,
         subject: input.subject,
         html: input.html,
         text: input.text,

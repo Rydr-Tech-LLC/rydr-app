@@ -34,11 +34,14 @@ export interface BetaApprovalInput {
 }
 
 export interface GenericEmailInput {
+  from?: string;
   to: string | string[];
+  bcc?: string | string[];
   subject: string;
   title?: string;
   body: string;
   text?: string;
+  eyebrow?: string;
 }
 
 export class NotificationService {
@@ -135,18 +138,27 @@ export class NotificationService {
   }
 
   async sendGenericEmail(input: GenericEmailInput): Promise<NotificationResult> {
+    const safeBody = input.body
+      .split(/\n{2,}/)
+      .map((block) => block.trim())
+      .filter(Boolean)
+      .map((block) => paragraph(escapeHtml(block).replaceAll("\n", "<br>")))
+      .join("");
     const html = genericTemplate({
       title: input.title ?? input.subject,
       previewText: input.subject,
+      eyebrow: input.eyebrow,
       children: `
         <h1 style="margin:0 0 18px;color:#151515;font-size:28px;line-height:1.18;font-weight:900;">${escapeHtml(input.title ?? input.subject)}</h1>
-        ${paragraph(escapeHtml(input.body))}
+        ${safeBody}
       `
     });
 
     return this.toNotificationResult(
       await this.email.sendEmail({
+        from: input.from,
         to: input.to,
+        bcc: input.bcc,
         subject: input.subject,
         html,
         text: input.text ?? input.body

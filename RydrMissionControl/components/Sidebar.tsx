@@ -5,6 +5,15 @@ import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { clientAuth } from "@/lib/firebaseClient";
 
+const CAMPUS_GROWTH_ITEMS = [
+  { href: "/campus-growth/discovery", label: "AI Discovery" },
+  { href: "/campus-growth/outreach", label: "Outreach Inbox" },
+  { href: "/campus-growth/organizations", label: "Organizations" },
+  { href: "/campus-growth/events", label: "Events" },
+  { href: "/campus-growth/ambassadors", label: "Ambassadors" },
+  { href: "/campus-growth/campuses", label: "Campuses" }
+];
+
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/drivers", label: "Driver Verification" },
@@ -51,15 +60,34 @@ export default function Sidebar({ email }: { email: string | null }) {
         {NAV_ITEMS.map((item) => {
           const active = pathname === item.href || (item.href !== "/dashboard" && pathname?.startsWith(item.href));
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`block rounded-md px-3 py-2 text-sm font-medium transition ${
-                active ? "bg-ink text-white" : "text-muted hover:bg-grouped hover:text-ink"
-              }`}
-            >
-              {item.label}
-            </Link>
+            <div key={item.href}>
+              <Link
+                href={item.href}
+                className={`block rounded-md px-3 py-2 text-sm font-medium transition ${
+                  active ? "bg-ink text-white" : "text-muted hover:bg-grouped hover:text-ink"
+                }`}
+              >
+                {item.label}
+              </Link>
+              {item.href === "/campus-growth" && active && (
+                <div className="mt-1 space-y-0.5 border-l border-line pl-3">
+                  {CAMPUS_GROWTH_ITEMS.map((child) => {
+                    const childActive = pathname === child.href;
+                    return (
+                      <Link
+                        key={child.href}
+                        href={child.href}
+                        className={`block rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                          childActive ? "bg-red-50 text-rydr-red" : "text-muted hover:bg-grouped hover:text-ink"
+                        }`}
+                      >
+                        {child.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           );
         })}
       </nav>

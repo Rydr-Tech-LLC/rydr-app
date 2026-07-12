@@ -8,9 +8,10 @@ export default function OutreachActions({ id, status }: { id: string; status: st
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function run(action: "approve" | "deny" | "mark_sent" | "mark_replied" | "reset") {
+  async function run(action: "approve" | "approve_and_send" | "deny" | "mark_sent" | "mark_replied" | "reset") {
     const reason = action === "deny" ? window.prompt("Why is this outreach draft being denied?") : undefined;
     if (action === "deny" && !reason?.trim()) return;
+    if (action === "approve_and_send" && !window.confirm("Approve this draft and send it through Resend using the Rydr letterhead?")) return;
 
     setBusy(action);
     setMessage(null);
@@ -22,7 +23,7 @@ export default function OutreachActions({ id, status }: { id: string; status: st
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "Unable to update draft.");
-      setMessage("Updated.");
+      setMessage(action === "approve_and_send" ? "Approved and sent." : "Updated.");
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to update draft.");
@@ -35,8 +36,9 @@ export default function OutreachActions({ id, status }: { id: string; status: st
     <div className="flex flex-col items-end gap-1.5">
       <div className="flex flex-wrap justify-end gap-1.5">
         <Button label="Approve" disabled={status === "approved"} busy={busy === "approve"} onClick={() => run("approve")} />
+        <Button label="Approve & Send" disabled={status === "sent"} busy={busy === "approve_and_send"} onClick={() => run("approve_and_send")} />
         <Button label="Deny" disabled={status === "denied"} busy={busy === "deny"} danger onClick={() => run("deny")} />
-        <Button label="Sent" disabled={status === "sent"} busy={busy === "mark_sent"} muted onClick={() => run("mark_sent")} />
+        <Button label="Mark Sent Manually" disabled={status === "sent"} busy={busy === "mark_sent"} muted onClick={() => run("mark_sent")} />
         <Button label="Replied" disabled={status === "replied"} busy={busy === "mark_replied"} muted onClick={() => run("mark_replied")} />
         <Button label="Reset" disabled={status === "draft"} busy={busy === "reset"} muted onClick={() => run("reset")} />
       </div>

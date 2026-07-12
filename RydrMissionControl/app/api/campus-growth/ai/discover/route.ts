@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
 
   const result = await discoverCampusLeads({
     discoveryGoal: body.discoveryGoal,
+    leadIntents: body.leadIntents,
     campusNames: body.campusNames,
     categories: body.categories,
     manualUrls: body.manualUrls,

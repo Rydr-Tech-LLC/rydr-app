@@ -110,6 +110,7 @@ export interface AILeadCandidate {
 
 export interface DiscoveryInput {
   discoveryGoal?: string;
+  leadIntents?: string[];
   campusNames?: string[];
   categories?: string[];
   manualUrls?: string[];
@@ -138,11 +139,12 @@ export function discoveryFingerprint(lead: Pick<AILeadCandidate, "campusName" | 
 
 export async function discoverCampusLeads(input: DiscoveryInput): Promise<DiscoveryResult> {
   const discoveryGoal = cleanLongText(input.discoveryGoal, 1000);
+  const leadIntents = cleanList(input.leadIntents);
   const campusNames = cleanList(input.campusNames).length ? cleanList(input.campusNames) : DEFAULT_TARGET_CAMPUSES;
   const categories = cleanList(input.categories).length ? cleanList(input.categories) : DEFAULT_PRIORITY_CATEGORIES;
   const maxSearchResults = clamp(Number(input.maxSearchResults) || 5, 1, 10);
   const runId = crypto.randomUUID();
-  const searchStrategies = await planSearchStrategies(campusNames, categories, discoveryGoal);
+  const searchStrategies = await planSearchStrategies(campusNames, categories, discoveryGoal, leadIntents);
 
   const rawResults = [
     ...(await runGoogleSearches(searchStrategies, maxSearchResults)),
@@ -160,7 +162,7 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
     return { runId, model: aiModel(), searchStrategies, searchResults, leads: [], rejectedSources };
   }
 
-  const leads = await extractLeadsWithAI({ campusNames, categories, discoveryGoal, searchStrategies, searchResults });
+  const leads = await extractLeadsWithAI({ campusNames, categories, leadIntents, discoveryGoal, searchStrategies, searchResults });
   const cleaned = leads
     .map((lead) => normalizeLead(lead, searchResults))
     .filter((lead): lead is AILeadCandidate => Boolean(lead))
@@ -169,7 +171,7 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
   return { runId, model: aiModel(), searchStrategies, searchResults, leads: cleaned, rejectedSources };
 }
 
-async function planSearchStrategies(campusNames: string[], categories: string[], discoveryGoal: string): Promise<string[]> {
+async function planSearchStrategies(campusNames: string[], categories: string[], discoveryGoal: string, leadIntents: string[]): Promise<string[]> {
   const fallback = buildFallbackQueries(campusNames, categories);
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return fallback;
@@ -194,6 +196,7 @@ async function planSearchStrategies(campusNames: string[], categories: string[],
             targetCampuses: campusNames,
             priorityCategories: categories,
             discoveryGoal,
+            leadIntents,
             desiredLeadTypes: [
               "student organizations",
               "computer science clubs",
@@ -323,6 +326,7 @@ function manualUrlResults(urls: unknown): SearchResult[] {
 async function extractLeadsWithAI(input: {
   campusNames: string[];
   categories: string[];
+  leadIntents: string[];
   discoveryGoal: string;
   searchStrategies: string[];
   searchResults: SearchResult[];
@@ -351,6 +355,7 @@ async function extractLeadsWithAI(input: {
             blockedSources: BLOCKED_LEAD_SOURCES,
             targetCampuses: input.campusNames,
             priorityCategories: input.categories,
+            leadIntents: input.leadIntents,
             discoveryGoal: input.discoveryGoal,
             allowedRecommendations: CAMPUS_AGENT_RECOMMENDATIONS,
             searchStrategies: input.searchStrategies,
