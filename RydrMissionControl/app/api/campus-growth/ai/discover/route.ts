@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { discoverCampusLeads, discoveryFingerprint } from "@/lib/ai/campusGrowthAI";
 import { writeAuditLog } from "@/lib/auditLog";
 import { campusCollections, cleanText, listCampuses } from "@/lib/campusGrowth";
@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
     const savedIds: string[] = [];
 
     for (const lead of result.leads) {
+      const timelineCreatedAt = Timestamp.now();
       const campus = campusByName.get(lead.campusName.toLowerCase());
       const id = discoveryFingerprint(lead);
       const ref = adminDb.collection(campusCollections.discoveredLeads).doc(id);
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
               type: "ai_recommendation",
               summary: lead.scoreReason || lead.outreachAngle,
               createdBy: "AI Campus Agent",
-              createdAt: FieldValue.serverTimestamp()
+              createdAt: timelineCreatedAt
             }
           ],
           discoveryRunId: result.runId,

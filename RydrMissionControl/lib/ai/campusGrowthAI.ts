@@ -158,12 +158,13 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
   const runId = crypto.randomUUID();
   const searchStrategies = await planSearchStrategies(campusNames, categories, discoveryGoal, leadIntents);
   const searchBatch = await runFirecrawlSearches(searchStrategies, maxSearchResults);
+  const manualBatch = await manualUrlResults(input.manualUrls);
 
   const rawResults = [
     ...searchBatch.results,
-    ...manualUrlResults(input.manualUrls)
+    ...manualBatch.results
   ];
-  const warnings = [...searchBatch.warnings];
+  const warnings = [...searchBatch.warnings, ...manualBatch.warnings];
 
   const rejectedSources: DiscoveryResult["rejectedSources"] = [];
   const searchResults = uniqueByUrl(rawResults).filter((result) => {
@@ -185,7 +186,7 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
       model: aiModel(),
       searchStrategies,
       searchProviderConfigured: searchBatch.providerConfigured,
-      searchErrors: searchBatch.errors,
+      searchErrors: [...searchBatch.errors, ...manualBatch.errors],
       warnings,
       searchResults,
       leads: [],
@@ -208,7 +209,7 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
     model: aiModel(),
     searchStrategies,
     searchProviderConfigured: searchBatch.providerConfigured,
-    searchErrors: searchBatch.errors,
+    searchErrors: [...searchBatch.errors, ...manualBatch.errors],
     warnings,
     searchResults,
     leads: cleaned,
@@ -465,17 +466,122 @@ function firecrawlExcludedDomains() {
   return uniqueStrings([...defaults, ...configured]);
 }
 
-function manualUrlResults(urls: unknown): SearchResult[] {
+async function manualUrlResults(
+  urls: unknown
+): Promise<{ results: SearchResult[]; errors: SearchProviderError[]; warnings: string[] }> {
   const values = Array.isArray(urls) ? urls : typeof urls === "string" ? urls.split(/\s+/) : [];
-  return values
+  const cleanUrls = values
     .map((value) => cleanUrl(value))
-    .filter(Boolean)
-    .map((url) => ({
-      title: "Manually entered URL",
-      link: url,
-      snippet: "Admin-approved manual URL for campus lead discovery.",
-      query: "manual_url"
-    }));
+    .filter(Boolean);
+  if (!cleanUrls.length) return { results: [], errors: [], warnings: [] };
+
+  const apiKey = firecrawlApiKey();
+  if (!apiKey) {
+    return {
+      results: cleanUrls.map((url) => manualUrlFallbackResult(url)),
+      errors: [],
+      warnings: ["Manual URLs were added without Firecrawl configured, so extraction is limited to URL/title context."]
+    };
+  }
+
+  const batches = await mapWithConcurrency(
+    cleanUrls,
+    clamp(Number(process.env.FIRECRAWL_MANUAL_URL_CONCURRENCY) || 2, 1, 4),
+    (url) => firecrawlScrapeManualUrl(url, apiKey)
+  );
+  return {
+    results: batches.flatMap((batch) => batch.result ? [batch.result] : []),
+    errors: batches.flatMap((batch) => batch.error ? [batch.error] : []),
+    warnings: batches.some((batch) => batch.error)
+      ? ["One or more manual URLs could not be scraped. Those URLs were skipped or need to be checked manually."]
+      : []
+  };
+}
+
+function manualUrlFallbackResult(url: string): SearchResult {
+  return {
+    title: "Manually entered URL",
+    link: url,
+    snippet: "Admin-approved manual URL for campus lead discovery.",
+    query: "manual_url",
+    provider: "manual"
+  };
+}
+
+async function firecrawlScrapeManualUrl(
+  url: string,
+  apiKey: string
+): Promise<{ result?: SearchResult; error?: SearchProviderError }> {
+  const cacheKey = `firecrawl-scrape|${url}`;
+  const cached = SEARCH_CACHE.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return { result: cached.results[0] };
+
+  const response = await fetch("https://api.firecrawl.dev/v2/scrape", {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      url,
+      formats: ["markdown"],
+      onlyMainContent: true,
+      onlyCleanContent: true,
+      timeout: clamp(Number(process.env.FIRECRAWL_MANUAL_URL_TIMEOUT_MS) || 30000, 10000, 60000),
+      removeBase64Images: true,
+      blockAds: true,
+      location: {
+        country: "US",
+        languages: ["en-US"]
+      }
+    })
+  }).catch((error) => {
+    const message = error instanceof Error ? error.message : "Unable to scrape manual URL.";
+    return { error: message };
+  });
+
+  if ("error" in response) {
+    return { error: { query: "manual_url", error: response.error } };
+  }
+
+  const data = (await response.json().catch(() => ({}))) as {
+    success?: boolean;
+    data?: {
+      markdown?: string;
+      summary?: string;
+      metadata?: {
+        title?: string;
+        description?: string;
+        sourceURL?: string;
+        url?: string;
+        error?: string;
+      };
+      warning?: string;
+    };
+    error?: string;
+    code?: string;
+  };
+  if (!response.ok || data.success === false) {
+    return {
+      error: {
+        query: "manual_url",
+        status: response.status,
+        error: data.error || data.code || data.data?.metadata?.error || `Firecrawl scrape returned HTTP ${response.status}.`
+      }
+    };
+  }
+
+  const result = {
+    title: cleanText(data.data?.metadata?.title, 300) || "Manually entered URL",
+    link: cleanUrl(data.data?.metadata?.sourceURL || data.data?.metadata?.url) || url,
+    snippet: cleanLongText(data.data?.metadata?.description || data.data?.summary, 1000) || "Admin-approved manual URL for campus lead discovery.",
+    content: cleanLongText(data.data?.markdown, 9000),
+    query: "manual_url",
+    provider: "firecrawl_scrape"
+  };
+  SEARCH_CACHE.set(cacheKey, { expiresAt: Date.now() + 1000 * 60 * 30, results: [result] });
+  return { result };
 }
 
 async function extractLeadsWithAI(input: {
