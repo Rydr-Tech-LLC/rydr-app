@@ -81,6 +81,12 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var unreadNotificationCount: Int = 0
     @Published var notificationErrorMessage: String?
     static let availableRideTypes = RydrRideTierCatalog.orderedRideTypes
+    var hasPremiumRideEligibility: Bool {
+        let premiumTypes = Set(["xl", "prestine", "executive"])
+        return eligibleRideTypes
+            .map(RydrRideTierCatalog.canonicalRideType)
+            .contains { premiumTypes.contains($0) }
+    }
 
     var isReadyToGoOnline: Bool {
         canGoOnline && hasSavedRateSettings && !selectedRideTypes.isEmpty
@@ -351,6 +357,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func accept(_ request: DriverRideRequest) {
+        guard isOnline else {
+            statusMessage = "Go online to accept this ride request."
+            return
+        }
         accept(request, queued: activeRide != nil)
     }
 
@@ -1149,7 +1159,8 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                     }
                     let requests = snapshot?.documents
                         .map(DriverRideRequest.init(document:))
-                        .filter { self?.canPresentAssignedRequest($0) == true } ?? []
+                        .filter { self?.canPresentAssignedRequest($0) == true }
+                        .sorted(by: { lhs, rhs in self?.sortAssignedRequests(lhs, rhs) ?? false }) ?? []
                     self?.applyPendingRideNotifications(requests)
                     self?.pendingRequests = (self?.isOnline == true) ? requests : []
                     self?.autoAcceptPendingQueuedRequestsIfNeeded()
@@ -1163,7 +1174,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func autoAcceptPendingQueuedRequestsIfNeeded() {
-        guard autoAcceptQueuedRides, activeRide != nil else { return }
+        guard isOnline, autoAcceptQueuedRides, activeRide != nil else { return }
         guard let request = pendingRequests.first(where: { !respondingRequestIDs.contains($0.id) }) else { return }
         accept(request, queued: true)
     }
@@ -1385,7 +1396,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     private func startMapRequestBlipListener() {
         mapRequestBlipListener?.remove()
-        mapRequestBlipListener = db.collection("rideRequests")
+        mapRequestBlipListener = db.collection("rideRequestSignals")
             .whereField("status", isEqualTo: "pending")
             .limit(to: 50)
             .addSnapshotListener { [weak self] snapshot, error in
@@ -1489,6 +1500,18 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         let pickupMiles = driverLocation.distance(from: pickupLocation) / 1609.344
         if rideFilterPreferences.workZoneEnabled {
             guard pickupMiles <= rideFilterPreferences.effectivePickupMiles else { return false }
+            guard let dropoffCoordinate = request.dropoffCoordinate else { return false }
+            let dropoffLocation = CLLocation(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)
+            let dropoffMiles = driverLocation.distance(from: dropoffLocation) / 1609.344
+            guard dropoffMiles <= rideFilterPreferences.effectivePickupMiles else { return false }
+        }
+
+        if rideFilterPreferences.prioritizeLongerRides, !rideFilterPreferences.prioritizeShorterRides {
+            guard let miles = request.estimatedDistanceMiles, miles >= 15 else { return false }
+        }
+
+        if rideFilterPreferences.prioritizeShorterRides, !rideFilterPreferences.prioritizeLongerRides {
+            guard let miles = request.estimatedDistanceMiles, miles < 15 else { return false }
         }
 
         guard rideFilterPreferences.hasDestinationFilter,
@@ -1525,8 +1548,30 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         let selected = Set(selectedRideTypes.map(RydrRideTierCatalog.canonicalRideType))
         guard selected.isEmpty || selected.contains(RydrRideTierCatalog.canonicalRideType(request.rideType)) else { return false }
 
-        guard rideFilterPreferences.workZoneEnabled || rideFilterPreferences.hasDestinationFilter else { return true }
         return matchesRideFilters(request)
+    }
+
+    private func sortAssignedRequests(_ lhs: DriverRideRequest, _ rhs: DriverRideRequest) -> Bool {
+        if rideFilterPreferences.showPremiumFirst && hasPremiumRideEligibility {
+            let leftPremium = isPremiumRideType(lhs.rideType)
+            let rightPremium = isPremiumRideType(rhs.rideType)
+            if leftPremium != rightPremium { return leftPremium }
+        }
+
+        if rideFilterPreferences.prioritizeLongerRides, !rideFilterPreferences.prioritizeShorterRides {
+            return (lhs.estimatedDistanceMiles ?? 0) > (rhs.estimatedDistanceMiles ?? 0)
+        }
+
+        if rideFilterPreferences.prioritizeShorterRides, !rideFilterPreferences.prioritizeLongerRides {
+            return (lhs.estimatedDistanceMiles ?? .greatestFiniteMagnitude) < (rhs.estimatedDistanceMiles ?? .greatestFiniteMagnitude)
+        }
+
+        return (lhs.createdAt ?? .distantPast) < (rhs.createdAt ?? .distantPast)
+    }
+
+    private func isPremiumRideType(_ rideType: String) -> Bool {
+        let canonical = RydrRideTierCatalog.canonicalRideType(rideType)
+        return canonical == "xl" || canonical == "prestine" || canonical == "executive"
     }
 
     private func projectedRouteProgress(
@@ -2060,7 +2105,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             "workZoneRadiusMiles": rideFilterPreferences.effectivePickupMiles,
             "destinationModeEnabled": rideFilterPreferences.hasDestinationFilter,
             "destinationText": rideFilterPreferences.destinationText,
-            "destinationCorridorMiles": rideFilterPreferences.destinationCorridor.miles
+            "destinationCorridorMiles": rideFilterPreferences.destinationCorridor.miles,
+            "prioritizeLongerRides": rideFilterPreferences.prioritizeLongerRides,
+            "prioritizeShorterRides": rideFilterPreferences.prioritizeShorterRides,
+            "showPremiumFirst": rideFilterPreferences.showPremiumFirst && hasPremiumRideEligibility
         ]
 
         if let destination = rideFilterPreferences.destinationCoordinate {
@@ -2328,7 +2376,10 @@ struct DriverDashboardView: View {
         case .fareInsights:
             EarningsHubView(vm: vm)
         case .rideFilters:
-            DriverRideFiltersView(preferences: $vm.rideFilterPreferences) {
+            DriverRideFiltersView(
+                preferences: $vm.rideFilterPreferences,
+                premiumPreferenceAvailable: vm.hasPremiumRideEligibility
+            ) {
                 activeSheet = nil
                 vm.refreshRideFilters()
             }

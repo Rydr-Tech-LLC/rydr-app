@@ -5,10 +5,13 @@
 //  Created by Khris Nunnally on 6/11/25.
 //
 import SwiftUI
+import FirebaseFirestore
 
 struct RideTypeSelectionView: View {
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var notificationVM = RiderNotificationInboxViewModel()
+    @State private var executiveConfigListener: ListenerRegistration?
+    @State private var rydrExecutiveEnabled = false
     var userName: String = "Rydr User" // Replace with actual user data in future
 
     private let options: [RideTypeOption] = [
@@ -56,6 +59,12 @@ struct RideTypeSelectionView: View {
         )
     ]
 
+    private var visibleOptions: [RideTypeOption] {
+        options.filter { option in
+            option.kind != .executive || rydrExecutiveEnabled
+        }
+    }
+
     var body: some View {
         ZStack {
             pageBackground
@@ -66,7 +75,7 @@ struct RideTypeSelectionView: View {
                     header
 
                     VStack(spacing: 14) {
-                        ForEach(options) { option in
+                        ForEach(visibleOptions) { option in
                             if option.kind == .cashHub {
                                 NavigationLink(destination: CashRydrHubView()) {
                                     RideOptionCard(option: option)
@@ -88,8 +97,27 @@ struct RideTypeSelectionView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { notificationVM.start() }
-        .onDisappear { notificationVM.stop() }
+        .onAppear {
+            notificationVM.start()
+            startExecutiveConfigListener()
+        }
+        .onDisappear {
+            notificationVM.stop()
+            executiveConfigListener?.remove()
+            executiveConfigListener = nil
+        }
+    }
+
+    private func startExecutiveConfigListener() {
+        executiveConfigListener?.remove()
+        executiveConfigListener = Firestore.firestore()
+            .collection("platformConfig")
+            .document("rydrExecutive")
+            .addSnapshotListener { snapshot, _ in
+                DispatchQueue.main.async {
+                    rydrExecutiveEnabled = snapshot?.data()?["enabled"] as? Bool == true
+                }
+            }
     }
 
     private var pageBackground: LinearGradient {

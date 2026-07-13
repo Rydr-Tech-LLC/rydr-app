@@ -71,6 +71,8 @@ export interface SearchResult {
   link: string;
   snippet: string;
   query: string;
+  content?: string;
+  provider?: string;
 }
 
 export interface SearchProviderError {
@@ -152,10 +154,10 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
   const leadIntents = cleanList(input.leadIntents);
   const campusNames = cleanList(input.campusNames).length ? cleanList(input.campusNames) : DEFAULT_TARGET_CAMPUSES;
   const categories = cleanList(input.categories).length ? cleanList(input.categories) : DEFAULT_PRIORITY_CATEGORIES;
-  const maxSearchResults = clamp(Number(input.maxSearchResults) || 5, 1, 10);
+  const maxSearchResults = clamp(Number(input.maxSearchResults) || 5, 1, 20);
   const runId = crypto.randomUUID();
   const searchStrategies = await planSearchStrategies(campusNames, categories, discoveryGoal, leadIntents);
-  const searchBatch = await runGoogleSearches(searchStrategies, maxSearchResults);
+  const searchBatch = await runFirecrawlSearches(searchStrategies, maxSearchResults);
 
   const rawResults = [
     ...searchBatch.results,
@@ -172,9 +174,9 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
 
   if (!searchResults.length) {
     if (!searchBatch.providerConfigured) {
-      warnings.push("Google Custom Search is not configured. Add GOOGLE_CUSTOM_SEARCH_API_KEY and GOOGLE_CUSTOM_SEARCH_ENGINE_ID, or paste approved public URLs.");
+      warnings.push("Firecrawl is not configured. Add FIRECRAWL_API_KEY in Mission Control environment variables, or paste approved public URLs.");
     } else if (searchBatch.errors.length) {
-      warnings.push("Google Custom Search returned errors. Check API enablement, quota, billing, and search engine settings.");
+      warnings.push("Firecrawl returned search errors. Check the API key, quota, billing, and provider status.");
     } else {
       warnings.push("No public search results were returned. Try broader categories, fewer filters, or paste approved public URLs.");
     }
@@ -295,22 +297,21 @@ async function planSearchStrategies(campusNames: string[], categories: string[],
   }
 }
 
-async function runGoogleSearches(
+async function runFirecrawlSearches(
   queries: string[],
   maxSearchResults: number
 ): Promise<{ providerConfigured: boolean; results: SearchResult[]; errors: SearchProviderError[]; warnings: string[] }> {
-  const apiKey = process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
-  const cx = process.env.GOOGLE_CUSTOM_SEARCH_ENGINE_ID;
-  if (!apiKey || !cx) {
+  const apiKey = firecrawlApiKey();
+  if (!apiKey) {
     return {
       providerConfigured: false,
       results: [],
       errors: [],
-      warnings: ["Google Custom Search credentials are missing in Mission Control environment variables."]
+      warnings: ["Firecrawl credentials are missing in Mission Control environment variables."]
     };
   }
 
-  const batches = await Promise.all(queries.map((query) => googleSearch(query, apiKey, cx, maxSearchResults)));
+  const batches = await Promise.all(queries.map((query) => firecrawlSearch(query, apiKey, maxSearchResults)));
   return {
     providerConfigured: true,
     results: batches.flatMap((batch) => batch.results),
@@ -346,43 +347,92 @@ function maxSearchStrategies() {
   return clamp(Number(process.env.CAMPUS_DISCOVERY_MAX_STRATEGIES) || DEFAULT_MAX_SEARCH_STRATEGIES, 5, 25);
 }
 
-async function googleSearch(query: string, apiKey: string, cx: string, maxSearchResults: number): Promise<{ results: SearchResult[]; error?: SearchProviderError }> {
-  const cacheKey = `${query}|${maxSearchResults}`;
+async function firecrawlSearch(query: string, apiKey: string, maxSearchResults: number): Promise<{ results: SearchResult[]; error?: SearchProviderError }> {
+  const cacheKey = `firecrawl|${query}|${maxSearchResults}`;
   const cached = SEARCH_CACHE.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return { results: cached.results };
 
-  const params = new URLSearchParams({
-    key: apiKey,
-    cx,
-    q: query,
-    num: String(maxSearchResults),
-    safe: "active"
+  const response = await fetch("https://api.firecrawl.dev/v2/search", {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      query,
+      limit: maxSearchResults,
+      sources: ["web"],
+      country: "US",
+      location: process.env.FIRECRAWL_SEARCH_LOCATION || "Atlanta, Georgia, United States",
+      timeout: clamp(Number(process.env.FIRECRAWL_SEARCH_TIMEOUT_MS) || 30000, 10000, 60000),
+      ignoreInvalidURLs: true,
+      excludeDomains: firecrawlExcludedDomains(),
+      scrapeOptions: {
+        formats: [{ type: "markdown" }],
+        onlyMainContent: true
+      }
+    })
   });
-  const response = await fetch(`https://www.googleapis.com/customsearch/v1?${params.toString()}`, { cache: "no-store" });
   const data = (await response.json().catch(() => ({}))) as {
-    items?: Array<{ title?: string; link?: string; snippet?: string }>;
-    error?: { message?: string };
+    success?: boolean;
+    data?: {
+      web?: Array<{
+        title?: string;
+        description?: string;
+        snippet?: string;
+        url?: string;
+        markdown?: string;
+        metadata?: { sourceURL?: string; url?: string; title?: string; description?: string; error?: string };
+      }>;
+    };
+    error?: string;
+    code?: string;
+    warning?: string;
   };
-  if (!response.ok) {
+  if (!response.ok || data.success === false) {
     return {
       results: [],
       error: {
         query,
         status: response.status,
-        error: data.error?.message || `Google Custom Search returned HTTP ${response.status}.`
+        error: data.error || data.code || `Firecrawl returned HTTP ${response.status}.`
       }
     };
   }
-  const results = (data.items ?? [])
+  const results = (data.data?.web ?? [])
     .map((item) => ({
-      title: cleanText(item.title, 300),
-      link: cleanUrl(item.link),
-      snippet: cleanLongText(item.snippet, 1000),
-      query
+      title: cleanText(item.title || item.metadata?.title, 300),
+      link: cleanUrl(item.url || item.metadata?.sourceURL || item.metadata?.url),
+      snippet: cleanLongText(item.description || item.snippet || item.metadata?.description, 1000),
+      content: cleanLongText(item.markdown, 6000),
+      query,
+      provider: "firecrawl"
     }))
     .filter((item) => item.title && item.link);
   SEARCH_CACHE.set(cacheKey, { expiresAt: Date.now() + 1000 * 60 * 30, results });
   return { results };
+}
+
+function firecrawlApiKey() {
+  return process.env.FIRECRAWL_API_KEY || process.env.FIRECRAWL_API_TOKEN || "";
+}
+
+function firecrawlExcludedDomains() {
+  const defaults = [
+    "tiktok.com",
+    "x.com",
+    "twitter.com",
+    "facebook.com",
+    "reddit.com",
+    "pinterest.com",
+    "youtube.com"
+  ];
+  const configured = (process.env.FIRECRAWL_EXCLUDE_DOMAINS || "")
+    .split(",")
+    .map((domain) => domain.trim().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0])
+    .filter(Boolean);
+  return uniqueStrings([...defaults, ...configured]);
 }
 
 function manualUrlResults(urls: unknown): SearchResult[] {
@@ -421,7 +471,7 @@ async function extractLeadsWithAI(input: {
         {
           role: "system",
           content:
-            "You are the Rydr AI Campus Agent. Extract public campus recruiting leads for CashRydr. Use only official public campus pages, public organization pages, public event listings, public department pages, Ticketmaster/public event API results, public organization social pages, or manually entered URLs. Do not include personal student profiles, guessed emails, private directories, private Discord servers, private Facebook groups, login pages, TikTok profiles, personal Instagram profiles, or personal LinkedIn profiles. LinkedIn organization pages are allowed only when clearly organizational. Return concise JSON only."
+            "You are the Rydr AI Campus Agent. Extract public campus recruiting leads for CashRydr. Use only official public campus pages, official student organization directories, public campus event calendars, public department pages, Ticketmaster/public event API results, or manually entered URLs. Do not use personal student profiles, guessed emails, private directories, private Discord servers, private Facebook groups, login pages, TikTok profiles, personal Instagram profiles, or personal LinkedIn profiles as lead sources. Social links may be stored only when they appear on an approved public source page. Return concise JSON only."
         },
         {
           role: "user",

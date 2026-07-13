@@ -505,6 +505,7 @@ protocol RideService: AnyObject, Sendable {
         near: CLLocationCoordinate2D,
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
+        estimatedDistanceMiles: Double?,
         riderPreferences: RiderRidePreferences?
     ) async throws -> [Driver]
     func requestRide(
@@ -781,6 +782,7 @@ final class RideManager: ObservableObject {
                     near: center,
                     pickupCoordinate: effectivePickupCoordinate,
                     dropoffCoordinate: effectiveDropoffCoordinate,
+                    estimatedDistanceMiles: estimate.distanceMiles,
                     riderPreferences: preferences
                 )
 

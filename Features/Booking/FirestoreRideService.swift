@@ -21,30 +21,38 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         near center: CLLocationCoordinate2D,
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
+        estimatedDistanceMiles: Double?,
         riderPreferences: RiderRidePreferences?
     ) async throws -> [Driver] {
+        guard try await rideTypeAvailableForBeta(rideType) else { return [] }
+
         let snapshot = try await db.collection("publicDriverProfiles")
             .whereField("isOnline", isEqualTo: true)
             .getDocuments()
 
-        return snapshot.documents
+        let candidates = snapshot.documents
             .compactMap { document in
-                driver(
+                driverCandidate(
                     from: document,
                     rideType: rideType,
                     near: center,
                     pickupCoordinate: pickupCoordinate,
                     dropoffCoordinate: dropoffCoordinate,
+                    estimatedDistanceMiles: estimatedDistanceMiles,
                     riderPreferences: riderPreferences
                 )
             }
-            .filter { $0.score > 0 }
-            .sorted { lhs, rhs in
-                if lhs.score == rhs.score { return lhs.rating > rhs.rating }
-                return lhs.score > rhs.score
-            }
-            .prefix(8)
-            .map { $0 }
+            .filter { $0.driver.score > 0 }
+
+        let strictMatches = candidates
+            .filter { $0.preferenceMatch == .strict }
+            .sorted(by: sortDriverCandidates)
+
+        let fallbackMatches = candidates
+            .filter { $0.preferenceMatch == .fallback }
+            .sorted(by: sortDriverCandidates)
+
+        return Array((strictMatches + fallbackMatches).prefix(3)).map(\.driver)
     }
 
     func requestRide(
@@ -106,6 +114,22 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         }
 
         try await db.collection("rideRequests").document(id).setData(payload)
+        if let pickupCoordinate {
+            try? await db.collection("rideRequestSignals").document(id).setData([
+                "id": id,
+                "riderId": user.uid,
+                "rideType": rideType,
+                "status": "pending",
+                "source": "standardRydr",
+                "pickupCoordinate": [
+                    "lat": pickupCoordinate.latitude,
+                    "lng": pickupCoordinate.longitude
+                ],
+                "pickupGeoPoint": GeoPoint(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude),
+                "createdAt": FieldValue.serverTimestamp(),
+                "expiresAt": Timestamp(date: Date().addingTimeInterval(90))
+            ])
+        }
         return id
     }
 
@@ -211,6 +235,10 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         update.merge(quote?.asFirestoreFields ?? [:]) { _, new in new }
         try await db.collection("rideRequests").document(rideId).setData(update, merge: true)
         try await db.collection("rides").document(rideId).setData(update, merge: true)
+        try? await db.collection("rideRequestSignals").document(rideId).setData([
+            "status": "cancelled",
+            "updatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
     }
 
     func cancelMidRide(rideId: String, quote: ProratedRideCancellationQuote) async throws {
@@ -231,19 +259,25 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         update.merge(quote.asFirestoreFields) { _, new in new }
         try await db.collection("rideRequests").document(rideId).setData(update, merge: true)
         try await db.collection("rides").document(rideId).setData(update, merge: true)
+        try? await db.collection("rideRequestSignals").document(rideId).setData([
+            "status": "cancelled",
+            "updatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
     }
 
-    private func driver(
+    private func driverCandidate(
         from document: QueryDocumentSnapshot,
         rideType: String,
         near center: CLLocationCoordinate2D,
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
+        estimatedDistanceMiles: Double?,
         riderPreferences: RiderRidePreferences?
-    ) -> Driver? {
+    ) -> DriverCandidate? {
         let data = document.data()
         let enabled = data["standardDispatchEnabled"] as? Bool ?? true
         guard enabled else { return nil }
+        guard !isRideTypeTemporarilyDisabled(rideType, data: data) else { return nil }
 
         let supportedRideTypes = data["eligibleRideTypes"] as? [String]
             ?? data["selectedRideTypes"] as? [String]
@@ -258,12 +292,14 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         let distance = CLLocation(latitude: center.latitude, longitude: center.longitude)
             .distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)) / 1609.344
         guard distance <= 30 else { return nil }
-        guard matchesDriverRideFilters(
+        let preferenceMatch = matchesDriverRideFilters(
             data["rideFilters"] as? [String: Any],
             driverCoordinate: coordinate,
             pickupCoordinate: pickupCoordinate ?? center,
-            dropoffCoordinate: dropoffCoordinate
-        ) else { return nil }
+            dropoffCoordinate: dropoffCoordinate,
+            estimatedDistanceMiles: estimatedDistanceMiles
+        )
+        guard preferenceMatch != .rejected else { return nil }
 
         let rating = Self.doubleValue(data["rating"]) ?? 5.0
         let ratingCount = Self.intValue(data["ratingCount"]) ?? 0
@@ -274,30 +310,34 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         let gender = driverGender(from: data)
         let score = max(1, min(100, Int(100 - (distance * 6) + ((rating - 4.5) * 18) + genderPreferenceBoost(driverGender: gender, riderPreferences: riderPreferences))))
 
-        return Driver(
-            id: document.documentID,
-            name: driverName(from: data),
-            profileImage: nonEmptyString(data["profilePhotoURL"]) ?? nonEmptyString(data["profileImage"]),
-            // "vehicleImageURL" is written by the Vehicle Library System
-            // (RydrDriver's DriverDashboardVM.publishPublicDriverProfile) —
-            // the generic factory-style image matched from the driver's
-            // decoded VIN + chosen color, never a photo of their actual car.
-            // "carImage" is kept for backward compatibility with any older
-            // writer of this field.
-            carImage: nonEmptyString(data["vehicleImageURL"]) ?? nonEmptyString(data["carImage"]),
-            carMakeModel: vehicleName(from: data),
-            rating: rating,
-            compliments: data["compliments"] as? [String] ?? [],
-            perMinute: rate.perMinute,
-            perMile: rate.perMile,
-            coordinate: coordinate,
-            score: score,
-            ratingCount: ratingCount,
-            completedRideCount: completedRideCount,
-            acceptanceRate: acceptanceRate,
-            stripeAccountId: data["stripeAccountId"] as? String,
-            stripeChargesEnabled: data["stripeChargesEnabled"] as? Bool ?? false,
-            gender: gender
+        return DriverCandidate(
+            driver: Driver(
+                id: document.documentID,
+                name: driverName(from: data),
+                profileImage: nonEmptyString(data["profilePhotoURL"]) ?? nonEmptyString(data["profileImage"]),
+                // "vehicleImageURL" is written by the Vehicle Library System
+                // (RydrDriver's DriverDashboardVM.publishPublicDriverProfile) —
+                // the generic factory-style image matched from the driver's
+                // decoded VIN + chosen color, never a photo of their actual car.
+                // "carImage" is kept for backward compatibility with any older
+                // writer of this field.
+                carImage: nonEmptyString(data["vehicleImageURL"]) ?? nonEmptyString(data["carImage"]),
+                carMakeModel: vehicleName(from: data),
+                rating: rating,
+                compliments: data["compliments"] as? [String] ?? [],
+                perMinute: rate.perMinute,
+                perMile: rate.perMile,
+                coordinate: coordinate,
+                score: score,
+                ratingCount: ratingCount,
+                completedRideCount: completedRideCount,
+                acceptanceRate: acceptanceRate,
+                stripeAccountId: data["stripeAccountId"] as? String,
+                stripeChargesEnabled: data["stripeChargesEnabled"] as? Bool ?? false,
+                gender: gender
+            ),
+            distanceMiles: distance,
+            preferenceMatch: preferenceMatch
         )
     }
 
@@ -360,25 +400,44 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         _ filters: [String: Any]?,
         driverCoordinate: CLLocationCoordinate2D,
         pickupCoordinate: CLLocationCoordinate2D,
-        dropoffCoordinate: CLLocationCoordinate2D?
-    ) -> Bool {
-        guard let filters else { return true }
+        dropoffCoordinate: CLLocationCoordinate2D?,
+        estimatedDistanceMiles: Double?
+    ) -> DriverPreferenceMatch {
+        guard let filters else { return .strict }
 
         if (filters["workZoneEnabled"] as? Bool) == true {
             let radiusMiles = Self.doubleValue(filters["workZoneRadiusMiles"]) ?? 0
-            let pickupMiles = CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
+            guard radiusMiles > 0 else { return .rejected }
+            let driverLocation = CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
+            let pickupMiles = driverLocation
                 .distance(from: CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)) / 1609.344
-            guard radiusMiles > 0, pickupMiles <= radiusMiles else { return false }
+            guard pickupMiles <= radiusMiles else { return .rejected }
+            guard let dropoffCoordinate else { return .rejected }
+            let dropoffMiles = driverLocation
+                .distance(from: CLLocation(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)) / 1609.344
+            guard dropoffMiles <= radiusMiles else { return .rejected }
+        }
+
+        let tripMiles = estimatedDistanceMiles ?? estimatedTripMiles(pickupCoordinate: pickupCoordinate, dropoffCoordinate: dropoffCoordinate)
+        let wantsLong = filters["prioritizeLongerRides"] as? Bool ?? false
+        let wantsShort = filters["prioritizeShorterRides"] as? Bool ?? filters["avoidShortPickups"] as? Bool ?? false
+        var preferenceMatch: DriverPreferenceMatch = .strict
+        if wantsLong && !wantsShort, let tripMiles, tripMiles < 15 {
+            return .rejected
+        }
+        if wantsShort && !wantsLong, let tripMiles {
+            if tripMiles >= 15 { return .rejected }
+            if tripMiles >= 11 { preferenceMatch = .fallback }
         }
 
         guard (filters["destinationModeEnabled"] as? Bool) == true,
               let destinationCoordinate = coordinate(from: filters["destinationCoordinate"] ?? filters["destinationGeoPoint"]) else {
-            return true
+            return preferenceMatch
         }
 
-        guard let dropoffCoordinate else { return false }
+        guard let dropoffCoordinate else { return .rejected }
         let progress = projectedRouteProgress(point: dropoffCoordinate, start: driverCoordinate, end: destinationCoordinate)
-        guard progress >= 0, progress <= 1 else { return false }
+        guard progress >= 0, progress <= 1 else { return .rejected }
 
         let pickupLocation = CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)
         let dropoffLocation = CLLocation(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)
@@ -390,6 +449,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
 
         return dropoffToDestinationMiles <= pickupToDestinationMiles
             && corridorMiles <= allowedCorridorMiles
+            ? preferenceMatch
+            : .rejected
     }
 
     private func driverRate(
@@ -543,6 +604,34 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         canonicalRideType(supported) == canonicalRideType(requested)
     }
 
+    private func sortDriverCandidates(_ lhs: DriverCandidate, _ rhs: DriverCandidate) -> Bool {
+        let leftDistance = (lhs.distanceMiles * 10).rounded() / 10
+        let rightDistance = (rhs.distanceMiles * 10).rounded() / 10
+        if leftDistance != rightDistance { return leftDistance < rightDistance }
+        if lhs.driver.score != rhs.driver.score { return lhs.driver.score > rhs.driver.score }
+        return lhs.driver.rating > rhs.driver.rating
+    }
+
+    private func isRideTypeTemporarilyDisabled(_ rideType: String, data: [String: Any]) -> Bool {
+        let disabledRideTypes = data["temporarilyDisabledRideTypes"] as? [String] ?? []
+        return disabledRideTypes.contains { canonicalRideType($0) == canonicalRideType(rideType) }
+    }
+
+    private func rideTypeAvailableForBeta(_ rideType: String) async throws -> Bool {
+        guard canonicalRideType(rideType) == "executive" else { return true }
+        let snap = try await db.collection("platformConfig").document("rydrExecutive").getDocument()
+        return snap.data()?["enabled"] as? Bool == true
+    }
+
+    private func estimatedTripMiles(
+        pickupCoordinate: CLLocationCoordinate2D,
+        dropoffCoordinate: CLLocationCoordinate2D?
+    ) -> Double? {
+        guard let dropoffCoordinate else { return nil }
+        return CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)
+            .distance(from: CLLocation(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)) / 1609.344
+    }
+
     private func canonicalRideType(_ rideType: String) -> String {
         let key = rideType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if key == "rydr" || key == "rydr go" { return "go" }
@@ -559,6 +648,18 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         if let number = value as? NSNumber { return number.doubleValue }
         return nil
     }
+}
+
+private struct DriverCandidate {
+    let driver: Driver
+    let distanceMiles: Double
+    let preferenceMatch: DriverPreferenceMatch
+}
+
+private enum DriverPreferenceMatch {
+    case strict
+    case fallback
+    case rejected
 }
 
 private enum RideDispatchError: LocalizedError {

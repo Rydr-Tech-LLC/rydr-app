@@ -13,6 +13,9 @@ struct RydrDriverNavigationMapView: View {
     let heading: CLLocationDirection
     let onRecenter: () -> Void
 
+    @State private var displayedDriverCoordinate: CLLocationCoordinate2D?
+    @State private var markerAnimationTask: Task<Void, Never>?
+
     /// Route geometry passed in from `MKRoute.polyline`, upsampled with a Catmull-Rom
     /// spline so curves render as smooth arcs rather than the sparse line segments
     /// MapKit's raw directions response returns.
@@ -26,6 +29,11 @@ struct RydrDriverNavigationMapView: View {
     private var snappedDriverCoordinate: CLLocationCoordinate2D? {
         guard let driverCoordinate else { return nil }
         return Self.closestPoint(to: driverCoordinate, on: routeCoordinates) ?? driverCoordinate
+    }
+
+    private var driverCoordinateSignature: String {
+        guard let coordinate = snappedDriverCoordinate else { return "none" }
+        return String(format: "%.6f,%.6f", coordinate.latitude, coordinate.longitude)
     }
 
     var body: some View {
@@ -64,7 +72,7 @@ struct RydrDriverNavigationMapView: View {
                     )
             }
 
-            if let markerCoordinate = snappedDriverCoordinate ?? driverCoordinate {
+            if let markerCoordinate = displayedDriverCoordinate ?? snappedDriverCoordinate ?? driverCoordinate {
                 Annotation("", coordinate: markerCoordinate, anchor: .center) {
                     RydrNavigationDriverMarker(heading: heading)
                 }
@@ -87,6 +95,15 @@ struct RydrDriverNavigationMapView: View {
             MapScaleView()
         }
         .mapStyle(.standard(elevation: .realistic))
+        .onAppear {
+            displayedDriverCoordinate = snappedDriverCoordinate ?? driverCoordinate
+        }
+        .onChange(of: driverCoordinateSignature) { _, _ in
+            animateDriverMarker(to: snappedDriverCoordinate ?? driverCoordinate)
+        }
+        .onDisappear {
+            markerAnimationTask?.cancel()
+        }
         .overlay(alignment: .trailing) {
             FloatingCircleButton(systemName: "location.fill", action: onRecenter)
                 .padding(.trailing, 18)
@@ -96,6 +113,50 @@ struct RydrDriverNavigationMapView: View {
     }
 
     // MARK: - Route geometry helpers
+
+    private func animateDriverMarker(to target: CLLocationCoordinate2D?) {
+        markerAnimationTask?.cancel()
+        guard let target else {
+            displayedDriverCoordinate = nil
+            return
+        }
+        guard let start = displayedDriverCoordinate else {
+            displayedDriverCoordinate = target
+            return
+        }
+
+        let distanceMeters = CLLocation(latitude: start.latitude, longitude: start.longitude)
+            .distance(from: CLLocation(latitude: target.latitude, longitude: target.longitude))
+        guard distanceMeters >= 1.5 else {
+            displayedDriverCoordinate = target
+            return
+        }
+
+        let duration = min(1.8, max(0.55, distanceMeters / 18.0))
+        markerAnimationTask = Task { @MainActor in
+            let steps = 24
+            let sleep = UInt64((duration / Double(steps)) * 1_000_000_000)
+            for step in 1...steps {
+                if Task.isCancelled { return }
+                let t = Double(step) / Double(steps)
+                let eased = t * t * (3 - 2 * t)
+                displayedDriverCoordinate = Self.interpolate(start: start, end: target, progress: eased)
+                try? await Task.sleep(nanoseconds: sleep)
+            }
+            displayedDriverCoordinate = target
+        }
+    }
+
+    private static func interpolate(
+        start: CLLocationCoordinate2D,
+        end: CLLocationCoordinate2D,
+        progress: Double
+    ) -> CLLocationCoordinate2D {
+        CLLocationCoordinate2D(
+            latitude: start.latitude + ((end.latitude - start.latitude) * progress),
+            longitude: start.longitude + ((end.longitude - start.longitude) * progress)
+        )
+    }
 
     /// Inserts Catmull-Rom interpolated points between each pair of route coordinates so
     /// curves render as smooth arcs instead of the sparse polyline MapKit's directions

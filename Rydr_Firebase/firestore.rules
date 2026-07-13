@@ -862,6 +862,30 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /rideRequestSignals/{signalId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.riderId == request.auth.uid
+        && request.resource.data.status == "pending"
+        && request.resource.data.source == "standardRydr"
+        && request.resource.data.keys().hasOnly([
+          "createdAt",
+          "expiresAt",
+          "id",
+          "pickupCoordinate",
+          "pickupGeoPoint",
+          "riderId",
+          "rideType",
+          "source",
+          "status"
+        ]);
+      allow update: if signedIn()
+        && resource.data.riderId == request.auth.uid
+        && affectedKeys().hasOnly(["status", "updatedAt"])
+        && request.resource.data.status in ["cancelled", "expired"];
+      allow delete: if isAdmin();
+    }
+
     match /rides/{rideId} {
       allow read: if rideParticipant(resource.data) || isAdmin();
       allow create: if validRiderRideCreate()

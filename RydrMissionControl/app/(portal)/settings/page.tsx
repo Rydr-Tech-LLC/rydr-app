@@ -2,14 +2,17 @@ import { getAdminSession } from "@/lib/session";
 import { adminDb } from "@/lib/firebaseAdmin";
 import AdminUsersPanel from "./AdminUsersPanel";
 import CashHubBetaToggle from "./CashHubBetaToggle";
+import RydrExecutiveBetaToggle from "./RydrExecutiveBetaToggle";
 
 export default async function SettingsPage() {
   const session = await getAdminSession();
-  const [cashHubConfigSnap, adminUsersSnap] = await Promise.all([
+  const [cashHubConfigSnap, executiveConfigSnap, adminUsersSnap] = await Promise.all([
     adminDb.collection("platformConfig").doc("cashRydrHub").get().catch(() => null),
+    adminDb.collection("platformConfig").doc("rydrExecutive").get().catch(() => null),
     adminDb.collection("missionControlAdmins").orderBy("email", "asc").limit(250).get().catch(() => null)
   ]);
   const cashHubConfig = cashHubConfigSnap?.data() ?? {};
+  const executiveConfig = executiveConfigSnap?.data() ?? {};
   const adminUsers =
     adminUsersSnap?.docs.map((doc) => {
       const data = doc.data();
@@ -17,13 +20,17 @@ export default async function SettingsPage() {
         id: doc.id,
         uid: typeof data.uid === "string" ? data.uid : doc.id,
         email: typeof data.email === "string" ? data.email : "",
+        displayName: typeof data.displayName === "string" ? data.displayName : "",
         status: typeof data.status === "string" ? data.status : "active",
+        passwordStatus: typeof data.passwordStatus === "string" ? data.passwordStatus : "",
+        createdLogin: data.createdLogin === true,
         grantedByEmail: typeof data.grantedByEmail === "string" ? data.grantedByEmail : null,
         revokedByEmail: typeof data.revokedByEmail === "string" ? data.revokedByEmail : null
       };
     }) ?? [];
   const cashHubTermsAcceptanceEnabled = cashHubConfig.termsAcceptanceEnabled === true;
   const cashHubTermsVersion = typeof cashHubConfig.cashHubTermsVersion === "string" ? cashHubConfig.cashHubTermsVersion : null;
+  const rydrExecutiveEnabled = executiveConfig.enabled === true;
 
   return (
     <div className="space-y-6">
@@ -39,6 +46,8 @@ export default async function SettingsPage() {
       </div>
 
       <CashHubBetaToggle initialEnabled={cashHubTermsAcceptanceEnabled} initialTermsVersion={cashHubTermsVersion} />
+
+      <RydrExecutiveBetaToggle initialEnabled={rydrExecutiveEnabled} />
 
       <AdminUsersPanel admins={adminUsers} />
 

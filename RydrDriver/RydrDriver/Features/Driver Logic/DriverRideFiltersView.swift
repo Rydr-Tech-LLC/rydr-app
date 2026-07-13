@@ -60,8 +60,8 @@ struct DriverRideFilterPreferences: Equatable {
     var destinationCoordinate: CLLocationCoordinate2D?
     var destinationModeEnabled: Bool = false
     var destinationCorridor: DriverRouteCorridor = .balanced
-    var prioritizeLongerRides: Bool = true
-    var avoidShortPickups: Bool = false
+    var prioritizeLongerRides: Bool = false
+    var prioritizeShorterRides: Bool = false
     var showPremiumFirst: Bool = true
 
     var effectivePickupMiles: Double {
@@ -82,7 +82,7 @@ struct DriverRideFilterPreferences: Equatable {
             && lhs.destinationModeEnabled == rhs.destinationModeEnabled
             && lhs.destinationCorridor == rhs.destinationCorridor
             && lhs.prioritizeLongerRides == rhs.prioritizeLongerRides
-            && lhs.avoidShortPickups == rhs.avoidShortPickups
+            && lhs.prioritizeShorterRides == rhs.prioritizeShorterRides
             && lhs.showPremiumFirst == rhs.showPremiumFirst
             && lhs.destinationCoordinate?.latitude == rhs.destinationCoordinate?.latitude
             && lhs.destinationCoordinate?.longitude == rhs.destinationCoordinate?.longitude
@@ -91,6 +91,7 @@ struct DriverRideFilterPreferences: Equatable {
 
 struct DriverRideFiltersView: View {
     @Binding var preferences: DriverRideFilterPreferences
+    var premiumPreferenceAvailable: Bool = true
     var onClose: () -> Void
 
     @StateObject private var destinationSearch = DriverDestinationSearchModel()
@@ -99,9 +100,11 @@ struct DriverRideFiltersView: View {
 
     init(
         preferences: Binding<DriverRideFilterPreferences>,
+        premiumPreferenceAvailable: Bool = true,
         onClose: @escaping () -> Void
     ) {
         _preferences = preferences
+        self.premiumPreferenceAvailable = premiumPreferenceAvailable
         self.onClose = onClose
         _draft = State(initialValue: preferences.wrappedValue)
     }
@@ -119,7 +122,10 @@ struct DriverRideFiltersView: View {
                         preferences: $draft,
                         search: destinationSearch
                     )
-                    RidePreferenceControl(preferences: $draft)
+                    RidePreferenceControl(
+                        preferences: $draft,
+                        premiumPreferenceAvailable: premiumPreferenceAvailable
+                    )
                     Color.clear.frame(height: 92)
                 }
                 .padding(.horizontal, 16)
@@ -466,6 +472,7 @@ private struct DestinationModeControl: View {
 
 private struct RidePreferenceControl: View {
     @Binding var preferences: DriverRideFilterPreferences
+    var premiumPreferenceAvailable: Bool = true
 
     var body: some View {
         RydrFilterSection(
@@ -475,19 +482,33 @@ private struct RidePreferenceControl: View {
         ) {
             PreferenceToggleRow(
                 title: "Prioritize longer rides",
-                subtitle: "Show higher paying, longer trips first.",
-                isOn: $preferences.prioritizeLongerRides
+                subtitle: "Only surface trips around 15 miles or more.",
+                isOn: Binding(
+                    get: { preferences.prioritizeLongerRides },
+                    set: { isOn in
+                        preferences.prioritizeLongerRides = isOn
+                        if isOn { preferences.prioritizeShorterRides = false }
+                    }
+                )
             )
             PreferenceToggleRow(
-                title: "Avoid short pickups",
-                subtitle: "Filter out pickups under 1.5 miles.",
-                isOn: $preferences.avoidShortPickups
+                title: "Prioritize shorter rides",
+                subtitle: "Prefer trips under 10 miles; 11-14 miles can appear when supply is thin.",
+                isOn: Binding(
+                    get: { preferences.prioritizeShorterRides },
+                    set: { isOn in
+                        preferences.prioritizeShorterRides = isOn
+                        if isOn { preferences.prioritizeLongerRides = false }
+                    }
+                )
             )
             PreferenceToggleRow(
                 title: "Show premium ride types first",
-                subtitle: "Prioritize XL, Prestine, and Executive.",
+                subtitle: premiumPreferenceAvailable ? "Prioritize XL, Prestine, and Executive." : "Requires XL, Prestine, or Executive eligibility.",
                 isOn: $preferences.showPremiumFirst
             )
+            .disabled(!premiumPreferenceAvailable)
+            .opacity(premiumPreferenceAvailable ? 1 : 0.55)
         }
     }
 }
