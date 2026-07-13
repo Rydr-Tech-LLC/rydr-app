@@ -84,7 +84,9 @@ export function LeadDiscoveryPanel({ campuses, categories, pendingCount }: { cam
         body: JSON.stringify(payload)
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error ?? "Unable to run lead discovery.");
+      if (!response.ok) {
+        throw new Error(body.error ?? `Unable to run lead discovery. HTTP ${response.status}`);
+      }
       setLastRun(body);
 
       const resultCount = body.searchResultCount ?? 0;

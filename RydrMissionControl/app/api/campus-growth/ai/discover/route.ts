@@ -19,111 +19,123 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid discovery payload." }, { status: 400 });
 
-  const result = await discoverCampusLeads({
-    discoveryGoal: body.discoveryGoal,
-    leadIntents: body.leadIntents,
-    campusNames: body.campusNames,
-    categories: body.categories,
-    manualUrls: body.manualUrls,
-    maxSearchResults: body.maxSearchResults
-  });
+  try {
+    const result = await discoverCampusLeads({
+      discoveryGoal: body.discoveryGoal,
+      leadIntents: body.leadIntents,
+      campusNames: body.campusNames,
+      categories: body.categories,
+      manualUrls: body.manualUrls,
+      maxSearchResults: body.maxSearchResults
+    });
 
-  const campuses = await listCampuses(500);
-  const campusByName = new Map(campuses.map((campus) => [cleanText(campus.name, 180).toLowerCase(), campus]));
-  const savedIds: string[] = [];
+    const campuses = await listCampuses(500);
+    const campusByName = new Map(campuses.map((campus) => [cleanText(campus.name, 180).toLowerCase(), campus]));
+    const savedIds: string[] = [];
 
-  for (const lead of result.leads) {
-    const campus = campusByName.get(lead.campusName.toLowerCase());
-    const id = discoveryFingerprint(lead);
-    const ref = adminDb.collection(campusCollections.discoveredLeads).doc(id);
-    const existing = await ref.get();
-    if (existing.exists && existing.data()?.reviewStatus === "approved") continue;
+    for (const lead of result.leads) {
+      const campus = campusByName.get(lead.campusName.toLowerCase());
+      const id = discoveryFingerprint(lead);
+      const ref = adminDb.collection(campusCollections.discoveredLeads).doc(id);
+      const existing = await ref.get();
+      if (existing.exists && existing.data()?.reviewStatus === "approved") continue;
 
-    await ref.set(
-      {
-        kind: lead.kind,
-        reviewStatus: "pending_review",
-        campusId: campus?.id ?? "",
-        campusName: lead.campusName,
-        name: lead.name,
-        category: lead.category,
-        description: lead.description ?? "",
-        website: lead.website ?? "",
-        instagramUrl: lead.instagramUrl ?? "",
-        linkedInUrl: lead.linkedInUrl ?? "",
-        discordUrl: lead.discordUrl ?? "",
-        facebookUrl: lead.facebookUrl ?? "",
-        meetingSchedule: lead.meetingSchedule ?? "",
-        tags: lead.tags ?? [],
-        estimatedStudentReach: lead.estimatedStudentReach ?? 0,
-        sourceType: lead.sourceType,
-        sourceUrl: lead.sourceUrl,
-        sourceTitle: lead.sourceTitle ?? "",
-        sourceSnippet: lead.sourceSnippet ?? "",
-        publicEmail: lead.publicEmail ?? "",
-        publicContactName: lead.publicContactName ?? "",
-        publicContactTitle: lead.publicContactTitle ?? "",
-        venue: lead.venue ?? "",
-        startsAtText: lead.startsAtText ?? "",
-        relevanceScore: lead.relevanceScore,
-        discoveryConfidence: lead.discoveryConfidence,
-        scoreReason: lead.scoreReason,
-        summary: lead.summary,
-        outreachAngle: lead.outreachAngle,
-        aiRecommendations: lead.aiRecommendations,
-        priorityLevel: lead.priorityLevel,
-        relationshipStrength: lead.relationshipStrength,
-        lastAIRecommendation: lead.aiRecommendations[0] ?? "",
-        customTags: lead.tags ?? [],
-        interactionTimeline: [
-          {
-            type: "ai_recommendation",
-            summary: lead.scoreReason || lead.outreachAngle,
-            createdBy: "AI Campus Agent",
-            createdAt: FieldValue.serverTimestamp()
-          }
-        ],
-        discoveryRunId: result.runId,
-        searchQuery: lead.searchQuery ?? "",
-        searchStrategy: lead.searchStrategy ?? lead.searchQuery ?? "",
-        aiModel: result.model,
-        discoveredBy: session.email ?? session.uid,
-        updatedAt: FieldValue.serverTimestamp(),
-        createdAt: existing.exists ? existing.data()?.createdAt ?? FieldValue.serverTimestamp() : FieldValue.serverTimestamp()
-      },
-      { merge: true }
-    );
-    savedIds.push(id);
-  }
+      await ref.set(
+        {
+          kind: lead.kind,
+          reviewStatus: "pending_review",
+          campusId: campus?.id ?? "",
+          campusName: lead.campusName,
+          name: lead.name,
+          category: lead.category,
+          description: lead.description ?? "",
+          website: lead.website ?? "",
+          instagramUrl: lead.instagramUrl ?? "",
+          linkedInUrl: lead.linkedInUrl ?? "",
+          discordUrl: lead.discordUrl ?? "",
+          facebookUrl: lead.facebookUrl ?? "",
+          meetingSchedule: lead.meetingSchedule ?? "",
+          tags: lead.tags ?? [],
+          estimatedStudentReach: lead.estimatedStudentReach ?? 0,
+          sourceType: lead.sourceType,
+          sourceUrl: lead.sourceUrl,
+          sourceTitle: lead.sourceTitle ?? "",
+          sourceSnippet: lead.sourceSnippet ?? "",
+          publicEmail: lead.publicEmail ?? "",
+          publicContactName: lead.publicContactName ?? "",
+          publicContactTitle: lead.publicContactTitle ?? "",
+          venue: lead.venue ?? "",
+          startsAtText: lead.startsAtText ?? "",
+          relevanceScore: lead.relevanceScore,
+          discoveryConfidence: lead.discoveryConfidence,
+          scoreReason: lead.scoreReason,
+          summary: lead.summary,
+          outreachAngle: lead.outreachAngle,
+          aiRecommendations: lead.aiRecommendations,
+          priorityLevel: lead.priorityLevel,
+          relationshipStrength: lead.relationshipStrength,
+          lastAIRecommendation: lead.aiRecommendations[0] ?? "",
+          customTags: lead.tags ?? [],
+          interactionTimeline: [
+            {
+              type: "ai_recommendation",
+              summary: lead.scoreReason || lead.outreachAngle,
+              createdBy: "AI Campus Agent",
+              createdAt: FieldValue.serverTimestamp()
+            }
+          ],
+          discoveryRunId: result.runId,
+          searchQuery: lead.searchQuery ?? "",
+          searchStrategy: lead.searchStrategy ?? lead.searchQuery ?? "",
+          aiModel: result.model,
+          discoveredBy: session.email ?? session.uid,
+          updatedAt: FieldValue.serverTimestamp(),
+          createdAt: existing.exists ? existing.data()?.createdAt ?? FieldValue.serverTimestamp() : FieldValue.serverTimestamp()
+        },
+        { merge: true }
+      );
+      savedIds.push(id);
+    }
 
-  await writeAuditLog({
-    adminUid: session.uid,
-    adminEmail: session.email ?? undefined,
-    action: "AI Campus Lead Discovery Run",
-    targetType: "campusDiscoveredLead",
-    targetId: result.runId,
-    metadata: {
+    await writeAuditLog({
+      adminUid: session.uid,
+      adminEmail: session.email ?? undefined,
+      action: "AI Campus Lead Discovery Run",
+      targetType: "campusDiscoveredLead",
+      targetId: result.runId,
+      metadata: {
+        savedCount: savedIds.length,
+        searchResultCount: result.searchResults.length,
+        searchStrategyCount: result.searchStrategies.length,
+        searchProviderConfigured: result.searchProviderConfigured,
+        searchErrorCount: result.searchErrors.length,
+        warnings: result.warnings,
+        rejectedSourceCount: result.rejectedSources.length,
+        model: result.model
+      }
+    });
+
+    return NextResponse.json({
+      runId: result.runId,
       savedCount: savedIds.length,
       searchResultCount: result.searchResults.length,
       searchStrategyCount: result.searchStrategies.length,
       searchProviderConfigured: result.searchProviderConfigured,
-      searchErrorCount: result.searchErrors.length,
+      searchErrors: result.searchErrors.slice(0, 10),
       warnings: result.warnings,
-      rejectedSourceCount: result.rejectedSources.length,
-      model: result.model
-    }
-  });
-
-  return NextResponse.json({
-    runId: result.runId,
-    savedCount: savedIds.length,
-    searchResultCount: result.searchResults.length,
-    searchStrategyCount: result.searchStrategies.length,
-    searchProviderConfigured: result.searchProviderConfigured,
-    searchErrors: result.searchErrors.slice(0, 10),
-    warnings: result.warnings,
-    rejectedSources: result.rejectedSources
-  });
+      rejectedSources: result.rejectedSources
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown discovery error.";
+    console.error("AI Campus Lead Discovery failed", error);
+    return NextResponse.json(
+      {
+        error: `Unable to run lead discovery: ${message}`,
+        detail: message
+      },
+      { status: 500 }
+    );
+  }
 }
 
 function allowDiscoveryRun(uid: string) {

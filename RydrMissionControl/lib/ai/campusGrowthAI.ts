@@ -140,7 +140,7 @@ export interface DiscoveryResult {
 const BLOCKED_HOSTS = ["tiktok.com"];
 const BLOCKED_PATH_TERMS = ["login", "signin", "sign-in", "auth", "portal", "blackboard", "canvas", "people", "person", "profile"];
 const SEARCH_CACHE = new Map<string, { expiresAt: number; results: SearchResult[] }>();
-const DEFAULT_MAX_SEARCH_STRATEGIES = 15;
+const DEFAULT_MAX_SEARCH_STRATEGIES = 8;
 
 export function discoveryFingerprint(lead: Pick<AILeadCandidate, "campusName" | "name" | "sourceUrl">) {
   return crypto
@@ -282,9 +282,9 @@ async function planSearchStrategies(campusNames: string[], categories: string[],
         }
       }
     })
-  });
+  }).catch(() => null);
 
-  if (!response.ok) return fallback;
+  if (!response?.ok) return fallback;
   const data = (await response.json()) as { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> };
   const jsonText = data.output_text ?? data.output?.flatMap((part) => part.content ?? []).map((content) => content.text).find(Boolean);
   if (!jsonText) return fallback;
@@ -311,7 +311,11 @@ async function runFirecrawlSearches(
     };
   }
 
-  const batches = await Promise.all(queries.map((query) => firecrawlSearch(query, apiKey, maxSearchResults)));
+  const batches = await mapWithConcurrency(
+    queries,
+    clamp(Number(process.env.FIRECRAWL_SEARCH_CONCURRENCY) || 3, 1, 5),
+    (query) => firecrawlSearch(query, apiKey, maxSearchResults)
+  );
   return {
     providerConfigured: true,
     results: batches.flatMap((batch) => batch.results),
@@ -344,7 +348,7 @@ function buildFallbackQueries(campusNames: string[], categories: string[]) {
 }
 
 function maxSearchStrategies() {
-  return clamp(Number(process.env.CAMPUS_DISCOVERY_MAX_STRATEGIES) || DEFAULT_MAX_SEARCH_STRATEGIES, 5, 25);
+  return clamp(Number(process.env.CAMPUS_DISCOVERY_MAX_STRATEGIES) || DEFAULT_MAX_SEARCH_STRATEGIES, 3, 15);
 }
 
 async function firecrawlSearch(query: string, apiKey: string, maxSearchResults: number): Promise<{ results: SearchResult[]; error?: SearchProviderError }> {
@@ -373,7 +377,19 @@ async function firecrawlSearch(query: string, apiKey: string, maxSearchResults: 
         onlyMainContent: true
       }
     })
+  }).catch((error) => {
+    const message = error instanceof Error ? error.message : "Unable to reach Firecrawl.";
+    return { error: message };
   });
+  if ("error" in response) {
+    return {
+      results: [],
+      error: {
+        query,
+        error: response.error
+      }
+    };
+  }
   const data = (await response.json().catch(() => ({}))) as {
     success?: boolean;
     data?: {
@@ -412,6 +428,20 @@ async function firecrawlSearch(query: string, apiKey: string, maxSearchResults: 
     .filter((item) => item.title && item.link);
   SEARCH_CACHE.set(cacheKey, { expiresAt: Date.now() + 1000 * 60 * 30, results });
   return { results };
+}
+
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, worker: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = [];
+  let index = 0;
+  async function runNext() {
+    while (index < items.length) {
+      const currentIndex = index;
+      index += 1;
+      results[currentIndex] = await worker(items[currentIndex]!);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, runNext));
+  return results;
 }
 
 function firecrawlApiKey() {
@@ -596,9 +626,9 @@ async function extractLeadsWithAI(input: {
         }
       }
     })
-  });
+  }).catch(() => null);
 
-  if (!response.ok) return ruleBasedCandidates(input.searchResults, input.campusNames, input.categories);
+  if (!response?.ok) return ruleBasedCandidates(input.searchResults, input.campusNames, input.categories);
   const data = (await response.json()) as { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> };
   const jsonText = data.output_text ?? data.output?.flatMap((part) => part.content ?? []).map((content) => content.text).find(Boolean);
   if (!jsonText) return [];
