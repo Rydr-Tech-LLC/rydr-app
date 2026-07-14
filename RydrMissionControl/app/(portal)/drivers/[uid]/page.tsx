@@ -9,7 +9,7 @@ import {
   evaluateDriverRequirements,
   type DriverRecord
 } from "@/lib/types";
-import { toDateSafe, fullName } from "@/lib/format";
+import { driverFullName, driverNameCollected, toDateSafe } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
 import ImageViewer from "@/components/ImageViewer";
 import RequirementChecklist from "@/components/RequirementChecklist";
@@ -53,9 +53,12 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-ink">{fullName(driver.firstName, driver.lastName)}</h1>
+            <h1 className="text-xl font-semibold text-ink">{driverFullName(driver)}</h1>
             <StatusPill status={driver.driverApprovalStatus ?? "pending"} />
           </div>
+          {!driverNameCollected(driver) && (
+            <p className="mt-1 text-sm font-medium text-amber-700">Name/DOB onboarding step has not been completed.</p>
+          )}
           <p className="mt-1 text-sm text-muted">
             {driver.email ?? "no email"} · {driver.phoneNumber ?? "no phone"} · Applied{" "}
             {createdAt ? createdAt.toLocaleDateString() : "—"}
@@ -67,7 +70,7 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
         <div className="space-y-6 lg:col-span-2">
           <Section title="Driver Profile">
             <Grid>
-              <Field label="Full name" value={fullName(driver.firstName, driver.lastName)} />
+              <Field label="Full name" value={driverFullName(driver)} />
               <Field label="Date of birth" value={dob ? dob.toLocaleDateString() : "—"} />
               <Field label="Email" value={driver.email} />
               <Field label="Phone" value={driver.phoneNumber ?? driver.phoneE164} />

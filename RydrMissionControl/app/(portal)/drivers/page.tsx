@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { evaluateDriverRequirements, type DriverRecord } from "@/lib/types";
-import { timeAgo, toDateSafe, fullName } from "@/lib/format";
+import { driverFullName, driverNameCollected, timeAgo, toDateSafe } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
 
 export const dynamic = "force-dynamic";
@@ -46,9 +46,12 @@ export default async function DriverVerificationQueuePage() {
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="font-medium text-ink">{fullName(driver.firstName, driver.lastName)}</p>
+                    <p className="font-medium text-ink">{driverFullName(driver)}</p>
                     <StatusPill status={driver.driverApprovalStatus ?? "pending"} />
                   </div>
+                  {!driverNameCollected(driver) && (
+                    <p className="mt-0.5 text-xs text-amber-700">Name/DOB onboarding step has not been completed.</p>
+                  )}
                   <p className="mt-0.5 text-xs text-muted">Submitted: {timeAgo(submitted)}</p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {Object.entries(checks).map(([key, met]) => (

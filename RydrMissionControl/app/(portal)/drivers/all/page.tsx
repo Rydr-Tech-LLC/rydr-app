@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { adminDb } from "@/lib/firebaseAdmin";
 import type { DriverRecord } from "@/lib/types";
-import { fullName } from "@/lib/format";
+import { driverFullName, driverNameCollected } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
 import { cashHubBillingDisplay, getCurrentCashHubBilling } from "@/lib/cashHubBilling";
 
@@ -48,7 +48,12 @@ export default async function AllDriversPage() {
 
               return (
                 <tr key={driver.uid} className="hover:bg-grouped/60">
-                  <td className="px-4 py-2.5 font-medium text-ink">{fullName(driver.firstName, driver.lastName)}</td>
+                  <td className="px-4 py-2.5">
+                    <p className="font-medium text-ink">{driverFullName(driver)}</p>
+                    {!driverNameCollected(driver) && (
+                      <p className="mt-0.5 text-[11px] leading-snug text-amber-700">Name/DOB step incomplete</p>
+                    )}
+                  </td>
                   <td className="px-4 py-2.5 text-muted">{driver.email ?? "—"}</td>
                   <td className="px-4 py-2.5 text-muted">
                     {[driver.vehicle?.year, driver.vehicle?.make, driver.vehicle?.model].filter(Boolean).join(" ") || "—"}

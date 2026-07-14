@@ -75,6 +75,10 @@ export interface DriverRecord {
   uid: string;
   firstName?: string;
   lastName?: string;
+  legalFirstName?: string;
+  legalLastName?: string;
+  legalName?: string;
+  displayName?: string;
   email?: string;
   phoneNumber?: string;
   phoneE164?: string;
@@ -100,6 +104,8 @@ export interface DriverRecord {
   betaAgreementAccepted?: boolean;
   betaAgreementAcceptedAt?: { toDate?: () => Date } | null;
   betaWaiverAccepted?: boolean;
+  nameDOBStepCompleted?: boolean;
+  emailPasswordStepCompleted?: boolean;
   driverSignupCompleted?: boolean;
   betaBackgroundCheckBypassEnabled?: boolean;
   betaBackgroundCheckBypassedAt?: { toDate?: () => Date } | null;

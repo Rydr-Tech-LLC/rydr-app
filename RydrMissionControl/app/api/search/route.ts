@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/session";
 import { adminDb } from "@/lib/firebaseAdmin";
 import type { DriverRecord, RiderRecord } from "@/lib/types";
+import { driverFullName } from "@/lib/format";
 
 // Lightweight in-memory search: pulls a bounded page of drivers/riders and
 // filters server-side. Fine for beta-scale data; swap for a real search
@@ -28,6 +29,10 @@ export async function GET(request: NextRequest) {
       matches([
         d.firstName,
         d.lastName,
+        d.legalFirstName,
+        d.legalLastName,
+        d.legalName,
+        d.displayName,
         d.email,
         d.phoneNumber,
         d.phoneE164,
@@ -38,7 +43,7 @@ export async function GET(request: NextRequest) {
       ])
     )
     .slice(0, 25)
-    .map((d) => ({ uid: d.uid, name: `${d.firstName ?? ""} ${d.lastName ?? ""}`.trim(), email: d.email }));
+    .map((d) => ({ uid: d.uid, name: driverFullName(d), email: d.email }));
 
   const riders = riderSnap.docs
     .map((doc) => ({ ...(doc.data() as RiderRecord), uid: doc.id }))

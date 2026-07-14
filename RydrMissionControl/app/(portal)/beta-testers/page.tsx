@@ -1,6 +1,6 @@
 import { adminDb } from "@/lib/firebaseAdmin";
 import type { DriverRecord, RiderRecord } from "@/lib/types";
-import { fullName } from "@/lib/format";
+import { driverFullName, fullName } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
 
 export const dynamic = "force-dynamic";
@@ -38,8 +38,8 @@ export default async function BetaTestersPage() {
       </div>
 
       <Group title="Student Ambassadors" rows={studentAmbassadors.map((r) => ({ id: r.uid, name: fullName(r.firstName, r.lastName), meta: r.email }))} />
-      <Group title="Approved Drivers" rows={approvedDrivers.map((d) => ({ id: d.uid, name: fullName(d.firstName, d.lastName), meta: d.email }))} />
-      <Group title="Pending Drivers" rows={pendingDrivers.map((d) => ({ id: d.uid, name: fullName(d.firstName, d.lastName), meta: d.email }))} />
+      <Group title="Approved Drivers" rows={approvedDrivers.map((d) => ({ id: d.uid, name: driverFullName(d), meta: d.email }))} />
+      <Group title="Pending Drivers" rows={pendingDrivers.map((d) => ({ id: d.uid, name: driverFullName(d), meta: d.email }))} />
     </div>
   );
 }
