@@ -141,6 +141,8 @@ const BLOCKED_HOSTS = ["tiktok.com"];
 const BLOCKED_PATH_TERMS = ["login", "signin", "sign-in", "auth", "portal", "blackboard", "canvas", "people", "person", "profile"];
 const SEARCH_CACHE = new Map<string, { expiresAt: number; results: SearchResult[] }>();
 const DEFAULT_MAX_SEARCH_STRATEGIES = 8;
+const DEFAULT_BRAVE_REQUEST_CAP = 100;
+const BRAVE_REQUEST_HARD_CAP = 1000;
 
 export function discoveryFingerprint(lead: Pick<AILeadCandidate, "campusName" | "name" | "sourceUrl">) {
   return crypto
@@ -157,7 +159,7 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
   const maxSearchResults = clamp(Number(input.maxSearchResults) || 5, 1, 20);
   const runId = crypto.randomUUID();
   const searchStrategies = await planSearchStrategies(campusNames, categories, discoveryGoal, leadIntents);
-  const searchBatch = await runFirecrawlSearches(searchStrategies, maxSearchResults);
+  const searchBatch = await runBraveSearches(searchStrategies, maxSearchResults);
   const manualBatch = await manualUrlResults(input.manualUrls);
 
   const rawResults = [
@@ -175,9 +177,9 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
 
   if (!searchResults.length) {
     if (!searchBatch.providerConfigured) {
-      warnings.push("Firecrawl is not configured. Add FIRECRAWL_API_KEY in Mission Control environment variables, or paste approved public URLs.");
+      warnings.push("Brave Search is not configured. Add BRAVE_SEARCH_API_KEY in Mission Control environment variables, or paste approved public URLs.");
     } else if (searchBatch.errors.length) {
-      warnings.push("Firecrawl returned search errors. Check the API key, quota, billing, and provider status.");
+      warnings.push("Brave Search returned search errors. Check the API key, quota, billing, and provider status.");
     } else {
       warnings.push("No public search results were returned. Try broader categories, fewer filters, or paste approved public URLs.");
     }
@@ -298,30 +300,36 @@ async function planSearchStrategies(campusNames: string[], categories: string[],
   }
 }
 
-async function runFirecrawlSearches(
+async function runBraveSearches(
   queries: string[],
   maxSearchResults: number
 ): Promise<{ providerConfigured: boolean; results: SearchResult[]; errors: SearchProviderError[]; warnings: string[] }> {
-  const apiKey = firecrawlApiKey();
+  const apiKey = braveApiKey();
   if (!apiKey) {
     return {
       providerConfigured: false,
       results: [],
       errors: [],
-      warnings: ["Firecrawl credentials are missing in Mission Control environment variables."]
+      warnings: ["Brave Search credentials are missing in Mission Control environment variables."]
     };
   }
 
+  const requestCap = braveRequestCap();
+  const cappedQueries = queries.slice(0, requestCap);
   const batches = await mapWithConcurrency(
-    queries,
-    clamp(Number(process.env.FIRECRAWL_SEARCH_CONCURRENCY) || 3, 1, 5),
-    (query) => firecrawlSearch(query, apiKey, maxSearchResults)
+    cappedQueries,
+    braveSearchConcurrency(),
+    (query) => braveWebSearch(query, apiKey, maxSearchResults)
   );
+  const warnings = queries.length > cappedQueries.length
+    ? [`Brave Search request cap limited this run to ${cappedQueries.length} of ${queries.length} planned searches. The hard maximum is ${BRAVE_REQUEST_HARD_CAP} requests per run.`]
+    : [];
+
   return {
     providerConfigured: true,
     results: batches.flatMap((batch) => batch.results),
     errors: batches.flatMap((batch) => (batch.error ? [batch.error] : [])),
-    warnings: []
+    warnings
   };
 }
 
@@ -352,34 +360,55 @@ function maxSearchStrategies() {
   return clamp(Number(process.env.CAMPUS_DISCOVERY_MAX_STRATEGIES) || DEFAULT_MAX_SEARCH_STRATEGIES, 3, 15);
 }
 
-async function firecrawlSearch(query: string, apiKey: string, maxSearchResults: number): Promise<{ results: SearchResult[]; error?: SearchProviderError }> {
-  const cacheKey = `firecrawl|${query}|${maxSearchResults}`;
+function braveRequestCap() {
+  return clamp(Number(process.env.CAMPUS_DISCOVERY_MAX_SEARCH_REQUESTS_PER_RUN) || DEFAULT_BRAVE_REQUEST_CAP, 1, BRAVE_REQUEST_HARD_CAP);
+}
+
+function braveSearchConcurrency() {
+  return clamp(Number(process.env.BRAVE_SEARCH_CONCURRENCY) || 3, 1, 10);
+}
+
+function braveApiKey() {
+  return process.env.BRAVE_SEARCH_API_KEY || process.env.BRAVE_API_KEY || "";
+}
+
+function braveSearchCountry() {
+  return cleanText(process.env.BRAVE_SEARCH_COUNTRY, 2).toUpperCase() || "US";
+}
+
+function braveSearchLanguage() {
+  return cleanText(process.env.BRAVE_SEARCH_LANGUAGE, 12).toLowerCase() || "en";
+}
+
+async function braveWebSearch(query: string, apiKey: string, maxSearchResults: number): Promise<{ results: SearchResult[]; error?: SearchProviderError }> {
+  const cacheKey = `brave-web|${query}|${maxSearchResults}`;
   const cached = SEARCH_CACHE.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return { results: cached.results };
 
-  const response = await fetch("https://api.firecrawl.dev/v2/search", {
-    method: "POST",
+  const params = new URLSearchParams({
+    q: query,
+    country: braveSearchCountry(),
+    search_lang: braveSearchLanguage(),
+    ui_lang: process.env.BRAVE_SEARCH_UI_LANGUAGE || "en-US",
+    count: String(maxSearchResults),
+    result_filter: "web",
+    safesearch: process.env.BRAVE_SEARCH_SAFESEARCH || "moderate",
+    spellcheck: "true",
+    text_decorations: "false",
+    extra_snippets: process.env.BRAVE_SEARCH_EXTRA_SNIPPETS === "false" ? "false" : "true"
+  });
+
+  const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params.toString()}`, {
+    method: "GET",
     cache: "no-store",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      query,
-      limit: maxSearchResults,
-      sources: ["web"],
-      country: "US",
-      location: process.env.FIRECRAWL_SEARCH_LOCATION || "Atlanta, Georgia, United States",
-      timeout: clamp(Number(process.env.FIRECRAWL_SEARCH_TIMEOUT_MS) || 30000, 10000, 60000),
-      ignoreInvalidURLs: true,
-      excludeDomains: firecrawlExcludedDomains(),
-      scrapeOptions: {
-        formats: [{ type: "markdown" }],
-        onlyMainContent: true
-      }
-    })
+      Accept: "application/json",
+      "Accept-Encoding": "gzip",
+      "Cache-Control": "no-cache",
+      "X-Subscription-Token": apiKey
+    }
   }).catch((error) => {
-    const message = error instanceof Error ? error.message : "Unable to reach Firecrawl.";
+    const message = error instanceof Error ? error.message : "Unable to reach Brave Search.";
     return { error: message };
   });
   if ("error" in response) {
@@ -392,40 +421,42 @@ async function firecrawlSearch(query: string, apiKey: string, maxSearchResults: 
     };
   }
   const data = (await response.json().catch(() => ({}))) as {
-    success?: boolean;
-    data?: {
-      web?: Array<{
+    web?: {
+      results?: Array<{
         title?: string;
-        description?: string;
-        snippet?: string;
         url?: string;
-        markdown?: string;
-        metadata?: { sourceURL?: string; url?: string; title?: string; description?: string; error?: string };
+        description?: string;
+        extra_snippets?: string[];
+        profile?: { name?: string; url?: string };
       }>;
     };
-    error?: string;
-    code?: string;
-    warning?: string;
+    error?: { message?: string; code?: string };
+    message?: string;
+    type?: string;
   };
-  if (!response.ok || data.success === false) {
+  if (!response.ok) {
     return {
       results: [],
       error: {
         query,
         status: response.status,
-        error: data.error || data.code || `Firecrawl returned HTTP ${response.status}.`
+        error: data.error?.message || data.message || data.type || `Brave Search returned HTTP ${response.status}.`
       }
     };
   }
-  const results = (data.data?.web ?? [])
-    .map((item) => ({
-      title: cleanText(item.title || item.metadata?.title, 300),
-      link: cleanUrl(item.url || item.metadata?.sourceURL || item.metadata?.url),
-      snippet: cleanLongText(item.description || item.snippet || item.metadata?.description, 1000),
-      content: cleanLongText(item.markdown, 6000),
-      query,
-      provider: "firecrawl"
-    }))
+
+  const results = (data.web?.results ?? [])
+    .map((item) => {
+      const snippets = [item.description, ...(item.extra_snippets ?? [])].filter(Boolean);
+      return {
+        title: cleanText(item.title || item.profile?.name, 300),
+        link: cleanUrl(item.url || item.profile?.url),
+        snippet: cleanLongText(snippets.join("\n"), 1000),
+        content: cleanLongText(snippets.join("\n\n"), 4000),
+        query,
+        provider: "brave_web"
+      };
+    })
     .filter((item) => item.title && item.link);
   SEARCH_CACHE.set(cacheKey, { expiresAt: Date.now() + 1000 * 60 * 30, results });
   return { results };
@@ -447,23 +478,6 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, worker:
 
 function firecrawlApiKey() {
   return process.env.FIRECRAWL_API_KEY || process.env.FIRECRAWL_API_TOKEN || "";
-}
-
-function firecrawlExcludedDomains() {
-  const defaults = [
-    "tiktok.com",
-    "x.com",
-    "twitter.com",
-    "facebook.com",
-    "reddit.com",
-    "pinterest.com",
-    "youtube.com"
-  ];
-  const configured = (process.env.FIRECRAWL_EXCLUDE_DOMAINS || "")
-    .split(",")
-    .map((domain) => domain.trim().replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0])
-    .filter(Boolean);
-  return uniqueStrings([...defaults, ...configured]);
 }
 
 async function manualUrlResults(

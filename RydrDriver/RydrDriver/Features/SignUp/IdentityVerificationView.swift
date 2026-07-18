@@ -11,6 +11,8 @@
 
 import SwiftUI
 import StripeIdentity
+import FirebaseAuth
+import FirebaseFirestore
 
 struct IdentityVerificationView: View {
     @Binding var isVerified: Bool
@@ -163,6 +165,7 @@ struct IdentityVerificationView: View {
                 isVerified = true
                 isError = false
                 message = "Identity Verified"
+                markIdentityStepCompleted()
                 return
             }
             if status.identityStatus == "requires_input" || status.identityStatus == "canceled" {
@@ -175,5 +178,13 @@ struct IdentityVerificationView: View {
 
         isError = false
         message = "Stripe is still processing your verification. Please try Continue again in a moment."
+    }
+
+    private func markIdentityStepCompleted() {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        Firestore.firestore().collection("drivers").document(uid).setData([
+            "identityVerificationStepCompleted": true,
+            "identityVerificationStepCompletedAt": FieldValue.serverTimestamp()
+        ], merge: true)
     }
 }

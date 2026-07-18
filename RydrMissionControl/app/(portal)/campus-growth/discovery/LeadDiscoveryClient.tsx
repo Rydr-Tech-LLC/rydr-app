@@ -27,10 +27,12 @@ interface SearchHealthResponse {
   provider?: string;
   hasApiKey?: boolean;
   status?: number;
-  firecrawlErrorCode?: string;
+  braveErrorCode?: string;
   error?: string;
   resultCount?: number;
-  creditsUsed?: number | null;
+  requestCap?: number;
+  manualUrlProvider?: string;
+  manualUrlConfigured?: boolean;
   warning?: string | null;
 }
 
@@ -112,14 +114,14 @@ export function LeadDiscoveryPanel({ campuses, categories, pendingCount }: { cam
     try {
       const response = await fetch("/api/campus-growth/ai/search-health", { method: "GET" });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error ?? "Unable to test Firecrawl Search.");
+      if (!response.ok) throw new Error(body.error ?? "Unable to test Brave Search.");
       setSearchHealth(body);
     } catch (error) {
       setSearchHealth({
         ok: false,
         configured: false,
-        provider: "firecrawl",
-        error: error instanceof Error ? error.message : "Unable to test Firecrawl Search."
+        provider: "brave_web",
+        error: error instanceof Error ? error.message : "Unable to test Brave Search."
       });
     } finally {
       setHealthBusy(false);
@@ -273,7 +275,7 @@ export function LeadDiscoveryPanel({ campuses, categories, pendingCount }: { cam
             disabled={healthBusy}
             className="mt-3 w-full rounded-md border border-line bg-white px-4 py-2.5 text-sm font-semibold text-ink shadow-sm hover:border-rydr-red hover:text-rydr-red disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {healthBusy ? "Testing Firecrawl..." : "Test Firecrawl Search"}
+            {healthBusy ? "Testing Brave..." : "Test Brave Search"}
           </button>
           <p className="mt-3 text-center text-xs text-muted">
             Every result enters Pending Review. Nothing is contacted automatically.
@@ -284,20 +286,21 @@ export function LeadDiscoveryPanel({ campuses, categories, pendingCount }: { cam
                 searchHealth.ok ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"
               }`}
             >
-              <p className="font-semibold">{searchHealth.ok ? "Firecrawl Search connected" : "Firecrawl Search needs attention"}</p>
+              <p className="font-semibold">{searchHealth.ok ? "Brave Search connected" : "Brave Search needs attention"}</p>
               {searchHealth.ok ? (
                 <p className="mt-1">
-                  Test returned {searchHealth.resultCount ?? 0} result preview
-                  {typeof searchHealth.creditsUsed === "number" ? ` using ${searchHealth.creditsUsed} Firecrawl credits.` : "."}
+                  Test returned {searchHealth.resultCount ?? 0} result preview. Per-run AI search cap is {searchHealth.requestCap ?? 100} Brave requests.
                   {searchHealth.warning ? ` ${searchHealth.warning}` : ""}
+                  {searchHealth.manualUrlConfigured === false ? " Firecrawl is not configured for approved URL extraction." : ""}
                 </p>
               ) : (
                 <ul className="mt-2 list-disc space-y-1 pl-4">
-                  {searchHealth.configured === false && <li>Mission Control is missing the Firecrawl API key env var.</li>}
-                  {searchHealth.status && <li>Firecrawl HTTP status: {searchHealth.status}</li>}
-                  {searchHealth.firecrawlErrorCode && <li>Firecrawl error code: {searchHealth.firecrawlErrorCode}</li>}
+                  {searchHealth.configured === false && <li>Mission Control is missing the Brave Search API key env var.</li>}
+                  {searchHealth.status && <li>Brave HTTP status: {searchHealth.status}</li>}
+                  {searchHealth.braveErrorCode && <li>Brave error code: {searchHealth.braveErrorCode}</li>}
                   {searchHealth.error && <li>{searchHealth.error}</li>}
-                  <li>Env check: Firecrawl API key {searchHealth.hasApiKey ? "present" : "missing"}.</li>
+                  <li>Env check: Brave Search API key {searchHealth.hasApiKey ? "present" : "missing"}.</li>
+                  <li>Per-run AI search cap: {searchHealth.requestCap ?? 100} Brave requests.</li>
                 </ul>
               )}
             </div>
@@ -310,16 +313,16 @@ export function LeadDiscoveryPanel({ campuses, categories, pendingCount }: { cam
                 {(lastRun.warnings ?? []).map((warning) => (
                   <li key={warning}>{warning}</li>
                 ))}
-                {lastRun.searchProviderConfigured === false && <li>Firecrawl is not connected, so only approved URLs can produce leads.</li>}
+                {lastRun.searchProviderConfigured === false && <li>Brave Search is not connected, so only approved URLs can produce leads.</li>}
                 {(lastRun.searchErrors ?? []).slice(0, 3).map((error, index) => (
                   <li key={`${error.query ?? "query"}-${index}`}>
-                    {error.status ? `Firecrawl status ${error.status}: ` : ""}
+                    {error.status ? `Brave status ${error.status}: ` : ""}
                     {error.error ?? "Search provider error."}
                   </li>
                 ))}
               </ul>
               <p className="mt-2">
-                Next step: verify the Firecrawl env var, quota, and billing, or paste one official campus organization/event URL into Approved public URLs and run again.
+                Next step: verify the Brave Search env var, quota, and billing, or paste one official campus organization/event URL into Approved public URLs and run again.
               </p>
             </div>
           ) : null}

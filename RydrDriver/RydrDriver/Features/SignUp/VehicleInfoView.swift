@@ -66,10 +66,25 @@ struct VehicleInfoView: View {
         && registrationDoc != nil
         && insuranceCard != nil
         && !isDecoding && !isSubmitting
+        && (isManualVehicle || decodedMatchesCurrentVin)
     }
 
     private var vinLooksValid: Bool {
-        vin.trimmingCharacters(in: .whitespacesAndNewlines).count == 17
+        normalizedVin.count == 17
+        && normalizedVin.rangeOfCharacter(from: CharacterSet(charactersIn: "IOQ")) == nil
+    }
+
+    private var normalizedVin: String {
+        vin
+            .uppercased()
+            .filter { $0.isLetter || $0.isNumber }
+            .prefix(17)
+            .description
+    }
+
+    private var decodedMatchesCurrentVin: Bool {
+        guard let decoded else { return false }
+        return decoded.vin.uppercased() == normalizedVin
     }
 
     private var manualEntryIsValid: Bool {
@@ -164,8 +179,17 @@ struct VehicleInfoView: View {
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
                     .onChange(of: vin) { _, newValue in
-                        if newValue.count > 17 {
-                            vin = String(newValue.prefix(17))
+                        let sanitized = newValue
+                            .uppercased()
+                            .filter { $0.isLetter || $0.isNumber }
+                            .prefix(17)
+                            .description
+                        if sanitized != newValue {
+                            vin = sanitized
+                            return
+                        }
+                        if let decoded, decoded.vin.uppercased() != sanitized {
+                            clearDecodedVehicleState()
                         }
                     }
             }
@@ -453,11 +477,19 @@ struct VehicleInfoView: View {
     // MARK: - Actions
 
     private func decodeVin() {
+        guard !isDecoding else { return }
+        guard vinLooksValid else {
+            clearDecodedVehicleState()
+            decodeError = "Enter a valid 17-character VIN before decoding."
+            return
+        }
+        vin = normalizedVin
+        clearDecodedVehicleState()
         decodeError = nil
         isDecoding = true
         Task {
             do {
-                let result = try await VehicleLibraryClient.decodeVin(vin)
+                let result = try await VehicleLibraryClient.decodeVin(normalizedVin)
                 await MainActor.run {
                     decoded = result
                     selectedColor = nil
@@ -466,7 +498,8 @@ struct VehicleInfoView: View {
                 }
             } catch {
                 await MainActor.run {
-                    decodeError = error.localizedDescription
+                    clearDecodedVehicleState()
+                    decodeError = friendlyVehicleError(error)
                     isDecoding = false
                 }
             }
@@ -476,7 +509,7 @@ struct VehicleInfoView: View {
     private func useManualEntry() {
         guard manualEntryIsValid else { return }
         decoded = DecodedVehicleInfo(
-            vin: vin.trimmingCharacters(in: .whitespacesAndNewlines),
+            vin: normalizedVin,
             make: manualMake,
             model: resolvedManualModel,
             year: manualYear,
@@ -514,7 +547,13 @@ struct VehicleInfoView: View {
     }
 
     private func handleContinue() {
+        guard !isSubmitting else { return }
         guard let selectedColor, let decoded else { return }
+        guard isManualVehicle || decodedMatchesCurrentVin else {
+            clearDecodedVehicleState()
+            decodeError = "The VIN changed after decoding. Decode the current VIN before continuing."
+            return
+        }
         isSubmitting = true
         Task {
             do {
@@ -530,7 +569,7 @@ struct VehicleInfoView: View {
                     )
                     result = try await VehicleLibraryClient.submitVehicleManual(manualInfo, color: selectedColor)
                 } else {
-                    result = try await VehicleLibraryClient.submitVehicleVin(vin: vin, color: selectedColor)
+                    result = try await VehicleLibraryClient.submitVehicleVin(vin: normalizedVin, color: selectedColor)
                 }
                 await MainActor.run {
                     imageInfo = result
@@ -539,11 +578,30 @@ struct VehicleInfoView: View {
                 }
             } catch {
                 await MainActor.run {
-                    decodeError = error.localizedDescription
+                    decodeError = friendlyVehicleError(error)
                     isSubmitting = false
                 }
             }
         }
+    }
+
+    private func clearDecodedVehicleState() {
+        decoded = nil
+        selectedColor = nil
+        imageInfo = nil
+        imageError = nil
+        isManualVehicle = false
+    }
+
+    private func friendlyVehicleError(_ error: Error) -> String {
+        let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if message.uppercased() == "INTERNAL" || message.localizedCaseInsensitiveContains("internal") {
+            return "We couldn't decode that VIN right now. Check the VIN and try again, or enter the vehicle details manually."
+        }
+        if message.localizedCaseInsensitiveContains("vin") {
+            return message.replacingOccurrences(of: "`", with: "")
+        }
+        return message.isEmpty ? "We couldn't decode that VIN. Check the VIN and try again." : message
     }
 }
 

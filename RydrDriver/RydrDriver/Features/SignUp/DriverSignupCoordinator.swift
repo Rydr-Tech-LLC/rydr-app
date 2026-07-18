@@ -28,6 +28,56 @@ enum DriverSignupStep: Hashable {
     case backgroundCheck
     case payouts
     case done
+
+    var trackingKey: String {
+        switch self {
+        case .phoneCode: return "phone_verification"
+        case .betaWaiver: return "beta_waiver"
+        case .nameDOB: return "legal_name_dob"
+        case .emailPassword: return "login_credentials"
+        case .address: return "address"
+        case .license: return "driver_license"
+        case .vehicle: return "vehicle_documents"
+        case .identity: return "identity_verification"
+        case .backgroundCheck: return "background_check"
+        case .payouts: return "payouts"
+        case .done: return "complete"
+        }
+    }
+
+    var trackingLabel: String {
+        switch self {
+        case .phoneCode: return "Phone Verification"
+        case .betaWaiver: return "Beta Waiver"
+        case .nameDOB: return "Legal Name & DOB"
+        case .emailPassword: return "Login Credentials"
+        case .address: return "Address"
+        case .license: return "Driver License"
+        case .vehicle: return "Vehicle & Documents"
+        case .identity: return "Identity Verification"
+        case .backgroundCheck: return "Background Check"
+        case .payouts: return "Payouts"
+        case .done: return "Complete"
+        }
+    }
+
+    var trackingIndex: Int {
+        switch self {
+        case .phoneCode: return 1
+        case .betaWaiver: return 2
+        case .nameDOB: return 3
+        case .emailPassword: return 4
+        case .address: return 5
+        case .license: return 6
+        case .vehicle: return 7
+        case .identity: return 8
+        case .backgroundCheck: return 9
+        case .payouts: return 10
+        case .done: return 11
+        }
+    }
+
+    static let trackedTotalSteps = 11
 }
 
 struct DriverSignupCoordinator: View {
@@ -148,6 +198,7 @@ struct DriverSignupCoordinator: View {
                             }
                         }
                     )
+                    .onAppear { markCurrentOnboardingStep(.phoneCode) }
 
                 case .betaWaiver:
                     BetaWaiverView(
@@ -155,6 +206,7 @@ struct DriverSignupCoordinator: View {
                             upsertDriver([
                                 "phoneNumber": phoneNumber,
                                 "phoneE164": phoneNumber,
+                                "phoneVerificationStepCompleted": true,
                                 "betaWaiverAccepted": true,
                                 "betaWaiverAcceptedAt": FieldValue.serverTimestamp(),
                                 "betaWaiverVersion": "2026-07-04"
@@ -166,6 +218,7 @@ struct DriverSignupCoordinator: View {
                             dismiss()
                         }
                     )
+                    .onAppear { markCurrentOnboardingStep(.betaWaiver) }
 
                 case .nameDOB:
                     NameDOBView(firstName: $firstName, lastName: $lastName, dob: $dob) {
@@ -185,6 +238,7 @@ struct DriverSignupCoordinator: View {
                         ])
                         path.append(.emailPassword)
                     }
+                    .onAppear { markCurrentOnboardingStep(.nameDOB) }
 
                 case .emailPassword:
                     EmailAndPasswordView(
@@ -201,6 +255,7 @@ struct DriverSignupCoordinator: View {
                             completeSocialAuthStepWithApple(authorization: authorization, nonce: nonce)
                         }
                     )
+                    .onAppear { markCurrentOnboardingStep(.emailPassword) }
 
                 case .address:
                     AddressInfoView(
@@ -221,6 +276,7 @@ struct DriverSignupCoordinator: View {
                         ])
                         path.append(.license)
                     }
+                    .onAppear { markCurrentOnboardingStep(.address) }
 
                 case .license:
                     DriverLicenseView(
@@ -231,6 +287,7 @@ struct DriverSignupCoordinator: View {
                     ) {
                         submitLicenseDocumentsAndContinue()
                     }
+                    .onAppear { markCurrentOnboardingStep(.license) }
 
                 case .vehicle:
                     // The authoritative vehicle write (vin, make, model, trim, bodyStyle,
@@ -252,11 +309,13 @@ struct DriverSignupCoordinator: View {
                     ) {
                         submitVehicleDocumentsAndContinue(decodedVehicle: decodedVehicle)
                     }
+                    .onAppear { markCurrentOnboardingStep(.vehicle) }
 
                 case .identity:
                     IdentityVerificationView(isVerified: $identityVerified) {
                         if identityVerified { path.append(.backgroundCheck) }
                     }
+                    .onAppear { markCurrentOnboardingStep(.identity) }
 
                 case .backgroundCheck:
                     BackgroundCheckView(
@@ -275,6 +334,7 @@ struct DriverSignupCoordinator: View {
                             path.append(.payouts)
                         }
                     }
+                    .onAppear { markCurrentOnboardingStep(.backgroundCheck) }
 
                 case .payouts:
                     PayoutsSetupView(
@@ -303,6 +363,7 @@ struct DriverSignupCoordinator: View {
                         upsertDriver(completionFields)
                         if connectOnboarded { path.append(.done) }
                     }
+                    .onAppear { markCurrentOnboardingStep(.payouts) }
 
                 case .done:
                     SignupCompleteView(onFinish: {
@@ -311,6 +372,7 @@ struct DriverSignupCoordinator: View {
                         session.canGoOnline = false
                         dismiss()
                     })
+                    .onAppear { markCurrentOnboardingStep(.done) }
                 }
             }
             .overlay {
@@ -350,6 +412,7 @@ struct DriverSignupCoordinator: View {
 
     private func submitLicenseDocumentsAndContinue() {
         guard !isSubmittingDocuments else { return }
+        isSubmittingDocuments = true
         Task { await uploadLicenseDocumentsAndContinue() }
     }
 
@@ -357,10 +420,10 @@ struct DriverSignupCoordinator: View {
     private func uploadLicenseDocumentsAndContinue() async {
         guard licenseFront != nil, licenseBack != nil else {
             flowAlertText = "Upload clear photos of the front and back of your driver license before continuing."
+            isSubmittingDocuments = false
             return
         }
 
-        isSubmittingDocuments = true
         defer { isSubmittingDocuments = false }
 
         do {
@@ -394,6 +457,7 @@ struct DriverSignupCoordinator: View {
 
     private func submitVehicleDocumentsAndContinue(decodedVehicle: DecodedVehicleInfo?) {
         guard !isSubmittingDocuments else { return }
+        isSubmittingDocuments = true
         Task { await uploadVehicleDocumentsAndContinue(decodedVehicle: decodedVehicle) }
     }
 
@@ -401,14 +465,15 @@ struct DriverSignupCoordinator: View {
     private func uploadVehicleDocumentsAndContinue(decodedVehicle: DecodedVehicleInfo?) async {
         guard let decodedVehicle else {
             flowAlertText = "Complete the vehicle details before continuing."
+            isSubmittingDocuments = false
             return
         }
         guard registrationDoc != nil, insuranceCard != nil else {
             flowAlertText = "Upload your registration and insurance documents before continuing."
+            isSubmittingDocuments = false
             return
         }
 
-        isSubmittingDocuments = true
         defer { isSubmittingDocuments = false }
 
         do {
@@ -641,6 +706,23 @@ struct DriverSignupCoordinator: View {
     }
 
     // MARK: - Firestore helper
+    private func markCurrentOnboardingStep(_ step: DriverSignupStep) {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        Firestore.firestore().collection("drivers").document(uid).setData([
+            "driverOnboardingCurrentStep": step.trackingKey,
+            "driverOnboardingCurrentStepLabel": step.trackingLabel,
+            "driverOnboardingCurrentStepIndex": step.trackingIndex,
+            "driverOnboardingTotalSteps": DriverSignupStep.trackedTotalSteps,
+            "driverOnboardingStatus": step == .done ? "completed" : "in_progress",
+            "driverOnboardingLastSeenAt": FieldValue.serverTimestamp(),
+            "driverOnboardingLastSeenSource": "driver-ios-signup"
+        ], merge: true) { err in
+            if let err {
+                print("⚠️ markCurrentOnboardingStep failed: \(err.localizedDescription)")
+            }
+        }
+    }
+
     private func upsertDriver(_ fields: [String: Any]) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         Firestore.firestore().collection("drivers").document(uid).setData(fields, merge: true) { err in

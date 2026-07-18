@@ -16,7 +16,10 @@ import RequirementChecklist from "@/components/RequirementChecklist";
 import TripSafetyAnalytics from "@/components/TripSafetyAnalytics";
 import { findActiveRideForDriver } from "@/lib/activeRides";
 import { cashHubBillingDisplay, formatCents, getCurrentCashHubBilling } from "@/lib/cashHubBilling";
+import { buildDriverOnboardingProgress } from "@/lib/driverOnboardingProgress";
 import DriverActions from "./DriverActions";
+import DriverOnboardingProgressLive from "./DriverOnboardingProgressLive";
+import DriverProfileAdminTools, { type DriverProfileAdminInitial } from "./DriverProfileAdminTools";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +50,35 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
   const identityStatus = driverIdentityStatus(driver);
   const connectStatus = driverConnectStatus(driver);
   const cashHubDisplay = cashHubBillingDisplay(driver, cashHubBilling, cashHubGateConfig);
+  const onboardingProgress = buildDriverOnboardingProgress(driver);
+  const adminProfileInitial: DriverProfileAdminInitial = {
+    firstName: driver.firstName ?? driver.legalFirstName ?? "",
+    lastName: driver.lastName ?? driver.legalLastName ?? "",
+    email: driver.email ?? "",
+    phoneNumber: driver.phoneE164 ?? driver.phoneNumber ?? "",
+    dob: dateInputValue(dob),
+    address: {
+      street: driver.address?.street ?? "",
+      line2: driver.address?.line2 ?? "",
+      city: driver.address?.city ?? "",
+      state: driver.address?.state ?? "",
+      zip: driver.address?.zip ?? ""
+    },
+    license: {
+      number: driver.license?.number ?? "",
+      state: driver.license?.state ?? ""
+    },
+    vehicle: {
+      year: driver.vehicle?.year ? String(driver.vehicle.year) : "",
+      make: driver.vehicle?.make ?? "",
+      model: driver.vehicle?.model ?? "",
+      trim: driver.vehicle?.trim ?? "",
+      color: driver.vehicle?.color ?? "",
+      plate: driver.vehicle?.plate ?? "",
+      vin: driver.vehicle?.vin ?? "",
+      class: driver.vehicle?.class ?? ""
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -200,6 +232,10 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
         </div>
 
         <div className="space-y-6">
+          <Section title="Onboarding Progress">
+            <DriverOnboardingProgressLive uid={driver.uid} initial={onboardingProgress} />
+          </Section>
+
           <Section title="Verification Status">
             <Grid cols={1}>
               <Field label="Stripe Identity" value={formatStatus(identityStatus)} />
@@ -237,6 +273,8 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
             <RequirementChecklist checks={checks} />
           </Section>
 
+          <DriverProfileAdminTools uid={driver.uid} initial={adminProfileInitial} />
+
           <DriverActions uid={driver.uid} missing={missing} activeRide={activeRide} />
         </div>
       </div>
@@ -271,4 +309,12 @@ function formatStatus(value: string) {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function dateInputValue(date: Date | null): string {
+  if (!date) return "";
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
