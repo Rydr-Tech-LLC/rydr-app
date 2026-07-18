@@ -4,8 +4,21 @@
 
 html,
 body {
+  min-width: 0;
   background-color: #f7f7fa;
   color: #111111;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
 }
 
 * {

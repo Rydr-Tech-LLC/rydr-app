@@ -19,8 +19,8 @@ export default async function SupportTicketPage({ params }: { params: { id: stri
   return (
     <div className="space-y-6">
       <div>
-        <div className="flex items-center gap-2">
-          <h1 className="text-xl font-semibold text-ink">{ticket.subject ?? "Support request"}</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="break-words text-xl font-semibold text-ink">{ticket.subject ?? "Support request"}</h1>
           <StatusPill status={ticket.status ?? "open"} />
         </div>
         <p className="mt-1 text-sm text-muted">
@@ -38,7 +38,7 @@ export default async function SupportTicketPage({ params }: { params: { id: stri
             return (
               <div key={message.id} className={`flex ${isAdmin ? "justify-end" : "justify-start"}`}>
                 <div
-                  className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm ${
+                  className={`max-w-[92%] break-words rounded-2xl px-3.5 py-2.5 text-sm sm:max-w-[80%] ${
                     isAdmin ? "bg-ink text-white" : "bg-grouped text-ink"
                   }`}
                 >

@@ -137,8 +137,8 @@ function LeadAvatar({ lead }: { lead: DiscoveredCampusLead }) {
 
 function SearchBox({ placeholder }: { placeholder: string }) {
   return (
-    <form className="flex gap-2">
-      <input name="q" placeholder={placeholder} className="w-64 rounded-md border border-line bg-white px-3 py-2 text-xs text-ink outline-none focus:border-rydr-red" />
+    <form className="flex w-full gap-2 sm:w-auto">
+      <input name="q" placeholder={placeholder} className="min-w-0 flex-1 rounded-md border border-line bg-white px-3 py-2 text-xs text-ink outline-none focus:border-rydr-red sm:w-64 sm:flex-none" />
       <button className="rounded-md border border-line bg-white px-3 py-2 text-xs font-semibold text-ink">Search</button>
     </form>
   );

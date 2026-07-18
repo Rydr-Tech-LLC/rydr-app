@@ -51,9 +51,9 @@ function TicketGroup({ title, tickets, emptyText }: { title: string; tickets: Su
               href={`/support/${ticket.id}`}
               className="block rounded-lg border border-line bg-white p-4 shadow-sm transition hover:border-ink/20"
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <p className="font-medium text-ink">{ticket.subject ?? "Support request"}</p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <p className="break-words font-medium text-ink">{ticket.subject ?? "Support request"}</p>
                   <StatusPill status={ticket.status ?? "open"} />
                   {ticket.userRole && (
                     <span className="rounded-full border border-line bg-grouped px-2 py-0.5 text-[11px] font-medium text-muted">
@@ -61,7 +61,7 @@ function TicketGroup({ title, tickets, emptyText }: { title: string; tickets: Su
                     </span>
                   )}
                 </div>
-                <span className="text-xs text-muted">{updated ? timeAgo(updated) : "—"}</span>
+                <span className="flex-shrink-0 text-xs text-muted">{updated ? timeAgo(updated) : "—"}</span>
               </div>
               {ticket.category && <p className="mt-1 text-xs text-muted">{ticket.category}</p>}
             </Link>

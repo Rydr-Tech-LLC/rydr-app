@@ -17,8 +17,8 @@ export default async function RidersPage() {
         <p className="mt-1 text-sm text-muted">{riders.length} total riders.</p>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-line bg-white shadow-sm">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-lg border border-line bg-white shadow-sm">
+        <table className="w-full min-w-[720px] text-sm">
           <thead className="border-b border-line bg-grouped text-left text-xs font-medium text-muted">
             <tr>
               <th className="px-4 py-2.5">Name</th>

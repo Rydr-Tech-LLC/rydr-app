@@ -43,7 +43,7 @@ export default async function RiderReviewPage({ params }: { params: { uid: strin
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold text-ink">{fullName(rider.firstName, rider.lastName)}</h1>
@@ -75,8 +75,8 @@ export default async function RiderReviewPage({ params }: { params: { uid: strin
               <Field label="Eligible rides" value={rydrBank.totalEligible ?? 0} />
             </Grid>
 
-            <div className="mt-4 overflow-hidden rounded-md border border-line">
-              <table className="w-full text-sm">
+            <div className="mt-4 overflow-x-auto rounded-md border border-line">
+              <table className="w-full min-w-[560px] text-sm">
                 <thead className="border-b border-line bg-grouped text-left text-xs font-medium text-muted">
                   <tr>
                     <th className="px-3 py-2">Code</th>

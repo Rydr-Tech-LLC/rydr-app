@@ -44,8 +44,8 @@ export default function VehicleEntryActions({ vehicleId }: { vehicleId: string }
   }
 
   return (
-    <div className="flex flex-col items-end gap-2">
-      <div className="flex gap-2">
+    <div className="flex w-full flex-col items-start gap-2 sm:w-auto sm:items-end">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={handleSyncDriverProfiles}
           disabled={loading}
@@ -61,7 +61,7 @@ export default function VehicleEntryActions({ vehicleId }: { vehicleId: string }
           {loading ? "Working…" : "Delete Entry"}
         </button>
       </div>
-      {syncMessage && <p className="max-w-xs text-right text-xs text-muted">{syncMessage}</p>}
+      {syncMessage && <p className="max-w-xs text-left text-xs text-muted sm:text-right">{syncMessage}</p>}
     </div>
   );
 }

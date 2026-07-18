@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
+import { useEffect, useState } from "react";
 import { clientAuth } from "@/lib/firebaseClient";
 
 const CAMPUS_GROWTH_ITEMS = [
@@ -36,6 +37,25 @@ const NAV_ITEMS = [
 export default function Sidebar({ email }: { email: string | null }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [mobileOpen]);
 
   async function handleSignOut() {
     await fetch("/api/session", { method: "DELETE" });
@@ -44,8 +64,8 @@ export default function Sidebar({ email }: { email: string | null }) {
     router.refresh();
   }
 
-  return (
-    <aside className="flex h-screen w-56 flex-shrink-0 flex-col border-r border-line bg-white">
+  const navigation = (
+    <>
       <div className="flex items-center gap-2 px-5 py-5">
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-rydr-red to-rydr-burgundy text-xs font-bold text-white">
           R
@@ -56,7 +76,7 @@ export default function Sidebar({ email }: { email: string | null }) {
         </div>
       </div>
 
-      <nav className="flex-1 space-y-0.5 px-3">
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pb-3">
         {NAV_ITEMS.map((item) => {
           const active = pathname === item.href || (item.href !== "/dashboard" && pathname?.startsWith(item.href));
           return (
@@ -101,6 +121,67 @@ export default function Sidebar({ email }: { email: string | null }) {
           Sign out
         </button>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <aside className="hidden h-screen w-56 flex-shrink-0 flex-col border-r border-line bg-white md:flex">
+        {navigation}
+      </aside>
+
+      <header className="fixed inset-x-0 top-0 z-40 flex h-16 items-center justify-between border-b border-line bg-white/95 px-4 backdrop-blur md:hidden">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-rydr-red to-rydr-burgundy text-xs font-bold text-white">
+            R
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold leading-tight text-ink">Mission Control</p>
+            <p className="truncate text-[11px] leading-tight text-muted">Rydr Internal</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          className="flex h-11 w-11 flex-shrink-0 flex-col items-center justify-center gap-1.5 rounded-md border border-line bg-white"
+          aria-label="Open navigation menu"
+          aria-expanded={mobileOpen}
+          aria-controls="mobile-navigation"
+        >
+          <span className="h-0.5 w-5 rounded-full bg-ink" />
+          <span className="h-0.5 w-5 rounded-full bg-ink" />
+          <span className="h-0.5 w-5 rounded-full bg-ink" />
+        </button>
+      </header>
+
+      <button
+        type="button"
+        aria-label="Close navigation menu"
+        onClick={() => setMobileOpen(false)}
+        className={`fixed inset-0 z-40 bg-black/35 transition-opacity md:hidden ${
+          mobileOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      />
+      <aside
+        id="mobile-navigation"
+        className={`fixed inset-y-0 left-0 z-50 flex w-[min(20rem,88vw)] flex-col border-r border-line bg-white shadow-lg transition-transform duration-200 md:hidden ${
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+        aria-hidden={!mobileOpen}
+      >
+        <div className="absolute right-3 top-3 z-10">
+          <button
+            type="button"
+            onClick={() => setMobileOpen(false)}
+            className="relative flex h-10 w-10 items-center justify-center rounded-md border border-line bg-white"
+            aria-label="Close navigation menu"
+          >
+            <span className="absolute h-0.5 w-5 rotate-45 rounded-full bg-ink" />
+            <span className="absolute h-0.5 w-5 -rotate-45 rounded-full bg-ink" />
+          </button>
+        </div>
+        {navigation}
+      </aside>
+    </>
   );
 }

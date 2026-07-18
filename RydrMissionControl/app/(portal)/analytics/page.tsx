@@ -227,7 +227,7 @@ function BarSeries({
   return (
     <div className="space-y-2">
       {points.slice(-14).map((point) => (
-        <div key={point.label} className="grid grid-cols-[3rem_1fr_6rem] items-center gap-3 text-xs">
+        <div key={point.label} className="grid grid-cols-[3rem_minmax(0,1fr)_4.5rem] items-center gap-2 text-xs sm:grid-cols-[3rem_minmax(0,1fr)_6rem] sm:gap-3">
           <span className="text-muted">{point.label}</span>
           <div className="h-7 overflow-hidden rounded-md bg-grouped">
             <div className="h-full rounded-md bg-rydr-burgundy" style={{ width: `${Math.max(2, (point.value / max) * 100)}%` }} />

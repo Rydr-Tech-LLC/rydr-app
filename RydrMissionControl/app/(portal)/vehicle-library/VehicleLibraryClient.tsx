@@ -100,7 +100,7 @@ export default function VehicleLibraryClient({
           <button onClick={resetSearch} className="rounded-md border border-line px-4 py-2 text-xs font-medium text-muted">
             Reset
           </button>
-          <div className="ml-auto flex gap-2">
+          <div className="flex w-full flex-wrap gap-2 sm:ml-auto sm:w-auto">
             <a
               href={OPENART_URL}
               target="_blank"
@@ -131,7 +131,7 @@ export default function VehicleLibraryClient({
   );
 }
 
-const inputClass = "w-40 rounded-md border border-line bg-grouped px-3 py-2 text-xs outline-none focus:border-ink";
+const inputClass = "w-full rounded-md border border-line bg-grouped px-3 py-2 text-xs outline-none focus:border-ink sm:w-40";
 
 function VehicleCard({ entry }: { entry: VehicleLibraryEntry }) {
   const count = imageCount(entry);
@@ -141,8 +141,8 @@ function VehicleCard({ entry }: { entry: VehicleLibraryEntry }) {
 
   return (
     <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
-      <div className="flex gap-4">
-        <div className="flex h-28 w-36 flex-shrink-0 items-center justify-center overflow-hidden rounded-md border border-line bg-grouped">
+      <div className="flex flex-col gap-4 sm:flex-row">
+        <div className="flex aspect-[4/3] w-full flex-shrink-0 items-center justify-center overflow-hidden rounded-md border border-line bg-grouped sm:h-28 sm:w-36">
           {previewUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={previewUrl} alt={`${entry.make} ${entry.model}`} className="h-full w-full object-cover" />
@@ -216,7 +216,7 @@ function firstColorImage(entry: VehicleLibraryEntry) {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex w-full flex-col gap-1 sm:w-auto">
       <span className="text-[11px] font-medium text-muted">{label}</span>
       {children}
     </div>

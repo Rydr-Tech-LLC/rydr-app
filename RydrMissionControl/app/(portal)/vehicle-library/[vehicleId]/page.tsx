@@ -12,8 +12,8 @@ export default async function VehicleLibraryEntryPage({ params }: { params: { ve
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-xl font-semibold text-ink">
             {entry.make} {entry.model}
           </h1>

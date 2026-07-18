@@ -174,7 +174,7 @@ function ProcessCard({ index, title, body }: { index: string; title: string; bod
 function SearchBox({ placeholder }: { placeholder: string }) {
   return (
     <form className="flex gap-2">
-      <input name="q" placeholder={placeholder} className="w-64 rounded-md border border-line bg-white px-3 py-2 text-xs text-ink outline-none focus:border-rydr-red" />
+      <input name="q" placeholder={placeholder} className="w-full rounded-md border border-line bg-white px-3 py-2 text-xs text-ink outline-none focus:border-rydr-red sm:w-64" />
       <button className="rounded-md border border-line bg-white px-3 py-2 text-xs font-semibold text-ink">Search</button>
     </form>
   );
