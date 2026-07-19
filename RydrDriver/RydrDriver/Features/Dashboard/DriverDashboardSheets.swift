@@ -2084,7 +2084,7 @@ struct DrawerDestinationView: View {
     var body: some View {
         NavigationStack {
             if item == .profile {
-                DriverProfileView()
+                DriverProfileView(dashboardVM: vm)
             } else if item == .vehicleRideTypes {
                 VehicleRydrHubView(vm: vm)
             } else if item == .cashRydrHub {
