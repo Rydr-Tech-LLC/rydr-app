@@ -27,7 +27,7 @@ struct DriverProfileView: View {
         .sheet(isPresented: $showRideFilters) {
             DriverRideFiltersView(
                 preferences: $dashboardVM.rideFilterPreferences,
-                premiumPreferenceAvailable: true,
+                premiumPreferenceAvailable: dashboardVM.hasPremiumRideEligibility,
                 onClose: {
                     showRideFilters = false
                     dashboardVM.refreshRideFilters()
