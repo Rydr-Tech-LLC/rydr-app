@@ -4,8 +4,14 @@ import FirebaseAuth
 import FirebaseFirestore
 
 struct DriverProfileView: View {
+    @ObservedObject var dashboardVM: DriverDashboardVM
+    @State private var showRideFilters = false
     @StateObject private var vm = DriverProfileViewModel()
 
+    init(dashboardVM: DriverDashboardVM) {
+        self.dashboardVM = dashboardVM
+    }
+    
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 18) {
@@ -17,6 +23,16 @@ struct DriverProfileView: View {
             .padding(.horizontal, 18)
             .padding(.top, 18)
             .padding(.bottom, 28)
+        }
+        .sheet(isPresented: $showRideFilters) {
+            DriverRideFiltersView(
+                preferences: $dashboardVM.rideFilterPreferences,
+                premiumPreferenceAvailable: dashboardVM.hasPremiumRideEligibility,
+                onClose: {
+                    showRideFilters = false
+                    dashboardVM.refreshRideFilters()
+                }
+            )
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Profile")
@@ -146,8 +162,18 @@ struct DriverProfileView: View {
     private var profileSections: some View {
         VStack(spacing: 10) {
             DriverProfileLinkRow(title: "Public profile details", subtitle: "Photo, name, and rider-facing profile", systemImage: "person.text.rectangle.fill")
-            DriverProfileLinkRow(title: "Ride preferences", subtitle: "Ride types and work style", systemImage: "slider.horizontal.3")
-            DriverProfileLinkRow(title: "Trust and safety", subtitle: "Reports, safety settings, and support", systemImage: "shield.fill")
+
+            Button {
+                showRideFilters = true
+            } label: {
+                DriverProfileLinkRow(title: "Ride preferences", subtitle: "Ride types and work style", systemImage: "slider.horizontal.3")
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink(destination: DriverSafetyCenterView(vm: dashboardVM)) {
+                DriverProfileLinkRow(title: "Trust and safety", subtitle: "Reports, safety settings, and support", systemImage: "shield.fill")
+            }
+            .buttonStyle(.plain)
         }
         .padding(14)
         .background(profileCardBackground)

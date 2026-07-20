@@ -23,3 +23,6 @@ DerivedData/
 # Logs
 *.log
 npm-debug.log*
+
+.aider*
+aider-venv/
