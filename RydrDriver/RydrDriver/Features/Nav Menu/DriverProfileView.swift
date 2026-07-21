@@ -161,7 +161,10 @@ struct DriverProfileView: View {
 
     private var profileSections: some View {
         VStack(spacing: 10) {
-            DriverProfileLinkRow(title: "Public profile details", subtitle: "Photo, name, and rider-facing profile", systemImage: "person.text.rectangle.fill")
+            NavigationLink(destination: PublicProfileDetailView(dashboardVM: dashboardVM)) {
+                DriverProfileLinkRow(title: "Public profile details", subtitle: "Photo, name, and rider-facing profile", systemImage: "person.text.rectangle.fill")
+            }
+            .buttonStyle(.plain)
 
             Button {
                 showRideFilters = true

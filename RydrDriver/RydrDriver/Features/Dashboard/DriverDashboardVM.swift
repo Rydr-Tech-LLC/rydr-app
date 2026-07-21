@@ -78,6 +78,56 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var accountDeletionMessage: String?
     @Published var isRequestingAccountDeletion: Bool = false
     @Published var driverNotifications: [DriverNotificationItem] = []
+    @Published var publicProfileErrorMessage: String?
+
+    var approvedProfilePhotoURL: URL? {
+        guard profilePhotoReviewStatus == "approved", let urlString = profilePhotoURL else { return nil }
+        return URL(string: urlString)
+    }
+
+    var isDriverVerified: Bool {
+        canGoOnline
+    }
+
+    var isNewPhotoPending: Bool {
+        pendingProfilePhotoURL != nil && profilePhotoReviewStatus == "pending"
+    }
+
+    var riderFacingFirstName: String {
+        driverDisplayName.components(separatedBy: " ").first ?? "Driver"
+    }
+
+    var isNewDriver: Bool {
+        driverRatingCount == 0
+    }
+
+    var approvedRideTypes: [String] {
+        eligibleRideTypes
+    }
+
+    var vehicle: DriverVehicle? {
+        guard let summary = vehicleSummaryText, !summary.isEmpty else { return nil }
+        return DriverVehicle(
+            libraryImageURL: vehicleImageURL.flatMap(URL.init(string:)),
+            summaryText: summary
+        )
+    }
+
+    var compliments: [String] { [] }
+
+    func fetchPublicProfile() {
+        startDashboard()
+    }
+
+    func fetchPublicProfileIfNeeded() {
+        if driverDisplayName == "Rydr Driver" {
+            fetchPublicProfile()
+        }
+    }
+    
+    var errorMessage: String? {
+        publicProfileErrorMessage
+    }
     @Published var unreadNotificationCount: Int = 0
     @Published var notificationErrorMessage: String?
     static let availableRideTypes = RydrRideTierCatalog.orderedRideTypes
