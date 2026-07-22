@@ -2210,12 +2210,18 @@ private struct DashboardLayoutMetrics {
     var contentBottomPadding: CGFloat { compactHeight ? 8 : 12 }
 }
 
+enum MapZoomLevel: CaseIterable {
+    case tight
+    case normal
+    case wide
+}
+
 struct DriverDashboardView: View {
     @EnvironmentObject var session: DriverSessionManager
     @StateObject private var vm = DriverDashboardVM()
     @State private var mapPosition: MapCameraPosition = .region(DriverMapDefaults.pilotRegion)
     @State private var activeSheet: DriverDashboardSheet?
-
+    @State private var mapZoomLevel: MapZoomLevel = .normal
     var body: some View {
         GeometryReader { proxy in
             let metrics = DashboardLayoutMetrics(size: proxy.size)
@@ -2229,7 +2235,7 @@ struct DriverDashboardView: View {
                     pendingRequests: vm.mapRideRequestBlips,
                     recenterButtonBottomPadding: metrics.recenterButtonBottomPadding,
                     workZoneControlBottomPadding: metrics.workZoneControlBottomPadding,
-                    onRecenter: recenterDriverMap
+                    onZoomToggle: toggleMapZoom
                 )
                 .onReceive(vm.$mapRegion) { newRegion in
                     mapPosition = .region(newRegion)
@@ -2426,6 +2432,28 @@ struct DriverDashboardView: View {
         vm.mapRegion = nextRegion
         withAnimation(.easeInOut(duration: 0.35)) {
             mapPosition = .region(nextRegion)
+        }
+    }
+    private func toggleMapZoom() {
+        let all = MapZoomLevel.allCases
+        let currentIndex = all.firstIndex(of: mapZoomLevel) ?? 1
+        let next = all[(currentIndex + 1) % all.count]
+        mapZoomLevel = next
+
+        let center = vm.lastLocation?.coordinate ?? DriverMapDefaults.pilotCoordinate
+        let span: MKCoordinateSpan
+        switch mapZoomLevel {
+        case .tight:
+            span = MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+        case .normal:
+            span = MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
+        case .wide:
+            span = MKCoordinateSpan(latitudeDelta: 0.4, longitudeDelta: 0.4)
+        }
+        let region = MKCoordinateRegion(center: center, span: span)
+        vm.mapRegion = region
+        withAnimation(.easeInOut(duration: 0.35)) {
+            mapPosition = .region(region)
         }
     }
 

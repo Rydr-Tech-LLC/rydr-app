@@ -11,7 +11,7 @@ struct RydrDriverMapView: View {
     let pendingRequests: [DriverRideRadarBlip]
     let recenterButtonBottomPadding: CGFloat
     let workZoneControlBottomPadding: CGFloat
-    let onRecenter: () -> Void
+    let onZoomToggle: () -> Void
 
     /// Coordinate the work zone camera was last fit to. Used to detect meaningful GPS
     /// movement so the work zone keeps following the driver instead of staying pinned
@@ -33,7 +33,7 @@ struct RydrDriverMapView: View {
         )
         .ignoresSafeArea()
         .overlay(alignment: .trailing) {
-            FloatingCircleButton(systemName: "location.magnifyingglass", action: onRecenter)
+            FloatingCircleButton(systemName: "location.magnifyingglass", action: onZoomToggle)
                 .padding(.trailing, 18)
                 .padding(.bottom, recenterButtonBottomPadding)
                 .frame(maxHeight: .infinity, alignment: .bottom)
