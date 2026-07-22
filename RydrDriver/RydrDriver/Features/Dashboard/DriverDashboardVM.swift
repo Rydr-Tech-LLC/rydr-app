@@ -79,7 +79,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var isRequestingAccountDeletion: Bool = false
     @Published var driverNotifications: [DriverNotificationItem] = []
     @Published var publicProfileErrorMessage: String?
-
+    @Published var isLoadingPublicProfile = false
     var approvedProfilePhotoURL: URL? {
         guard profilePhotoReviewStatus == "approved", let urlString = profilePhotoURL else { return nil }
         return URL(string: urlString)
@@ -90,7 +90,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     var isNewPhotoPending: Bool {
-        pendingProfilePhotoURL != nil && profilePhotoReviewStatus == "pending"
+        profilePhotoReviewStatus == "pending" || isUploadingProfilePhoto
     }
 
     var riderFacingFirstName: String {
@@ -116,12 +116,66 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     var compliments: [String] { [] }
 
     func fetchPublicProfile() {
-        startDashboard()
+        guard !isLoadingPublicProfile else { return }
+        isLoadingPublicProfile = true
+        publicProfileErrorMessage = nil
+
+        guard let uid = Auth.auth().currentUser?.uid else {
+            publicProfileErrorMessage = "Sign in to view your public profile."
+            isLoadingPublicProfile = false
+            return
+        }
+
+        db.collection("drivers").document(uid).getDocument { [weak self] snapshot, error in
+            guard let self else { return }
+            if let error {
+                self.publicProfileErrorMessage = "Could not load profile: \(error.localizedDescription)"
+            } else if let data = snapshot?.data() {
+                self.applyProfileData(data)
+            } else {
+                self.publicProfileErrorMessage = "Profile not found."
+            }
+            self.isLoadingPublicProfile = false
+        }
     }
 
     func fetchPublicProfileIfNeeded() {
-        if driverDisplayName == "Rydr Driver" {
-            fetchPublicProfile()
+        guard driverDisplayName == "Rydr Driver" else { return }
+        fetchPublicProfile()
+    }
+
+    private func applyProfileData(_ data: [String: Any]) {
+        if let rating = Self.doubleValue(data["driverRating"] ?? data["rating"] ?? data["averageRating"]) {
+            driverRating = rating
+        }
+        if let count = data["ratingCount"] as? Int {
+            driverRatingCount = count
+        }
+        if let displayName = data["displayName"] as? String, !displayName.isEmpty {
+            driverDisplayName = displayName
+        } else {
+            let first = data["firstName"] as? String ?? ""
+            let last = data["lastName"] as? String ?? ""
+            driverDisplayName = [first, last].filter { !$0.isEmpty }.joined(separator: " ")
+        }
+        if let photoURL = data["profilePhotoURL"] as? String {
+            profilePhotoURL = photoURL
+        }
+        if let pendingURL = data["pendingProfilePhotoURL"] as? String {
+            pendingProfilePhotoURL = pendingURL
+        }
+        if let reviewStatus = data["profilePhotoReviewStatus"] as? String {
+            profilePhotoReviewStatus = reviewStatus
+        }
+        if let vehicle = data["vehicle"] as? [String: Any] {
+            let make = vehicle["make"] as? String ?? ""
+            let model = vehicle["model"] as? String ?? ""
+            let color = vehicle["color"] as? String ?? ""
+            let year = Self.vehicleYearString(vehicle["year"])
+            vehicleSummaryText = "\(color) \(year) \(make) \(model)".trimmingCharacters(in: .whitespaces)
+            vehicleColor = color
+            vehicleImageURL = vehicle["imageURL"] as? String
+            vehiclePlateText = vehicle["licensePlate"] as? String
         }
     }
     
