@@ -17,9 +17,9 @@ export const DEFAULT_TARGET_CAMPUSES = [
   "Morehouse College",
   "Spelman College",
   "Georgia State University",
-  "Georgia State University previously Georgia Perimeter College",
+  "Georgia State University Perimeter College",
   "Clayton State University",
-  "Georgia Tech Institution"
+  "Georgia Institute of Technology"
 ];
 
 export const DEFAULT_PRIORITY_CATEGORIES = [
@@ -44,13 +44,14 @@ export const APPROVED_LEAD_SOURCES = [
   "Official campus student organization directories",
   "Official campus event calendars",
   "Public campus department pages",
+  "Public campus-affiliated organization and student-leader social accounts",
   "Ticketmaster/public event APIs if already approved",
   "Manually entered URLs"
 ];
 
 export const BLOCKED_LEAD_SOURCES = [
-  "Instagram personal profiles",
-  "TikTok profiles",
+  "Unrelated personal social profiles without a clear public campus role",
+  "Private or login-required social profiles and groups",
   "LinkedIn personal profiles",
   "Guessed student emails",
   "Private directories",
@@ -92,6 +93,7 @@ export interface AILeadCandidate {
   linkedInUrl?: string;
   discordUrl?: string;
   facebookUrl?: string;
+  tiktokUrl?: string;
   meetingSchedule?: string;
   tags?: string[];
   estimatedStudentReach?: number;
@@ -137,12 +139,32 @@ export interface DiscoveryResult {
   rejectedSources: Array<{ url: string; reason: string }>;
 }
 
-const BLOCKED_HOSTS = ["tiktok.com"];
 const BLOCKED_PATH_TERMS = ["login", "signin", "sign-in", "auth", "portal", "blackboard", "canvas", "people", "person", "profile"];
 const SEARCH_CACHE = new Map<string, { expiresAt: number; results: SearchResult[] }>();
-const DEFAULT_MAX_SEARCH_STRATEGIES = 8;
+const DEFAULT_MAX_SEARCH_STRATEGIES = 28;
 const DEFAULT_BRAVE_REQUEST_CAP = 100;
 const BRAVE_REQUEST_HARD_CAP = 1000;
+const MAX_RESULTS_FOR_LEAD_EXTRACTION = 80;
+const SOCIAL_HOSTS = ["instagram.com", "facebook.com", "tiktok.com"];
+const CONTACTABLE_CAMPUS_TERMS = [
+  "student organization",
+  "student org",
+  "club",
+  "chapter",
+  "association",
+  "student government",
+  "student media",
+  "campus ambassador",
+  "student ambassador",
+  "student leader",
+  "student leaders",
+  "students",
+  "commuter",
+  "campus life",
+  "university",
+  "college",
+  "official"
+];
 
 export function discoveryFingerprint(lead: Pick<AILeadCandidate, "campusName" | "name" | "sourceUrl">) {
   return crypto
@@ -169,11 +191,11 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
   const warnings = [...searchBatch.warnings, ...manualBatch.warnings];
 
   const rejectedSources: DiscoveryResult["rejectedSources"] = [];
-  const searchResults = uniqueByUrl(rawResults).filter((result) => {
-    const blocked = blockedSourceReason(result.link);
+  const searchResults = rankSearchResults(uniqueByUrl(rawResults).filter((result) => {
+    const blocked = blockedSourceReason(result.link, result);
     if (blocked) rejectedSources.push({ url: result.link, reason: blocked });
     return !blocked;
-  });
+  })).slice(0, MAX_RESULTS_FOR_LEAD_EXTRACTION);
 
   if (!searchResults.length) {
     if (!searchBatch.providerConfigured) {
@@ -220,7 +242,7 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
 }
 
 async function planSearchStrategies(campusNames: string[], categories: string[], discoveryGoal: string, leadIntents: string[]): Promise<string[]> {
-  const fallback = buildFallbackQueries(campusNames, categories);
+  const fallback = buildFallbackQueries(campusNames, categories, discoveryGoal, leadIntents);
   const apiKey = process.env.OPENAI_API_KEY;
   const maxStrategies = maxSearchStrategies();
   if (!apiKey) return fallback;
@@ -237,7 +259,7 @@ async function planSearchStrategies(campusNames: string[], categories: string[],
         {
           role: "system",
           content:
-            "You are the Rydr Campus Agent search planner. Generate public-web search queries for campus recruiting leads. Prefer official campus domains and public event pages. Do not target personal profiles, private groups, login-required pages, or guessed emails. Return JSON only."
+            "You are the Rydr Campus Agent search planner. Generate contact-focused public-web queries, not article-research queries. Cover every selected campus. Prioritize official organization directories plus public Instagram, Facebook, and TikTok accounts for campus organizations, clubs, student government, student media, commuter groups, and people who publicly identify a campus ambassador or student-leader role. Do not target unrelated personal profiles, private groups, login-required pages, scraped personal data, or guessed contact details. Use site: operators for social platforms. Return JSON only."
         },
         {
           role: "user",
@@ -294,7 +316,7 @@ async function planSearchStrategies(campusNames: string[], categories: string[],
   try {
     const parsed = JSON.parse(jsonText) as { queries?: string[] };
     const planned = (parsed.queries ?? []).map((query) => cleanText(query, 240)).filter(Boolean);
-    return planned.length ? uniqueStrings([...planned, ...fallback]).slice(0, maxStrategies) : fallback;
+    return planned.length ? uniqueStrings([...fallback, ...planned]).slice(0, maxStrategies) : fallback;
   } catch {
     return fallback;
   }
@@ -333,31 +355,34 @@ async function runBraveSearches(
   };
 }
 
-function buildFallbackQueries(campusNames: string[], categories: string[]) {
-  const queries: string[] = [];
-  for (const campus of campusNames) {
-    queries.push(`"${campus}" "student organizations"`);
-    queries.push(`"${campus}" "event calendar"`);
-    queries.push(`"${campus}" "student government"`);
-    queries.push(`"${campus}" "commuter student"`);
-    queries.push(`"${campus}" "career fair"`);
-    queries.push(`"${campus}" "hackathon"`);
-    queries.push(`"${campus}" "startup incubator"`);
-    queries.push(`"${campus}" "innovation lab"`);
-    queries.push(`"${campus}" "transportation" "students"`);
-    queries.push(`"${campus}" "student media"`);
-    queries.push(`"${campus}" "residence hall association"`);
-    queries.push(`"${campus}" "ACM"`);
-    queries.push(`"${campus}" "IEEE"`);
-    for (const category of categories) {
-      queries.push(`"${campus}" "${category}" "student organization"`);
-    }
-  }
+export function buildFallbackQueries(
+  campusNames: string[],
+  categories: string[],
+  discoveryGoal = "",
+  leadIntents: string[] = []
+) {
+  const campuses = cleanList(campusNames);
+  const intentTerms = uniqueStrings([
+    ...cleanList(leadIntents),
+    ...categories.slice(0, 4).map((category) => cleanText(category, 80))
+  ]).slice(0, 6);
+  const focus = intentTerms.length
+    ? intentTerms.map((intent) => `"${intent}"`).join(" OR ")
+    : '"student organization" OR club OR ambassador OR commuter';
+  const goalTerms = discoveryGoal.toLowerCase().includes("beta") ? ' OR "beta tester"' : "";
+  const queryGroups: Array<(campus: string) => string> = [
+    (campus) => `"${campus}" ("student organization" OR club OR "student government" OR "student media" OR commuter) (contact OR Instagram OR Facebook OR TikTok) -news -article`,
+    (campus) => `site:instagram.com "${campus}" (${focus}${goalTerms}) -news -article`,
+    (campus) => `site:facebook.com "${campus}" (${focus}${goalTerms}) -news -article`,
+    (campus) => `site:tiktok.com "${campus}" (${focus} OR "student leader" OR "campus life"${goalTerms}) -news -article`
+  ];
+
+  const queries = queryGroups.flatMap((buildQuery) => campuses.map(buildQuery));
   return uniqueStrings(queries).slice(0, maxSearchStrategies());
 }
 
 function maxSearchStrategies() {
-  return clamp(Number(process.env.CAMPUS_DISCOVERY_MAX_STRATEGIES) || DEFAULT_MAX_SEARCH_STRATEGIES, 3, 15);
+  return clamp(Number(process.env.CAMPUS_DISCOVERY_MAX_STRATEGIES) || DEFAULT_MAX_SEARCH_STRATEGIES, 4, 40);
 }
 
 function braveRequestCap() {
@@ -621,7 +646,7 @@ async function extractLeadsWithAI(input: {
         {
           role: "system",
           content:
-            "You are the Rydr AI Campus Agent. Extract public campus recruiting leads for CashRydr. Use only official public campus pages, official student organization directories, public campus event calendars, public department pages, Ticketmaster/public event API results, or manually entered URLs. Do not use personal student profiles, guessed emails, private directories, private Discord servers, private Facebook groups, login pages, TikTok profiles, personal Instagram profiles, or personal LinkedIn profiles as lead sources. Social links may be stored only when they appear on an approved public source page. Return concise JSON only."
+            "You are the Rydr AI Campus Agent. Extract contactable public campus recruiting leads for CashRydr rather than articles about campus topics. Prefer campus organizations, clubs, chapters, student government, student media, commuter groups, events, departments, and people who publicly identify a campus ambassador or student-leader role. A public Instagram, Facebook, or TikTok account may be a lead source only when the result title or snippet clearly establishes that campus affiliation and recruiting relevance. Never infer private facts, collect unrelated personal profiles, guess emails, or use private directories, private groups, login pages, or personal LinkedIn profiles. Store only public contact channels present in the supplied search results. Return concise JSON only."
         },
         {
           role: "user",
@@ -667,6 +692,7 @@ async function extractLeadsWithAI(input: {
                     linkedInUrl: { type: "string" },
                     discordUrl: { type: "string" },
                     facebookUrl: { type: "string" },
+                    tiktokUrl: { type: "string" },
                     meetingSchedule: { type: "string" },
                     tags: { type: "array", maxItems: 12, items: { type: "string" } },
                     estimatedStudentReach: { type: "number" },
@@ -715,6 +741,7 @@ async function extractLeadsWithAI(input: {
                     "linkedInUrl",
                     "discordUrl",
                     "facebookUrl",
+                    "tiktokUrl",
                     "meetingSchedule",
                     "tags",
                     "estimatedStudentReach",
@@ -762,10 +789,10 @@ async function extractLeadsWithAI(input: {
 
 function normalizeLead(lead: AILeadCandidate, searchResults: SearchResult[]): AILeadCandidate | null {
   const sourceUrl = cleanUrl(lead.sourceUrl);
-  const blocked = blockedSourceReason(sourceUrl);
+  const source = searchResults.find((result) => result.link === sourceUrl) ?? searchResults.find((result) => sourceUrl.includes(result.link));
+  const blocked = blockedSourceReason(sourceUrl, source);
   if (!sourceUrl || blocked) return null;
 
-  const source = searchResults.find((result) => result.link === sourceUrl) ?? searchResults.find((result) => sourceUrl.includes(result.link));
   const name = cleanText(lead.name, 180);
   const campusName = cleanText(lead.campusName, 180);
   const category = cleanText(lead.category, 120);
@@ -786,6 +813,7 @@ function normalizeLead(lead: AILeadCandidate, searchResults: SearchResult[]): AI
     linkedInUrl: allowedOrgSocialUrl(lead.linkedInUrl, "linkedin.com"),
     discordUrl: cleanUrl(lead.discordUrl),
     facebookUrl: allowedOrgSocialUrl(lead.facebookUrl, "facebook.com"),
+    tiktokUrl: allowedOrgSocialUrl(lead.tiktokUrl, "tiktok.com"),
     meetingSchedule: cleanText(lead.meetingSchedule, 300),
     tags: cleanStringArray(lead.tags, 12),
     estimatedStudentReach: clamp(Math.round(Number(lead.estimatedStudentReach) || 0), 0, 100000),
@@ -828,10 +856,11 @@ function ruleBasedCandidates(searchResults: SearchResult[], campuses: string[], 
       sourceSnippet: result.snippet,
       description: result.snippet,
       website: result.link,
-      instagramUrl: "",
+      instagramUrl: socialUrlForHost(result.link, "instagram.com"),
       linkedInUrl: "",
       discordUrl: "",
-      facebookUrl: "",
+      facebookUrl: socialUrlForHost(result.link, "facebook.com"),
+      tiktokUrl: socialUrlForHost(result.link, "tiktok.com"),
       meetingSchedule: "",
       tags: [category],
       estimatedStudentReach: 0,
@@ -863,16 +892,13 @@ function inferCategory(text: string) {
   return "general campus outreach";
 }
 
-function blockedSourceReason(url: string) {
+function blockedSourceReason(url: string, result?: SearchResult) {
   if (!url) return "Missing source URL.";
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
-    if (BLOCKED_HOSTS.some((blockedHost) => host === blockedHost || host.endsWith(`.${blockedHost}`))) {
-      return "Blocked social or personal-profile source.";
-    }
-    if ((host === "instagram.com" || host.endsWith(".instagram.com")) && parsed.pathname.split("/").filter(Boolean).length <= 1) {
-      return "Blocked likely personal Instagram profile source.";
+    if (isSocialHost(host) && !isContactableCampusSocialResult(result)) {
+      return "Blocked social profile without clear public campus organization or student-leader context.";
     }
     if ((host === "linkedin.com" || host.endsWith(".linkedin.com")) && !parsed.pathname.toLowerCase().startsWith("/company/")) {
       return "Blocked personal LinkedIn profile source.";
@@ -885,6 +911,40 @@ function blockedSourceReason(url: string) {
   } catch {
     return "Invalid source URL.";
   }
+}
+
+function isContactableCampusSocialResult(result?: SearchResult) {
+  if (!result) return false;
+  if (result.query === "manual_url") return true;
+  const text = `${result.title} ${result.snippet}`.toLowerCase();
+  return CONTACTABLE_CAMPUS_TERMS.some((term) => text.includes(term));
+}
+
+function isSocialHost(host: string) {
+  return SOCIAL_HOSTS.some((socialHost) => host === socialHost || host.endsWith(`.${socialHost}`));
+}
+
+function rankSearchResults(results: SearchResult[]) {
+  return results
+    .map((result, index) => ({ result, index, score: contactabilityScore(result) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map(({ result }) => result);
+}
+
+function contactabilityScore(result: SearchResult) {
+  const text = `${result.title} ${result.snippet} ${result.query}`.toLowerCase();
+  let score = 0;
+  try {
+    const host = new URL(result.link).hostname.replace(/^www\./, "").toLowerCase();
+    if (isSocialHost(host)) score += 45;
+    if (host.endsWith(".edu")) score += 25;
+  } catch {
+    return -100;
+  }
+  if (CONTACTABLE_CAMPUS_TERMS.some((term) => text.includes(term))) score += 25;
+  if (/(contact|email|dm|instagram|facebook|tiktok|join|officers|leadership)/.test(text)) score += 15;
+  if (/(news|article|press release|opinion|research paper)/.test(text)) score -= 30;
+  return score;
 }
 
 function uniqueByUrl(results: SearchResult[]) {
@@ -965,9 +1025,14 @@ function allowedOrgSocialUrl(value: unknown, hostName: string) {
   }
 }
 
+function socialUrlForHost(value: unknown, hostName: string) {
+  return allowedOrgSocialUrl(value, hostName);
+}
+
 function confidenceFromSource(sourceUrl: string, lead: AILeadCandidate) {
   const text = `${sourceUrl} ${lead.sourceType}`.toLowerCase();
   if (text.includes(".edu")) return 80;
+  if (SOCIAL_HOSTS.some((host) => text.includes(host))) return 65;
   if (text.includes("ticketmaster") || text.includes("eventbrite")) return 65;
   if (lead.publicEmail || lead.meetingSchedule) return 70;
   return 55;

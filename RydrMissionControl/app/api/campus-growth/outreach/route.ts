@@ -14,7 +14,7 @@ import { adminDb } from "@/lib/firebaseAdmin";
 import { getAdminSession } from "@/lib/session";
 
 const TARGET_TYPES = ["organization", "event", "campus", "manual"] as const;
-const CHANNELS = ["email", "instagram", "linkedin", "discord", "event_invitation", "internship_invitation", "ambassador_invitation", "other"] as const;
+const CHANNELS = ["email", "instagram", "facebook", "tiktok", "linkedin", "discord", "event_invitation", "internship_invitation", "ambassador_invitation", "other"] as const;
 
 export async function GET() {
   const session = await getAdminSession();

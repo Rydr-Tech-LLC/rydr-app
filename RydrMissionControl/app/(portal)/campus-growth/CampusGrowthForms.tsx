@@ -68,6 +68,7 @@ export function OrganizationForm({ campuses }: { campuses: CampusOption[] }) {
         <Input name="linkedInUrl" label="LinkedIn org URL" />
         <Input name="discordUrl" label="Discord invite URL" />
         <Input name="facebookUrl" label="Facebook page URL" />
+        <Input name="tiktokUrl" label="TikTok public URL" />
         <Input name="meetingSchedule" label="Meeting schedule" />
         <Input name="estimatedStudentReach" label="Estimated reach" type="number" min={0} />
         <Input name="tags" label="Tags" placeholder="hackathon, cs, ambassador" />
@@ -192,7 +193,7 @@ export function OutreachDraftForm({ campuses, organizations }: { campuses: Campu
         <Select
           name="channel"
           label="Channel"
-          options={["email", "instagram", "linkedin", "discord", "event_invitation", "internship_invitation", "ambassador_invitation", "other"]}
+          options={["email", "instagram", "facebook", "tiktok", "linkedin", "discord", "event_invitation", "internship_invitation", "ambassador_invitation", "other"]}
           defaultValue="email"
         />
         <Input name="subject" label="Subject" required className="md:col-span-2" />

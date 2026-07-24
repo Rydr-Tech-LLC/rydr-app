@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
     linkedInUrl: cleanUrl(body.linkedInUrl),
     discordUrl: cleanUrl(body.discordUrl),
     facebookUrl: cleanUrl(body.facebookUrl),
+    tiktokUrl: cleanUrl(body.tiktokUrl),
     meetingSchedule: cleanText(body.meetingSchedule, 300),
     description: cleanLongText(body.description, 1000),
     tags: splitTags(body.tags),

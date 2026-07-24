@@ -58,6 +58,7 @@ export interface StudentOrganization {
   linkedInUrl?: string;
   discordUrl?: string;
   facebookUrl?: string;
+  tiktokUrl?: string;
   meetingSchedule?: string;
   description?: string;
   tags?: string[];
@@ -130,7 +131,7 @@ export interface OutreachDraft {
   bccEmail?: string;
   recipientName?: string;
   recipientEmail?: string;
-  channel?: "email" | "instagram" | "linkedin" | "discord" | "event_invitation" | "internship_invitation" | "ambassador_invitation" | "other";
+  channel?: "email" | "instagram" | "facebook" | "tiktok" | "linkedin" | "discord" | "event_invitation" | "internship_invitation" | "ambassador_invitation" | "other";
   subject?: string;
   body?: string;
   status?: OutreachStatus;
@@ -191,6 +192,7 @@ export interface DiscoveredCampusLead {
   linkedInUrl?: string;
   discordUrl?: string;
   facebookUrl?: string;
+  tiktokUrl?: string;
   meetingSchedule?: string;
   tags?: string[];
   estimatedStudentReach?: number;

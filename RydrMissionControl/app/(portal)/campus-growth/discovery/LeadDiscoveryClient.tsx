@@ -8,6 +8,8 @@ const LEAD_INTENTS = [
   { label: "Commuter riders", value: "commuter riders" },
   { label: "Interns", value: "intern recruiting" },
   { label: "Ambassadors", value: "campus ambassadors" },
+  { label: "Student leaders", value: "public campus student leaders" },
+  { label: "Social accounts", value: "public campus-affiliated social accounts" },
   { label: "Events", value: "campus events" }
 ];
 
@@ -15,6 +17,7 @@ interface DiscoveryRunResponse {
   savedCount?: number;
   searchResultCount?: number;
   searchStrategyCount?: number;
+  searchStrategies?: string[];
   searchProviderConfigured?: boolean;
   searchErrors?: Array<{ query?: string; status?: number; error?: string }>;
   warnings?: string[];
@@ -43,7 +46,7 @@ export function LeadDiscoveryPanel({ campuses, categories, pendingCount }: { cam
   const [message, setMessage] = useState<string | null>(null);
   const [lastRun, setLastRun] = useState<DiscoveryRunResponse | null>(null);
   const [searchHealth, setSearchHealth] = useState<SearchHealthResponse | null>(null);
-  const [goal, setGoal] = useState("Find campus organizations that can help recruit commuter riders, student ambassadors, interns, or beta testers.");
+  const [goal, setGoal] = useState("Find public campus organizations, student leaders, ambassadors, and social accounts that can be contacted about commuter riders, internships, and beta testing.");
   const [selectedIntents, setSelectedIntents] = useState<string[]>(LEAD_INTENTS.map((intent) => intent.value));
   const [selectedCampuses, setSelectedCampuses] = useState<string[]>(campuses);
   const [selectedCategories, setSelectedCategories] = useState<string[]>(categories);
@@ -306,6 +309,18 @@ export function LeadDiscoveryPanel({ campuses, categories, pendingCount }: { cam
             </div>
           ) : null}
           {message && <p className="mt-4 rounded-md bg-grouped px-3 py-2 text-xs leading-5 text-muted">{message}</p>}
+          {lastRun?.searchStrategies?.length ? (
+            <details className="mt-3 rounded-md border border-line bg-white px-3 py-3 text-xs text-muted">
+              <summary className="cursor-pointer font-semibold text-ink">
+                Planned searches ({lastRun.searchStrategies.length})
+              </summary>
+              <ol className="mt-2 list-decimal space-y-1 pl-4">
+                {lastRun.searchStrategies.map((strategy) => (
+                  <li key={strategy} className="break-words">{strategy}</li>
+                ))}
+              </ol>
+            </details>
+          ) : null}
           {lastRun && (lastRun.warnings?.length || lastRun.searchErrors?.length || (lastRun.searchResultCount ?? 0) === 0) ? (
             <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900">
               <p className="font-semibold">Search diagnostics</p>
