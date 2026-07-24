@@ -11,12 +11,12 @@ import {
   type DiscoveredCampusLead
 } from "@/lib/campusGrowth";
 import { adminDb } from "@/lib/firebaseAdmin";
-import { getAdminSession } from "@/lib/session";
+import { getCampusGrowthSession } from "@/lib/session";
 
 const ACTIONS = ["approve", "reject", "reset"] as const;
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getAdminSession();
+  const session = await getCampusGrowthSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const body = await request.json().catch(() => null);

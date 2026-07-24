@@ -4,13 +4,13 @@ import { discoverCampusLeads, discoveryFingerprint } from "@/lib/ai/campusGrowth
 import { writeAuditLog } from "@/lib/auditLog";
 import { campusCollections, cleanText, listCampuses } from "@/lib/campusGrowth";
 import { adminDb } from "@/lib/firebaseAdmin";
-import { getAdminSession } from "@/lib/session";
+import { getCampusGrowthSession } from "@/lib/session";
 
 const DISCOVERY_RATE_LIMIT = new Map<string, number[]>();
 const MAX_DISCOVERY_RUNS_PER_HOUR = 10;
 
 export async function POST(request: NextRequest) {
-  const session = await getAdminSession();
+  const session = await getCampusGrowthSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   if (!allowDiscoveryRun(session.uid)) {
     return NextResponse.json({ error: "Lead discovery rate limit reached. Try again later." }, { status: 429 });

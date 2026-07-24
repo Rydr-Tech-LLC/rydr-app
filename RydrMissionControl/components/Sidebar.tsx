@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { useEffect, useState } from "react";
 import { clientAuth } from "@/lib/firebaseClient";
+import type { MissionControlRole } from "@/lib/missionControlAccess";
 
 const CAMPUS_GROWTH_ITEMS = [
   { href: "/campus-growth/discovery", label: "AI Discovery" },
@@ -34,10 +35,13 @@ const NAV_ITEMS = [
   { href: "/settings", label: "Settings" }
 ];
 
-export default function Sidebar({ email }: { email: string | null }) {
+export default function Sidebar({ email, role }: { email: string | null; role: MissionControlRole }) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const navItems = role === "marketing"
+    ? NAV_ITEMS.filter((item) => item.href === "/campus-growth" || item.href === "/settings")
+    : NAV_ITEMS;
 
   useEffect(() => {
     setMobileOpen(false);
@@ -77,7 +81,7 @@ export default function Sidebar({ email }: { email: string | null }) {
       </div>
 
       <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pb-3">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const active = pathname === item.href || (item.href !== "/dashboard" && pathname?.startsWith(item.href));
           return (
             <div key={item.href}>
@@ -114,6 +118,7 @@ export default function Sidebar({ email }: { email: string | null }) {
 
       <div className="border-t border-line px-3 py-3">
         <p className="truncate px-2 text-[11px] text-muted">{email}</p>
+        <p className="px-2 pt-0.5 text-[10px] font-medium uppercase text-muted">{role}</p>
         <button
           onClick={handleSignOut}
           className="mt-1 w-full rounded-md px-2 py-1.5 text-left text-xs font-medium text-muted hover:bg-grouped hover:text-ink"

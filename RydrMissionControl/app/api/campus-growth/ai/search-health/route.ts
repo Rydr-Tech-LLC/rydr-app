@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { getAdminSession } from "@/lib/session";
+import { getCampusGrowthSession } from "@/lib/session";
 
 export async function GET() {
-  const session = await getAdminSession();
+  const session = await getCampusGrowthSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const apiKey = process.env.BRAVE_SEARCH_API_KEY || process.env.BRAVE_API_KEY;

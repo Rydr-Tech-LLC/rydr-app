@@ -11,13 +11,13 @@ import {
   serverTimestamps
 } from "@/lib/campusGrowth";
 import { adminDb } from "@/lib/firebaseAdmin";
-import { getAdminSession } from "@/lib/session";
+import { getCampusGrowthSession } from "@/lib/session";
 
 const TARGET_TYPES = ["organization", "event", "campus", "manual"] as const;
 const CHANNELS = ["email", "instagram", "facebook", "tiktok", "linkedin", "discord", "event_invitation", "internship_invitation", "ambassador_invitation", "other"] as const;
 
 export async function GET() {
-  const session = await getAdminSession();
+  const session = await getCampusGrowthSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const drafts = await listOutreachDrafts();
@@ -25,7 +25,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getAdminSession();
+  const session = await getCampusGrowthSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const body = await request.json().catch(() => null);

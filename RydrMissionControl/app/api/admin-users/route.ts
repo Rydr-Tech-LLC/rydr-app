@@ -3,8 +3,12 @@ import { FieldValue } from "firebase-admin/firestore";
 import { writeAuditLog } from "@/lib/auditLog";
 import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
 import { getAdminSession } from "@/lib/session";
+import {
+  isMissionControlRole,
+  MISSION_CONTROL_DOMAIN,
+  type MissionControlRole
+} from "@/lib/missionControlAccess";
 
-const ADMIN_DOMAIN = "rydr-go.com";
 const ADMIN_COLLECTION = "missionControlAdmins";
 
 type AdminAction = "grant" | "revoke";
@@ -28,8 +32,9 @@ export async function POST(request: NextRequest) {
   const action = normalizeAction(body?.action);
   const temporaryPassword = typeof body?.temporaryPassword === "string" ? body.temporaryPassword : "";
   const displayName = cleanName(body?.displayName);
+  const requestedRole = normalizeRole(body?.role);
 
-  if (!email) return NextResponse.json({ error: "A valid @rydr-go.com email is required." }, { status: 400 });
+  if (!email) return NextResponse.json({ error: `A valid @${MISSION_CONTROL_DOMAIN} email is required.` }, { status: 400 });
   if (!action) return NextResponse.json({ error: "Action must be create, grant, resetPassword, or revoke." }, { status: 400 });
   if (action === "revoke" && email === session.email?.toLowerCase()) {
     return NextResponse.json({ error: "You cannot revoke your own Mission Control access." }, { status: 400 });
@@ -52,17 +57,18 @@ export async function POST(request: NextRequest) {
       const code = errorCode(error);
       if (code === "auth/email-already-exists") {
         return NextResponse.json(
-          { error: "A Firebase Auth user already exists for this email. Use Grant Admin or Set Temp Password instead." },
+          { error: "A Firebase Auth user already exists for this email. Use Grant Existing User or Set Temp Password instead." },
           { status: 409 }
         );
       }
       return NextResponse.json({ error: "Unable to create Firebase Auth user." }, { status: 500 });
     }
 
-    await adminAuth.setCustomUserClaims(user.uid, { role: "admin" });
+    await adminAuth.setCustomUserClaims(user.uid, { role: requestedRole });
     await upsertAdminRecord({
       uid: user.uid,
       email,
+      role: requestedRole,
       status: "active",
       session,
       displayName,
@@ -73,16 +79,17 @@ export async function POST(request: NextRequest) {
     await writeAuditLog({
       adminUid: session.uid,
       adminEmail: session.email ?? undefined,
-      action: "Mission Control Admin Login Created",
-      targetType: "missionControlAdmin",
+      action: "Mission Control User Login Created",
+      targetType: "missionControlUser",
       targetId: user.uid,
-      metadata: { email, action, createdLogin: true, passwordStatus: "temporary" }
+      metadata: { email, action, role: requestedRole, createdLogin: true, passwordStatus: "temporary" }
     });
 
     return NextResponse.json({
       ok: true,
       uid: user.uid,
       email,
+      role: requestedRole,
       status: "active",
       createdLogin: true,
       passwordStatus: "temporary"
@@ -96,7 +103,7 @@ export async function POST(request: NextRequest) {
     const code = errorCode(error);
     if (code === "auth/user-not-found") {
       return NextResponse.json(
-        { error: "No Firebase Auth user exists for that email yet. Use Create Admin Login to create the account and set a temporary password." },
+        { error: "No Firebase Auth user exists for that email yet. Use Create Staff Login to create the account and set a temporary password." },
         { status: 404 }
       );
     }
@@ -107,17 +114,23 @@ export async function POST(request: NextRequest) {
     const passwordError = validateTemporaryPassword(temporaryPassword);
     if (passwordError) return NextResponse.json({ error: passwordError }, { status: 400 });
 
+    const existingClaims = user.customClaims ?? {};
+    const currentRole = roleFromClaims(existingClaims);
+    if (!currentRole) {
+      return NextResponse.json({ error: "Grant a Mission Control role before resetting this user's password." }, { status: 409 });
+    }
+
     await adminAuth.updateUser(user.uid, {
       password: temporaryPassword,
       emailVerified: true,
       disabled: false
     });
 
-    const existingClaims = user.customClaims ?? {};
-    await adminAuth.setCustomUserClaims(user.uid, { ...existingClaims, role: "admin" });
+    await adminAuth.setCustomUserClaims(user.uid, { ...existingClaims, role: currentRole });
     await upsertAdminRecord({
       uid: user.uid,
       email,
+      role: currentRole,
       status: "active",
       session,
       displayName: user.displayName ?? "",
@@ -127,16 +140,17 @@ export async function POST(request: NextRequest) {
     await writeAuditLog({
       adminUid: session.uid,
       adminEmail: session.email ?? undefined,
-      action: "Mission Control Admin Temporary Password Set",
-      targetType: "missionControlAdmin",
+      action: "Mission Control User Temporary Password Set",
+      targetType: "missionControlUser",
       targetId: user.uid,
-      metadata: { email, action, passwordStatus: "temporary" }
+      metadata: { email, action, role: currentRole, passwordStatus: "temporary" }
     });
 
     return NextResponse.json({
       ok: true,
       uid: user.uid,
       email,
+      role: currentRole,
       status: "active",
       passwordStatus: "temporary"
     });
@@ -145,7 +159,8 @@ export async function POST(request: NextRequest) {
   const existingClaims = user.customClaims ?? {};
   const nextClaims = { ...existingClaims };
   if (action === "grant") {
-    nextClaims.role = "admin";
+    nextClaims.role = requestedRole;
+    if (requestedRole === "marketing") delete nextClaims.admin;
   } else {
     delete nextClaims.role;
     delete nextClaims.admin;
@@ -158,6 +173,7 @@ export async function POST(request: NextRequest) {
     await upsertAdminRecord({
       uid: user.uid,
       email,
+      role: requestedRole,
       status: "active",
       session,
       displayName: user.displayName ?? "",
@@ -168,7 +184,7 @@ export async function POST(request: NextRequest) {
       {
         uid: user.uid,
         email,
-        role: "admin",
+        role: roleFromClaims(existingClaims) ?? "admin",
         status: "revoked",
         revokedAt: FieldValue.serverTimestamp(),
         revokedBy: session.uid,
@@ -182,16 +198,17 @@ export async function POST(request: NextRequest) {
   await writeAuditLog({
     adminUid: session.uid,
     adminEmail: session.email ?? undefined,
-    action: action === "grant" ? "Mission Control Admin Granted" : "Mission Control Admin Revoked",
-    targetType: "missionControlAdmin",
+    action: action === "grant" ? "Mission Control User Granted" : "Mission Control User Revoked",
+    targetType: "missionControlUser",
     targetId: user.uid,
-    metadata: { email, action }
+    metadata: { email, action, role: action === "grant" ? requestedRole : roleFromClaims(existingClaims) }
   });
 
   return NextResponse.json({
     ok: true,
     uid: user.uid,
     email,
+    role: action === "grant" ? requestedRole : roleFromClaims(existingClaims),
     status: action === "grant" ? "active" : "revoked"
   });
 }
@@ -200,7 +217,16 @@ function normalizeEmail(value: unknown): string {
   if (typeof value !== "string") return "";
   const email = value.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "";
-  return email.endsWith(`@${ADMIN_DOMAIN}`) ? email : "";
+  return email.endsWith(`@${MISSION_CONTROL_DOMAIN}`) ? email : "";
+}
+
+function normalizeRole(value: unknown): MissionControlRole {
+  return isMissionControlRole(value) ? value : "marketing";
+}
+
+function roleFromClaims(claims: Record<string, unknown>): MissionControlRole | null {
+  if (isMissionControlRole(claims.role)) return claims.role;
+  return claims.admin === true ? "admin" : null;
 }
 
 function normalizeAction(value: unknown): AdminCreateAction | null {
@@ -229,6 +255,7 @@ function validateTemporaryPassword(password: string) {
 async function upsertAdminRecord(input: {
   uid: string;
   email: string;
+  role: MissionControlRole;
   status: "active";
   session: Awaited<ReturnType<typeof getAdminSession>> & {};
   displayName?: string;
@@ -239,7 +266,7 @@ async function upsertAdminRecord(input: {
     uid: input.uid,
     email: input.email,
     displayName: input.displayName ?? "",
-    role: "admin",
+    role: input.role,
     status: input.status,
     passwordStatus: input.passwordStatus ?? FieldValue.delete(),
     temporaryPasswordSetAt: input.passwordStatus === "temporary" ? FieldValue.serverTimestamp() : FieldValue.delete(),

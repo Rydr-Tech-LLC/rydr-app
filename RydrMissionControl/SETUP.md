@@ -7,20 +7,24 @@ RydrPlayground.
 
 ## 1. How authorization actually works
 
-There is no role field stored anywhere a browser can edit. Access is gated by
-a Firebase Auth **custom claim**, `role: "admin"`, which only a server with
-your Firebase Admin service account can set. The flow:
+There is no trusted role field stored anywhere a browser can edit. Access is
+gated by a Firebase Auth **custom claim**, which only a server with your
+Firebase Admin service account can set:
+
+- `role: "admin"` grants full Mission Control access.
+- `role: "marketing"` grants access only to Campus Growth, its modules, and
+  personal Settings for changing the user's own password.
 
 1. Staff member signs in with email/password (Firebase Auth) on `/login`.
 2. The client sends the resulting ID token to `POST /api/session`.
-3. That route verifies the token with the Admin SDK, checks `role === "admin"`,
-   and — only if true — issues an httpOnly session cookie.
-4. Every page under `app/(portal)/` and every privileged API route
+3. That route verifies the token, approved role, and `@rydr-go.com` email
+   domain before issuing an httpOnly session cookie.
+4. Portal pages and every privileged API route
    (`/api/drivers/[uid]/decision`, `/api/riders/[uid]/status`,
-   `/api/reports/[id]/action`) re-verifies that cookie server-side via
-   `getAdminSession()` (`lib/session.ts`) before doing anything. The browser
-   is never trusted, including for which buttons are visible — the same
-   checks happen even if someone hits the API route directly.
+   `/api/reports/[id]/action`) re-verify that cookie server-side. Admin-only
+   routes call `getAdminSession()`. Campus Growth routes call
+   `getCampusGrowthSession()`, which accepts Admin or Marketing. The browser
+   is never trusted, including when someone enters a URL directly.
 5. All backend-owned Firestore fields (`driverApprovalStatus`, `approvedAt`,
    `approvedBy`, `isApproved`, etc.) are written only by the Admin SDK
    (`lib/firebaseAdmin.ts`), which bypasses Firestore security rules
@@ -50,6 +54,14 @@ Copy `.env.example` to `.env.local` and fill in:
 
 ## 3. Granting/revoking staff access
 
+Use **Settings → Mission Control Users** to create a `@rydr-go.com` login or
+grant an existing Firebase Auth user either Admin or Marketing access. This
+is the preferred workflow because it records the selected role and audit
+information. A newly created user receives the temporary password entered by
+the admin, then can replace it under their own Settings after signing in.
+
+The legacy command below grants full Admin access only:
+
 ```bash
 npm install
 npm run set-admin -- someone@rydr-go.com          # grant
@@ -69,7 +81,8 @@ npm install
 npm run dev
 ```
 
-Visit `http://localhost:3000`, sign in with an admin-claimed account.
+Visit `http://localhost:3000`, then sign in with an approved Admin or
+Marketing account.
 
 ## 5. Deploy to Vercel under rydr-go.com
 

@@ -33,7 +33,8 @@ export default function LoginForm() {
         return;
       }
 
-      router.push("/dashboard");
+      const body = await response.json() as { role?: string };
+      router.push(body.role === "marketing" ? "/campus-growth" : "/dashboard");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in.");
@@ -75,7 +76,7 @@ export default function LoginForm() {
         {loading ? "Signing in…" : "Sign in"}
       </button>
       <p className="pt-1 text-center text-[11px] text-white/30">
-        Access is restricted to accounts with admin role.
+        Access is restricted to approved Rydr staff accounts.
       </p>
     </form>
   );

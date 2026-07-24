@@ -10,13 +10,13 @@ import {
   type OutreachDraft
 } from "@/lib/campusGrowth";
 import { adminDb } from "@/lib/firebaseAdmin";
-import { getAdminSession } from "@/lib/session";
+import { getCampusGrowthSession } from "@/lib/session";
 import { notificationService } from "@/src/services/notifications/NotificationService";
 
 const ACTIONS = ["approve", "approve_and_send", "deny", "mark_sent", "mark_replied", "reset"] as const;
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getAdminSession();
+  const session = await getCampusGrowthSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const body = await request.json().catch(() => null);

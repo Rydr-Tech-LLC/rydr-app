@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth } from "@/lib/firebaseAdmin";
-import { SESSION_COOKIE } from "@/lib/session";
+import { isMissionControlRole, isStaffEmail, SESSION_COOKIE } from "@/lib/session";
 
 const FIVE_DAYS_MS = 60 * 60 * 24 * 5 * 1000;
 
 // Exchanges a freshly-minted Firebase ID token (from client-side
 // signInWithEmailAndPassword) for an httpOnly session cookie, after
-// confirming the user actually carries the `role: admin` custom claim.
+// confirming the user carries an approved Mission Control role.
 // This is the only place that claim is trusted from a token the client
 // handed us — every other check re-verifies the cookie server-side.
 export async function POST(request: NextRequest) {
@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
   }
 
   const role = (decoded.role as string | undefined) ?? (decoded.admin ? "admin" : null);
-  if (role !== "admin") {
+  if (!isMissionControlRole(role) || !isStaffEmail(decoded.email)) {
     return NextResponse.json(
       { error: "This account does not have Mission Control access." },
       { status: 403 }
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
 
   const sessionCookie = await adminAuth.createSessionCookie(idToken, { expiresIn: FIVE_DAYS_MS });
 
-  const response = NextResponse.json({ ok: true });
+  const response = NextResponse.json({ ok: true, role });
   response.cookies.set(SESSION_COOKIE, sessionCookie, {
     maxAge: FIVE_DAYS_MS / 1000,
     httpOnly: true,

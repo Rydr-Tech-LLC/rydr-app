@@ -3,12 +3,14 @@
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import StatusPill from "@/components/StatusPill";
+import type { MissionControlRole } from "@/lib/missionControlAccess";
 
 interface AdminUserRecord {
   id: string;
   uid?: string;
   email?: string;
   displayName?: string;
+  role?: MissionControlRole;
   status?: string;
   passwordStatus?: string;
   createdLogin?: boolean;
@@ -21,24 +23,26 @@ export default function AdminUsersPanel({ admins }: { admins: AdminUserRecord[] 
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [createRole, setCreateRole] = useState<MissionControlRole>("marketing");
   const [grantEmail, setGrantEmail] = useState("");
+  const [grantRole, setGrantRole] = useState<MissionControlRole>("marketing");
   const [busy, setBusy] = useState<"create" | "grant" | "resetPassword" | "revoke" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   async function submitCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await run("create", email, { displayName, temporaryPassword });
+    await run("create", email, { displayName, temporaryPassword, role: createRole });
   }
 
   async function submitGrant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await run("grant", grantEmail);
+    await run("grant", grantEmail, { role: grantRole });
   }
 
   async function run(
     action: "create" | "grant" | "resetPassword" | "revoke",
     targetEmail: string,
-    options: { displayName?: string; temporaryPassword?: string } = {}
+    options: { displayName?: string; temporaryPassword?: string; role?: MissionControlRole } = {}
   ) {
     setBusy(action);
     setMessage(null);
@@ -51,14 +55,14 @@ export default function AdminUsersPanel({ admins }: { admins: AdminUserRecord[] 
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? "Unable to update admin access.");
       if (action === "create") {
-        setMessage(`Created admin login for ${body.email}. Share the temporary password through a secure channel.`);
+        setMessage(`Created ${roleLabel(body.role)} login for ${body.email}. Share the temporary password through a secure channel.`);
         setEmail("");
         setDisplayName("");
         setTemporaryPassword("");
       } else if (action === "resetPassword") {
         setMessage(`Temporary password updated for ${body.email}. Share it through a secure channel.`);
       } else if (action === "grant") {
-        setMessage(`Granted Mission Control access to ${body.email}. They must sign out and back in.`);
+        setMessage(`Granted ${roleLabel(body.role)} access to ${body.email}. They must sign out and back in.`);
         setGrantEmail("");
       } else {
         setMessage(`Revoked Mission Control access for ${body.email}.`);
@@ -88,9 +92,9 @@ export default function AdminUsersPanel({ admins }: { admins: AdminUserRecord[] 
     <div className="rounded-lg border border-line bg-white p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-sm font-semibold text-ink">Mission Control Admins</h2>
+          <h2 className="text-sm font-semibold text-ink">Mission Control Users</h2>
           <p className="mt-1 text-sm text-muted">
-            Create or grant admin access for <code className="rounded bg-grouped px-1">@rydr-go.com</code> staff accounts. Temporary passwords are never stored.
+            Create Admin or Marketing access for <code className="rounded bg-grouped px-1">@rydr-go.com</code> staff accounts. Marketing can access only Campus Growth. Temporary passwords are never stored.
           </p>
         </div>
       </div>
@@ -99,8 +103,8 @@ export default function AdminUsersPanel({ admins }: { admins: AdminUserRecord[] 
         <form onSubmit={submitCreate} className="rounded-md border border-line bg-grouped/40 p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-ink">Create admin login</p>
-              <p className="mt-1 text-xs text-muted">Creates the Firebase Auth account, verifies the email domain, and applies the admin role.</p>
+              <p className="text-sm font-semibold text-ink">Create staff login</p>
+              <p className="mt-1 text-xs text-muted">Creates the Firebase Auth account, verifies the email domain, and applies the selected role.</p>
             </div>
             <StatusPill status="active" label="Secure" />
           </div>
@@ -126,6 +130,17 @@ export default function AdminUsersPanel({ admins }: { admins: AdminUserRecord[] 
                 className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2 text-sm font-normal text-ink outline-none focus:border-ink"
               />
             </label>
+            <label className="text-xs font-semibold text-muted md:col-span-2">
+              Role
+              <select
+                value={createRole}
+                onChange={(event) => setCreateRole(event.target.value as MissionControlRole)}
+                className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2 text-sm font-normal text-ink outline-none focus:border-ink"
+              >
+                <option value="marketing">Marketing - Campus Growth only</option>
+                <option value="admin">Admin - Full Mission Control</option>
+              </select>
+            </label>
           </div>
           <label className="mt-3 block text-xs font-semibold text-muted">
             Temporary password
@@ -144,7 +159,7 @@ export default function AdminUsersPanel({ admins }: { admins: AdminUserRecord[] 
             </div>
           </label>
           <button type="submit" disabled={busy !== null} className="mt-4 rounded-md bg-ink px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">
-            {busy === "create" ? "Creating..." : "Create Admin Login"}
+            {busy === "create" ? "Creating..." : "Create Staff Login"}
           </button>
         </form>
 
@@ -159,8 +174,16 @@ export default function AdminUsersPanel({ admins }: { admins: AdminUserRecord[] 
             className="mt-4 w-full rounded-md border border-line bg-white px-3 py-2 text-sm text-ink outline-none focus:border-ink"
             required
           />
+          <select
+            value={grantRole}
+            onChange={(event) => setGrantRole(event.target.value as MissionControlRole)}
+            className="mt-3 w-full rounded-md border border-line bg-white px-3 py-2 text-sm text-ink outline-none focus:border-ink"
+          >
+            <option value="marketing">Marketing - Campus Growth only</option>
+            <option value="admin">Admin - Full Mission Control</option>
+          </select>
           <button type="submit" disabled={busy !== null} className="mt-3 rounded-md bg-ink px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">
-            {busy === "grant" ? "Granting..." : "Grant Admin"}
+            {busy === "grant" ? "Granting..." : "Grant Access"}
           </button>
         </form>
       </div>
@@ -169,7 +192,7 @@ export default function AdminUsersPanel({ admins }: { admins: AdminUserRecord[] 
 
       <div className="mt-5 overflow-hidden rounded-md border border-line">
         {admins.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-muted">No admin grants have been tracked from Mission Control yet.</p>
+          <p className="px-4 py-6 text-center text-sm text-muted">No Mission Control users have been tracked yet.</p>
         ) : (
           <div className="divide-y divide-line">
             {admins.map((admin) => {
@@ -180,6 +203,7 @@ export default function AdminUsersPanel({ admins }: { admins: AdminUserRecord[] 
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="truncate text-sm font-medium text-ink">{admin.email ?? admin.id}</p>
                       <StatusPill status={status} />
+                      <StatusPill status={admin.role ?? "admin"} label={roleLabel(admin.role)} />
                       {admin.passwordStatus === "temporary" ? <StatusPill status="queued" label="Temp password" /> : null}
                     </div>
                     <p className="mt-1 text-xs text-muted">
@@ -216,4 +240,8 @@ export default function AdminUsersPanel({ admins }: { admins: AdminUserRecord[] 
       </div>
     </div>
   );
+}
+
+function roleLabel(role: unknown) {
+  return role === "marketing" ? "Marketing" : "Admin";
 }

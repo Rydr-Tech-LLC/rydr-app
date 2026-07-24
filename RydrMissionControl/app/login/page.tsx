@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
-import { getAdminSession } from "@/lib/session";
+import { getMissionControlSession, homeForRole } from "@/lib/session";
 import LoginForm from "./LoginForm";
 
 export default async function LoginPage() {
-  const session = await getAdminSession();
-  if (session) redirect("/dashboard");
+  const session = await getMissionControlSession();
+  if (session) redirect(homeForRole(session.role));
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-ink px-4">

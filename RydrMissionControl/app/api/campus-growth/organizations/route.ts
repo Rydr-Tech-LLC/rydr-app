@@ -13,12 +13,12 @@ import {
   type LeadStatus
 } from "@/lib/campusGrowth";
 import { adminDb } from "@/lib/firebaseAdmin";
-import { getAdminSession } from "@/lib/session";
+import { getCampusGrowthSession } from "@/lib/session";
 
 const STATUSES: LeadStatus[] = ["new", "qualified", "queued", "contacted", "replied", "archived"];
 
 export async function GET() {
-  const session = await getAdminSession();
+  const session = await getCampusGrowthSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const organizations = await listOrganizations();
@@ -26,7 +26,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getAdminSession();
+  const session = await getCampusGrowthSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
   const body = await request.json().catch(() => null);
