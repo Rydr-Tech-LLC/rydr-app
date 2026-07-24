@@ -159,7 +159,7 @@ struct DriverRideWorkPanel: View {
             if let request = vm.pendingRequests.first {
                 IncomingRideRequestCard(
                     request: request,
-                    driverCoordinate: vm.lastLocation?.coordinate,
+                    driverCoordinate: vm.pickupEstimateOriginCoordinate,
                     rate: vm.rate(for: request.rideType),
                     isResponding: vm.respondingRequestIDs.contains(request.id),
                     onAccept: { vm.accept(request) },

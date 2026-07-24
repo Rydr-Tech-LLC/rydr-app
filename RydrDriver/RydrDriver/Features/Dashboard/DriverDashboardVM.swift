@@ -31,6 +31,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var isLoadingEarningsSummary: Bool = false
     @Published var mapRegion: MKCoordinateRegion = DriverMapDefaults.pilotRegion
     @Published var lastLocation: CLLocation? = DriverMapDefaults.pilotLocation
+    @Published private(set) var hasReceivedDriverLocation = false
     @Published var locationPermissionDenied: Bool = false
     @Published var canGoOnline: Bool = false
     @Published var selectedRideTypes: Set<String> = []
@@ -207,6 +208,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         unreadNotificationCount > 99 ? "99+" : "\(unreadNotificationCount)"
     }
 
+    var pickupEstimateOriginCoordinate: CLLocationCoordinate2D? {
+        hasReceivedDriverLocation ? lastLocation?.coordinate : nil
+    }
+
     private let locationManager = CLLocationManager()
     private var locationTimer: Timer?
     private let db = Firestore.firestore()
@@ -323,6 +328,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             return
         }
         #endif
+        hasReceivedDriverLocation = true
         lastLocation = loc
         mapRegion.center = loc.coordinate
 
@@ -422,6 +428,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     #if DEBUG
     private func applyAtlantaPilotLocation() {
+        hasReceivedDriverLocation = true
         lastLocation = DriverMapDefaults.pilotLocation
         mapRegion = DriverMapDefaults.pilotRegion
     }
@@ -2449,7 +2456,7 @@ struct DriverDashboardView: View {
                     if let request = vm.pendingRequests.first {
                         IncomingRideRequestCard(
                             request: request,
-                            driverCoordinate: vm.lastLocation?.coordinate,
+                            driverCoordinate: vm.pickupEstimateOriginCoordinate,
                             rate: vm.rate(for: request.rideType),
                             isResponding: vm.respondingRequestIDs.contains(request.id),
                             onAccept: { vm.accept(request) },

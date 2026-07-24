@@ -133,6 +133,8 @@ struct IncomingRideRequestCard: View {
             alertSound.stop()
         }
         .onChange(of: request.id) { _, _ in
+            pickupLeg = nil
+            tripLeg = nil
             alertSound.restartLoop()
         }
         .onChange(of: isResponding) { _, responding in
@@ -142,12 +144,30 @@ struct IncomingRideRequestCard: View {
                 alertSound.startLoop()
             }
         }
+        .task(id: pickupRouteCalculationKey) {
+            await loadPickupEstimate()
+        }
         .task(id: request.id) {
-            await loadRouteEstimates()
+            await loadTripEstimate()
         }
         .task(id: request.id) {
             await runCountdown()
         }
+    }
+
+    private var validDriverCoordinate: CLLocationCoordinate2D? {
+        guard let driverCoordinate,
+              CLLocationCoordinate2DIsValid(driverCoordinate) else {
+            return nil
+        }
+        return driverCoordinate
+    }
+
+    private var pickupRouteCalculationKey: PickupRouteCalculationKey {
+        PickupRouteCalculationKey(
+            requestID: request.id,
+            driverCoordinate: validDriverCoordinate
+        )
     }
 
     private var fallbackTripLeg: RideRequestLegEstimate? {
@@ -178,43 +198,34 @@ struct IncomingRideRequestCard: View {
         (value * 100).rounded() / 100
     }
 
-    private func loadRouteEstimates() async {
-        async let pickupEstimate = routeEstimate(from: driverCoordinate, to: request.pickupCoordinate)
-        async let tripEstimate = routeEstimate(from: request.pickupCoordinate, to: request.dropoffCoordinate)
-        let estimates = await (pickupEstimate, tripEstimate)
+    private func loadPickupEstimate() async {
         await MainActor.run {
-            pickupLeg = estimates.0
-            tripLeg = estimates.1
+            pickupLeg = nil
         }
-    }
+        guard let validDriverCoordinate else { return }
 
-    private func routeEstimate(from start: CLLocationCoordinate2D?, to end: CLLocationCoordinate2D?) async -> RideRequestLegEstimate? {
-        guard let start, let end else { return nil }
-        let request = MKDirections.Request()
-        request.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
-        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: end))
-        request.transportType = .automobile
-
-        do {
-            let response = try await MKDirections(request: request).calculate()
-            guard let route = response.routes.first else { return nil }
-            return RideRequestLegEstimate(
-                distanceMiles: ((route.distance / 1609.344) * 10).rounded() / 10,
-                durationMinutes: max(1, (route.expectedTravelTime / 60).rounded())
-            )
-        } catch {
-            return straightLineEstimate(from: start, to: end)
-        }
-    }
-
-    private func straightLineEstimate(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> RideRequestLegEstimate {
-        let miles = CLLocation(latitude: start.latitude, longitude: start.longitude)
-            .distance(from: CLLocation(latitude: end.latitude, longitude: end.longitude)) / 1609.344
-        let adjustedMiles = (miles * 1.25 * 10).rounded() / 10
-        return RideRequestLegEstimate(
-            distanceMiles: adjustedMiles,
-            durationMinutes: max(1, (adjustedMiles / 24.0 * 60).rounded())
+        let estimate = await RideRequestRouteEstimator.estimateUsingMapKit(
+            from: validDriverCoordinate,
+            to: request.pickupCoordinate
         )
+        guard !Task.isCancelled else { return }
+        await MainActor.run {
+            pickupLeg = estimate
+        }
+    }
+
+    private func loadTripEstimate() async {
+        await MainActor.run {
+            tripLeg = nil
+        }
+        let estimate = await RideRequestRouteEstimator.estimateUsingMapKit(
+            from: request.pickupCoordinate,
+            to: request.dropoffCoordinate
+        )
+        guard !Task.isCancelled else { return }
+        await MainActor.run {
+            tripLeg = estimate
+        }
     }
 
     private func runCountdown() async {
@@ -307,12 +318,95 @@ private struct CountdownRing: View {
     }
 }
 
-private struct RideRequestLegEstimate: Equatable {
+struct PickupRouteCalculationKey: Hashable {
+    let requestID: String
+    let hasValidDriverCoordinate: Bool
+
+    init(requestID: String, driverCoordinate: CLLocationCoordinate2D?) {
+        self.requestID = requestID
+        hasValidDriverCoordinate = driverCoordinate.map(CLLocationCoordinate2DIsValid) ?? false
+    }
+}
+
+struct RideRequestLegEstimate: Equatable {
     let distanceMiles: Double
     let durationMinutes: Double
 
     var label: String {
         "\(Int(durationMinutes)) min • \(String(format: "%.1f", distanceMiles)) mi"
+    }
+}
+
+struct RideRequestRouteMetrics: Equatable {
+    let distanceMeters: CLLocationDistance
+    let expectedTravelTime: TimeInterval
+}
+
+enum RideRequestRouteEstimator {
+    typealias RouteProvider = (
+        _ start: CLLocationCoordinate2D,
+        _ end: CLLocationCoordinate2D
+    ) async throws -> RideRequestRouteMetrics?
+
+    static func estimateUsingMapKit(
+        from start: CLLocationCoordinate2D?,
+        to end: CLLocationCoordinate2D?
+    ) async -> RideRequestLegEstimate? {
+        await estimate(from: start, to: end) { start, end in
+            let request = MKDirections.Request()
+            request.source = MKMapItem(placemark: MKPlacemark(coordinate: start))
+            request.destination = MKMapItem(placemark: MKPlacemark(coordinate: end))
+            request.transportType = .automobile
+
+            let response = try await MKDirections(request: request).calculate()
+            guard let route = response.routes.first else { return nil }
+            return RideRequestRouteMetrics(
+                distanceMeters: route.distance,
+                expectedTravelTime: route.expectedTravelTime
+            )
+        }
+    }
+
+    static func estimate(
+        from start: CLLocationCoordinate2D?,
+        to end: CLLocationCoordinate2D?,
+        routeProvider: RouteProvider
+    ) async -> RideRequestLegEstimate? {
+        guard let start,
+              let end,
+              CLLocationCoordinate2DIsValid(start),
+              CLLocationCoordinate2DIsValid(end) else {
+            return nil
+        }
+
+        do {
+            if let route = try await routeProvider(start, end) {
+                return RideRequestLegEstimate(
+                    distanceMiles: ((route.distanceMeters / 1609.344) * 10).rounded() / 10,
+                    durationMinutes: max(1, (route.expectedTravelTime / 60).rounded())
+                )
+            }
+        } catch {
+            if Task.isCancelled {
+                return nil
+            }
+        }
+
+        guard !Task.isCancelled else { return nil }
+        return straightLineEstimate(from: start, to: end)
+    }
+
+    private static func straightLineEstimate(
+        from start: CLLocationCoordinate2D,
+        to end: CLLocationCoordinate2D
+    ) -> RideRequestLegEstimate {
+        let miles = CLLocation(latitude: start.latitude, longitude: start.longitude)
+            .distance(from: CLLocation(latitude: end.latitude, longitude: end.longitude)) / 1609.344
+        let adjustedMiles = (miles * 1.25 * 10).rounded() / 10
+        return RideRequestLegEstimate(
+            distanceMiles: adjustedMiles,
+            durationMinutes: max(1, (adjustedMiles / 24.0 * 60).rounded())
+        )
     }
 }
 
