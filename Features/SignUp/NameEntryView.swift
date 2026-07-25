@@ -33,6 +33,7 @@ struct NameEntryView: View {
     @State private var errorMessage = ""
     @State private var isSaving = false
     @State private var currentNonce: String?
+    @State private var socialAuthAttemptID: UUID?
 
     private var canContinue: Bool {
         !firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
@@ -116,12 +117,17 @@ struct NameEntryView: View {
                             .signInWithAppleButtonStyle(.black)
                             .frame(height: 52)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .disabled(isSaving)
 
                             Button(action: handleGoogleSignIn) {
                                 HStack(spacing: 10) {
-                                    Image(systemName: "g.circle.fill")
-                                        .font(.system(size: 21, weight: .bold))
-                                    Text("Sign Up with Google")
+                                    if isSaving {
+                                        ProgressView()
+                                    } else {
+                                        Image(systemName: "g.circle.fill")
+                                            .font(.system(size: 21, weight: .bold))
+                                    }
+                                    Text(isSaving ? "Connecting..." : "Sign Up with Google")
                                         .font(.system(size: 15, weight: .bold, design: .rounded))
                                 }
                                 .frame(maxWidth: .infinity)
@@ -134,6 +140,7 @@ struct NameEntryView: View {
                                 .foregroundStyle(SignupPalette.ink)
                             }
                             .buttonStyle(.plain)
+                            .disabled(isSaving)
                         }
 
                         if !errorMessage.isEmpty {
@@ -153,32 +160,35 @@ struct NameEntryView: View {
 
     // MARK: - Google Sign-Up
     private func handleGoogleSignIn() {
-        guard FirebaseApp.app()?.options.clientID != nil else {
-            errorMessage = "Missing client ID"
+        let rootViewController: UIViewController
+        do {
+            rootViewController = try RiderGoogleSignInCoordinator.presentingViewController()
+        } catch {
+            errorMessage = error.localizedDescription
             return
         }
 
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let rootVC = windowScene.windows.first?.rootViewController else {
-            errorMessage = "Unable to access root view controller"
-            return
-        }
-
-        GIDSignIn.sharedInstance.signIn(withPresenting: rootVC) { result, error in
-            if let error = error {
-                errorMessage = "Google sign-up failed: \(error.localizedDescription)"
-                return
+        let attemptID = beginSocialAuthAttempt()
+        GIDSignIn.sharedInstance.signIn(withPresenting: rootViewController) { result, error in
+            Task { @MainActor in
+                guard socialAuthAttemptID == attemptID else { return }
+                if let error {
+                    finishSocialAuthAttempt(attemptID, error: "Google sign-up failed: \(error.localizedDescription)")
+                    return
+                }
+                guard let user = result?.user,
+                      let idToken = user.idToken?.tokenString else {
+                    finishSocialAuthAttempt(attemptID, error: "Google sign-up did not return a valid token.")
+                    return
+                }
+                let accessToken = user.accessToken.tokenString
+                let credential = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
+                authenticateWithSocialCredential(
+                    credential,
+                    profile: googleProfile(from: user),
+                    attemptID: attemptID
+                )
             }
-            guard let user = result?.user,
-                  let idToken = user.idToken?.tokenString else {
-                errorMessage = "Google auth data missing"
-                return
-            }
-            let accessToken = user.accessToken.tokenString
-            let cred = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
-
-            let profile = googleProfile(from: user)
-            authenticateWithSocialCredential(cred, profile: profile)
         }
     }
 
@@ -195,30 +205,81 @@ struct NameEntryView: View {
         )
     }
 
-    private func authenticateWithSocialCredential(_ credential: AuthCredential, profile: RiderSocialAuthProfile) {
+    private func authenticateWithSocialCredential(
+        _ credential: AuthCredential,
+        profile: RiderSocialAuthProfile,
+        attemptID existingAttemptID: UUID? = nil
+    ) {
+        let attemptID = existingAttemptID ?? beginSocialAuthAttempt()
         if let currentUser = Auth.auth().currentUser {
             currentUser.link(with: credential) { _, err in
-                if let err = err as NSError? {
-                    if err.code == AuthErrorCode.providerAlreadyLinked.rawValue {
-                        applySocialProfile(profile)
-                        onContinueWithSocial(profile)
+                Task { @MainActor in
+                    guard socialAuthAttemptID == attemptID else { return }
+                    if let err = err as NSError? {
+                        if err.code == AuthErrorCode.providerAlreadyLinked.rawValue {
+                            completeSocialSignup(profile: profile, attemptID: attemptID)
+                            return
+                        }
+                        finishSocialAuthAttempt(attemptID, error: socialSignupErrorMessage(err))
                         return
                     }
-                    errorMessage = "Social sign-up failed: \(err.localizedDescription)"
-                    return
+                    completeSocialSignup(profile: profile, attemptID: attemptID)
                 }
-                applySocialProfile(profile)
-                onContinueWithSocial(profile)
             }
         } else {
             Auth.auth().signIn(with: credential) { _, err in
-                if let err {
-                    errorMessage = "Social sign-up failed: \(err.localizedDescription)"
-                    return
+                Task { @MainActor in
+                    guard socialAuthAttemptID == attemptID else { return }
+                    if let err {
+                        finishSocialAuthAttempt(attemptID, error: "Social sign-up failed: \(err.localizedDescription)")
+                        return
+                    }
+                    completeSocialSignup(profile: profile, attemptID: attemptID)
                 }
-                applySocialProfile(profile)
-                onContinueWithSocial(profile)
             }
+        }
+    }
+
+    @MainActor
+    private func completeSocialSignup(profile: RiderSocialAuthProfile, attemptID: UUID) {
+        applySocialProfile(profile)
+        finishSocialAuthAttempt(attemptID)
+        onContinueWithSocial(profile)
+    }
+
+    @MainActor
+    private func beginSocialAuthAttempt() -> UUID {
+        let attemptID = UUID()
+        socialAuthAttemptID = attemptID
+        isSaving = true
+        errorMessage = ""
+        Task {
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            guard socialAuthAttemptID == attemptID else { return }
+            finishSocialAuthAttempt(
+                attemptID,
+                error: "Sign-up is taking longer than expected. Check your connection and try again."
+            )
+        }
+        return attemptID
+    }
+
+    @MainActor
+    private func finishSocialAuthAttempt(_ attemptID: UUID, error: String? = nil) {
+        guard socialAuthAttemptID == attemptID else { return }
+        socialAuthAttemptID = nil
+        isSaving = false
+        if let error {
+            errorMessage = error
+        }
+    }
+
+    private func socialSignupErrorMessage(_ error: NSError) -> String {
+        switch AuthErrorCode(rawValue: error.code) {
+        case .credentialAlreadyInUse, .emailAlreadyInUse, .accountExistsWithDifferentCredential:
+            return "That social account is already connected to an existing Rydr account. Return to sign in instead."
+        default:
+            return "Social sign-up failed: \(error.localizedDescription)"
         }
     }
 
@@ -247,6 +308,7 @@ struct NameEntryView: View {
             errorMessage = "Apple sign-up could not verify this request. Please try again."
             return
         }
+        currentNonce = nil
 
         let oauth = OAuthProvider.appleCredential(
             withIDToken: tokenStr,

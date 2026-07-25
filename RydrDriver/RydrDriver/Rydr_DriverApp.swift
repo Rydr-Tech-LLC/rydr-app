@@ -43,6 +43,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     #endif
 
     FirebaseApp.configure()
+    if let clientID = FirebaseApp.app()?.options.clientID, !clientID.isEmpty {
+      GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
+    } else {
+      print("Google Sign-In configuration failed: missing Firebase client ID")
+    }
 
     UNUserNotificationCenter.current().delegate = self
     Messaging.messaging().delegate = self

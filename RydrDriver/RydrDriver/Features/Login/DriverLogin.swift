@@ -28,6 +28,7 @@ struct DriverLoginView: View {
     @State private var isLoggingIn = false
     @State private var showingSignup = false
     @State private var currentNonce: String?
+    @State private var socialAuthAttemptID: UUID?
 
     // Dedicated full-screen phone verification flow (shared with driver signup).
     @State private var showPhoneFlow = false
@@ -301,11 +302,16 @@ struct DriverLoginView: View {
             .signInWithAppleButtonStyle(.black)
             .frame(height: 54)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .disabled(isLoggingIn)
 
             Button(action: socialLoginWithGoogle) {
                 HStack {
-                    Image(systemName: "g.circle.fill")
-                    Text("Continue with Google")
+                    if isLoggingIn {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "g.circle.fill")
+                    }
+                    Text(isLoggingIn ? "Connecting..." : "Continue with Google")
                         .fontWeight(.semibold)
                     Spacer()
                 }
@@ -322,6 +328,7 @@ struct DriverLoginView: View {
                     .stroke(Color(.systemGray4), lineWidth: 1)
             )
             .buttonStyle(.plain)
+            .disabled(isLoggingIn)
         }
     }
 
@@ -452,16 +459,22 @@ struct DriverLoginView: View {
     }
 
     private func socialLoginWithGoogle() {
-        errorMessage = ""
-        isLoggingIn = true
+        let attemptID = beginSocialAuthAttempt()
         DriverSocialAuthService.signInWithGoogle { result in
-            switch result {
-            case .success(let payload):
-                signInWithSocialCredential(payload.0, fallbackEmail: payload.1.email)
-            case .failure(let error):
-                Task { @MainActor in
-                    isLoggingIn = false
-                    errorMessage = "Google sign-in failed: \(error.localizedDescription)"
+            Task { @MainActor in
+                guard socialAuthAttemptID == attemptID else { return }
+                switch result {
+                case .success(let payload):
+                    signInWithSocialCredential(
+                        payload.0,
+                        fallbackEmail: payload.1.email,
+                        attemptID: attemptID
+                    )
+                case .failure(let error):
+                    finishSocialAuthAttempt(
+                        attemptID,
+                        error: "Google sign-in failed: \(error.localizedDescription)"
+                    )
                 }
             }
         }
@@ -472,33 +485,69 @@ struct DriverLoginView: View {
             errorMessage = "Apple sign-in could not verify this request. Please try again."
             return
         }
+        currentNonce = nil
 
         switch DriverSocialAuthService.credential(from: authorization, nonce: nonce) {
         case .success(let payload):
-            errorMessage = ""
-            isLoggingIn = true
-            signInWithSocialCredential(payload.0, fallbackEmail: payload.1.email)
+            let attemptID = beginSocialAuthAttempt()
+            signInWithSocialCredential(
+                payload.0,
+                fallbackEmail: payload.1.email,
+                attemptID: attemptID
+            )
         case .failure(let error):
             errorMessage = "Apple sign-in failed: \(error.localizedDescription)"
         }
     }
 
-    private func signInWithSocialCredential(_ credential: AuthCredential, fallbackEmail: String) {
+    private func signInWithSocialCredential(
+        _ credential: AuthCredential,
+        fallbackEmail: String,
+        attemptID: UUID
+    ) {
         Auth.auth().signIn(with: credential) { result, error in
             Task { @MainActor in
-                isLoggingIn = false
+                guard socialAuthAttemptID == attemptID else { return }
                 if let error {
-                    errorMessage = "Sign-in failed: \(error.localizedDescription)"
+                    finishSocialAuthAttempt(attemptID, error: "Sign-in failed: \(error.localizedDescription)")
                     return
                 }
 
                 guard let user = result?.user else {
-                    errorMessage = "Sign-in failed: missing user."
+                    finishSocialAuthAttempt(attemptID, error: "Sign-in failed: missing user.")
                     return
                 }
 
+                finishSocialAuthAttempt(attemptID)
                 loadDriverProfile(for: user, fallbackEmail: fallbackEmail)
             }
+        }
+    }
+
+    @MainActor
+    private func beginSocialAuthAttempt() -> UUID {
+        let attemptID = UUID()
+        socialAuthAttemptID = attemptID
+        isLoggingIn = true
+        errorMessage = ""
+        Task {
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            guard socialAuthAttemptID == attemptID else { return }
+            finishSocialAuthAttempt(
+                attemptID,
+                error: "Sign-in is taking longer than expected. Check your connection and try again."
+            )
+        }
+        return attemptID
+    }
+
+    @MainActor
+    private func finishSocialAuthAttempt(_ attemptID: UUID, error: String? = nil) {
+        guard socialAuthAttemptID == attemptID else { return }
+        socialAuthAttemptID = nil
+        isLoggingIn = false
+        if let error {
+            errorMessage = error
         }
     }
 

@@ -51,6 +51,8 @@ struct LoginView: View {
     @State private var phoneRepairPassword = ""
     @State private var isRepairingPhoneLogin = false
     @State private var currentNonce: String?
+    @State private var isSocialAuthInProgress = false
+    @State private var socialAuthAttemptID: UUID?
     
     private var formattedPhoneNumber: String {
         let digits = phoneNumber.filter { $0.isNumber }.prefix(10)
@@ -369,12 +371,17 @@ struct LoginView: View {
             .signInWithAppleButtonStyle(.black)
             .frame(height: 56)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .disabled(isSocialAuthInProgress)
 
             Button(action: handleGoogleSignIn) {
                 HStack(spacing: 10) {
-                    Image(systemName: "g.circle.fill")
-                        .font(.system(size: 21, weight: .bold))
-                    Text("Continue with Google")
+                    if isSocialAuthInProgress {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "g.circle.fill")
+                            .font(.system(size: 21, weight: .bold))
+                    }
+                    Text(isSocialAuthInProgress ? "Connecting..." : "Continue with Google")
                         .font(.headline.weight(.bold))
                 }
                 .frame(maxWidth: .infinity)
@@ -387,6 +394,7 @@ struct LoginView: View {
                 .foregroundColor(Palette.googleInk)
             }
             .buttonStyle(.plain)
+            .disabled(isSocialAuthInProgress)
         }
     }
     
@@ -485,35 +493,39 @@ struct LoginView: View {
     }
 
     private func handleGoogleSignIn() {
-        guard FirebaseApp.app()?.options.clientID != nil else {
-            errorMessage = "Missing Firebase client ID for Google sign-in."
+        let rootViewController: UIViewController
+        do {
+            rootViewController = try RiderGoogleSignInCoordinator.presentingViewController()
+        } catch {
+            errorMessage = error.localizedDescription
             return
         }
 
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let rootVC = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController ?? windowScene.windows.first?.rootViewController else {
-            errorMessage = "Unable to open Google sign-in."
-            return
-        }
+        let attemptID = beginSocialAuthAttempt()
+        GIDSignIn.sharedInstance.signIn(withPresenting: rootViewController) { result, error in
+            Task { @MainActor in
+                guard socialAuthAttemptID == attemptID else { return }
+                if let error {
+                    finishSocialAuthAttempt(attemptID, error: "Google sign-in failed: \(error.localizedDescription)")
+                    return
+                }
 
-        errorMessage = ""
-        GIDSignIn.sharedInstance.signIn(withPresenting: rootVC) { result, error in
-            if let error {
-                Task { @MainActor in errorMessage = "Google sign-in failed: \(error.localizedDescription)" }
-                return
+                guard let googleUser = result?.user,
+                      let idToken = googleUser.idToken?.tokenString else {
+                    finishSocialAuthAttempt(attemptID, error: "Google sign-in did not return a valid token.")
+                    return
+                }
+
+                let credential = GoogleAuthProvider.credential(
+                    withIDToken: idToken,
+                    accessToken: googleUser.accessToken.tokenString
+                )
+                signInWithSocialCredential(
+                    credential,
+                    fallbackEmail: googleUser.profile?.email ?? "",
+                    attemptID: attemptID
+                )
             }
-
-            guard let googleUser = result?.user,
-                  let idToken = googleUser.idToken?.tokenString else {
-                Task { @MainActor in errorMessage = "Google sign-in did not return a valid token." }
-                return
-            }
-
-            let credential = GoogleAuthProvider.credential(
-                withIDToken: idToken,
-                accessToken: googleUser.accessToken.tokenString
-            )
-            signInWithSocialCredential(credential, fallbackEmail: googleUser.profile?.email ?? "")
         }
     }
 
@@ -529,30 +541,69 @@ struct LoginView: View {
             errorMessage = "Apple sign-in could not verify this request. Please try again."
             return
         }
+        currentNonce = nil
 
         let credential = OAuthProvider.appleCredential(
             withIDToken: idTokenString,
             rawNonce: nonce,
             fullName: appleIDCredential.fullName
         )
-        signInWithSocialCredential(credential, fallbackEmail: appleIDCredential.email ?? "")
+        let attemptID = beginSocialAuthAttempt()
+        signInWithSocialCredential(
+            credential,
+            fallbackEmail: appleIDCredential.email ?? "",
+            attemptID: attemptID
+        )
     }
 
-    private func signInWithSocialCredential(_ credential: AuthCredential, fallbackEmail: String) {
+    private func signInWithSocialCredential(
+        _ credential: AuthCredential,
+        fallbackEmail: String,
+        attemptID: UUID
+    ) {
         Auth.auth().signIn(with: credential) { result, error in
             Task { @MainActor in
+                guard socialAuthAttemptID == attemptID else { return }
                 if let error {
-                    errorMessage = "Sign-in failed: \(error.localizedDescription)"
+                    finishSocialAuthAttempt(attemptID, error: "Sign-in failed: \(error.localizedDescription)")
                     return
                 }
 
                 guard let user = result?.user else {
-                    errorMessage = "Sign-in failed. Please try again."
+                    finishSocialAuthAttempt(attemptID, error: "Sign-in failed. Please try again.")
                     return
                 }
 
+                finishSocialAuthAttempt(attemptID)
                 completeEmailLogin(for: user, fallbackEmail: fallbackEmail)
             }
+        }
+    }
+
+    @MainActor
+    private func beginSocialAuthAttempt() -> UUID {
+        let attemptID = UUID()
+        socialAuthAttemptID = attemptID
+        isSocialAuthInProgress = true
+        errorMessage = ""
+        Task {
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            guard socialAuthAttemptID == attemptID else { return }
+            finishSocialAuthAttempt(
+                attemptID,
+                error: "Sign-in is taking longer than expected. Check your connection and try again."
+            )
+        }
+        return attemptID
+    }
+
+    @MainActor
+    private func finishSocialAuthAttempt(_ attemptID: UUID, error: String? = nil) {
+        guard socialAuthAttemptID == attemptID else { return }
+        socialAuthAttemptID = nil
+        isSocialAuthInProgress = false
+        if let error {
+            errorMessage = error
         }
     }
 

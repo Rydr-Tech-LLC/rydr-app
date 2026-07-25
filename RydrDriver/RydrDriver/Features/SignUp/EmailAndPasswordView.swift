@@ -23,6 +23,7 @@ struct EmailAndPasswordView: View {
     var onNext: () -> Void
     var onContinueWithGoogle: (() -> Void)? = nil
     var onContinueWithApple: ((ASAuthorization, String) -> Void)? = nil
+    var isSocialAuthInProgress = false
 
     @State private var errorMessage = ""
     @State private var isPasswordVisible = false
@@ -131,6 +132,7 @@ struct EmailAndPasswordView: View {
                                             errorMessage = "Apple sign-up could not verify this request. Please try again."
                                             return
                                         }
+                                        currentNonce = nil
                                         onContinueWithApple(authorization, nonce)
                                     case .failure(let error):
                                         errorMessage = "Apple sign-up failed: \(error.localizedDescription)"
@@ -140,13 +142,18 @@ struct EmailAndPasswordView: View {
                             .signInWithAppleButtonStyle(.black)
                             .frame(height: 54)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .disabled(isSocialAuthInProgress)
                         }
 
                         if let onContinueWithGoogle {
                             Button(action: onContinueWithGoogle) {
                                 HStack {
-                                    Image(systemName: "g.circle.fill")
-                                    Text("Continue with Google")
+                                    if isSocialAuthInProgress {
+                                        ProgressView()
+                                    } else {
+                                        Image(systemName: "g.circle.fill")
+                                    }
+                                    Text(isSocialAuthInProgress ? "Connecting..." : "Continue with Google")
                                         .fontWeight(.semibold)
                                     Spacer()
                                 }
@@ -163,6 +170,7 @@ struct EmailAndPasswordView: View {
                                     .stroke(Color(.systemGray4), lineWidth: 1)
                             )
                             .buttonStyle(.plain)
+                            .disabled(isSocialAuthInProgress)
                         }
                     }
                 }

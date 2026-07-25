@@ -129,6 +129,8 @@ struct DriverSignupCoordinator: View {
     @State private var existingAccountAlert = false
     @State private var flowAlertText: String?
     @State private var isSubmittingDocuments = false
+    @State private var isSocialAuthInProgress = false
+    @State private var socialAuthAttemptID: UUID?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -253,7 +255,8 @@ struct DriverSignupCoordinator: View {
                         },
                         onContinueWithApple: { authorization, nonce in
                             completeSocialAuthStepWithApple(authorization: authorization, nonce: nonce)
-                        }
+                        },
+                        isSocialAuthInProgress: isSocialAuthInProgress
                     )
                     .onAppear { markCurrentOnboardingStep(.emailPassword) }
 
@@ -625,13 +628,18 @@ struct DriverSignupCoordinator: View {
     }
 
     private func completeSocialAuthStepWithGoogle() {
+        let attemptID = beginSocialAuthAttempt()
         DriverSocialAuthService.signInWithGoogle { result in
             Task { @MainActor in
+                guard socialAuthAttemptID == attemptID else { return }
                 switch result {
                 case .success(let payload):
-                    linkSocialCredential(payload.0, profile: payload.1)
+                    linkSocialCredential(payload.0, profile: payload.1, attemptID: attemptID)
                 case .failure(let error):
-                    flowAlertText = "Google sign-up failed: \(error.localizedDescription)"
+                    finishSocialAuthAttempt(
+                        attemptID,
+                        error: "Google sign-up failed: \(error.localizedDescription)"
+                    )
                 }
             }
         }
@@ -640,31 +648,78 @@ struct DriverSignupCoordinator: View {
     private func completeSocialAuthStepWithApple(authorization: ASAuthorization, nonce: String) {
         switch DriverSocialAuthService.credential(from: authorization, nonce: nonce) {
         case .success(let payload):
-            linkSocialCredential(payload.0, profile: payload.1)
+            let attemptID = beginSocialAuthAttempt()
+            linkSocialCredential(payload.0, profile: payload.1, attemptID: attemptID)
         case .failure(let error):
             flowAlertText = "Apple sign-up failed: \(error.localizedDescription)"
         }
     }
 
-    private func linkSocialCredential(_ credential: AuthCredential, profile: DriverSocialAuthProfile) {
+    private func linkSocialCredential(
+        _ credential: AuthCredential,
+        profile: DriverSocialAuthProfile,
+        attemptID: UUID
+    ) {
         guard let phoneUser = Auth.auth().currentUser else {
-            flowAlertText = "Your phone verification session expired. Please restart signup."
+            finishSocialAuthAttempt(
+                attemptID,
+                error: "Your phone verification session expired. Please restart signup."
+            )
             return
         }
 
         phoneUser.link(with: credential) { result, error in
             Task { @MainActor in
+                guard socialAuthAttemptID == attemptID else { return }
                 if let error = error as NSError? {
                     if error.code == AuthErrorCode.providerAlreadyLinked.rawValue {
+                        finishSocialAuthAttempt(attemptID)
                         finishSocialAuthStep(uid: phoneUser.uid, profile: profile)
                         return
                     }
-                    flowAlertText = "Social sign-up failed: \(error.localizedDescription)"
+                    finishSocialAuthAttempt(attemptID, error: socialSignupErrorMessage(error))
                     return
                 }
 
+                finishSocialAuthAttempt(attemptID)
                 finishSocialAuthStep(uid: result?.user.uid ?? phoneUser.uid, profile: profile)
             }
+        }
+    }
+
+    @MainActor
+    private func beginSocialAuthAttempt() -> UUID {
+        let attemptID = UUID()
+        socialAuthAttemptID = attemptID
+        isSocialAuthInProgress = true
+        flowAlertText = nil
+        Task {
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            guard socialAuthAttemptID == attemptID else { return }
+            finishSocialAuthAttempt(
+                attemptID,
+                error: "Sign-up is taking longer than expected. Check your connection and try again."
+            )
+        }
+        return attemptID
+    }
+
+    @MainActor
+    private func finishSocialAuthAttempt(_ attemptID: UUID, error: String? = nil) {
+        guard socialAuthAttemptID == attemptID else { return }
+        socialAuthAttemptID = nil
+        isSocialAuthInProgress = false
+        if let error {
+            flowAlertText = error
+        }
+    }
+
+    private func socialSignupErrorMessage(_ error: NSError) -> String {
+        switch AuthErrorCode(rawValue: error.code) {
+        case .credentialAlreadyInUse, .emailAlreadyInUse, .accountExistsWithDifferentCredential:
+            return "That social account is already connected to an existing Rydr account. Return to sign in instead."
+        default:
+            return "Social sign-up failed: \(error.localizedDescription)"
         }
     }
 

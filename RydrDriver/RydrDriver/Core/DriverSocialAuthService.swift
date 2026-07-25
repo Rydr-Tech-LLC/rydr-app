@@ -16,18 +16,22 @@ struct DriverSocialAuthProfile {
 
 enum DriverSocialAuthService {
     static func signInWithGoogle(completion: @escaping (Result<(AuthCredential, DriverSocialAuthProfile), Error>) -> Void) {
-        guard FirebaseApp.app()?.options.clientID != nil else {
+        guard let clientID = FirebaseApp.app()?.options.clientID, !clientID.isEmpty else {
             completion(.failure(NSError(domain: "DriverSocialAuth", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing Firebase client ID for Google sign-in."])))
             return
         }
+        GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
 
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let rootVC = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController ?? windowScene.windows.first?.rootViewController else {
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }),
+              let rootVC = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController
+                ?? windowScene.windows.first?.rootViewController else {
             completion(.failure(NSError(domain: "DriverSocialAuth", code: -2, userInfo: [NSLocalizedDescriptionKey: "Unable to open Google sign-in."])))
             return
         }
 
-        GIDSignIn.sharedInstance.signIn(withPresenting: rootVC) { result, error in
+        GIDSignIn.sharedInstance.signIn(withPresenting: topViewController(from: rootVC)) { result, error in
             if let error {
                 completion(.failure(error))
                 return
@@ -118,5 +122,20 @@ enum DriverSocialAuthService {
         let parts = displayName.split(separator: " ").map(String.init)
         guard let first = parts.first else { return ("", "") }
         return (first, parts.dropFirst().joined(separator: " "))
+    }
+
+    private static func topViewController(from viewController: UIViewController) -> UIViewController {
+        if let presented = viewController.presentedViewController {
+            return topViewController(from: presented)
+        }
+        if let navigationController = viewController as? UINavigationController,
+           let visible = navigationController.visibleViewController {
+            return topViewController(from: visible)
+        }
+        if let tabController = viewController as? UITabBarController,
+           let selected = tabController.selectedViewController {
+            return topViewController(from: selected)
+        }
+        return viewController
     }
 }

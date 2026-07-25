@@ -13,6 +13,55 @@ import FirebaseMessaging
 import GoogleSignIn
 import UserNotifications
 
+enum RiderGoogleSignInCoordinator {
+  private static let errorDomain = "RiderGoogleSignIn"
+
+  @MainActor
+  static func configure() throws {
+    guard let clientID = FirebaseApp.app()?.options.clientID, !clientID.isEmpty else {
+      throw NSError(
+        domain: errorDomain,
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Missing Firebase client ID for Google sign-in."]
+      )
+    }
+    GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
+  }
+
+  @MainActor
+  static func presentingViewController() throws -> UIViewController {
+    try configure()
+    guard let windowScene = UIApplication.shared.connectedScenes
+      .compactMap({ $0 as? UIWindowScene })
+      .first(where: { $0.activationState == .foregroundActive }),
+      let rootViewController = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController
+        ?? windowScene.windows.first?.rootViewController else {
+      throw NSError(
+        domain: errorDomain,
+        code: 2,
+        userInfo: [NSLocalizedDescriptionKey: "Unable to open Google sign-in."]
+      )
+    }
+    return topViewController(from: rootViewController)
+  }
+
+  @MainActor
+  private static func topViewController(from viewController: UIViewController) -> UIViewController {
+    if let presented = viewController.presentedViewController {
+      return topViewController(from: presented)
+    }
+    if let navigationController = viewController as? UINavigationController,
+       let visible = navigationController.visibleViewController {
+      return topViewController(from: visible)
+    }
+    if let tabController = viewController as? UITabBarController,
+       let selected = tabController.selectedViewController {
+      return topViewController(from: selected)
+    }
+    return viewController
+  }
+}
+
 private final class RydrAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
   func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
     if #available(iOS 14.0, *) {
@@ -43,6 +92,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     // ✅ Firebase
     FirebaseApp.configure()
+    do {
+      try RiderGoogleSignInCoordinator.configure()
+    } catch {
+      print("⚠️ Google Sign-In configuration failed: \(error.localizedDescription)")
+    }
 
     // Sanity-check FirebaseOptions immediately after configure(). A missing
     // CLIENT_ID (sourced from GoogleService-Info.plist) silently breaks
