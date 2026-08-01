@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import QuartzCore
 
 struct RydrDriverMapView: View {
     @Binding var position: MapCameraPosition
@@ -29,7 +30,19 @@ struct RydrDriverMapView: View {
             filterPreferences: filterPreferences,
             driverCoordinate: driverCoordinate,
             isOnline: isOnline,
-            pendingRequests: pendingRequests
+            pendingRequests: pendingRequests,
+            onUserRegionChange: { region in
+                // The driver just panned/zoomed the map directly (native MapKit
+                // gesture, not our work-zone MagnificationGesture). Cancel any
+                // pending "snap back to ground camera" so we don't fight them,
+                // and adopt their region as the new source of truth so the next
+                // unrelated SwiftUI re-render (GPS tick, pendingRequests
+                // refresh, etc.) doesn't silently re-apply the old zoomed-in
+                // region on top of what they just did.
+                returnToGroundCameraWorkItem?.cancel()
+                returnToGroundCameraWorkItem = nil
+                position = .region(region)
+            }
         )
         .ignoresSafeArea()
         .overlay(alignment: .trailing) {
@@ -211,6 +224,7 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
     let driverCoordinate: CLLocationCoordinate2D?
     let isOnline: Bool
     let pendingRequests: [DriverRideRadarBlip]
+    let onUserRegionChange: (MKCoordinateRegion) -> Void
 
     func makeUIView(context: Context) -> MKMapView {
         let mapView = MKMapView(frame: .zero)
@@ -225,6 +239,7 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ mapView: MKMapView, context: Context) {
+        context.coordinator.onUserRegionChange = onUserRegionChange
         context.coordinator.configure(
             mapView,
             position: position,
@@ -242,6 +257,17 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
     final class Coordinator: NSObject, MKMapViewDelegate {
         private var hasSetInitialRegion = false
         private var lastAppliedRegion: MKCoordinateRegion?
+        /// Set right before we push a region onto the map ourselves, so the
+        /// resulting `regionDidChangeAnimated` callback can tell "we did this"
+        /// apart from "the driver just panned/pinched the map".
+        private var isApplyingProgrammaticRegion = false
+        var onUserRegionChange: ((MKCoordinateRegion) -> Void)?
+        private var regionAnimationDisplayLink: CADisplayLink?
+        private var regionAnimationStart: MKCoordinateRegion?
+        private var regionAnimationTarget: MKCoordinateRegion?
+        private var regionAnimationStartTime: CFTimeInterval = 0
+        private var regionAnimationDuration: TimeInterval = 0.6
+        private weak var animatingMapView: MKMapView?
         private var workZoneOverlayIDs = Set<ObjectIdentifier>()
         private var destinationGlowOverlayIDs = Set<ObjectIdentifier>()
         private var destinationRouteOverlayIDs = Set<ObjectIdentifier>()
@@ -267,6 +293,7 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
 
         deinit {
             pulseTimer?.invalidate()
+            regionAnimationDisplayLink?.invalidate()
         }
 
         func configure(
@@ -349,6 +376,28 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
                 setRegionIfNeeded(region, on: mapView, animated: false)
                 hasSetInitialRegion = true
             }
+        }
+
+        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+            if isApplyingProgrammaticRegion {
+                // Still mid-flight on a camera move we initiated ourselves (or its
+                // completion handler hasn't fired yet). MapKit can call this delegate
+                // method more than once over the course of a single animated
+                // transition, so clearing the flag here — on the first call — used to
+                // cause a smooth zoom to get reinterpreted as a user gesture partway
+                // through, which is what made it look like it "teleported" instead of
+                // gliding in. The flag is only cleared once, in setRegionIfNeeded's
+                // animation completion handler, so ignore every call until then.
+                return
+            }
+
+            // The driver panned or pinch-zoomed the map directly. Record this
+            // as the current region so we don't stomp on it on the next
+            // unrelated `updateUIView`, and tell the SwiftUI layer so it can
+            // cancel any pending "return to ground camera" reset and adopt
+            // this region as the new `position`.
+            lastAppliedRegion = mapView.region
+            onUserRegionChange?(mapView.region)
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
@@ -441,25 +490,106 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
             if let lastAppliedRegion, regionsAreClose(lastAppliedRegion, region) {
                 return
             }
+            let previousRegion = lastAppliedRegion
             lastAppliedRegion = region
 
             guard animated else {
+                isApplyingProgrammaticRegion = true
                 mapView.setRegion(region, animated: false)
+                isApplyingProgrammaticRegion = false
                 return
             }
 
-            // Wrapping the (non-animated) region assignment in an explicit UIView
-            // animation block gives precise control over duration — 0.6s sits in the
-            // requested 500-700ms window for a smooth, deliberate camera move rather
-            // than MapKit's default un-tunable `animated: true` timing.
-            UIView.animate(
-                withDuration: 0.6,
-                delay: 0,
-                options: [.curveEaseInOut],
-                animations: {
-                    mapView.setRegion(region, animated: false)
-                }
+            // Scale the animation duration to how big a jump this is. A full "wide
+            // view back to tight ground camera" transition (e.g. after zooming out
+            // manually, or the driver moving 30m+) reads as a deliberate, gradual
+            // zoom-in at a longer duration; small follow-the-driver nudges keep the
+            // snappier default so they don't feel sluggish.
+            let duration = Self.animationDuration(from: previousRegion, to: region)
+            animateRegion(to: region, on: mapView, duration: duration)
+        }
+
+        /// Manually interpolates the map's region frame-by-frame via CADisplayLink,
+        /// instead of relying on UIKit's implicit property animation (wrapping the
+        /// `region` assignment in a `UIView.animate` block). That implicit-animation
+        /// trick turned out not to reliably animate `MKMapView.region` on this SDK —
+        /// the region change would apply instantly regardless of the surrounding
+        /// animation block, which is why earlier attempts still looked like an
+        /// instant cut. Driving the interpolation ourselves, frame by frame, is the
+        /// same reliable approach already used for the driver marker's smooth motion
+        /// in RydrDriverNavigationMapView.
+        private func animateRegion(to target: MKCoordinateRegion, on mapView: MKMapView, duration: TimeInterval) {
+            regionAnimationDisplayLink?.invalidate()
+
+            let start = mapView.region
+            regionAnimationStart = start
+            regionAnimationTarget = target
+            regionAnimationStartTime = CACurrentMediaTime()
+            regionAnimationDuration = max(duration, 0.05)
+            animatingMapView = mapView
+            isApplyingProgrammaticRegion = true
+
+            let link = CADisplayLink(target: self, selector: #selector(stepRegionAnimation))
+            link.add(to: .main, forMode: .common)
+            regionAnimationDisplayLink = link
+        }
+
+        @objc private func stepRegionAnimation() {
+            guard let start = regionAnimationStart,
+                  let target = regionAnimationTarget,
+                  let mapView = animatingMapView else {
+                regionAnimationDisplayLink?.invalidate()
+                regionAnimationDisplayLink = nil
+                return
+            }
+
+            let elapsed = CACurrentMediaTime() - regionAnimationStartTime
+            let t = min(1.0, elapsed / regionAnimationDuration)
+            // Smoothstep easing — gentle ease-in/ease-out rather than linear, so the
+            // zoom feels deliberate rather than mechanical.
+            let eased = t * t * (3 - 2 * t)
+
+            let center = CLLocationCoordinate2D(
+                latitude: start.center.latitude + (target.center.latitude - start.center.latitude) * eased,
+                longitude: start.center.longitude + (target.center.longitude - start.center.longitude) * eased
             )
+            let span = MKCoordinateSpan(
+                latitudeDelta: start.span.latitudeDelta + (target.span.latitudeDelta - start.span.latitudeDelta) * eased,
+                longitudeDelta: start.span.longitudeDelta + (target.span.longitudeDelta - start.span.longitudeDelta) * eased
+            )
+            mapView.region = MKCoordinateRegion(center: center, span: span)
+
+            if t >= 1.0 {
+                regionAnimationDisplayLink?.invalidate()
+                regionAnimationDisplayLink = nil
+                animatingMapView = nil
+                regionAnimationStart = nil
+                regionAnimationTarget = nil
+                // Only clear the flag once the transition has actually finished —
+                // clearing it as soon as the first `regionDidChangeAnimated` callback
+                // arrives (which fires on every one of these per-frame updates) let a
+                // smooth zoom get misread as a user gesture partway through.
+                isApplyingProgrammaticRegion = false
+            }
+        }
+
+        /// A bigger zoom-level change (e.g. wide view → tight ground camera) gets a
+        /// longer, more deliberate animation; small position nudges at a similar zoom
+        /// level stay quick.
+        private static func animationDuration(from previous: MKCoordinateRegion?, to region: MKCoordinateRegion) -> TimeInterval {
+            guard let previous else { return 0.6 }
+            let previousSpan = max(previous.span.latitudeDelta, 0.0001)
+            let newSpan = max(region.span.latitudeDelta, 0.0001)
+            let zoomRatio = max(previousSpan / newSpan, newSpan / previousSpan)
+
+            switch zoomRatio {
+            case ..<1.5:
+                return 0.6
+            case ..<4:
+                return 0.9
+            default:
+                return 1.3
+            }
         }
 
         private func regionsAreClose(_ lhs: MKCoordinateRegion, _ rhs: MKCoordinateRegion) -> Bool {
