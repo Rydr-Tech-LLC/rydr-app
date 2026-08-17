@@ -9,6 +9,7 @@ import SwiftUI
 import MapKit
 import CoreLocation
 import Combine
+import FirebaseAuth
 
 private enum DriverRideLifecyclePhase {
     case accepted
@@ -1093,7 +1094,9 @@ private struct DriverRideMessageSheet: View {
     let driverSpeedMetersPerSecond: CLLocationSpeed?
     let onSend: (_ text: String) async throws -> Void
 
+    
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var messages: [DriverRideChatMessage] = []
     @State private var message = ""
     @State private var isSending = false
@@ -1241,24 +1244,37 @@ private struct DriverRideMessageSheet: View {
                 }
             )
         }
-        let isDriverMessage = chatMessage.senderId == driverId || chatMessage.senderRole == "driver"
+        let isOutgoing = chatMessage.senderId == Auth.auth().currentUser?.uid
 
         return AnyView(HStack {
-            if isDriverMessage { Spacer(minLength: 48) }
+            if isOutgoing { Spacer(minLength: 48) }
 
             Text(chatMessage.text)
                 .font(.body)
-                .foregroundStyle(isDriverMessage ? .white : .primary)
+                .foregroundStyle(Color.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
-                .background(isDriverMessage ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.systemBackground)))
+                .background(
+                    Group {
+                        if isOutgoing {
+                            Styles.rydrGradient
+                        } else if colorScheme == .dark {
+                            Color(.systemGray5)
+                        } else {
+                            Color(.systemGray6)
+                        }
+                    }
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(isDriverMessage ? Color.clear : Color.black.opacity(0.06), lineWidth: 1)
+                        .stroke(
+                            (!isOutgoing && colorScheme == .dark) ? Color.white.opacity(0.15) : Color.clear,
+                            lineWidth: 1
+                        )
                 )
 
-            if !isDriverMessage { Spacer(minLength: 48) }
+            if !isOutgoing { Spacer(minLength: 48) }
         })
     }
 
