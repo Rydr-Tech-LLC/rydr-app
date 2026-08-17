@@ -124,24 +124,11 @@ struct RideChatView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
                 .background(
-                    Group {
-                        if isOutgoing {
-                            Styles.rydrGradient
-                        } else if colorScheme == .dark {
-                            Color(.systemGray5)
-                        } else {
-                            Color(.systemGray6)
-                        }
-                    }
+                    isOutgoing
+                        ? AnyView(Styles.rydrGradient)
+                        : AnyView(colorScheme == .dark ? Color(.systemGray2) : Color(.systemGray))
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(
-                            (!isOutgoing && colorScheme == .dark) ? Color.white.opacity(0.15) : Color.clear,
-                            lineWidth: 1
-                        )
-                )
 
             if !isOutgoing {
                 Spacer(minLength: 52)
