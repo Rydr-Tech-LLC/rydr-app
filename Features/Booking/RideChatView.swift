@@ -110,6 +110,12 @@ struct RideChatView: View {
         !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
     }
 
+    private var incomingBubbleColor: Color {
+        colorScheme == .dark
+            ? Color(.systemGray2)
+            : Color(red: 0.32, green: 0.32, blue: 0.34)
+    }
+
     private func messageRow(_ message: ChatMessage) -> some View {
         let isOutgoing = message.senderId == Auth.auth().currentUser?.uid
 
@@ -125,8 +131,8 @@ struct RideChatView: View {
                 .padding(.vertical, 9)
                 .background(
                     isOutgoing
-                        ? AnyView(Styles.rydrGradient)
-                        : AnyView(colorScheme == .dark ? Color(.systemGray2) : Color(.systemGray))
+                        ? AnyShapeStyle(Styles.rydrGradient)
+                        : AnyShapeStyle(incomingBubbleColor)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 14))
 
@@ -218,4 +224,3 @@ struct RideChatView: View {
         }
     }
 }
-

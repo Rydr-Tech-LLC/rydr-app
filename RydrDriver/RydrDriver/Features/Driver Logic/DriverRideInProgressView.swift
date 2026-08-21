@@ -1094,7 +1094,6 @@ private struct DriverRideMessageSheet: View {
     let driverSpeedMetersPerSecond: CLLocationSpeed?
     let onSend: (_ text: String) async throws -> Void
 
-    
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @State private var messages: [DriverRideChatMessage] = []
@@ -1226,6 +1225,12 @@ private struct DriverRideMessageSheet: View {
         return speed >= 2.7
     }
 
+    private var incomingBubbleColor: Color {
+        colorScheme == .dark
+            ? Color(.systemGray2)
+            : Color(red: 0.32, green: 0.32, blue: 0.34)
+    }
+
     private func chatBubble(_ chatMessage: DriverRideChatMessage) -> some View {
         if chatMessage.isPrivateDriverNote {
             return AnyView(
@@ -1256,8 +1261,8 @@ private struct DriverRideMessageSheet: View {
                 .padding(.vertical, 9)
                 .background(
                     isOutgoing
-                        ? AnyView(Styles.rydrGradient)
-                        : AnyView(colorScheme == .dark ? Color(.systemGray2) : Color(.systemGray))
+                        ? AnyShapeStyle(Styles.rydrGradient)
+                        : AnyShapeStyle(incomingBubbleColor)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
