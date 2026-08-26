@@ -97,6 +97,7 @@ struct DriverRideRequest: Identifiable, Equatable {
         dropoff = data["dropoff"] as? String ?? "Drop-off location"
         rideType = data["rideType"] as? String ?? "Rydr"
         estimatedFare = Self.doubleValue(data["estimatedFare"] ?? data["upfrontFare"])
+            ?? Self.dollarsFromCents(data["displayEstimatedDriverPayoutCents"] ?? data["estimatedDriverPayoutCents"])
         estimatedDriverPayout = Self.dollarsFromCents(data["estimatedDriverPayoutCents"] ?? data["driverPayoutCents"])
             ?? Self.doubleValue(data["estimatedDriverPayout"] ?? data["driverPayout"])
             ?? estimatedFare
@@ -235,7 +236,7 @@ struct DriverActiveRide: Identifiable, Equatable {
         rideType = data["rideType"] as? String ?? "Rydr"
         status = data["status"] as? String ?? "accepted"
         estimatedFare = Self.doubleValue(data["estimatedFare"] ?? data["upfrontFare"] ?? data["fare"])
-            ?? Self.dollarsFromCents(data["estimatedDriverPayoutCents"] ?? data["driverPayoutCents"])
+            ?? Self.dollarsFromCents(data["displayEstimatedDriverPayoutCents"] ?? data["estimatedDriverPayoutCents"] ?? data["driverPayoutCents"])
         estimatedDistanceMiles = Self.doubleValue(data["estimatedDistanceMiles"] ?? data["distanceMiles"])
         estimatedDurationMinutes = Self.doubleValue(data["estimatedDurationMinutes"] ?? data["durationMinutes"])
         pickupCoordinate = Self.coordinate(from: data["pickupCoordinate"] ?? data["pickupLocation"] ?? data["pickupGeoPoint"])

@@ -1,5 +1,5 @@
 const { admin, getFirestore } = require("../config/firebase");
-const { calculateOutcome } = require("./rideFinancialService");
+const { calculateOutcome, applyFullRideCredit } = require("./rideFinancialService");
 const { calculateAndStoreRideRouteEstimate } = require("./rideRouteService");
 
 const ACTIONS = {
@@ -33,6 +33,14 @@ function serverRateFields(driver, rideType) {
     driverRatePerMileCents: Number.isFinite(perMile) ? Math.round(perMile * 100) : undefined,
     driverRatePerMinuteCents: Number.isFinite(perMinute) ? Math.round(perMinute * 100) : undefined
   };
+}
+
+function rydrBankRewardGroup(rideType) {
+  const key = String(rideType || "").toLowerCase();
+  if (key.includes("xl")) return "xl";
+  if (key.includes("prestine") || key.includes("pristine")) return "prestine";
+  if (key.includes("executive")) return "executive";
+  return "go_eco";
 }
 
 async function transitionRide({ rideId, action, uid, reason, requestId, queued = false }) {
@@ -74,6 +82,24 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     }
 
     const driverSnap = ride.driverId ? await tx.get(db.collection("drivers").doc(ride.driverId)) : null;
+    let rydrBankCredit = null;
+    const rydrBankCode = typeof ride.rydrBankCode === "string" ? ride.rydrBankCode.trim() : "";
+    if (action === "complete" && !outcomeSnap.exists && rydrBankCode) {
+      if (!/^RB-[A-Z0-9-]{4,32}$/i.test(rydrBankCode)) throw error("RydrBank code is invalid", 409);
+      const indexRef = db.collection("codes_index").doc(rydrBankCode);
+      const indexSnap = await tx.get(indexRef);
+      if (!indexSnap.exists || indexSnap.data().currentOwnerUid !== ride.riderId) throw error("RydrBank code is not owned by this rider", 409);
+      const codePath = indexSnap.data().codeDocPath;
+      if (typeof codePath !== "string" || !codePath) throw error("RydrBank code record is invalid", 409);
+      const codeRef = db.doc(codePath);
+      const codeSnap = await tx.get(codeRef);
+      const codeData = codeSnap.exists ? codeSnap.data() : null;
+      if (!codeData || !["active", "reserved"].includes(codeData.status)) throw error("RydrBank code is no longer available", 409);
+      const distanceMiles = Number(ride.backendDistanceMiles ?? ride.estimatedDistanceMiles ?? ride.distanceMiles);
+      if (Number.isFinite(distanceMiles) && distanceMiles > Number(codeData.maxMiles || 15)) throw error("Ride exceeds the RydrBank mileage limit", 409);
+      if ((codeData.rewardGroup || "go_eco") !== rydrBankRewardGroup(ride.rideType)) throw error("RydrBank code does not match this ride type", 409);
+      rydrBankCredit = { code: rydrBankCode, codeRef, ownerUid: ride.riderId };
+    }
 
     const now = admin.firestore.Timestamp.now();
     const hasStop = Boolean(ride.stop || ride.addedStop || ride.stopCoordinate || ride.stopGeoPoint);
@@ -91,11 +117,39 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     const finalRide = { ...ride, ...serverRateFields(driverSnap?.data(), ride.rideType), ...update };
     let outcome = outcomeSnap.exists ? outcomeSnap.data() : null;
     if (policy.finalizes && !outcome) {
-      outcome = { rideId, ...calculateOutcome(finalRide, { nowMillis: now.toMillis() }), calculatedAt: now, createdAt: now, updatedAt: now };
+      let calculatedOutcome = calculateOutcome(finalRide, { nowMillis: now.toMillis() });
+      if (rydrBankCredit) calculatedOutcome = applyFullRideCredit(calculatedOutcome, true);
+      outcome = { rideId, ...calculatedOutcome, calculatedAt: now, createdAt: now, updatedAt: now };
       tx.create(outcomeRef, outcome);
-      Object.assign(update, { finalRiderChargeCents: outcome.finalRiderChargeCents, driverPayoutCents: outcome.driverPayoutCents, platformShareCents: outcome.platformShareCents, financialOutcomeStatus: "finalized", paymentStatus: "pending" });
+      if (rydrBankCredit) {
+        tx.update(rydrBankCredit.codeRef, { status: "used", usedRideId: rideId, reservedRideId: null, usedAt: now });
+        tx.set(db.collection("users").doc(rydrBankCredit.ownerUid), {
+          rydrBank: { codesAvailable: admin.firestore.FieldValue.increment(-1) },
+          updatedAt: now
+        }, { merge: true });
+      }
+      Object.assign(update, {
+        pricingVersion: outcome.pricingVersion,
+        distanceChargeCents: outcome.distanceChargeCents,
+        timeChargeCents: outcome.timeChargeCents,
+        minimumFareAdjustmentCents: outcome.minimumFareAdjustmentCents,
+        rideSubtotalCents: outcome.rideSubtotalCents,
+        bookingFeeCents: outcome.bookingFeeCents,
+        waitChargeCents: outcome.waitChargeCents,
+        cancellationFeeCents: outcome.cancellationFeeCents,
+        grossChargeCents: outcome.grossChargeCents,
+        promotionDiscountCents: outcome.promotionDiscountCents,
+        appliedRydrBankCredit: outcome.appliedRydrBankCredit === true,
+        finalRiderChargeCents: outcome.finalRiderChargeCents,
+        driverPayoutCents: outcome.driverPayoutCents,
+        platformShareCents: outcome.platformShareCents,
+        proratedCancellationChargeCents: outcome.outcomeType === "mid_ride_cancellation" ? outcome.finalRiderChargeCents : null,
+        cancellationTotalChargeCents: outcome.outcomeType === "rider_cancellation" ? outcome.finalRiderChargeCents : null,
+        financialOutcomeStatus: "finalized",
+        paymentStatus: "pending"
+      });
     }
-    if (!policy.requestOnly) tx.set(rideRef, action === "driver_accept" ? { ...ride, ...update } : update, { merge: true });
+    if (!policy.requestOnly) tx.set(rideRef, !rideSnap.exists || action === "driver_accept" ? { ...ride, ...update } : update, { merge: true });
     tx.set(requestRef, update, { merge: true });
     if (action.endsWith("cancel")) tx.set(signalRef, { status: "cancelled", updatedAt: now }, { merge: true });
     return { status: resolvedStatus, outcome, duplicate: false };

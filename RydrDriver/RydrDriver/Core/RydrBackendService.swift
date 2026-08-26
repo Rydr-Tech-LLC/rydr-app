@@ -52,6 +52,18 @@ enum RydrBackendService {
         }
     }
 
+    static func updateDriverPresence(_ body: DriverPresenceRequest) async throws -> DriverPresenceResponse {
+        guard let request = try await makeAuthenticatedRequest(path: "/driver/presence", method: "POST", body: body) else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Backend presence update failed."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        return try JSONDecoder().decode(DriverPresenceResponse.self, from: data)
+    }
+
     /// Every rydr-backend `/driver/*` route now requires a verified Firebase
     /// ID token (see rydr-backend/src/middleware/firebaseAuth.js) and checks
     /// that the body's uid/driverId matches the token — so every call from
@@ -103,6 +115,27 @@ enum RydrBackendService {
 
     private struct RideRouteEstimateRequest: Encodable {
         let departureDate: String
+    }
+
+    struct DriverPresenceRequest: Encodable {
+        let online: Bool
+        let selectedRideTypes: [String]
+        let location: DriverPresenceLocation?
+    }
+
+    struct DriverPresenceLocation: Encodable {
+        let lat: Double
+        let lng: Double
+        let speed: Double
+        let course: Double
+    }
+
+    struct DriverPresenceResponse: Decodable {
+        let ok: Bool
+        let online: Bool
+        let availabilityStatus: String
+        let hasActiveRide: Bool
+        let selectedRideTypes: [String]
     }
 
     struct RideTransitionResponse: Decodable {

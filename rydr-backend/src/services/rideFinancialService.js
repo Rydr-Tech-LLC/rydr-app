@@ -97,4 +97,17 @@ function calculateOutcome(ride, options = {}) {
   };
 }
 
-module.exports = { calculateOutcome, tierFor, PRICING_VERSION };
+function applyFullRideCredit(outcome, hasCredit) {
+  if (!hasCredit) return outcome;
+  return {
+    ...outcome,
+    promotionDiscountCents: outcome.grossChargeCents,
+    finalRiderChargeCents: 0,
+    platformShareCents: outcome.grossChargeCents - outcome.driverPayoutCents,
+    appliedRydrBankCredit: true,
+    promotionSource: "rydr_bank",
+    calculationReason: `${outcome.calculationReason}_rydr_bank_credit`
+  };
+}
+
+module.exports = { calculateOutcome, applyFullRideCredit, tierFor, PRICING_VERSION };

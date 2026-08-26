@@ -59,30 +59,6 @@ struct RidePricingSnapshot: Equatable, Codable {
     let promoDiscountCents: Int
     let authorizedRiderChargeCents: Int
 
-    var asFirestoreFields: [String: Any] {
-        [
-            "pricingVersion": pricingVersion,
-            "fareEstimateSource": estimateSource,
-            "driverRatePerMileCents": driverRatePerMileCents,
-            "driverRatePerMinuteCents": driverRatePerMinuteCents,
-            "distanceCostCents": distanceCostCents,
-            "timeCostCents": timeCostCents,
-            "calculatedSubtotalCents": calculatedSubtotalCents,
-            "minimumFareAdjustmentCents": minimumFareAdjustmentCents,
-            "rideSubtotalCents": rideSubtotalCents,
-            "bookingFeeCents": bookingFeeCents,
-            "estimatedRiderTotalCents": estimatedRiderTotalCents,
-            "estimatedDriverPayoutCents": estimatedDriverPayoutCents,
-            "estimatedPlatformShareCents": estimatedPlatformShareCents,
-            "promoDiscountCents": promoDiscountCents,
-            "authorizedRiderChargeCents": authorizedRiderChargeCents,
-            "finalRiderChargeCents": authorizedRiderChargeCents,
-            "upfrontFare": Double(estimatedDriverPayoutCents) / 100.0,
-            "estimatedFare": Double(estimatedDriverPayoutCents) / 100.0,
-            "estimatedRiderTotal": Double(estimatedRiderTotalCents) / 100.0,
-            "bookingFee": Double(bookingFeeCents) / 100.0
-        ]
-    }
 }
 
 enum RydrRideTier {
@@ -428,22 +404,6 @@ struct RideCancellationQuote {
     let driverPayoutCents: Int
     let totalChargeCents: Int
 
-    var asFirestoreFields: [String: Any] {
-        [
-            "cancellationMode": mode.rawValue,
-            "cancellationFeeApplies": appliesFee,
-            "cancellationPickupEtaSeconds": pickupEtaSeconds,
-            "cancellationRideSubtotalCents": rideSubtotalCents,
-            "cancellationFeeRateBasisPoints": 2000,
-            "cancellationFeeCents": cancellationFeeCents,
-            "cancellationBookingFeeCents": bookingFeeCents,
-            "cancellationPlatformFeeCents": platformFeeCents,
-            "cancellationDriverPayoutCents": driverPayoutCents,
-            "cancellationTotalChargeCents": totalChargeCents,
-            "finalRiderChargeCents": totalChargeCents,
-            "driverPayoutCents": driverPayoutCents
-        ]
-    }
 }
 
 struct ProratedRideCancellationQuote {
@@ -453,19 +413,6 @@ struct ProratedRideCancellationQuote {
     let platformFeeCents: Int
     let cancelledByRole: String
 
-    var asFirestoreFields: [String: Any] {
-        [
-            "proratedCancellation": true,
-            "proratedCancellationReason": "midRide",
-            "proratedCancellationDistanceMiles": distanceMiles,
-            "proratedCancellationChargeCents": chargeCents,
-            "proratedCancellationDriverPayoutCents": driverPayoutCents,
-            "proratedCancellationPlatformFeeCents": platformFeeCents,
-            "finalRiderChargeCents": chargeCents,
-            "driverPayoutCents": driverPayoutCents,
-            "cancelledByRole": cancelledByRole
-        ]
-    }
 }
 
 struct RideLifecycleSnapshot {
@@ -476,6 +423,7 @@ struct RideLifecycleSnapshot {
     let dropoffCoordinate: CLLocationCoordinate2D?
     let pickupWaitStartedAt: Date?
     let pickupComplimentaryWaitSeconds: Int?
+    let finalRiderChargeCents: Int?
     let proratedCancellationChargeCents: Int?
     let proratedCancellationDistanceMiles: Double?
 }
@@ -517,6 +465,7 @@ protocol RideService: AnyObject, Sendable {
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
         pricingSnapshot: RidePricingSnapshot,
+        rydrBankCode: String?,
         riderPreferences: RiderRidePreferences?,
         riderVerified: Bool
     ) async throws -> String // returns rideId
@@ -855,6 +804,7 @@ final class RideManager: ObservableObject {
                     dropoffCoordinate: cachedDropoffCoordinate,
                     estimate: cachedEstimate,
                     pricingSnapshot: pricingSnapshot,
+                    rydrBankCode: self.currentAppliedRydrBankCode,
                     riderPreferences: cachedRidePreferences,
                     riderVerified: cachedRiderVerified
                 )
@@ -977,7 +927,6 @@ final class RideManager: ObservableObject {
         history.insert(receipt, at: 0)
         let backendRideId = currentServiceRideId ?? ride.id.uuidString
         let chatContext = activeRideChatContext
-        let appliedCode = currentAppliedRydrBankCode
         let rideType = ride.rideType
         let distance = ride.estimate.distanceMiles
         currentRide = nil
@@ -992,12 +941,9 @@ final class RideManager: ObservableObject {
         closeRideChatIfNeeded(chatContext)
 
         Task {
-            if let appliedCode, !appliedCode.isEmpty {
-                try? await RydrBankAPI.consume(code: appliedCode, rideId: backendRideId, rideType: rideType, distanceMi: distance)
-                await MainActor.run {
-                    UserDefaults.standard.removeObject(forKey: "appliedRydrBankCode")
-                    UserDefaults.standard.removeObject(forKey: "appliedRydrBankBookingId")
-                }
+            await MainActor.run {
+                UserDefaults.standard.removeObject(forKey: "appliedRydrBankCode")
+                UserDefaults.standard.removeObject(forKey: "appliedRydrBankBookingId")
             }
             _ = try? await RydrBankAPI.rideComplete(rideId: backendRideId, distanceMi: distance, rideType: rideType)
             await chargeRiderForRide(ride, rideId: backendRideId, totalAmount: chargeBreakdown.calculatedTotal)
@@ -1297,9 +1243,7 @@ final class RideManager: ObservableObject {
         Task {
             if notifyBackend, let id = cancelledServiceRideId {
                 try? await rideService.cancelRide(rideId: id, mode: mode, quote: cancellationQuote)
-                if (cancellationQuote?.totalChargeCents ?? 0) > 0 {
-                    await chargeCancellationFee(rideId: id)
-                }
+                await chargeCancellationFee(rideId: id)
             }
         }
         closeRideChatIfNeeded(chatContext)
@@ -1337,9 +1281,7 @@ final class RideManager: ObservableObject {
         Task {
             if let id = cancelledServiceRideId {
                 try? await rideService.cancelRide(rideId: id, mode: mode, quote: cancellationQuote)
-                if (cancellationQuote?.totalChargeCents ?? 0) > 0 {
-                    await chargeCancellationFee(rideId: id)
-                }
+                await chargeCancellationFee(rideId: id)
             }
         }
         closeRideChatIfNeeded(chatContext)
@@ -1434,6 +1376,10 @@ final class RideManager: ObservableObject {
 
     private func applyLifecycleSnapshot(_ snapshot: RideLifecycleSnapshot) {
         guard currentRide != nil else { return }
+
+        if let finalRiderChargeCents = snapshot.finalRiderChargeCents {
+            currentRide?.fare = Double(finalRiderChargeCents) / 100.0
+        }
 
         if let driverCoordinate = snapshot.driverCoordinate {
             liveDriverCoordinate = driverCoordinate

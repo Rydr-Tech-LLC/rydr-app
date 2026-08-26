@@ -50,6 +50,7 @@ service cloud.firestore {
         "admin",
         "adminRole",
         "approvalStatus",
+        "availabilityStatus",
         "approvedAt",
         "approvedBy",
         "availableBalance",
@@ -81,9 +82,11 @@ service cloud.firestore {
         "identityStatus",
         "identityVerified",
         "identityVerifiedAt",
+        "hasActiveRide",
         "isAdmin",
         "isApproved",
         "isLicenseVerified",
+        "isOnline",
         "isRydrVerifiedDriver",
         "isVerified",
         "missionControlApprovalOverride",
@@ -91,6 +94,7 @@ service cloud.firestore {
         "missionControlApprovalOverrideBy",
         "missionControlApprovalOverrideReason",
         "needsAttentionReason",
+        "online",
         "paymentStatus",
         "pendingBalance",
         "rating",
@@ -691,7 +695,6 @@ service cloud.firestore {
         "approximateLocation",
         "displayName",
         "eligibleRideTypes",
-        "isOnline",
         "profilePhotoURL",
         "rating",
         "ratingCount",
@@ -836,17 +839,29 @@ service cloud.firestore {
 
     match /driver_status/{uid} {
       allow read: if signedIn();
-      allow create, update: if isSelf(uid)
+      allow create: if isSelf(uid)
         && request.resource.data.keys().hasOnly([
-          "availabilityStatus",
           "autoAcceptQueuedRides",
           "course",
-          "hasActiveRide",
-          "isOnline",
           "lat",
           "lng",
           "location",
-          "online",
+          "qualifiedRideTypes",
+          "rideFilters",
+          "rideTypes",
+          "selectedRideTypes",
+          "speed",
+          "supportedRideTypes",
+          "tierRates",
+          "updatedAt"
+        ]);
+      allow update: if isSelf(uid)
+        && affectedKeys().hasOnly([
+          "autoAcceptQueuedRides",
+          "course",
+          "lat",
+          "lng",
+          "location",
           "qualifiedRideTypes",
           "rideFilters",
           "rideTypes",
@@ -861,18 +876,7 @@ service cloud.firestore {
 
     match /driverPresenceEvents/{eventId} {
       allow read: if isAdmin();
-      allow create: if signedIn()
-        && request.resource.data.driverId == request.auth.uid
-        && request.resource.data.isOnline is bool
-        && request.resource.data.keys().hasOnly([
-          "availabilityStatus",
-          "createdAt",
-          "driverId",
-          "hasActiveRide",
-          "isOnline",
-          "selectedRideTypes"
-        ]);
-      allow update, delete: if false;
+      allow write: if false;
     }
 
     match /publicDriverProfiles/{driverUid} {

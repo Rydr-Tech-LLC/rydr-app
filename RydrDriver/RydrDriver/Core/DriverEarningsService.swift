@@ -70,7 +70,9 @@ final class DriverEarningsService {
 
         for document in ridesSnapshot.documents {
             let data = document.data()
-            let fare = Self.decimal(data["fare"] ?? data["finalFare"] ?? data["estimatedFare"]) ?? 0
+            let fare = Self.dollarsFromCents(data["driverPayoutCents"])
+                ?? Self.decimal(data["fare"] ?? data["finalFare"] ?? data["estimatedFare"])
+                ?? 0
             let completedAt = Self.date(data["completedAt"]) ?? Self.date(data["updatedAt"])
 
             if let completedAt {
@@ -125,6 +127,11 @@ final class DriverEarningsService {
         if let value = value as? NSNumber { return value.decimalValue }
         if let value = value as? String { return Decimal(string: value) }
         return nil
+    }
+
+    private static func dollarsFromCents(_ value: Any?) -> Decimal? {
+        guard let cents = decimal(value) else { return nil }
+        return cents / 100
     }
 
     private static func date(_ value: Any?) -> Date? {

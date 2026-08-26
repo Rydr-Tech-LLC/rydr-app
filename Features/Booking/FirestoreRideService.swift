@@ -64,6 +64,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
         pricingSnapshot: RidePricingSnapshot,
+        rydrBankCode: String?,
         riderPreferences: RiderRidePreferences?,
         riderVerified: Bool
     ) async throws -> String {
@@ -111,6 +112,9 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         // consumed by backend finalization or Stripe as trusted money.
         payload["displayEstimatedRiderTotalCents"] = pricingSnapshot.estimatedRiderTotalCents
         payload["displayEstimatedDriverPayoutCents"] = pricingSnapshot.estimatedDriverPayoutCents
+        if let rydrBankCode, !rydrBankCode.isEmpty {
+            payload["rydrBankCode"] = rydrBankCode
+        }
         if let preferencePayload = riderPreferences?.rideRequestPayload {
             payload["ridePreferences"] = preferencePayload
         }
@@ -207,6 +211,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                         dropoffCoordinate: Self.coordinate(from: data["dropoffCoordinate"]) ?? Self.coordinate(from: data["dropoffGeoPoint"]),
                         pickupWaitStartedAt: Self.date(from: data["pickupWaitStartedAt"] ?? data["arrivedAtPickupAt"]),
                         pickupComplimentaryWaitSeconds: Self.intValue(data["pickupComplimentaryWaitSeconds"]),
+                        finalRiderChargeCents: Self.intValue(data["finalRiderChargeCents"]),
                         proratedCancellationChargeCents: Self.intValue(data["proratedCancellationChargeCents"]),
                         proratedCancellationDistanceMiles: Self.doubleValue(data["proratedCancellationDistanceMiles"])
                     )
