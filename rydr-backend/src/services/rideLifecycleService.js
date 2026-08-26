@@ -130,6 +130,8 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
       }
       Object.assign(update, {
         pricingVersion: outcome.pricingVersion,
+        outcomeType: outcome.outcomeType,
+        currency: outcome.currency,
         distanceChargeCents: outcome.distanceChargeCents,
         timeChargeCents: outcome.timeChargeCents,
         minimumFareAdjustmentCents: outcome.minimumFareAdjustmentCents,

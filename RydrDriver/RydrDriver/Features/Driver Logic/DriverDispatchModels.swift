@@ -98,9 +98,8 @@ struct DriverRideRequest: Identifiable, Equatable {
         rideType = data["rideType"] as? String ?? "Rydr"
         estimatedFare = Self.doubleValue(data["estimatedFare"] ?? data["upfrontFare"])
             ?? Self.dollarsFromCents(data["displayEstimatedDriverPayoutCents"] ?? data["estimatedDriverPayoutCents"])
-        estimatedDriverPayout = Self.dollarsFromCents(data["estimatedDriverPayoutCents"] ?? data["driverPayoutCents"])
-            ?? Self.doubleValue(data["estimatedDriverPayout"] ?? data["driverPayout"])
-            ?? estimatedFare
+        estimatedDriverPayout = Self.dollarsFromCents(data["displayEstimatedDriverPayoutCents"] ?? data["estimatedDriverPayoutCents"])
+            ?? Self.doubleValue(data["estimatedDriverPayout"])
         estimatedDistanceMiles = Self.doubleValue(data["estimatedDistanceMiles"] ?? data["distanceMiles"])
         estimatedDurationMinutes = Self.doubleValue(data["estimatedDurationMinutes"] ?? data["durationMinutes"])
         pickupCoordinate = Self.coordinate(from: data["pickupCoordinate"] ?? data["pickupLocation"] ?? data["pickupGeoPoint"])
@@ -175,7 +174,7 @@ struct DriverDemandSnapshot {
 }
 
 struct DriverActiveRide: Identifiable, Equatable {
-    static let pickupComplimentaryWaitSeconds = DriverRideLifecyclePolicy.pickupComplimentaryWaitSeconds
+    static let pickupComplimentaryWaitSeconds = DriverRidePresentationPolicy.pickupComplimentaryWaitSeconds
 
     let id: String
     let riderId: String
@@ -186,6 +185,7 @@ struct DriverActiveRide: Identifiable, Equatable {
     let rideType: String
     let status: String
     let estimatedFare: Double?
+    var finalDriverPayout: Double?
     let estimatedDistanceMiles: Double?
     let estimatedDurationMinutes: Double?
     let pickupCoordinate: CLLocationCoordinate2D?
@@ -211,7 +211,7 @@ struct DriverActiveRide: Identifiable, Equatable {
     let ridePreferences: DriverVisibleRidePreferences?
 
     var normalizedStatus: String {
-        DriverRideLifecyclePolicy.normalizedStatus(status)
+        DriverRidePresentationPolicy.normalizedStatus(status)
     }
 
     var isPickupStage: Bool {
@@ -235,8 +235,11 @@ struct DriverActiveRide: Identifiable, Equatable {
         dropoff = data["dropoff"] as? String ?? "Drop-off location"
         rideType = data["rideType"] as? String ?? "Rydr"
         status = data["status"] as? String ?? "accepted"
-        estimatedFare = Self.doubleValue(data["estimatedFare"] ?? data["upfrontFare"] ?? data["fare"])
-            ?? Self.dollarsFromCents(data["displayEstimatedDriverPayoutCents"] ?? data["estimatedDriverPayoutCents"] ?? data["driverPayoutCents"])
+        estimatedFare = Self.doubleValue(data["estimatedFare"] ?? data["upfrontFare"])
+            ?? Self.dollarsFromCents(data["displayEstimatedDriverPayoutCents"] ?? data["estimatedDriverPayoutCents"])
+        finalDriverPayout = data["financialOutcomeStatus"] as? String == "finalized"
+            ? Self.dollarsFromCents(data["driverPayoutCents"])
+            : nil
         estimatedDistanceMiles = Self.doubleValue(data["estimatedDistanceMiles"] ?? data["distanceMiles"])
         estimatedDurationMinutes = Self.doubleValue(data["estimatedDurationMinutes"] ?? data["durationMinutes"])
         pickupCoordinate = Self.coordinate(from: data["pickupCoordinate"] ?? data["pickupLocation"] ?? data["pickupGeoPoint"])

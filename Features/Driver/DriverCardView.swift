@@ -23,8 +23,8 @@ struct DriverCardView: View {
     private var perMinute: Double { pricingConfig.clampedPerMinute(driver.perMinute) }
 
     // Estimated fare (booking fee + time + distance)
-    private var fareBreakdown: RideFareBreakdown {
-        RideManager.fareBreakdown(estimate: estimate, with: driver, rideType: rideType)
+    private var fareBreakdown: RideFareEstimateBreakdown {
+        RideManager.fareEstimateBreakdown(estimate: estimate, with: driver, rideType: rideType)
     }
 
     private var price: Double {
@@ -58,7 +58,7 @@ struct DriverCardView: View {
 
                     // Big price in top right
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("$\(price, specifier: "%.2f")")
+                        Text("Est. $\(price, specifier: "%.2f")")
                             .font(.title3.bold())
                             .monospacedDigit()
                         Text(pricingConfig.title)

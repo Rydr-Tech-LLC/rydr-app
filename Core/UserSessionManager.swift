@@ -8,6 +8,7 @@ import Foundation
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
+import GoogleSignIn
 import UIKit
 
 enum MainAppTab: Hashable {
@@ -57,6 +58,8 @@ class UserSessionManager: ObservableObject {
     @Published var verifiedBadge: Bool = false
     @Published var studentAmbassadorBadge: Bool = false
 
+    private var isLoggingOut = false
+
     var hasRiderAccess: Bool { accountAccess == .rider }
     var isCashHubOnly: Bool { accountAccess == .cashHubOnly }
 
@@ -90,17 +93,45 @@ class UserSessionManager: ObservableObject {
     }
 
     func logout() {
+        guard !isLoggingOut else { return }
+        isLoggingOut = true
         let uid = Auth.auth().currentUser?.uid
         Task {
             await NotificationManager.shared.disableAndDeleteCurrentTokenForLogout(uid: uid)
+
+            do {
+                try Auth.auth().signOut()
+            } catch {
+                print("[RydrSession][rider] firebase_sign_out_failed error=\(error.localizedDescription)")
+                isLoggingOut = false
+                return
+            }
+
+            // Firebase and Google maintain separate local sessions. Clearing
+            // both prevents the next Google login from silently reusing the
+            // account that just logged out.
+            GIDSignIn.sharedInstance.signOut()
+            clearLocalAccountState()
+
+            userName = ""
+            userEmail = ""
+            selectedTab = .ride
+            accountAccess = nil
+            verifiedBadge = false
+            studentAmbassadorBadge = false
+            isLoggedIn = false
+            isLoggingOut = false
         }
-        userName = ""
-        userEmail = ""
-        selectedTab = .ride
-        accountAccess = nil
-        verifiedBadge = false
-        studentAmbassadorBadge = false
-        isLoggedIn = false
+    }
+
+    private func clearLocalAccountState() {
+        let defaults = UserDefaults.standard
+        [
+            "rydr.activeRideSnapshot.v1",
+            "appliedRydrBankCode",
+            "appliedRydrBankBookingId",
+            "recentDropoffsData"
+        ].forEach(defaults.removeObject(forKey:))
     }
 
     /// Load rider info from Firestore and compute a display name.

@@ -97,10 +97,10 @@ struct DriverEndRideView: View {
             Text("Ride completed")
                 .font(.largeTitle.weight(.black))
                 .foregroundStyle(.white)
-            Text("Earnings recorded for alpha testing.")
+            Text("Final payout calculated by Rydr.")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.86))
-            Text(ride.estimatedFare.map { $0.formatted(.currency(code: "USD")) } ?? "--")
+            Text(ride.finalDriverPayout.map { $0.formatted(.currency(code: "USD")) } ?? "Finalizing…")
                 .font(.system(size: 42, weight: .black, design: .rounded).monospacedDigit())
                 .foregroundStyle(.white)
         }

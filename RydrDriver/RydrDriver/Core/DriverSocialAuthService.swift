@@ -22,6 +22,10 @@ enum DriverSocialAuthService {
         }
         GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
 
+        // Do not silently reuse a Google account cached by an older session.
+        // Firebase Auth and Google Sign-In keep independent local sessions.
+        GIDSignIn.sharedInstance.signOut()
+
         guard let windowScene = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene })
             .first(where: { $0.activationState == .foregroundActive }),
@@ -50,6 +54,10 @@ enum DriverSocialAuthService {
             let profile = googleProfile(from: googleUser)
             completion(.success((credential, profile)))
         }
+    }
+
+    static func signOutFromGoogle() {
+        GIDSignIn.sharedInstance.signOut()
     }
 
     static func credential(from authorization: ASAuthorization, nonce: String) -> Result<(AuthCredential, DriverSocialAuthProfile), Error> {

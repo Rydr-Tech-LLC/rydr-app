@@ -63,7 +63,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
-        pricingSnapshot: RidePricingSnapshot,
+        pricingSnapshot: RidePriceEstimateSnapshot,
         rydrBankCode: String?,
         riderPreferences: RiderRidePreferences?,
         riderVerified: Bool
@@ -211,7 +211,9 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                         dropoffCoordinate: Self.coordinate(from: data["dropoffCoordinate"]) ?? Self.coordinate(from: data["dropoffGeoPoint"]),
                         pickupWaitStartedAt: Self.date(from: data["pickupWaitStartedAt"] ?? data["arrivedAtPickupAt"]),
                         pickupComplimentaryWaitSeconds: Self.intValue(data["pickupComplimentaryWaitSeconds"]),
-                        finalRiderChargeCents: Self.intValue(data["finalRiderChargeCents"]),
+                        financialOutcome: Self.financialOutcome(from: data),
+                        backendDistanceMiles: Self.doubleValue(data["backendDistanceMiles"]),
+                        backendDurationMinutes: Self.doubleValue(data["backendDurationMinutes"]),
                         proratedCancellationChargeCents: Self.intValue(data["proratedCancellationChargeCents"]),
                         proratedCancellationDistanceMiles: Self.doubleValue(data["proratedCancellationDistanceMiles"])
                     )
@@ -228,16 +230,27 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         }
     }
 
-    func cancelRide(rideId: String, mode: RideCancellationMode, quote: RideCancellationQuote?) async throws {
+    func cancelRide(rideId: String, mode: RideCancellationMode) async throws -> BackendRideFinancialOutcome? {
         let reason = mode == .findAnotherDriver ? "Rider cancelled to find another driver" : "Rider cancelled"
-        try await sendRideTransition(rideId: rideId, action: "rider_cancel", reason: reason)
+        return try await sendRideTransition(rideId: rideId, action: "rider_cancel", reason: reason)
     }
 
-    func cancelMidRide(rideId: String, quote: ProratedRideCancellationQuote) async throws {
-        try await sendRideTransition(rideId: rideId, action: "rider_cancel", reason: "Rider cancelled mid-ride")
+    func cancelMidRide(rideId: String) async throws -> BackendRideFinancialOutcome {
+        guard let outcome = try await sendRideTransition(
+            rideId: rideId,
+            action: "rider_cancel",
+            reason: "Rider cancelled mid-ride"
+        ) else {
+            throw NSError(
+                domain: "RydrRideBackend",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "The backend did not return a finalized cancellation fare."]
+            )
+        }
+        return outcome
     }
 
-    private func sendRideTransition(rideId: String, action: String, reason: String) async throws {
+    private func sendRideTransition(rideId: String, action: String, reason: String) async throws -> BackendRideFinancialOutcome? {
         guard let user = Auth.auth().currentUser else { throw RideDispatchError.notSignedIn }
         guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
               let base = URL(string: rawBase),
@@ -253,6 +266,11 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             throw NSError(domain: "RydrRideBackend", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: payload?["error"] as? String ?? "Ride cancellation failed."])
         }
+        return try JSONDecoder().decode(RideTransitionPayload.self, from: data).outcome
+    }
+
+    private struct RideTransitionPayload: Decodable {
+        let outcome: BackendRideFinancialOutcome?
     }
 
     private func requestBackendRouteEstimate(rideId: String, user: User) async throws {
@@ -388,6 +406,34 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         if let timestamp = raw as? Timestamp { return timestamp.dateValue() }
         if let date = raw as? Date { return date }
         return nil
+    }
+
+    private static func financialOutcome(from data: [String: Any]) -> BackendRideFinancialOutcome? {
+        guard data["financialOutcomeStatus"] as? String == "finalized",
+              let finalRiderChargeCents = intValue(data["finalRiderChargeCents"]),
+              let driverPayoutCents = intValue(data["driverPayoutCents"]),
+              let platformShareCents = intValue(data["platformShareCents"]) else {
+            return nil
+        }
+
+        return BackendRideFinancialOutcome(
+            pricingVersion: data["pricingVersion"] as? String,
+            outcomeType: data["outcomeType"] as? String,
+            currency: data["currency"] as? String ?? "usd",
+            distanceChargeCents: intValue(data["distanceChargeCents"]) ?? 0,
+            timeChargeCents: intValue(data["timeChargeCents"]) ?? 0,
+            minimumFareAdjustmentCents: intValue(data["minimumFareAdjustmentCents"]) ?? 0,
+            rideSubtotalCents: intValue(data["rideSubtotalCents"]) ?? 0,
+            bookingFeeCents: intValue(data["bookingFeeCents"]) ?? 0,
+            waitChargeCents: intValue(data["waitChargeCents"]) ?? 0,
+            cancellationFeeCents: intValue(data["cancellationFeeCents"]) ?? 0,
+            grossChargeCents: intValue(data["grossChargeCents"]) ?? finalRiderChargeCents,
+            promotionDiscountCents: intValue(data["promotionDiscountCents"]) ?? 0,
+            finalRiderChargeCents: finalRiderChargeCents,
+            driverPayoutCents: driverPayoutCents,
+            platformShareCents: platformShareCents,
+            calculationInputs: nil
+        )
     }
 
     private static func number(_ raw: Any?) -> CLLocationDegrees? {

@@ -308,8 +308,8 @@ private struct DriverCard: View {
 
     @State private var isFavorite = false
 
-    private var fareBreakdown: RideFareBreakdown {
-        RideManager.fareBreakdown(estimate: estimate, with: driver, rideType: rideType)
+    private var fareBreakdown: RideFareEstimateBreakdown {
+        RideManager.fareEstimateBreakdown(estimate: estimate, with: driver, rideType: rideType)
     }
 
     private var baseFare: Double {
@@ -477,7 +477,7 @@ private struct DriverCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .strikethrough()
-            Text(finalFare == 0 ? "FREE" : "$\(finalFare, specifier: "%.2f")")
+            Text(finalFare == 0 ? "EST. FREE" : "EST. $\(finalFare, specifier: "%.2f")")
                 .font(.headline.weight(.black))
         } else {
             Text("$\(baseFare, specifier: "%.2f")")

@@ -70,9 +70,15 @@ final class DriverEarningsService {
 
         for document in ridesSnapshot.documents {
             let data = document.data()
-            let fare = Self.dollarsFromCents(data["driverPayoutCents"])
-                ?? Self.decimal(data["fare"] ?? data["finalFare"] ?? data["estimatedFare"])
-                ?? 0
+            let fare: Decimal
+            if data["financialOutcomeStatus"] as? String == "finalized" {
+                // New rides use only the backend's authoritative payout.
+                fare = Self.dollarsFromCents(data["driverPayoutCents"]) ?? 0
+            } else {
+                // Read-only compatibility for rides created before backend
+                // financial outcomes existed.
+                fare = Self.decimal(data["fare"] ?? data["finalFare"] ?? data["estimatedFare"]) ?? 0
+            }
             let completedAt = Self.date(data["completedAt"]) ?? Self.date(data["updatedAt"])
 
             if let completedAt {

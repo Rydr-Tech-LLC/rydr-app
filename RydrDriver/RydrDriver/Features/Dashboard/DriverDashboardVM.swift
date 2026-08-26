@@ -411,6 +411,39 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         }
     }
 
+    @MainActor
+    func prepareForLogout() async {
+        if isOnline {
+            let location = lastLocation.map {
+                RydrBackendService.DriverPresenceLocation(
+                    lat: $0.coordinate.latitude,
+                    lng: $0.coordinate.longitude,
+                    speed: $0.speed,
+                    course: $0.course
+                )
+            }
+            let request = RydrBackendService.DriverPresenceRequest(
+                online: false,
+                selectedRideTypes: Array(selectedRideTypes).sorted(),
+                location: location
+            )
+            do {
+                _ = try await RydrBackendService.updateDriverPresence(request)
+            } catch {
+                RydrCrashReporter.record(error, context: "driver_logout_presence")
+            }
+        }
+
+        isOnline = false
+        isSearchingForRides = false
+        stopPushingDriverPresence()
+        stopRequestListener()
+        stopMapRequestBlipListener()
+        locationManager.stopUpdatingLocation()
+        pendingRequests = []
+        respondingRequestIDs = []
+    }
+
     func refreshMapRequestBlips() {
         startMapRequestBlipListener()
     }
@@ -535,59 +568,51 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func startActiveRideNavigation() {
-        updateActiveRideStatus(status: "enRouteToPickup")
+        performRideAction("start_navigation", successMessage: "Heading to pickup")
     }
 
     func markArrivedAtPickup() {
         guard let ride = activeRide else { return }
-        updateActiveRideStatus(status: "arrivedAtPickup")
+        performRideAction("arrive_pickup", successMessage: "Arrived at pickup")
         recordWaitTimeEvent(ride: ride, waitStage: "pickup_grace_started")
         // TODO: trigger rider push notification when notification service is available.
     }
 
     func markPickupPaidWaitActive() {
         guard let ride = activeRide else { return }
-        updateActiveRideStatus(status: "arrivedAtPickup")
+        performRideAction("start_paid_wait", successMessage: "Paid wait started")
         recordWaitTimeEvent(ride: ride, waitStage: "pickup_paid_started")
     }
 
     func startPassengerRide() {
         guard let ride = activeRide else { return }
-        let nextStatus = ride.hasAddedStop ? "navigatingToStop" : "inProgress"
-        updateActiveRideStatus(status: nextStatus)
+        performRideAction("start_ride", successMessage: ride.hasAddedStop ? "Heading to the stop" : "Ride started")
         recordWaitTimeEvent(ride: ride, waitStage: "wait_ended")
         // TODO: trigger rider push notification when notification service is available.
     }
 
     func markArrivedAtStop() {
         guard let ride = activeRide else { return }
-        updateActiveRideStatus(status: "arrivedAtStop")
+        performRideAction("arrive_stop", successMessage: "Arrived at stop")
         recordWaitTimeEvent(ride: ride, waitStage: "stop_paid_started")
     }
 
     func headToDropoffFromStop() {
         guard let ride = activeRide else { return }
-        updateActiveRideStatus(status: "inProgress")
+        performRideAction("leave_stop", successMessage: "Heading to drop-off")
         recordWaitTimeEvent(ride: ride, waitStage: "wait_ended")
     }
 
-    private func updateActiveRideStatus(status: String) {
+    /// Sends a transition intent. The backend validates it and the ride
+    /// listener supplies the resulting official status.
+    private func performRideAction(_ action: String, successMessage: String) {
         guard let ride = activeRide else { return }
         guard !isUpdatingActiveRide else { return }
         isUpdatingActiveRide = true
-        let action: String
-        switch status {
-        case "enRouteToPickup": action = "start_navigation"
-        case "arrivedAtPickup" where ride.normalizedStatus != "arrivedAtPickup": action = "arrive_pickup"
-        case "arrivedAtPickup": action = "start_paid_wait"
-        case "arrivedAtStop": action = "arrive_stop"
-        case "inProgress" where ride.normalizedStatus == "arrivedAtStop": action = "leave_stop"
-        default: action = "start_ride"
-        }
         Task { [weak self] in
             do {
                 _ = try await RydrBackendService.transitionRide(rideId: ride.id, action: action)
-                await MainActor.run { self?.isUpdatingActiveRide = false; self?.statusMessage = Self.driverMessage(for: status) }
+                await MainActor.run { self?.isUpdatingActiveRide = false; self?.statusMessage = successMessage }
             } catch {
                 await MainActor.run { self?.isUpdatingActiveRide = false; self?.statusMessage = "Could not update ride: \(error.localizedDescription)" }
             }
@@ -601,9 +626,11 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
         Task { [weak self] in
             do {
-                _ = try await RydrBackendService.transitionRide(rideId: ride.id, action: "complete")
+                let response = try await RydrBackendService.transitionRide(rideId: ride.id, action: "complete")
+                var completedRide = ride
+                completedRide.finalDriverPayout = response.outcome.map { Double($0.driverPayoutCents) / 100.0 }
                 await MainActor.run {
-                    self?.isUpdatingActiveRide = false; self?.completedRideForRating = ride; self?.setActiveRide(nil)
+                    self?.isUpdatingActiveRide = false; self?.completedRideForRating = completedRide; self?.setActiveRide(nil)
                     self?.statusMessage = "Ride completed. You are ready for the next request."; self?.promoteNextQueuedRideIfAvailable(); self?.resumeStandbyIfWaiting(); self?.updateDriverPresence(online: self?.isOnline ?? false)
                 }
             } catch { await MainActor.run { self?.isUpdatingActiveRide = false; self?.statusMessage = "Could not complete ride: \(error.localizedDescription)" } }
@@ -642,28 +669,28 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
         if waitStage == "pickup_grace_started" {
             paidWaitSeconds = 0
-            complimentaryWaitSeconds = Int(DriverRideLifecyclePolicy.pickupComplimentaryWaitSeconds)
+            complimentaryWaitSeconds = Int(DriverRidePresentationPolicy.pickupComplimentaryWaitSeconds)
         } else if waitStage == "pickup_paid_started" {
-            paidWaitSeconds = DriverRideLifecyclePolicy.pickupPaidWaitSeconds(
+            paidWaitSeconds = DriverRidePresentationPolicy.pickupPaidWaitSeconds(
                 waitStartedAt: ride.pickupWaitStartedAt,
                 paidWaitStartedAt: ride.pickupPaidWaitStartedAt,
                 now: now
             )
-            complimentaryWaitSeconds = Int(DriverRideLifecyclePolicy.pickupComplimentaryWaitSeconds)
+            complimentaryWaitSeconds = Int(DriverRidePresentationPolicy.pickupComplimentaryWaitSeconds)
         } else if waitStage == "stop_paid_started" {
-            paidWaitSeconds = DriverRideLifecyclePolicy.stopPaidWaitSeconds(stopWaitStartedAt: ride.stopWaitStartedAt, now: now)
+            paidWaitSeconds = DriverRidePresentationPolicy.stopPaidWaitSeconds(stopWaitStartedAt: ride.stopWaitStartedAt, now: now)
             complimentaryWaitSeconds = 0
         } else {
             if ride.normalizedStatus == "arrivedAtStop" {
-                paidWaitSeconds = DriverRideLifecyclePolicy.stopPaidWaitSeconds(stopWaitStartedAt: ride.stopWaitStartedAt, now: now)
+                paidWaitSeconds = DriverRidePresentationPolicy.stopPaidWaitSeconds(stopWaitStartedAt: ride.stopWaitStartedAt, now: now)
                 complimentaryWaitSeconds = 0
             } else {
-                paidWaitSeconds = DriverRideLifecyclePolicy.pickupPaidWaitSeconds(
+                paidWaitSeconds = DriverRidePresentationPolicy.pickupPaidWaitSeconds(
                     waitStartedAt: ride.pickupWaitStartedAt,
                     paidWaitStartedAt: ride.pickupPaidWaitStartedAt,
                     now: now
                 )
-                complimentaryWaitSeconds = Int(DriverRideLifecyclePolicy.pickupComplimentaryWaitSeconds)
+                complimentaryWaitSeconds = Int(DriverRidePresentationPolicy.pickupComplimentaryWaitSeconds)
             }
         }
 
@@ -2147,7 +2174,10 @@ struct DriverDashboardView: View {
         case .fareInsights:
             activeSheet = .fareInsights
         case .logout:
-            session.logout()
+            Task {
+                await vm.prepareForLogout()
+                session.logout()
+            }
         default:
             activeSheet = .menu(item)
         }

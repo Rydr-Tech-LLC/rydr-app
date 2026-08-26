@@ -655,7 +655,7 @@ struct DriverRideInProgressView: View {
     }
 
     private var fareText: String? {
-        ride.estimatedFare?.formatted(.currency(code: "USD"))
+        ride.estimatedFare.map { "Est. \($0.formatted(.currency(code: "USD")))" }
     }
 
     private var primaryDestinationCoordinate: CLLocationCoordinate2D? {

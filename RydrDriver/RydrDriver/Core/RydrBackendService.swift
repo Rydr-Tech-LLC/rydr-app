@@ -139,9 +139,14 @@ enum RydrBackendService {
     }
 
     struct RideTransitionResponse: Decodable {
+        struct FinancialOutcome: Decodable {
+            let driverPayoutCents: Int
+        }
+
         let ok: Bool
         let status: String
         let duplicate: Bool
+        let outcome: FinancialOutcome?
     }
 
     private struct BackendError: Decodable { let error: String }

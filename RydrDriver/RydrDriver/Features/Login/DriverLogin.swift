@@ -701,7 +701,14 @@ struct DriverLoginView: View {
                         return
                     }
 
-                    let profile = makeLoginProfile(from: snapshot?.data() ?? [:], user: user, fallbackEmail: fallbackEmail)
+                    guard let snapshot, snapshot.exists else {
+                        try? Auth.auth().signOut()
+                        DriverSocialAuthService.signOutFromGoogle()
+                        errorMessage = "No driver account was found for this Google account. Choose the Google account used during driver signup or create a driver account first."
+                        return
+                    }
+
+                    let profile = makeLoginProfile(from: snapshot.data() ?? [:], user: user, fallbackEmail: fallbackEmail)
                     session.login(name: profile.name, email: profile.email)
                 }
             }

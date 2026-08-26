@@ -32,6 +32,7 @@ final class DriverSessionManager: ObservableObject {
     @Published var canGoOnline: Bool = false
 
     private var driverListener: ListenerRegistration?
+    private var isLoggingOut = false
 
     deinit { driverListener?.remove() }
 
@@ -63,17 +64,42 @@ final class DriverSessionManager: ObservableObject {
     }
 
     func logout() {
+        guard !isLoggingOut else { return }
+        isLoggingOut = true
         let uid = Auth.auth().currentUser?.uid
         Task {
             await DriverNotificationManager.shared.disableAndDeleteCurrentTokenForLogout(uid: uid)
+
+            do {
+                try Auth.auth().signOut()
+            } catch {
+                print("[RydrSession][driver] firebase_sign_out_failed error=\(error.localizedDescription)")
+                await MainActor.run { self.isLoggingOut = false }
+                return
+            }
+
+            DriverSocialAuthService.signOutFromGoogle()
+
+            await MainActor.run {
+                self.clearLocalAccountState()
+                self.driverListener?.remove()
+                self.driverListener = nil
+                self.driverName = ""
+                self.driverEmail = ""
+                self.isLoggedIn = false
+                self.canGoOnline = false
+                self.isLoggingOut = false
+            }
         }
-        driverListener?.remove()
-        driverListener = nil
-        try? Auth.auth().signOut()
-        driverName = ""
-        driverEmail = ""
-        isLoggedIn = false
-        canGoOnline = false
+    }
+
+    private func clearLocalAccountState() {
+        let defaults = UserDefaults.standard
+        [
+            "rydr.driver.notifications.readLocalNotificationIDs",
+            "rydr.driver.notifications.dismissedLocalNotificationIDs",
+            "rydr.driver.settings.autoAcceptQueuedRides"
+        ].forEach(defaults.removeObject(forKey:))
     }
 
     private static func publicDisplayName(from data: [String: Any], authUser: User?) -> String {

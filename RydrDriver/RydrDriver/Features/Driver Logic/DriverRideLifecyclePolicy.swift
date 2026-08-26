@@ -1,6 +1,8 @@
 import Foundation
 
-enum DriverRideLifecyclePolicy {
+/// Presentation-only normalization and timers for backend-owned ride state.
+/// This type never validates or persists a lifecycle transition.
+enum DriverRidePresentationPolicy {
     static let pickupComplimentaryWaitSeconds: TimeInterval = 180
 
     static func normalizedStatus(_ status: String) -> String {

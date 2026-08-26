@@ -31,6 +31,10 @@ enum RiderGoogleSignInCoordinator {
   @MainActor
   static func presentingViewController() throws -> UIViewController {
     try configure()
+    // Always begin an explicit Google account-selection flow. Firebase
+    // sign-out and Google sign-out are independent, and older app versions
+    // could leave a previous Google user cached on the device.
+    GIDSignIn.sharedInstance.signOut()
     guard let windowScene = UIApplication.shared.connectedScenes
       .compactMap({ $0 as? UIWindowScene })
       .first(where: { $0.activationState == .foregroundActive }),
