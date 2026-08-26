@@ -1,0 +1,27 @@
+{
+  "enabled": false,
+  "schemaVersion": 1,
+  "pricingVersion": "scheduled-rides-v1",
+  "allowedRideTypes": ["eco", "go", "xl", "prestine", "executive"],
+  "allowedRiderIds": [],
+  "allowedDriverIds": [],
+  "maximumOffers": 3,
+  "minimumLeadMinutes": 120,
+  "maximumAdvanceDays": 30,
+  "offerWindowMinutes": 30,
+  "riderSelectionWindowMinutes": 30,
+  "driverCheckInLeadMinutes": 60,
+  "driverCheckInGraceMinutes": 10,
+  "activationBufferMinutes": 5,
+  "reservationLeadMinutes": 60,
+  "reservationTurnaroundMinutes": 15,
+  "scheduleLockBucketMinutes": 15,
+  "driverPayoutBasisPoints": 7000,
+  "pricingTiers": {
+    "eco": { "minimumRideSubtotalCents": 700, "bookingFeeUnderFiveMilesCents": 300, "bookingFeeFiveMilesOrMoreCents": 500, "minPerMileCents": 50, "maxPerMileCents": 110, "minPerMinuteCents": 15, "maxPerMinuteCents": 25 },
+    "go": { "minimumRideSubtotalCents": 700, "bookingFeeUnderFiveMilesCents": 300, "bookingFeeFiveMilesOrMoreCents": 600, "minPerMileCents": 50, "maxPerMileCents": 100, "minPerMinuteCents": 15, "maxPerMinuteCents": 25 },
+    "xl": { "minimumRideSubtotalCents": 900, "bookingFeeUnderFiveMilesCents": 400, "bookingFeeFiveMilesOrMoreCents": 800, "minPerMileCents": 50, "maxPerMileCents": 125, "minPerMinuteCents": 15, "maxPerMinuteCents": 25 },
+    "prestine": { "minimumRideSubtotalCents": 1200, "bookingFeeUnderFiveMilesCents": 500, "bookingFeeFiveMilesOrMoreCents": 1000, "minPerMileCents": 75, "maxPerMileCents": 150, "minPerMinuteCents": 15, "maxPerMinuteCents": 35 },
+    "executive": { "minimumRideSubtotalCents": 1800, "bookingFeeUnderFiveMilesCents": 800, "bookingFeeFiveMilesOrMoreCents": 1500, "minPerMileCents": 100, "maxPerMileCents": 200, "minPerMinuteCents": 25, "maxPerMinuteCents": 50 }
+  }
+}
