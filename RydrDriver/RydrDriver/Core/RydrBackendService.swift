@@ -27,6 +27,31 @@ enum RydrBackendService {
         _ = try await URLSession.shared.data(for: request)
     }
 
+    static func transitionRide(rideId: String, action: String, reason: String? = nil, queued: Bool = false) async throws -> RideTransitionResponse {
+        let body = RideTransitionRequest(action: action, requestId: UUID().uuidString, reason: reason, queued: queued)
+        guard let request = try await makeAuthenticatedRequest(path: "/rides/\(rideId)/transition", method: "POST", body: body) else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Backend ride transition failed."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        return try JSONDecoder().decode(RideTransitionResponse.self, from: data)
+    }
+
+    static func calculateRouteEstimate(rideId: String) async throws {
+        let body = RideRouteEstimateRequest(departureDate: ISO8601DateFormatter().string(from: Date()))
+        guard let request = try await makeAuthenticatedRequest(path: "/rides/\(rideId)/route-estimate", method: "POST", body: body) else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Backend route estimate failed."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+
     /// Every rydr-backend `/driver/*` route now requires a verified Firebase
     /// ID token (see rydr-backend/src/middleware/firebaseAuth.js) and checks
     /// that the body's uid/driverId matches the token — so every call from
@@ -68,4 +93,23 @@ enum RydrBackendService {
         let reason: String?
         let requestedAt: String
     }
+
+    private struct RideTransitionRequest: Encodable {
+        let action: String
+        let requestId: String
+        let reason: String?
+        let queued: Bool
+    }
+
+    private struct RideRouteEstimateRequest: Encodable {
+        let departureDate: String
+    }
+
+    struct RideTransitionResponse: Decodable {
+        let ok: Bool
+        let status: String
+        let duplicate: Bool
+    }
+
+    private struct BackendError: Decodable { let error: String }
 }

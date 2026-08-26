@@ -9,6 +9,7 @@ const healthRoutes = require("./routes/health");
 const eventRoutes = require("./routes/events");
 const driverRoutes = require("./routes/driver");
 const moderationRoutes = require("./routes/moderation");
+const rideRoutes = require("./routes/rides");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -26,6 +27,7 @@ app.use("/", healthRoutes);
 app.use("/events", eventRoutes);
 app.use("/driver", driverRoutes);
 app.use("/moderation", moderationRoutes);
+app.use("/rides", rideRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

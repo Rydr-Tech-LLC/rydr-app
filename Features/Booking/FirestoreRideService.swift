@@ -107,8 +107,10 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             payload["estimatedDistanceMiles"] = estimate.distanceMiles
             payload["estimatedDurationMinutes"] = estimate.durationMinutes
         }
-        payload.merge(pricingSnapshot.asFirestoreFields) { _, new in new }
-        payload["fareEstimateCreatedAt"] = FieldValue.serverTimestamp()
+        // Display-only estimates are explicitly namespaced. They are never
+        // consumed by backend finalization or Stripe as trusted money.
+        payload["displayEstimatedRiderTotalCents"] = pricingSnapshot.estimatedRiderTotalCents
+        payload["displayEstimatedDriverPayoutCents"] = pricingSnapshot.estimatedDriverPayoutCents
         if let preferencePayload = riderPreferences?.rideRequestPayload {
             payload["ridePreferences"] = preferencePayload
         }
@@ -130,6 +132,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                 "expiresAt": Timestamp(date: Date().addingTimeInterval(90))
             ])
         }
+        try? await requestBackendRouteEstimate(rideId: id, user: user)
         return id
     }
 
@@ -221,48 +224,55 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
     }
 
     func cancelRide(rideId: String, mode: RideCancellationMode, quote: RideCancellationQuote?) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            throw RideDispatchError.notSignedIn
-        }
-        var update: [String: Any] = [
-            "status": "riderCancelled",
-            "cancelledBy": uid,
-            "cancelledByRole": "rider",
-            "cancellationReason": mode == .findAnotherDriver ? "Rider cancelled to find another driver" : "Rider cancelled",
-            "cancelledAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-        update.merge(quote?.asFirestoreFields ?? [:]) { _, new in new }
-        try await db.collection("rideRequests").document(rideId).setData(update, merge: true)
-        try await db.collection("rides").document(rideId).setData(update, merge: true)
-        try? await db.collection("rideRequestSignals").document(rideId).setData([
-            "status": "cancelled",
-            "updatedAt": FieldValue.serverTimestamp()
-        ], merge: true)
+        let reason = mode == .findAnotherDriver ? "Rider cancelled to find another driver" : "Rider cancelled"
+        try await sendRideTransition(rideId: rideId, action: "rider_cancel", reason: reason)
     }
 
     func cancelMidRide(rideId: String, quote: ProratedRideCancellationQuote) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            throw RideDispatchError.notSignedIn
+        try await sendRideTransition(rideId: rideId, action: "rider_cancel", reason: "Rider cancelled mid-ride")
+    }
+
+    private func sendRideTransition(rideId: String, action: String, reason: String) async throws {
+        guard let user = Auth.auth().currentUser else { throw RideDispatchError.notSignedIn }
+        guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
+              let base = URL(string: rawBase),
+              let url = URL(string: "/rides/\(rideId)/transition", relativeTo: base) else { throw URLError(.badURL) }
+        let token = try await user.getIDToken()
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["action": action, "reason": reason, "requestId": UUID().uuidString])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw NSError(domain: "RydrRideBackend", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: payload?["error"] as? String ?? "Ride cancellation failed."])
         }
-        var update: [String: Any] = [
-            "status": "riderCancelled",
-            "cancelledBy": uid,
-            "cancelledByRole": "rider",
-            "cancellationReason": "Rider cancelled mid-ride",
-            "cancelledAt": FieldValue.serverTimestamp(),
-            "riderRideState": "cancelled",
-            "riderStatusMessage": "Ride cancelled.",
-            "paymentStatus": "pending",
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-        update.merge(quote.asFirestoreFields) { _, new in new }
-        try await db.collection("rideRequests").document(rideId).setData(update, merge: true)
-        try await db.collection("rides").document(rideId).setData(update, merge: true)
-        try? await db.collection("rideRequestSignals").document(rideId).setData([
-            "status": "cancelled",
-            "updatedAt": FieldValue.serverTimestamp()
-        ], merge: true)
+    }
+
+    private func requestBackendRouteEstimate(rideId: String, user: User) async throws {
+        guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
+              let base = URL(string: rawBase),
+              let url = URL(string: "/rides/\(rideId)/route-estimate", relativeTo: base) else {
+            throw URLError(.badURL)
+        }
+        let token = try await user.getIDToken()
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "departureDate": ISO8601DateFormatter().string(from: Date())
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw NSError(
+                domain: "RydrRideBackend",
+                code: (response as? HTTPURLResponse)?.statusCode ?? -1,
+                userInfo: [NSLocalizedDescriptionKey: payload?["error"] as? String ?? "Route estimate failed."]
+            )
+        }
     }
 
     private func driverCandidate(
