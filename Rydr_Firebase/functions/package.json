@@ -15,7 +15,8 @@
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "npm run build && firebase emulators:exec --config ../firebase.json --project demo-rydr-scheduled-rides --only firestore \"node --test test/firebase-foundation.test.js\""
   },
   "dependencies": {
     "firebase-admin": "^13.10.0",
@@ -23,8 +24,10 @@
     "node-fetch": "^2.7.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
     "@types/node": "^20.14.9",
     "@types/node-fetch": "^2.6.11",
+    "firebase": "^11.0.0",
     "typescript": "^5.5.4"
   }
 }

@@ -16,6 +16,12 @@ export { onDriverApprovalDecision } from "./triggers/driverApprovalNotifications
 export { onDriverAutoApprovalEligibility } from "./triggers/driverAutoApproval";
 export { onRydrBankCodeCreated, onRydrBankSummaryUpdated } from "./triggers/rydrBankNotifications";
 export { onDocumentUploadedForReview } from "./triggers/documentReview";
+export {
+  previewScheduledRidePrice,
+  createScheduledRideRequest,
+  respondToScheduledRide,
+  selectScheduledRideOffer
+} from "./scheduledRides/functions";
 
 const VEHICLE_BODY_STYLES: readonly VehicleBodyStyle[] = [
   "sedan",

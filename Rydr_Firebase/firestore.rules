@@ -41,6 +41,16 @@ service cloud.firestore {
       return isAdmin();
     }
 
+    function isApprovedScheduledDriver() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/drivers/$(request.auth.uid))
+        && (
+          get(/databases/$(database)/documents/drivers/$(request.auth.uid)).data.driverApprovalStatus == "approved" ||
+          get(/databases/$(database)/documents/drivers/$(request.auth.uid)).data.approvalStatus == "approved" ||
+          get(/databases/$(database)/documents/drivers/$(request.auth.uid)).data.isApproved == true
+        );
+    }
+
     function affectedKeys() {
       return request.resource.data.diff(resource.data).affectedKeys();
     }
@@ -749,6 +759,13 @@ service cloud.firestore {
         allow read: if isSelf(uid) || isAdmin();
         allow write: if false;
       }
+
+      // Reservation buckets are authoritative concurrency locks. Drivers may
+      // inspect their own schedule, but only Cloud Functions may mutate it.
+      match /scheduledRideLocks/{bucketId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow create, update, delete: if false;
+      }
     }
 
     match /betaInvites/{role}/phones/{phone} {
@@ -853,6 +870,43 @@ service cloud.firestore {
       allow create: if isSelf(driverUid) && noBackendOwnedKeysOnCreate();
       allow update: if isSelf(driverUid) && noBackendOwnedKeysChanged();
       allow delete: if isAdmin();
+    }
+
+    // All scheduled-ride mutations pass through callable Functions. This
+    // prevents clients from assigning drivers, changing quotes, or bypassing
+    // the offer and schedule-lock transactions.
+    match /scheduledRideRequests/{requestId} {
+      allow read: if signedIn() && (
+        resource.data.riderId == request.auth.uid ||
+        resource.data.assignedDriverId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create, update, delete: if false;
+
+      match /offers/{offerId} {
+        allow read: if signedIn() && (
+          resource.data.driverId == request.auth.uid ||
+          get(/databases/$(database)/documents/scheduledRideRequests/$(requestId)).data.riderId == request.auth.uid ||
+          isAdmin()
+        );
+        allow create, update, delete: if false;
+      }
+
+      match /priceLocks/{lockId} {
+        allow read: if signedIn() && (
+          get(/databases/$(database)/documents/scheduledRideRequests/$(requestId)).data.riderId == request.auth.uid ||
+          get(/databases/$(database)/documents/scheduledRideRequests/$(requestId)).data.assignedDriverId == request.auth.uid ||
+          isAdmin()
+        );
+        allow create, update, delete: if false;
+      }
+    }
+
+    // Opportunities contain coarse pickup information only. Exact addresses
+    // remain private on the parent request until a driver is assigned.
+    match /scheduledRideOpportunities/{requestId} {
+      allow read: if isApprovedScheduledDriver() || isAdmin();
+      allow create, update, delete: if false;
     }
 
     match /rideRequests/{rideId} {
