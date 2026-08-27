@@ -636,7 +636,7 @@ private struct RydrPreviewPin: View {
     }
 }
 
-struct UpfrontFareHero: View {
+private struct UpfrontFareHero: View {
     let fare: Double
 
     var body: some View {
@@ -667,7 +667,7 @@ struct UpfrontFareHero: View {
     }
 }
 
-struct RideRequestRouteDetails: View {
+private struct RideRequestRouteDetails: View {
     let pickupAddress: String
     let dropoffAddress: String
     let pickupEstimate: RideRequestLegEstimate?
