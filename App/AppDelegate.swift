@@ -50,6 +50,57 @@ enum RiderGoogleSignInCoordinator {
   }
 
   @MainActor
+  static func signIn(
+    withPresenting viewController: UIViewController,
+    expectedEmail rawExpectedEmail: String,
+    completion: @escaping (GIDSignInResult?, Error?) -> Void
+  ) {
+    let expectedEmail = rawExpectedEmail
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    guard isValidEmail(expectedEmail) else {
+      completion(nil, NSError(
+        domain: errorDomain,
+        code: 3,
+        userInfo: [NSLocalizedDescriptionKey: "Enter the Google email address you want to use, then try again."]
+      ))
+      return
+    }
+
+    GIDSignIn.sharedInstance.signIn(
+      withPresenting: viewController,
+      hint: expectedEmail
+    ) { result, error in
+      if let error {
+        completion(nil, error)
+        return
+      }
+
+      let selectedEmail = result?.user.profile?.email
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased() ?? ""
+      guard selectedEmail == expectedEmail else {
+        GIDSignIn.sharedInstance.signOut()
+        completion(nil, NSError(
+          domain: errorDomain,
+          code: 4,
+          userInfo: [
+            NSLocalizedDescriptionKey: "Google selected \(selectedEmail.isEmpty ? "a different account" : selectedEmail). Please try again with \(expectedEmail)."
+          ]
+        ))
+        return
+      }
+
+      completion(result, nil)
+    }
+  }
+
+  private static func isValidEmail(_ email: String) -> Bool {
+    let pattern = "(?:[A-Z0-9a-z._%+-]+)@(?:[A-Z0-9a-z.-]+)\\.[A-Za-z]{2,64}"
+    return NSPredicate(format: "SELF MATCHES %@", pattern).evaluate(with: email)
+  }
+
+  @MainActor
   private static func topViewController(from viewController: UIViewController) -> UIViewController {
     if let presented = viewController.presentedViewController {
       return topViewController(from: presented)

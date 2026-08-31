@@ -629,7 +629,7 @@ struct DriverSignupCoordinator: View {
 
     private func completeSocialAuthStepWithGoogle() {
         let attemptID = beginSocialAuthAttempt()
-        DriverSocialAuthService.signInWithGoogle { result in
+        DriverSocialAuthService.signInWithGoogle(expectedEmail: email) { result in
             Task { @MainActor in
                 guard socialAuthAttemptID == attemptID else { return }
                 switch result {

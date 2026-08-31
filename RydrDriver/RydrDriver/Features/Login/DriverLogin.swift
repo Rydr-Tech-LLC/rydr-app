@@ -29,6 +29,8 @@ struct DriverLoginView: View {
     @State private var showingSignup = false
     @State private var currentNonce: String?
     @State private var socialAuthAttemptID: UUID?
+    @State private var googleAccountEmail = ""
+    @State private var showGoogleAccountPrompt = false
 
     // Dedicated full-screen phone verification flow (shared with driver signup).
     @State private var showPhoneFlow = false
@@ -83,6 +85,18 @@ struct DriverLoginView: View {
                 message: Text("Check your inbox at \(email) for a link to reset your password."),
                 dismissButton: .default(Text("OK"))
             )
+        }
+        .alert("Choose Google account", isPresented: $showGoogleAccountPrompt) {
+            TextField("Google email address", text: $googleAccountEmail)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+            Button("Cancel", role: .cancel) {}
+            Button("Continue") {
+                email = googleAccountEmail
+                socialLoginWithGoogle()
+            }
+        } message: {
+            Text("Enter the Google email address you want Rydr Driver to use.")
         }
         .sheet(isPresented: $showingSignup) {
             DriverSignupCoordinator()
@@ -304,7 +318,10 @@ struct DriverLoginView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .disabled(isLoggingIn)
 
-            Button(action: socialLoginWithGoogle) {
+            Button {
+                googleAccountEmail = email
+                showGoogleAccountPrompt = true
+            } label: {
                 HStack {
                     if isLoggingIn {
                         ProgressView()
@@ -460,7 +477,7 @@ struct DriverLoginView: View {
 
     private func socialLoginWithGoogle() {
         let attemptID = beginSocialAuthAttempt()
-        DriverSocialAuthService.signInWithGoogle { result in
+        DriverSocialAuthService.signInWithGoogle(expectedEmail: email) { result in
             Task { @MainActor in
                 guard socialAuthAttemptID == attemptID else { return }
                 switch result {
@@ -747,7 +764,7 @@ extension View {
                 #if canImport(UIKit)
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 #endif
-            }, including: .all
+            }, including: .gesture
         )
     }
 }

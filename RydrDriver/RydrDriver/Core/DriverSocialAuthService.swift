@@ -15,7 +15,22 @@ struct DriverSocialAuthProfile {
 }
 
 enum DriverSocialAuthService {
-    static func signInWithGoogle(completion: @escaping (Result<(AuthCredential, DriverSocialAuthProfile), Error>) -> Void) {
+    static func signInWithGoogle(
+        expectedEmail rawExpectedEmail: String,
+        completion: @escaping (Result<(AuthCredential, DriverSocialAuthProfile), Error>) -> Void
+    ) {
+        let expectedEmail = rawExpectedEmail
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard isValidEmail(expectedEmail) else {
+            completion(.failure(NSError(
+                domain: "DriverSocialAuth",
+                code: -6,
+                userInfo: [NSLocalizedDescriptionKey: "Enter the Google email address you want to use, then try again."]
+            )))
+            return
+        }
+
         guard let clientID = FirebaseApp.app()?.options.clientID, !clientID.isEmpty else {
             completion(.failure(NSError(domain: "DriverSocialAuth", code: -1, userInfo: [NSLocalizedDescriptionKey: "Missing Firebase client ID for Google sign-in."])))
             return
@@ -35,7 +50,10 @@ enum DriverSocialAuthService {
             return
         }
 
-        GIDSignIn.sharedInstance.signIn(withPresenting: topViewController(from: rootVC)) { result, error in
+        GIDSignIn.sharedInstance.signIn(
+            withPresenting: topViewController(from: rootVC),
+            hint: expectedEmail
+        ) { result, error in
             if let error {
                 completion(.failure(error))
                 return
@@ -44,6 +62,21 @@ enum DriverSocialAuthService {
             guard let googleUser = result?.user,
                   let idToken = googleUser.idToken?.tokenString else {
                 completion(.failure(NSError(domain: "DriverSocialAuth", code: -3, userInfo: [NSLocalizedDescriptionKey: "Google sign-in did not return a valid token."])))
+                return
+            }
+
+            let selectedEmail = googleUser.profile?.email
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() ?? ""
+            guard selectedEmail == expectedEmail else {
+                GIDSignIn.sharedInstance.signOut()
+                completion(.failure(NSError(
+                    domain: "DriverSocialAuth",
+                    code: -5,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "Google selected \(selectedEmail.isEmpty ? "a different account" : selectedEmail). Please try again with \(expectedEmail)."
+                    ]
+                )))
                 return
             }
 
@@ -58,6 +91,11 @@ enum DriverSocialAuthService {
 
     static func signOutFromGoogle() {
         GIDSignIn.sharedInstance.signOut()
+    }
+
+    private static func isValidEmail(_ email: String) -> Bool {
+        let pattern = "(?:[A-Z0-9a-z._%+-]+)@(?:[A-Z0-9a-z.-]+)\\.[A-Za-z]{2,64}"
+        return NSPredicate(format: "SELF MATCHES %@", pattern).evaluate(with: email)
     }
 
     static func credential(from authorization: ASAuthorization, nonce: String) -> Result<(AuthCredential, DriverSocialAuthProfile), Error> {
