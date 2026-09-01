@@ -23,3 +23,9 @@ services:
         sync: false
       - key: TICKETMASTER_API_KEY
         sync: false
+      - key: APPLE_MAPS_TEAM_ID
+        sync: false
+      - key: APPLE_MAPS_KEY_ID
+        sync: false
+      - key: APPLE_MAPS_PRIVATE_KEY
+        sync: false

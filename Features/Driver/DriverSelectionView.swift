@@ -107,7 +107,7 @@ struct DriverSelectionView: View {
 
                 // Decline banner
                 if showUnavailableBanner {
-                    UnavailableBanner(text: "Looks like the driver isn’t available. Let’s find you another driver!")
+                    UnavailableBanner(text: "Looks like the driver isn't available. Let's find you another driver!")
                         .transition(.move(edge: .top).combined(with: .opacity))
                         .padding(.top, 8)
                 }
@@ -157,6 +157,81 @@ struct DriverSelectionView: View {
     private func confirm(_ driver: Driver) {
         rideManager.confirm(driver: driver)
         // state change to .awaitingDriver will trigger overlay via onChange
+    }
+}
+
+// MARK: - Scheduled Rides adaptation ("Choose My Driver")
+//
+// Sprint 1 (Critical, ene): "Adapt DriverSelectionView and DriverCard to
+// display one to three scheduled driver offers."
+//
+// Reuses DriverCard as-is (via the lockedPriceOverride/confirmLabelOverride
+// params added above) rather than duplicating its layout, so the two flows
+// stay visually consistent and any future DriverCard change (pricing display,
+// styling) automatically applies to scheduled offers too.
+
+struct ScheduledOfferSelectionView: View {
+    @ObservedObject var rideManager: RideManager
+    let rideType: String
+    let estimate: RideEstimate
+    let offers: [ScheduledDriverOffer]
+    let isLoadingOffers: Bool
+    let onSelect: (ScheduledDriverOffer) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "person.2.fill")
+                    .foregroundStyle(Styles.rydrGradient)
+                Text(offers.isEmpty ? "Waiting for driver offers…" : "Swipe to compare offers")
+                    .font(.subheadline.weight(.bold))
+            }
+            .padding(.horizontal)
+
+            if offers.isEmpty {
+                WaitingForOffersState(isLoading: isLoadingOffers)
+                    .padding(.horizontal)
+            } else {
+                TabView {
+                    ForEach(offers) { offer in
+                        DriverCard(
+                            rideManager: rideManager,
+                            driver: offer.asDriver(coordinate: rideManager.selectedDriver?.coordinate
+                                ?? CLLocationCoordinate2D(latitude: 0, longitude: 0)),
+                            rideType: rideType,
+                            estimate: estimate,
+                            promoAppliedDevFree: false,
+                            onConfirm: { onSelect(offer) },
+                            lockedPriceOverride: offer.lockedPrice,
+                            confirmLabelOverride: "Choose \(offer.driverName)"
+                        )
+                        .padding(.horizontal)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .automatic))
+                .indexViewStyle(.page(backgroundDisplayMode: .interactive))
+            }
+        }
+    }
+}
+
+private struct WaitingForOffersState: View {
+    let isLoading: Bool
+
+    var body: some View {
+        VStack(spacing: 14) {
+            ProgressView().controlSize(.large)
+            Text("Nearby drivers are being notified")
+                .font(.headline)
+            Text("You'll be able to compare and choose a driver as soon as the first offer comes in.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, minHeight: 220)
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 18).fill(.ultraThinMaterial))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.black.opacity(0.06), lineWidth: 1))
     }
 }
 
@@ -305,6 +380,13 @@ private struct DriverCard: View {
     let estimate: RideEstimate
     let promoAppliedDevFree: Bool
     let onConfirm: () -> Void
+    /// Scheduled Rides adaptation: when set, this is an already-locked offer
+    /// price (from `ScheduledDriverOffer.lockedPrice`), not a live on-demand
+    /// estimate. Bypasses fareBreakdown/promo math entirely so the UI never
+    /// mislabels a locked scheduled price as an estimate.
+    var lockedPriceOverride: Double? = nil
+    /// Scheduled Rides adaptation: overrides the default "Confirm X with Y" label.
+    var confirmLabelOverride: String? = nil
 
     @State private var isFavorite = false
 
@@ -313,7 +395,7 @@ private struct DriverCard: View {
     }
 
     private var baseFare: Double {
-        fareBreakdown.finalRiderTotal
+        lockedPriceOverride ?? fareBreakdown.finalRiderTotal
     }
 
     private var distanceText: String {
@@ -321,8 +403,9 @@ private struct DriverCard: View {
     }
 
     private var finalFare: Double {
+        if let lockedPriceOverride { return lockedPriceOverride }
         // Show FREE when any promo is present during testing;
-        // otherwise honor RideManager’s applyPromo for %/cap logic.
+        // otherwise honor RideManager's applyPromo for %/cap logic.
         if promoAppliedDevFree { return 0 }
         return rideManager.applyPromo(to: baseFare)
     }
@@ -377,7 +460,7 @@ private struct DriverCard: View {
                 }
             }
 
-            if fareBreakdown.minimumFareAdjustment > 0 {
+            if lockedPriceOverride == nil && fareBreakdown.minimumFareAdjustment > 0 {
                 HStack {
                     Text("Minimum fare adjustment")
                     Spacer()
@@ -388,8 +471,17 @@ private struct DriverCard: View {
                 .foregroundStyle(.secondary)
             }
 
+            if lockedPriceOverride != nil {
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.fill")
+                    Text("Locked price — won't change")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.green)
+            }
+
             Button(action: onConfirm) {
-                Text("Confirm \(rideTypeDisplay) with \(driver.name)")
+                Text(confirmLabelOverride ?? "Confirm \(rideTypeDisplay) with \(driver.name)")
                     .font(.headline.weight(.bold))
                     .frame(maxWidth: .infinity)
             }
@@ -477,7 +569,7 @@ private struct DriverCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .strikethrough()
-            Text(finalFare == 0 ? "FREE" : "$\(finalFare, specifier: "%.2f")")
+            Text(finalFare == 0 ? "EST. FREE" : "EST. $\(finalFare, specifier: "%.2f")")
                 .font(.headline.weight(.black))
         } else {
             Text("$\(baseFare, specifier: "%.2f")")

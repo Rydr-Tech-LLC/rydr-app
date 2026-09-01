@@ -1,6 +1,11 @@
 # Scheduled Rides MVP data contract
 
-Status: implementation candidate; review before Firebase deployment. Schema version: `1`.
+Status: approved technical baseline for the MVP. Deployment remains disabled
+until the implementation and release gates pass. Schema version: `1`.
+
+Product source of truth: [`../SCHEDULED_RIDES_MVP.md`](../SCHEDULED_RIDES_MVP.md).
+Canonical client/server mappings and remaining MVP interfaces are tracked in
+[`SCHEDULED_RIDES_IMPLEMENTATION_CONTRACT.md`](SCHEDULED_RIDES_IMPLEMENTATION_CONTRACT.md).
 
 ## Ownership and invariants
 
@@ -35,9 +40,15 @@ Approved-driver browse projection. Contains ride type, scheduled time, route est
 
 Server-created offer with a driver/vehicle snapshot, versioned rate snapshot, exact quote, currency, expiration, and status. Quick Schedule creates one selected offer. Choose My Driver transactionally admits the first three valid offers.
 
-### `scheduledRideRequests/{requestId}/priceLocks/v1`
+### `scheduledRideRequests/{requestId}/priceLocks/{version}`
 
-Immutable server-created record of rider, selected driver/offer, route estimate, versioned rates, exact quote, approved maximum, locked base fare, currency, and approval time.
+Immutable server-created record of rider, selected driver/offer, route estimate,
+versioned rates, exact quote, approved maximum, locked base fare, currency, and
+approval time. Initial confirmation creates `v1`. A replacement creates `v2`,
+`v3`, and so on with `supersedesPriceLockId`; the request's `priceLockId`
+points to the current version. A manually approved changed replacement also
+records `approvedReplacementBaseFareCents` and its approval basis. Prior locks
+and the original approved maximum are never mutated.
 
 ### `drivers/{driverId}/scheduledRideLocks/{UTC-bucket}`
 
@@ -45,7 +56,11 @@ Server-only reservation buckets covering configured travel lead time, estimated 
 
 ### `platformConfig/scheduledRides`
 
-Feature flag, rollout allowlists, allowed tiers, versioned rate bounds, offer/scheduling/check-in windows, reservation buffers, lock granularity, and payout basis points. See `config/scheduledRides.example.json`; the checked-in example is disabled.
+Feature flag, fail-closed rollout mode and allowlists, allowed tiers, versioned
+rate bounds, quote/offer/scheduling/check-in/replacement windows, reminder
+schedule, reservation buffers, dispatch timeout, lock granularity, and payout
+basis points. See `config/scheduledRides.example.json`; the checked-in approved
+template is disabled and in allowlist mode.
 
 ## Callable contracts
 
@@ -53,7 +68,15 @@ Feature flag, rollout allowlists, allowed tiers, versioned rate bounds, offer/sc
 - `createScheduledRideRequest`: requires the exact current server maximum approved by the rider and atomically creates the private request plus redacted opportunity.
 - `respondToScheduledRide`: revalidates driver approval, tier eligibility, active-ride state, configured rates, price ceiling, and conflicts. Quick Schedule atomically assigns the first eligible driver; Choose My Driver atomically caps offers at three.
 - `selectScheduledRideOffer`: rider-only selection that revalidates eligibility/conflicts and atomically creates the immutable price and schedule locks.
+- `previewScheduledRideDriverQuote`: returns the exact driver payout and a short-lived quote fingerprint before explicit acceptance.
+- `checkInScheduledRide`: accepts a fresh assigned-driver MapKit ETA and stores the server activation time.
+- `cancelScheduledRide`: owns pre-activation cancellation and delegates post-activation cancellation to the standard lifecycle.
+- `approveScheduledRideReplacement`: applies explicit Rider approval to a replacement offer and creates a new immutable price-lock version.
 
-## Deferred integration work
+## MVP integration work not yet implemented
 
-Check-in, ETA-based activation (`pickup time - travel ETA - configurable buffer`), reminders/expiration, replacement matching/approval, edits/cancellation, standard `rides` activation, payment preflight, notifications, and cleanup/release of locks belong to later sprints. The fields and statuses above reserve that shared path without exposing unsafe client writes now.
+Check-in, ETA-based activation (`pickup time - travel ETA - configurable buffer`), reminders/expiration, replacement matching/approval, edits/cancellation, standard `rides` activation, payment preflight, notifications, and cleanup/release of locks belong to later sprints. The fields and statuses above reserve that shared path without exposing unsafe client writes now. Their approved interfaces and values are defined in `SCHEDULED_RIDES_IMPLEMENTATION_CONTRACT.md`.
+
+These items are deferred from the Firebase foundation only; they remain
+required for the final proposed MVP workflow and must be complete before an
+enabled rollout.

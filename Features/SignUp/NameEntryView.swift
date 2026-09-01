@@ -83,6 +83,14 @@ struct NameEntryView: View {
                                 TextField("Preferred Name (optional)", text: $preferredName)
                                     .textContentType(.nickname)
                             }
+
+                            SignupInputRow(icon: "envelope.fill", placeholder: "Email address") {
+                                TextField("Email address", text: $email)
+                                    .textContentType(.emailAddress)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled(true)
+                                    .keyboardType(.emailAddress)
+                            }
                         }
 
                         Button(isSaving ? "Saving..." : "Continue") {
@@ -169,7 +177,10 @@ struct NameEntryView: View {
         }
 
         let attemptID = beginSocialAuthAttempt()
-        GIDSignIn.sharedInstance.signIn(withPresenting: rootViewController) { result, error in
+        RiderGoogleSignInCoordinator.signIn(
+            withPresenting: rootViewController,
+            expectedEmail: email
+        ) { result, error in
             Task { @MainActor in
                 guard socialAuthAttemptID == attemptID else { return }
                 if let error {

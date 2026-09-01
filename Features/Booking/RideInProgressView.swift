@@ -738,7 +738,7 @@ struct RideInProgressView: View {
                 return "Your driver has arrived. Please head to the pickup spot."
             }
             let charge = String(format: "$%.2f", rideManager.pickupWaitCharge)
-            return "Wait charges are accruing. Current wait charge: \(charge)."
+            return "Estimated wait charge: \(charge). Your final charge is calculated by Rydr."
         default:
             return "Your driver is heading to the pickup location."
         }
@@ -838,7 +838,7 @@ struct RideInProgressView: View {
                 return "Driver is here · \(pickupWaitText) complimentary wait"
             }
             let charge = String(format: "+$%.2f", rideManager.pickupWaitCharge)
-            return "Paid wait time · \(paidWaitText) · \(charge)"
+            return "Paid wait time · \(paidWaitText) · est. \(charge)"
         case .enRouteToDropoff?:
             return "Heading to drop-off — arrives in \(etaText) (\(etaArrivalText))"
         default:

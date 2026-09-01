@@ -53,6 +53,8 @@ struct LoginView: View {
     @State private var currentNonce: String?
     @State private var isSocialAuthInProgress = false
     @State private var socialAuthAttemptID: UUID?
+    @State private var googleAccountEmail = ""
+    @State private var showGoogleAccountPrompt = false
     
     private var formattedPhoneNumber: String {
         let digits = phoneNumber.filter { $0.isNumber }.prefix(10)
@@ -127,6 +129,18 @@ struct LoginView: View {
                 message: Text("Check your inbox at \(email) for a link to reset your password."),
                 dismissButton: .default(Text("OK"))
             )
+        }
+        .alert("Choose Google account", isPresented: $showGoogleAccountPrompt) {
+            TextField("Google email address", text: $googleAccountEmail)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+            Button("Cancel", role: .cancel) {}
+            Button("Continue") {
+                email = googleAccountEmail
+                handleGoogleSignIn()
+            }
+        } message: {
+            Text("Enter the Google email address you want Rydr to use.")
         }
         .sheet(item: $verificationSession) { verificationSession in
             VerificationCodeView(
@@ -373,7 +387,10 @@ struct LoginView: View {
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .disabled(isSocialAuthInProgress)
 
-            Button(action: handleGoogleSignIn) {
+            Button {
+                googleAccountEmail = email
+                showGoogleAccountPrompt = true
+            } label: {
                 HStack(spacing: 10) {
                     if isSocialAuthInProgress {
                         ProgressView()
@@ -502,7 +519,10 @@ struct LoginView: View {
         }
 
         let attemptID = beginSocialAuthAttempt()
-        GIDSignIn.sharedInstance.signIn(withPresenting: rootViewController) { result, error in
+        RiderGoogleSignInCoordinator.signIn(
+            withPresenting: rootViewController,
+            expectedEmail: email
+        ) { result, error in
             Task { @MainActor in
                 guard socialAuthAttemptID == attemptID else { return }
                 if let error {

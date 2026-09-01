@@ -71,6 +71,11 @@
 		A7B7C94C85EDCA3BFCC8617D /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C2DB1E40E4A1CF1DD0770E7 /* LoginView.swift */; };
 		A96FDDF8F8E31985FE66A32A /* RydrRideProgressMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6BE46F6F6C5FE5CA4622A9 /* RydrRideProgressMapView.swift */; };
 		A977218877B64CD80867CE9B /* DriverCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C8C5EC4F4A1D3D902A609C3 /* DriverCardView.swift */; };
+		B1E000000000000000000001 /* QuickScheduleReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E000000000000000000001 /* QuickScheduleReviewView.swift */; };
+		B1E000000000000000000002 /* ScheduleTimeSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E000000000000000000002 /* ScheduleTimeSelectionView.swift */; };
+		B1E000000000000000000003 /* ScheduledRide.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E000000000000000000003 /* ScheduledRide.swift */; };
+		B1E000000000000000000004 /* ScheduledRideConfirmationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E000000000000000000004 /* ScheduledRideConfirmationView.swift */; };
+		B1E000000000000000000005 /* ScheduledRideManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E000000000000000000005 /* ScheduledRideManager.swift */; };
 		AD1BE911D837B07326A0D436 /* RydrPlaygroundUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 265FF09425ED61B5DA8936B2 /* RydrPlaygroundUITestsLaunchTests.swift */; };
 		B7C274E53917519E55CCDBEB /* CashHubSignupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AACF99F1403DF0942634997 /* CashHubSignupView.swift */; };
 		BB840A852B971A1E04ACECEB /* HelpArticleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8E2267E399131032338D17 /* HelpArticleStore.swift */; };
@@ -194,6 +199,11 @@
 		A729798422E72CCD06AF8641 /* RydrPlaygroundUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RydrPlaygroundUITests.swift; sourceTree = "<group>"; };
 		A823F3EC96FAD1F8AC3CA2E0 /* RiderIdentityVerificationService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RiderIdentityVerificationService.swift; sourceTree = "<group>"; };
 		A9D3B59B7136722D9EB30D2A /* RydrPlaygroundTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RydrPlaygroundTests.swift; sourceTree = "<group>"; };
+		A1E000000000000000000001 /* QuickScheduleReviewView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QuickScheduleReviewView.swift; sourceTree = "<group>"; };
+		A1E000000000000000000002 /* ScheduleTimeSelectionView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScheduleTimeSelectionView.swift; sourceTree = "<group>"; };
+		A1E000000000000000000003 /* ScheduledRide.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScheduledRide.swift; sourceTree = "<group>"; };
+		A1E000000000000000000004 /* ScheduledRideConfirmationView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScheduledRideConfirmationView.swift; sourceTree = "<group>"; };
+		A1E000000000000000000005 /* ScheduledRideManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScheduledRideManager.swift; sourceTree = "<group>"; };
 		AE7F150DACBCB949A66F8EE5 /* View+Extension.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "View+Extension.swift"; sourceTree = "<group>"; };
 		AEB6F289F9BBFFB1D2FD10ED /* RydrBankSummary.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RydrBankSummary.swift; sourceTree = "<group>"; };
 		AF0EFFE4C283D14A5F1A2CE1 /* ScheduleCallRequestView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScheduleCallRequestView.swift; sourceTree = "<group>"; };
@@ -353,6 +363,7 @@
 				32A6D1C8826F1EF9AB75D7CD /* EndRideView.swift */,
 				53FE95B67E113FB2FBC7AE64 /* FirestoreRideService.swift */,
 				237938C8437DBBC48842F0B7 /* LocationManagerView.swift */,
+				A1E000000000000000000001 /* QuickScheduleReviewView.swift */,
 				BE51E864B91D3E4A63E44888 /* RideChatService.swift */,
 				048C273382D125D833EEFCF9 /* RideChatView.swift */,
 				75D4705C3E5EA46EBAD4C7EE /* RideInProgressView.swift */,
@@ -360,6 +371,10 @@
 				25A6FAE0FDE63CFC16C5C73D /* RideTypeSelectionView.swift */,
 				850F4A849DEA82B46153FB77 /* RydrMapView.swift */,
 				5F6BE46F6F6C5FE5CA4622A9 /* RydrRideProgressMapView.swift */,
+				A1E000000000000000000002 /* ScheduleTimeSelectionView.swift */,
+				A1E000000000000000000003 /* ScheduledRide.swift */,
+				A1E000000000000000000004 /* ScheduledRideConfirmationView.swift */,
+				A1E000000000000000000005 /* ScheduledRideManager.swift */,
 			);
 			path = Booking;
 			sourceTree = "<group>";
@@ -720,6 +735,7 @@
 				F15E3952443A70B9BAAFB5ED /* EndRideView.swift in Sources */,
 				6B7D35B5794BF6685E0224F7 /* FirestoreRideService.swift in Sources */,
 				520CCFBA68EA6812CE9D1125 /* LocationManagerView.swift in Sources */,
+				B1E000000000000000000001 /* QuickScheduleReviewView.swift in Sources */,
 				C02E79734F812F8DE47EC1C2 /* RideChatService.swift in Sources */,
 				ED20A23A9EAEA8FBC0BC9EE6 /* RideChatView.swift in Sources */,
 				C84D7080BB7D7B2C49C6B72E /* RideInProgressView.swift in Sources */,
@@ -728,6 +744,10 @@
 				61C1E1A78C2D4C2B91287131 /* RiderRidePreferences.swift in Sources */,
 				E70A2D574B5EA42DEAC1A05C /* RydrMapView.swift in Sources */,
 				A96FDDF8F8E31985FE66A32A /* RydrRideProgressMapView.swift in Sources */,
+				B1E000000000000000000002 /* ScheduleTimeSelectionView.swift in Sources */,
+				B1E000000000000000000003 /* ScheduledRide.swift in Sources */,
+				B1E000000000000000000004 /* ScheduledRideConfirmationView.swift in Sources */,
+				B1E000000000000000000005 /* ScheduledRideManager.swift in Sources */,
 				A977218877B64CD80867CE9B /* DriverCardView.swift in Sources */,
 				3ED5EDA268FECB5C153A8E1A /* DriverSelectionView.swift in Sources */,
 				CBF3EBC9C85C41C142C65758 /* PaymentScreenView.swift in Sources */,

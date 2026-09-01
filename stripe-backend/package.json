@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "node --check index.js && node --check scripts/delete-connected-accounts.js",
+    "test": "node --check index.js && node --check scripts/delete-connected-accounts.js && node --test test/*.test.js",
     "start": "node index.js",
     "delete-connected-accounts": "node scripts/delete-connected-accounts.js"
   },

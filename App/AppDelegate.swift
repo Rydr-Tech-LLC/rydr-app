@@ -31,6 +31,10 @@ enum RiderGoogleSignInCoordinator {
   @MainActor
   static func presentingViewController() throws -> UIViewController {
     try configure()
+    // Always begin an explicit Google account-selection flow. Firebase
+    // sign-out and Google sign-out are independent, and older app versions
+    // could leave a previous Google user cached on the device.
+    GIDSignIn.sharedInstance.signOut()
     guard let windowScene = UIApplication.shared.connectedScenes
       .compactMap({ $0 as? UIWindowScene })
       .first(where: { $0.activationState == .foregroundActive }),
@@ -43,6 +47,57 @@ enum RiderGoogleSignInCoordinator {
       )
     }
     return topViewController(from: rootViewController)
+  }
+
+  @MainActor
+  static func signIn(
+    withPresenting viewController: UIViewController,
+    expectedEmail rawExpectedEmail: String,
+    completion: @escaping (GIDSignInResult?, Error?) -> Void
+  ) {
+    let expectedEmail = rawExpectedEmail
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    guard isValidEmail(expectedEmail) else {
+      completion(nil, NSError(
+        domain: errorDomain,
+        code: 3,
+        userInfo: [NSLocalizedDescriptionKey: "Enter the Google email address you want to use, then try again."]
+      ))
+      return
+    }
+
+    GIDSignIn.sharedInstance.signIn(
+      withPresenting: viewController,
+      hint: expectedEmail
+    ) { result, error in
+      if let error {
+        completion(nil, error)
+        return
+      }
+
+      let selectedEmail = result?.user.profile?.email
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased() ?? ""
+      guard selectedEmail == expectedEmail else {
+        GIDSignIn.sharedInstance.signOut()
+        completion(nil, NSError(
+          domain: errorDomain,
+          code: 4,
+          userInfo: [
+            NSLocalizedDescriptionKey: "Google selected \(selectedEmail.isEmpty ? "a different account" : selectedEmail). Please try again with \(expectedEmail)."
+          ]
+        ))
+        return
+      }
+
+      completion(result, nil)
+    }
+  }
+
+  private static func isValidEmail(_ email: String) -> Bool {
+    let pattern = "(?:[A-Z0-9a-z._%+-]+)@(?:[A-Z0-9a-z.-]+)\\.[A-Za-z]{2,64}"
+    return NSPredicate(format: "SELF MATCHES %@", pattern).evaluate(with: email)
   }
 
   @MainActor

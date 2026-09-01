@@ -28,6 +28,7 @@
     "@types/node": "^20.14.9",
     "@types/node-fetch": "^2.6.11",
     "firebase": "^11.0.0",
+    "firebase-tools": "^15.28.2",
     "typescript": "^5.5.4"
   }
 }

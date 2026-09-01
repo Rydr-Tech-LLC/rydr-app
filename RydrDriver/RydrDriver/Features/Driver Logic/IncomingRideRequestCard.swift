@@ -25,8 +25,6 @@ struct IncomingRideRequestCard: View {
     @State private var secondsRemaining = 15
     @State private var didRespond = false
 
-    private let driverPayoutShare = 0.70
-
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
@@ -176,22 +174,11 @@ struct IncomingRideRequestCard: View {
         return RideRequestLegEstimate(distanceMiles: miles, durationMinutes: minutes)
     }
 
-    private var fareBaseLeg: RideRequestLegEstimate? {
-        tripLeg ?? fallbackTripLeg
-    }
-
-    private var upfrontFare: Double {
+    private var upfrontFare: Double? {
         if let payout = request.estimatedDriverPayout {
             return roundedCurrency(payout)
         }
-        if let leg = fareBaseLeg {
-            let gross = (leg.distanceMiles * rate.perMile) + (leg.durationMinutes * rate.perMinute)
-            return roundedCurrency(gross * driverPayoutShare)
-        }
-        if let fare = request.estimatedFare {
-            return roundedCurrency(fare)
-        }
-        return 0
+        return nil
     }
 
     private func roundedCurrency(_ value: Double) -> Double {
@@ -637,19 +624,25 @@ private struct RydrPreviewPin: View {
 }
 
 struct UpfrontFareHero: View {
-    let fare: Double
+    let fare: Double?
 
     var body: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Upfront fare")
+                Text("Estimated payout")
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(.white.opacity(0.92))
             }
             Spacer()
-            Text(fare, format: .currency(code: "USD"))
-                .font(.system(size: 38, weight: .black, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white)
+            if let fare {
+                Text(fare, format: .currency(code: "USD"))
+                    .font(.system(size: 38, weight: .black, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.white)
+            } else {
+                Text("Unavailable")
+                    .font(.title2.weight(.black))
+                    .foregroundStyle(.white)
+            }
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 18)

@@ -60,6 +60,7 @@ service cloud.firestore {
         "admin",
         "adminRole",
         "approvalStatus",
+        "availabilityStatus",
         "approvedAt",
         "approvedBy",
         "availableBalance",
@@ -91,9 +92,11 @@ service cloud.firestore {
         "identityStatus",
         "identityVerified",
         "identityVerifiedAt",
+        "hasActiveRide",
         "isAdmin",
         "isApproved",
         "isLicenseVerified",
+        "isOnline",
         "isRydrVerifiedDriver",
         "isVerified",
         "missionControlApprovalOverride",
@@ -101,6 +104,7 @@ service cloud.firestore {
         "missionControlApprovalOverrideBy",
         "missionControlApprovalOverrideReason",
         "needsAttentionReason",
+        "online",
         "paymentStatus",
         "pendingBalance",
         "rating",
@@ -215,7 +219,15 @@ service cloud.firestore {
     function validRiderRideCreate() {
       return signedIn()
         && request.resource.data.riderId == request.auth.uid
-        && request.resource.data.status == "pending";
+        && request.resource.data.status == "pending"
+        && !request.resource.data.keys().hasAny([
+          "authorizedRiderChargeCents", "bookingFeeCents", "calculatedSubtotalCents",
+          "cancellationFeeCents", "cancellationTotalChargeCents", "driverPayoutCents",
+          "driverRatePerMileCents", "driverRatePerMinuteCents", "estimatedDriverPayoutCents",
+          "estimatedPlatformShareCents", "estimatedRiderTotalCents", "finalRiderChargeCents",
+          "minimumFareAdjustmentCents", "paymentStatus", "platformShareCents",
+          "promoDiscountCents", "rideSubtotalCents", "timeCostCents", "distanceCostCents"
+        ]);
     }
 
     function matchingAcceptedRideRequest(rideId) {
@@ -278,6 +290,21 @@ service cloud.firestore {
 
     function validRideLifecycleUpdate() {
       return rideParticipant(resource.data)
+        && !affectedKeys().hasAny([
+          "arrivedAtPickupAt", "arrivedAtStopAt", "cancelledAt", "cancelledBy",
+          "cancelledByRole", "cancellationBookingFeeCents", "cancellationDriverPayoutCents",
+          "cancellationFeeApplies", "cancellationFeeCents", "cancellationPlatformFeeCents",
+          "cancellationTotalChargeCents", "completedAt", "driverPayoutCents",
+          "enRouteToPickupAt", "finalRiderChargeCents", "financialOutcomeStatus",
+          "headedToDropoffAt", "lastLifecycleRequestId", "lifecycleOwner",
+          "minimumFareAdjustmentCents", "navigationStartedAt", "navigatingToDropoffAt",
+          "navigatingToStopAt", "paymentStatus", "pickupPaidWaitStartedAt",
+          "pickupWaitStartedAt", "platformShareCents", "proratedCancellationChargeCents",
+          "proratedCancellationDriverPayoutCents", "proratedCancellationPlatformFeeCents",
+          "activeAt", "driverQueueStatus", "queuedAt", "queuedRideStartedAt",
+          "rideStartedAt", "riderRideState", "riderStatusMessage", "startedAt", "status",
+          "stopWaitStartedAt", "waitChargeCents"
+        ])
         && affectedKeys().hasOnly([
           "acceptedAt",
           "acceptedDriverId",
@@ -344,6 +371,32 @@ service cloud.firestore {
         ]);
     }
 
+    function validRiderLocationUpdate() {
+      return signedIn()
+        && resource.data.riderId == request.auth.uid
+        && request.resource.data.riderLocationSharingEnabled is bool
+        && affectedKeys().hasOnly([
+          "riderLocation",
+          "riderLocationSharingEnabled",
+          "riderLocationUpdatedAt",
+          "updatedAt"
+        ]);
+    }
+
+    // Ride lifecycle, queue, fare, and ownership fields are backend-only.
+    // Participants may only publish live map metadata or attach a rating to
+    // an already-finalized ride; rider location sharing has its own validator.
+    function validRideParticipantMetadataUpdate() {
+      return rideParticipant(resource.data)
+        && affectedKeys().hasOnly([
+          "driverLocation",
+          "driverLocationUpdatedAt",
+          "driverRiderRating",
+          "navigationProvider",
+          "riderDriverRating",
+          "updatedAt"
+        ]);
+    }
     function chatParticipant(data) {
       return signedIn() && (
         data.riderId == request.auth.uid ||
@@ -652,7 +705,6 @@ service cloud.firestore {
         "approximateLocation",
         "displayName",
         "eligibleRideTypes",
-        "isOnline",
         "profilePhotoURL",
         "rating",
         "ratingCount",
@@ -804,17 +856,29 @@ service cloud.firestore {
 
     match /driver_status/{uid} {
       allow read: if signedIn();
-      allow create, update: if isSelf(uid)
+      allow create: if isSelf(uid)
         && request.resource.data.keys().hasOnly([
-          "availabilityStatus",
           "autoAcceptQueuedRides",
           "course",
-          "hasActiveRide",
-          "isOnline",
           "lat",
           "lng",
           "location",
-          "online",
+          "qualifiedRideTypes",
+          "rideFilters",
+          "rideTypes",
+          "selectedRideTypes",
+          "speed",
+          "supportedRideTypes",
+          "tierRates",
+          "updatedAt"
+        ]);
+      allow update: if isSelf(uid)
+        && affectedKeys().hasOnly([
+          "autoAcceptQueuedRides",
+          "course",
+          "lat",
+          "lng",
+          "location",
           "qualifiedRideTypes",
           "rideFilters",
           "rideTypes",
@@ -829,18 +893,7 @@ service cloud.firestore {
 
     match /driverPresenceEvents/{eventId} {
       allow read: if isAdmin();
-      allow create: if signedIn()
-        && request.resource.data.driverId == request.auth.uid
-        && request.resource.data.isOnline is bool
-        && request.resource.data.keys().hasOnly([
-          "availabilityStatus",
-          "createdAt",
-          "driverId",
-          "hasActiveRide",
-          "isOnline",
-          "selectedRideTypes"
-        ]);
-      allow update, delete: if false;
+      allow write: if false;
     }
 
     match /publicDriverProfiles/{driverUid} {
@@ -912,7 +965,7 @@ service cloud.firestore {
     match /rideRequests/{rideId} {
       allow read: if rideParticipant(resource.data) || isUnclaimedRideRequest(resource.data) || isAdmin();
       allow create: if validRiderRideCreate();
-      allow update: if validRideClaim() || validRideLifecycleUpdate() || isAdmin();
+      allow update: if validRideParticipantMetadataUpdate() || validRiderLocationUpdate() || isAdmin();
       allow delete: if isAdmin();
     }
 
@@ -933,20 +986,15 @@ service cloud.firestore {
           "source",
           "status"
         ]);
-      allow update: if signedIn()
-        && resource.data.riderId == request.auth.uid
-        && affectedKeys().hasOnly(["status", "updatedAt"])
-        && request.resource.data.status in ["cancelled", "expired"];
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
     match /rides/{rideId} {
       allow read: if rideParticipant(resource.data) || isAdmin();
       allow create: if validRiderRideCreate()
-        || validRiderRideMirrorCreate(rideId)
-        || (signedIn() && request.resource.data.driverId == request.auth.uid && matchingAcceptedRideRequest(rideId))
         || isAdmin();
-      allow update: if validRideLifecycleUpdate() || isAdmin();
+      allow update: if validRideParticipantMetadataUpdate() || validRiderLocationUpdate() || isAdmin();
       allow delete: if isAdmin();
 
       match /telemetry/{eventId} {
@@ -968,6 +1016,11 @@ service cloud.firestore {
             "status"
           ]);
         allow update, delete: if false;
+      }
+
+      match /financial/{documentId} {
+        allow read: if rideParticipant(get(/databases/$(database)/documents/rides/$(rideId)).data) || isAdmin();
+        allow write: if false;
       }
     }
 

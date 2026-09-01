@@ -7,6 +7,7 @@
 
 import SwiftUI
 import FirebaseFirestore
+import FirebaseAuth
 
 struct RideChatView: View {
     let rideId: String
@@ -15,6 +16,7 @@ struct RideChatView: View {
     let driverName: String
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var messages: [ChatMessage] = []
     @State private var draftText = ""
     @State private var errorMessage: String?
@@ -108,27 +110,33 @@ struct RideChatView: View {
         !draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending
     }
 
+    private var incomingBubbleColor: Color {
+        colorScheme == .dark
+            ? Color(.systemGray2)
+            : Color(red: 0.32, green: 0.32, blue: 0.34)
+    }
+
     private func messageRow(_ message: ChatMessage) -> some View {
-        let isRiderMessage = message.senderId == riderId || message.senderRole == "rider"
+        let isOutgoing = message.senderId == Auth.auth().currentUser?.uid
 
         return HStack {
-            if isRiderMessage {
+            if isOutgoing {
                 Spacer(minLength: 52)
             }
 
             Text(message.text)
                 .font(.body)
-                .foregroundStyle(isRiderMessage ? Color.white : Color.primary)
+                .foregroundStyle(Color.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
-                .background(isRiderMessage ? Color.red : Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(isRiderMessage ? Color.clear : Color.black.opacity(0.06), lineWidth: 1)
+                .background(
+                    isOutgoing
+                        ? AnyShapeStyle(Styles.rydrGradient)
+                        : AnyShapeStyle(incomingBubbleColor)
                 )
+                .clipShape(RoundedRectangle(cornerRadius: 14))
 
-            if !isRiderMessage {
+            if !isOutgoing {
                 Spacer(minLength: 52)
             }
         }

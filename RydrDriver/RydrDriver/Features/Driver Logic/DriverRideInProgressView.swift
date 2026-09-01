@@ -9,6 +9,7 @@ import SwiftUI
 import MapKit
 import CoreLocation
 import Combine
+import FirebaseAuth
 
 private enum DriverRideLifecyclePhase {
     case accepted
@@ -654,7 +655,7 @@ struct DriverRideInProgressView: View {
     }
 
     private var fareText: String? {
-        ride.estimatedFare?.formatted(.currency(code: "USD"))
+        ride.estimatedFare.map { "Est. \($0.formatted(.currency(code: "USD")))" }
     }
 
     private var primaryDestinationCoordinate: CLLocationCoordinate2D? {
@@ -1094,6 +1095,7 @@ private struct DriverRideMessageSheet: View {
     let onSend: (_ text: String) async throws -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var messages: [DriverRideChatMessage] = []
     @State private var message = ""
     @State private var isSending = false
@@ -1223,6 +1225,12 @@ private struct DriverRideMessageSheet: View {
         return speed >= 2.7
     }
 
+    private var incomingBubbleColor: Color {
+        colorScheme == .dark
+            ? Color(.systemGray2)
+            : Color(red: 0.32, green: 0.32, blue: 0.34)
+    }
+
     private func chatBubble(_ chatMessage: DriverRideChatMessage) -> some View {
         if chatMessage.isPrivateDriverNote {
             return AnyView(
@@ -1241,24 +1249,24 @@ private struct DriverRideMessageSheet: View {
                 }
             )
         }
-        let isDriverMessage = chatMessage.senderId == driverId || chatMessage.senderRole == "driver"
+        let isOutgoing = chatMessage.senderId == Auth.auth().currentUser?.uid
 
         return AnyView(HStack {
-            if isDriverMessage { Spacer(minLength: 48) }
+            if isOutgoing { Spacer(minLength: 48) }
 
             Text(chatMessage.text)
                 .font(.body)
-                .foregroundStyle(isDriverMessage ? .white : .primary)
+                .foregroundStyle(Color.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
-                .background(isDriverMessage ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.systemBackground)))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(isDriverMessage ? Color.clear : Color.black.opacity(0.06), lineWidth: 1)
+                .background(
+                    isOutgoing
+                        ? AnyShapeStyle(Styles.rydrGradient)
+                        : AnyShapeStyle(incomingBubbleColor)
                 )
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-            if !isDriverMessage { Spacer(minLength: 48) }
+            if !isOutgoing { Spacer(minLength: 48) }
         })
     }
 
