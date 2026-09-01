@@ -9,8 +9,6 @@ document conflicts with this workflow, this workflow wins.
 
 Technical field names and callable boundaries are maintained in
 [`Rydr_Firebase/SCHEDULED_RIDES_IMPLEMENTATION_CONTRACT.md`](Rydr_Firebase/SCHEDULED_RIDES_IMPLEMENTATION_CONTRACT.md).
-Approved owner assignments and sprint gates are maintained in
-[`SCHEDULED_RIDES_SPRINT_PLAN.md`](SCHEDULED_RIDES_SPRINT_PLAN.md).
 Changes to the workflow require team review before implementation.
 
 ## 1. Rider creates the request

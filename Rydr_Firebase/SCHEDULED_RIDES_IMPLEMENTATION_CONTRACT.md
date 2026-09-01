@@ -7,8 +7,6 @@ acceptance gates and end-to-end tests pass.
 Product authority: [`../SCHEDULED_RIDES_MVP.md`](../SCHEDULED_RIDES_MVP.md).
 The existing data model and security boundary are described in
 [`SCHEDULED_RIDES_DATA_CONTRACT.md`](SCHEDULED_RIDES_DATA_CONTRACT.md).
-Delivery assignments and sprint gates are maintained in
-[`../SCHEDULED_RIDES_SPRINT_PLAN.md`](../SCHEDULED_RIDES_SPRINT_PLAN.md).
 
 Changes to money ownership, automatic replacement constraints, cancellation
 policy, or the standard-dispatch handoff require Ashank's approval. Other
@@ -321,9 +319,9 @@ configurable, and `enabled` stays false until the release gate.
 | `driverPayoutBasisPoints` | 7000 | Retains the existing 70% driver share of ride subtotal |
 
 The checked-in example now records the approved values, but the current config
-parser does not yet enforce every new field. SR-A1 must add parser and emulator
-coverage before the template is deployed. Until then, `enabled` must remain
-false.
+parser does not yet enforce every new field. The first implementation sprint
+must add parser and emulator coverage before the template is deployed. Until
+then, `enabled` must remain false.
 
 `checkInDueAt` in the current foundation is ambiguous. Implementation must
 store separate `checkInOpensAt` and `checkInDeadlineAt` timestamps using the
