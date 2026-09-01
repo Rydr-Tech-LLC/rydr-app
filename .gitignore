@@ -24,5 +24,8 @@ DerivedData/
 *.log
 npm-debug.log*
 
+# Private signing keys
+*.p8
+
 .aider*
 aider-venv/

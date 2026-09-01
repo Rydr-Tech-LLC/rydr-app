@@ -1,22 +1,22 @@
 import XCTest
 @testable import RydrDriver
 
-final class DriverRideLifecyclePolicyTests: XCTestCase {
+final class DriverRidePresentationPolicyTests: XCTestCase {
     func testNormalizesLegacyStatuses() {
-        XCTAssertEqual(DriverRideLifecyclePolicy.normalizedStatus("arrived"), "arrivedAtPickup")
-        XCTAssertEqual(DriverRideLifecyclePolicy.normalizedStatus("waitingForRider"), "arrivedAtPickup")
-        XCTAssertEqual(DriverRideLifecyclePolicy.normalizedStatus("waitingAtStop"), "arrivedAtStop")
-        XCTAssertEqual(DriverRideLifecyclePolicy.normalizedStatus("navigatingToDropoff"), "inProgress")
-        XCTAssertEqual(DriverRideLifecyclePolicy.normalizedStatus("dropoffArrived"), "arrivedAtDropoff")
-        XCTAssertEqual(DriverRideLifecyclePolicy.normalizedStatus("driverCancelled"), "cancelled")
+        XCTAssertEqual(DriverRidePresentationPolicy.normalizedStatus("arrived"), "arrivedAtPickup")
+        XCTAssertEqual(DriverRidePresentationPolicy.normalizedStatus("waitingForRider"), "arrivedAtPickup")
+        XCTAssertEqual(DriverRidePresentationPolicy.normalizedStatus("waitingAtStop"), "arrivedAtStop")
+        XCTAssertEqual(DriverRidePresentationPolicy.normalizedStatus("navigatingToDropoff"), "inProgress")
+        XCTAssertEqual(DriverRidePresentationPolicy.normalizedStatus("dropoffArrived"), "arrivedAtDropoff")
+        XCTAssertEqual(DriverRidePresentationPolicy.normalizedStatus("driverCancelled"), "cancelled")
     }
 
     func testMapsDriverStatusToRiderState() {
-        XCTAssertEqual(DriverRideLifecyclePolicy.riderState(forDriverStatus: "accepted"), "driverEnRoute")
-        XCTAssertEqual(DriverRideLifecyclePolicy.riderState(forDriverStatus: "arrivedAtPickup"), "driverArrived")
-        XCTAssertEqual(DriverRideLifecyclePolicy.riderState(forDriverStatus: "navigatingToStop"), "inProgress")
-        XCTAssertEqual(DriverRideLifecyclePolicy.riderState(forDriverStatus: "arrivedAtStop"), "driverAtStop")
-        XCTAssertEqual(DriverRideLifecyclePolicy.riderState(forDriverStatus: "completed"), "completed")
+        XCTAssertEqual(DriverRidePresentationPolicy.riderState(forDriverStatus: "accepted"), "driverEnRoute")
+        XCTAssertEqual(DriverRidePresentationPolicy.riderState(forDriverStatus: "arrivedAtPickup"), "driverArrived")
+        XCTAssertEqual(DriverRidePresentationPolicy.riderState(forDriverStatus: "navigatingToStop"), "inProgress")
+        XCTAssertEqual(DriverRidePresentationPolicy.riderState(forDriverStatus: "arrivedAtStop"), "driverAtStop")
+        XCTAssertEqual(DriverRidePresentationPolicy.riderState(forDriverStatus: "completed"), "completed")
     }
 
     func testPickupPaidWaitStartsAfterComplimentaryWindow() {
@@ -25,7 +25,7 @@ final class DriverRideLifecyclePolicyTests: XCTestCase {
         let afterGraceEnds = started.addingTimeInterval(195)
 
         XCTAssertEqual(
-            DriverRideLifecyclePolicy.pickupPaidWaitSeconds(
+            DriverRidePresentationPolicy.pickupPaidWaitSeconds(
                 waitStartedAt: started,
                 paidWaitStartedAt: nil,
                 now: beforeGraceEnds
@@ -33,7 +33,7 @@ final class DriverRideLifecyclePolicyTests: XCTestCase {
             0
         )
         XCTAssertEqual(
-            DriverRideLifecyclePolicy.pickupPaidWaitSeconds(
+            DriverRidePresentationPolicy.pickupPaidWaitSeconds(
                 waitStartedAt: started,
                 paidWaitStartedAt: nil,
                 now: afterGraceEnds
@@ -47,7 +47,7 @@ final class DriverRideLifecyclePolicyTests: XCTestCase {
         let now = started.addingTimeInterval(42)
 
         XCTAssertEqual(
-            DriverRideLifecyclePolicy.stopPaidWaitSeconds(stopWaitStartedAt: started, now: now),
+            DriverRidePresentationPolicy.stopPaidWaitSeconds(stopWaitStartedAt: started, now: now),
             42
         )
     }

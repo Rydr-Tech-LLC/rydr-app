@@ -7,6 +7,7 @@ const dotenv = require("dotenv");
 const admin = require("firebase-admin");
 const Stripe = require("stripe");
 const { randomInt } = require("crypto");
+const { rideWithFinancialOutcome } = require("./financialOutcome");
 
 dotenv.config();
 
@@ -788,6 +789,17 @@ function pickupWaitChargeCents(ride) {
 }
 
 function resolvedRideCharge(ride) {
+  if (ride?.backendFinancialOutcome === true) {
+    const amount = nonNegativeIntegerField(ride, "finalRiderChargeCents");
+    if (amount === null) return null;
+    return {
+      amount,
+      baseAmount: amount,
+      pickupPaidWaitSeconds: 0,
+      pickupWaitChargeCents: nonNegativeIntegerField(ride, "backendWaitChargeCents") || 0,
+    };
+  }
+
   if (PRORATED_CANCELLATION_STATUSES.has(ride?.status)) {
     const proratedAmount = nonNegativeIntegerField(ride, "proratedCancellationChargeCents");
     if (proratedAmount !== null) {
@@ -823,6 +835,10 @@ function resolvedRideCharge(ride) {
 }
 
 function platformFeeCents(ride, chargeAmountCents, resolvedCharge = null) {
+  if (ride?.backendFinancialOutcome === true) {
+    return Math.min(nonNegativeIntegerField(ride, "estimatedPlatformShareCents") || 0, chargeAmountCents);
+  }
+
   if (PRORATED_CANCELLATION_STATUSES.has(ride?.status)) {
     const proratedPlatformFee = nonNegativeIntegerField(ride, "proratedCancellationPlatformFeeCents");
     if (proratedPlatformFee !== null) {
@@ -848,6 +864,10 @@ function platformFeeCents(ride, chargeAmountCents, resolvedCharge = null) {
 }
 
 function driverPayoutCents(ride, resolvedCharge = null) {
+  if (ride?.backendFinancialOutcome === true) {
+    return nonNegativeIntegerField(ride, "estimatedDriverPayoutCents") || 0;
+  }
+
   if (PRORATED_CANCELLATION_STATUSES.has(ride?.status)) {
     const proratedDriverPayout = nonNegativeIntegerField(ride, "proratedCancellationDriverPayoutCents");
     if (proratedDriverPayout !== null) return proratedDriverPayout;
@@ -1304,10 +1324,28 @@ async function chargeRideAttempt({
   if (!owned) {
     return { httpStatus: 404, body: { error: "ride_not_found_or_not_owned" } };
   }
-  const { ref: rideRef, data: ride } = owned;
-  const paymentType = nonNegativeIntegerField(ride, "proratedCancellationChargeCents") !== null
+  const { ref: rideRef } = owned;
+  const outcomeSnap = await rideRef.collection("financial").doc("outcome").get();
+  if (!outcomeSnap.exists) {
+    return { httpStatus: 409, body: { error: "financial_outcome_required", message: "The ride must be finalized by rydr-backend before payment." } };
+  }
+  const outcome = outcomeSnap.data();
+  const outcomeRef = outcomeSnap.ref;
+  if (outcome.status === "paid") {
+    return {
+      httpStatus: 409,
+      body: { error: "ride_already_paid", paymentIntentId: outcome.paymentIntentId || null },
+    };
+  }
+  const mappedOutcome = rideWithFinancialOutcome(owned.data, outcome);
+  if (!mappedOutcome.ok) {
+    return { httpStatus: 409, body: { error: mappedOutcome.error } };
+  }
+  const ride = mappedOutcome.value;
+  currency = "usd";
+  const paymentType = outcome.outcomeType === "mid_ride_cancellation"
     ? "prorated_cancellation_fare"
-    : CANCELLATION_CHARGE_STATUSES.has(ride.status) ? "cancellation_fee" : "ride_fare";
+    : ["rider_cancellation", "driver_cancellation"].includes(outcome.outcomeType) ? "cancellation_fee" : "ride_fare";
   const attempt = (ride.retryCount || 0) + 1;
   const resolvedCharge = resolvedRideCharge(ride);
 
@@ -1386,6 +1424,7 @@ async function chargeRideAttempt({
       promoSubsidyTransferId: subsidyResult.transferId,
       promoSubsidyTransferStatus: subsidyResult.transferStatus,
     });
+    await outcomeRef.set({ status: "paid", paymentIntentId: null, paidAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
     if (paymentType === "ride_fare") {
       await recordRiderPromotionRedemption({
         rideId,
@@ -1555,6 +1594,9 @@ async function chargeRideAttempt({
       promoSubsidyTransferId: subsidyResult.transferId,
       promoSubsidyTransferStatus: subsidyResult.transferStatus,
     });
+    if (pi.status === "succeeded") {
+      await outcomeRef.set({ status: "paid", paymentIntentId: pi.id, paidAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    }
     if (pi.status === "succeeded" && paymentType === "ride_fare") {
       await recordRiderPromotionRedemption({
         rideId,

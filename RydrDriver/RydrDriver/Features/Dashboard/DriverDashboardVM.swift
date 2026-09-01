@@ -401,16 +401,47 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             #endif
             startPushingDriverPresence()
             startRequestListener()
-            recordDriverPresenceEvent(online: true)
         } else {
             isSearchingForRides = false
             stopPushingDriverPresence()
             stopRequestListener()
             updateDriverPresence(online: false)
-            recordDriverPresenceEvent(online: false)
             pendingRequests = []
             statusMessage = "Offline. You will not receive new ride requests."
         }
+    }
+
+    @MainActor
+    func prepareForLogout() async {
+        if isOnline {
+            let location = lastLocation.map {
+                RydrBackendService.DriverPresenceLocation(
+                    lat: $0.coordinate.latitude,
+                    lng: $0.coordinate.longitude,
+                    speed: $0.speed,
+                    course: $0.course
+                )
+            }
+            let request = RydrBackendService.DriverPresenceRequest(
+                online: false,
+                selectedRideTypes: Array(selectedRideTypes).sorted(),
+                location: location
+            )
+            do {
+                _ = try await RydrBackendService.updateDriverPresence(request)
+            } catch {
+                RydrCrashReporter.record(error, context: "driver_logout_presence")
+            }
+        }
+
+        isOnline = false
+        isSearchingForRides = false
+        stopPushingDriverPresence()
+        stopRequestListener()
+        stopMapRequestBlipListener()
+        locationManager.stopUpdatingLocation()
+        pendingRequests = []
+        respondingRequestIDs = []
     }
 
     func refreshMapRequestBlips() {
@@ -479,172 +510,15 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         guard let uid = Auth.auth().currentUser?.uid else { return }
         guard !respondingRequestIDs.contains(request.id) else { return }
         respondingRequestIDs.insert(request.id)
-        let rideRef = db.collection("rides").document(request.id)
-        let requestRef = db.collection("rideRequests").document(request.id)
-        var rideData: [String: Any] = [
-            "id": request.id,
-            "requestId": request.id,
-            "driverId": uid,
-            "riderId": request.riderId,
-            "riderName": request.riderName,
-            "pickup": request.pickup,
-            "dropoff": request.dropoff,
-            "rideType": request.rideType,
-            "status": "accepted",
-            "acceptedAt": FieldValue.serverTimestamp(),
-            "driverQueueStatus": queued ? "queued" : "active",
-            "riderStatusMessage": queued
-                ? "Your driver is finishing a current ride. You're next in their queue."
-                : "Your driver is on the way.",
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-        rideData[queued ? "queuedAt" : "activeAt"] = FieldValue.serverTimestamp()
-        if let estimatedFare = request.estimatedFare {
-            rideData["estimatedFare"] = estimatedFare
-        }
-        if let riderPhotoURL = request.riderPhotoURL {
-            rideData["riderPhotoURL"] = riderPhotoURL
-        }
-        if let riderRating = request.riderRating {
-            rideData["riderRating"] = riderRating
-        }
-        if let distance = request.estimatedDistanceMiles {
-            rideData["estimatedDistanceMiles"] = distance
-        }
-        if let duration = request.estimatedDurationMinutes {
-            rideData["estimatedDurationMinutes"] = duration
-        }
-        if let ridePreferences = request.ridePreferences {
-            rideData["ridePreferences"] = [
-                "summaryItems": ridePreferences.summaryItems,
-                "summaryText": ridePreferences.summaryText
-            ]
-        }
-        if let pickupCoordinate = request.pickupCoordinate {
-            rideData["pickupCoordinate"] = [
-                "lat": pickupCoordinate.latitude,
-                "lng": pickupCoordinate.longitude
-            ]
-            rideData["pickupGeoPoint"] = GeoPoint(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)
-        }
-        if let stop = request.stop?.trimmingCharacters(in: .whitespacesAndNewlines), !stop.isEmpty {
-            rideData["stop"] = stop
-        }
-        if let stopCoordinate = request.stopCoordinate {
-            rideData["stopCoordinate"] = [
-                "lat": stopCoordinate.latitude,
-                "lng": stopCoordinate.longitude
-            ]
-            rideData["stopGeoPoint"] = GeoPoint(latitude: stopCoordinate.latitude, longitude: stopCoordinate.longitude)
-        }
-        if let dropoffCoordinate = request.dropoffCoordinate {
-            rideData["dropoffCoordinate"] = [
-                "lat": dropoffCoordinate.latitude,
-                "lng": dropoffCoordinate.longitude
-            ]
-            rideData["dropoffGeoPoint"] = GeoPoint(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)
-        }
-        if let loc = lastLocation {
-            rideData["driverLocation"] = [
-                "lat": loc.coordinate.latitude,
-                "lng": loc.coordinate.longitude,
-                "updatedAt": FieldValue.serverTimestamp()
-            ]
-        }
-
-        db.runTransaction({ transaction, errorPointer -> Any? in
-            let snapshot: DocumentSnapshot
+        Task { [weak self] in
             do {
-                snapshot = try transaction.getDocument(requestRef)
-            } catch let error as NSError {
-                errorPointer?.pointee = error
-                return nil
-            }
-
-            let data = snapshot.data() ?? [:]
-            let status = (data["status"] as? String ?? "pending").lowercased()
-            let acceptedDriverId = data["acceptedDriverId"] as? String ?? data["connectedDriverUid"] as? String
-            let existingRideId = data["rideId"] as? String
-            guard status == "pending", acceptedDriverId == nil, existingRideId == nil else {
-                errorPointer?.pointee = NSError(
-                    domain: "RydrDriver.AcceptRide",
-                    code: 409,
-                    userInfo: [NSLocalizedDescriptionKey: "Ride no longer available."]
-                )
-                return nil
-            }
-
-            var transactionRideData = rideData
-            Self.copyAuthoritativePricingFields(from: data, into: &transactionRideData)
-
-            var requestUpdate: [String: Any] = [
-                "status": "accepted",
-                "driverQueueStatus": queued ? "queued" : "active",
-                "acceptedAt": FieldValue.serverTimestamp(),
-                "acceptedDriverId": uid,
-                "rideId": request.id,
-                "riderStatusMessage": queued
-                    ? "Your driver is finishing a current ride. You're next in their queue."
-                    : "Your driver is on the way.",
-                "updatedAt": FieldValue.serverTimestamp()
-            ]
-            requestUpdate[queued ? "queuedAt" : "activeAt"] = FieldValue.serverTimestamp()
-            transaction.updateData(requestUpdate, forDocument: requestRef)
-            transaction.setData(transactionRideData, forDocument: rideRef, merge: true)
-            return transactionRideData
-        }) { [weak self] result, error in
-            DispatchQueue.main.async {
-                self?.respondingRequestIDs.remove(request.id)
-                if let error {
-                    let message = (error as NSError).code == 409
-                        ? "Ride no longer available."
-                        : "Could not accept ride: \(error.localizedDescription)"
-                    self?.pendingRequests.removeAll { $0.id == request.id && (error as NSError).code == 409 }
-                    self?.statusMessage = message
-                    self?.resumeStandbyIfWaiting()
-                    return
+                _ = try await RydrBackendService.transitionRide(rideId: request.id, action: "driver_accept", queued: queued)
+                await MainActor.run {
+                    self?.respondingRequestIDs.remove(request.id); self?.pendingRequests.removeAll { $0.id == request.id }
+                    if queued { self?.statusMessage = "Ride added to queue." } else { self?.isSearchingForRides = false; self?.setActiveRide(DriverActiveRide(id: request.id, data: ["driverId": uid, "riderId": request.riderId, "riderName": request.riderName, "pickup": request.pickup, "dropoff": request.dropoff, "rideType": request.rideType, "status": "accepted"])); self?.statusMessage = "Ride accepted. Head to pickup." }
+                    self?.updateDriverPresence(online: true)
                 }
-                self?.pendingRequests.removeAll { $0.id == request.id }
-                if queued {
-                    self?.statusMessage = "Ride added to queue."
-                } else {
-                    self?.isSearchingForRides = false
-                    self?.setActiveRide(DriverActiveRide(id: request.id, data: (result as? [String: Any]) ?? rideData))
-                    self?.statusMessage = "Ride accepted. Head to pickup."
-                }
-                self?.updateDriverPresence(online: true)
-            }
-        }
-    }
-
-    private static func copyAuthoritativePricingFields(from source: [String: Any], into destination: inout [String: Any]) {
-        let keys = [
-            "pricingVersion",
-            "fareEstimateSource",
-            "fareEstimateCreatedAt",
-            "driverRatePerMileCents",
-            "driverRatePerMinuteCents",
-            "distanceCostCents",
-            "timeCostCents",
-            "calculatedSubtotalCents",
-            "minimumFareAdjustmentCents",
-            "rideSubtotalCents",
-            "bookingFeeCents",
-            "estimatedRiderTotalCents",
-            "estimatedDriverPayoutCents",
-            "estimatedPlatformShareCents",
-            "promoDiscountCents",
-            "authorizedRiderChargeCents",
-            "finalRiderChargeCents",
-            "estimatedRiderTotal",
-            "bookingFee",
-            "upfrontFare",
-            "estimatedFare"
-        ]
-        for key in keys {
-            if let value = source[key] {
-                destination[key] = value
-            }
+            } catch { await MainActor.run { self?.respondingRequestIDs.remove(request.id); self?.statusMessage = "Could not accept ride: \(error.localizedDescription)" } }
         }
     }
 
@@ -653,28 +527,21 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func miss(_ request: DriverRideRequest) {
-        decline(request, status: "missed", timestampField: "missedAt", message: "Looks like you missed this ride.")
+        decline(request, status: "missed", message: "Looks like you missed this ride.")
     }
 
     private func decline(
         _ request: DriverRideRequest,
         status: String = "declined",
-        timestampField: String = "declinedAt",
         message: String
     ) {
         guard !respondingRequestIDs.contains(request.id) else { return }
         respondingRequestIDs.insert(request.id)
-        db.collection("rideRequests").document(request.id).updateData([
-            "status": status,
-            timestampField: FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
-        ]) { [weak self] error in
-            DispatchQueue.main.async {
+        Task { [weak self] in
+            do {
+                _ = try await RydrBackendService.transitionRide(rideId: request.id, action: status == "missed" ? "driver_miss" : "driver_decline")
+                await MainActor.run {
                 self?.respondingRequestIDs.remove(request.id)
-                if let error {
-                    self?.statusMessage = "Could not decline ride: \(error.localizedDescription)"
-                    return
-                }
                 self?.pendingRequests.removeAll { $0.id == request.id }
                 if status == "missed" {
                     self?.upsertLocalNotification(
@@ -693,209 +560,63 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 }
                 self?.statusMessage = message
                 self?.resumeStandbyIfWaiting()
+                }
+            } catch {
+                await MainActor.run { self?.respondingRequestIDs.remove(request.id); self?.statusMessage = "Could not decline ride: \(error.localizedDescription)" }
             }
         }
     }
 
     func startActiveRideNavigation() {
-        updateActiveRideStatus(
-            status: "enRouteToPickup",
-            fields: [
-                "navigationProvider": "rydr",
-                "navigationStartedAt": FieldValue.serverTimestamp(),
-                "enRouteToPickupAt": FieldValue.serverTimestamp()
-            ]
-        )
+        performRideAction("start_navigation", successMessage: "Heading to pickup")
     }
 
     func markArrivedAtPickup() {
         guard let ride = activeRide else { return }
-        let riderState = DriverRideLifecyclePolicy.riderState(forDriverStatus: "arrivedAtPickup")
-        updateActiveRideStatus(
-            status: "arrivedAtPickup",
-            fields: [
-                "arrivedAtPickupAt": FieldValue.serverTimestamp(),
-                "pickupWaitStartedAt": FieldValue.serverTimestamp(),
-                "riderRideState": riderState,
-                "riderStatusMessage": "Your driver has arrived at pickup."
-            ]
-        )
+        performRideAction("arrive_pickup", successMessage: "Arrived at pickup")
         recordWaitTimeEvent(ride: ride, waitStage: "pickup_grace_started")
         // TODO: trigger rider push notification when notification service is available.
     }
 
     func markPickupPaidWaitActive() {
         guard let ride = activeRide else { return }
-        updateActiveRideStatus(
-            status: "arrivedAtPickup",
-            fields: [
-                "pickupPaidWaitStartedAt": FieldValue.serverTimestamp(),
-                "pickupComplimentaryWaitSeconds": DriverActiveRide.pickupComplimentaryWaitSeconds,
-                "riderRideState": DriverRideLifecyclePolicy.riderState(forDriverStatus: "arrivedAtPickup"),
-                "riderStatusMessage": "Paid wait time is active."
-            ]
-        )
+        performRideAction("start_paid_wait", successMessage: "Paid wait started")
         recordWaitTimeEvent(ride: ride, waitStage: "pickup_paid_started")
     }
 
     func startPassengerRide() {
         guard let ride = activeRide else { return }
-        let nextStatus = ride.hasAddedStop ? "navigatingToStop" : "inProgress"
-        var fields: [String: Any] = [
-            "rideStartedAt": FieldValue.serverTimestamp(),
-            "startedAt": FieldValue.serverTimestamp(),
-            "navigationProvider": "rydr",
-            "riderRideState": DriverRideLifecyclePolicy.riderState(forDriverStatus: nextStatus),
-            "riderStatusMessage": ride.hasAddedStop ? "Your ride is headed to the added stop." : "Your ride is headed to drop-off."
-        ]
-        if ride.hasAddedStop {
-            fields["navigatingToStopAt"] = FieldValue.serverTimestamp()
-        } else {
-            fields["navigatingToDropoffAt"] = FieldValue.serverTimestamp()
-        }
-        updateActiveRideStatus(status: nextStatus, fields: fields)
+        performRideAction("start_ride", successMessage: ride.hasAddedStop ? "Heading to the stop" : "Ride started")
         recordWaitTimeEvent(ride: ride, waitStage: "wait_ended")
         // TODO: trigger rider push notification when notification service is available.
     }
 
     func markArrivedAtStop() {
         guard let ride = activeRide else { return }
-        updateActiveRideStatus(
-            status: "arrivedAtStop",
-            fields: [
-                "arrivedAtStopAt": FieldValue.serverTimestamp(),
-                "stopWaitStartedAt": FieldValue.serverTimestamp(),
-                "riderRideState": DriverRideLifecyclePolicy.riderState(forDriverStatus: "arrivedAtStop"),
-                "riderStatusMessage": "Your driver is waiting at the added stop."
-            ]
-        )
+        performRideAction("arrive_stop", successMessage: "Arrived at stop")
         recordWaitTimeEvent(ride: ride, waitStage: "stop_paid_started")
     }
 
     func headToDropoffFromStop() {
         guard let ride = activeRide else { return }
-        updateActiveRideStatus(
-            status: "inProgress",
-            fields: [
-                "headedToDropoffAt": FieldValue.serverTimestamp(),
-                "navigatingToDropoffAt": FieldValue.serverTimestamp(),
-                "navigationProvider": "rydr",
-                "riderRideState": DriverRideLifecyclePolicy.riderState(forDriverStatus: "inProgress"),
-                "riderStatusMessage": "Your ride is headed to drop-off."
-            ]
-        )
+        performRideAction("leave_stop", successMessage: "Heading to drop-off")
         recordWaitTimeEvent(ride: ride, waitStage: "wait_ended")
     }
 
-    private func updateActiveRideStatus(status: String, fields: [String: Any]) {
+    /// Sends a transition intent. The backend validates it and the ride
+    /// listener supplies the resulting official status.
+    private func performRideAction(_ action: String, successMessage: String) {
         guard let ride = activeRide else { return }
         guard !isUpdatingActiveRide else { return }
         isUpdatingActiveRide = true
-
-        var payload = fields
-        payload["status"] = status
-        payload["updatedAt"] = FieldValue.serverTimestamp()
-
-        let batch = db.batch()
-        let rideRef = db.collection("rides").document(ride.id)
-        let requestRef = db.collection("rideRequests").document(ride.id)
-        batch.setData(payload, forDocument: rideRef, merge: true)
-        batch.setData(payload, forDocument: requestRef, merge: true)
-        batch.commit { [weak self] error in
-            DispatchQueue.main.async {
-                self?.isUpdatingActiveRide = false
-                if let error {
-                    RydrCrashReporter.record(error, context: "update_active_ride_status_\(status)")
-                    self?.statusMessage = "Could not update ride: \(error.localizedDescription)"
-                    return
-                }
-                self?.statusMessage = Self.driverMessage(for: status)
+        Task { [weak self] in
+            do {
+                _ = try await RydrBackendService.transitionRide(rideId: ride.id, action: action)
+                await MainActor.run { self?.isUpdatingActiveRide = false; self?.statusMessage = successMessage }
+            } catch {
+                await MainActor.run { self?.isUpdatingActiveRide = false; self?.statusMessage = "Could not update ride: \(error.localizedDescription)" }
             }
         }
-    }
-
-    /// Computes the final fare using the driver's saved per-mile/per-minute
-    /// rate and actual elapsed ride time. `distanceOverrideMiles` is used for
-    /// prorated mid-ride cancellations.
-    private func computeFinalFare(for ride: DriverActiveRide, distanceOverrideMiles: Double? = nil) -> Decimal? {
-        guard let distanceMiles = distanceOverrideMiles ?? ride.estimatedDistanceMiles else {
-            return ride.estimatedFare.map { Decimal($0) }
-        }
-
-        // tierRates/rate(for:) are keyed by the display-form ride type
-        // ("Rydr Go", "Rydr XL", etc.), not the lowercase canonical form, so
-        // map the ride's stored rideType onto the matching display string
-        // before looking up the rate.
-        let canonical = RydrRideTierCatalog.canonicalRideType(ride.rideType)
-        let rideTypeKey = DriverDashboardVM.availableRideTypes.first {
-            RydrRideTierCatalog.canonicalRideType($0) == canonical
-        } ?? ride.rideType
-        let rate = self.rate(for: rideTypeKey)
-
-        let actualDurationMinutes: Double
-        if let startedAt = ride.rideStartedAt {
-            actualDurationMinutes = max(0, Date().timeIntervalSince(startedAt) / 60)
-        } else {
-            actualDurationMinutes = ride.estimatedDurationMinutes ?? 0
-        }
-
-        let rawFare = (distanceMiles * rate.perMile) + (actualDurationMinutes * rate.perMinute)
-        guard rawFare > 0 else {
-            return ride.estimatedFare.map { Decimal($0) }
-        }
-
-        let roundedFare = (rawFare * 100).rounded() / 100
-        return Decimal(roundedFare)
-    }
-
-    private func proratedCancellationFields(for ride: DriverActiveRide) -> [String: Any] {
-        guard isMidRideCancellation(ride) else { return [:] }
-
-        let progress = midRideProgressFraction(for: ride)
-        let estimatedDistance = ride.estimatedDistanceMiles ?? 0
-        let proratedMiles = max(0.1, ((estimatedDistance * progress) * 10).rounded() / 10)
-        let fare = computeFinalFare(for: ride, distanceOverrideMiles: proratedMiles)
-            ?? ride.estimatedFare.map { Decimal(max(0.01, $0 * progress)) }
-        guard let fare else { return [:] }
-
-        let fareCents = max(0, Int((NSDecimalNumber(decimal: fare).doubleValue * 100).rounded()))
-        let platformCents = Int((Double(fareCents) * 0.30).rounded())
-        let driverPayoutCents = max(0, fareCents - platformCents)
-
-        return [
-            "proratedCancellation": true,
-            "proratedCancellationReason": "midRide",
-            "proratedCancellationProgress": progress,
-            "proratedCancellationDistanceMiles": proratedMiles,
-            "proratedCancellationChargeCents": fareCents,
-            "proratedCancellationDriverPayoutCents": driverPayoutCents,
-            "proratedCancellationPlatformFeeCents": platformCents,
-            "finalRiderChargeCents": fareCents,
-            "driverPayoutCents": driverPayoutCents,
-            "paymentStatus": "pending"
-        ]
-    }
-
-    private func isMidRideCancellation(_ ride: DriverActiveRide) -> Bool {
-        ["inProgress", "navigatingToStop", "arrivedAtStop", "waitingAtStop", "navigatingToDropoff"].contains(ride.normalizedStatus)
-    }
-
-    private func midRideProgressFraction(for ride: DriverActiveRide) -> Double {
-        if let current = lastLocation?.coordinate,
-           let pickup = ride.pickupCoordinate,
-           let dropoff = ride.dropoffCoordinate {
-            let projected = projectedRouteProgress(point: current, start: pickup, end: dropoff)
-            if projected.isFinite {
-                return max(0.05, min(0.95, projected))
-            }
-        }
-
-        guard let startedAt = ride.rideStartedAt,
-              let estimatedDuration = ride.estimatedDurationMinutes,
-              estimatedDuration > 0 else {
-            return 0.1
-        }
-        return max(0.05, min(0.95, Date().timeIntervalSince(startedAt) / (estimatedDuration * 60)))
     }
 
     func completeActiveRide() {
@@ -903,42 +624,16 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         guard !isUpdatingActiveRide else { return }
         isUpdatingActiveRide = true
 
-        let finalFare = computeFinalFare(for: ride)
-
-        let batch = db.batch()
-        let rideRef = db.collection("rides").document(ride.id)
-        let requestRef = db.collection("rideRequests").document(ride.id)
-        var completionFields: [String: Any] = [
-            "status": "completed",
-            "completedAt": FieldValue.serverTimestamp(),
-            "riderRideState": DriverRideLifecyclePolicy.riderState(forDriverStatus: "completed"),
-            "riderStatusMessage": "Your ride is complete.",
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-        if let finalFare {
-            // Real final fare, computed from the actual elapsed ride time and
-            // the driver's saved per-mile/per-minute rate — this is what
-            // DriverEarningsService and Earnings Hub read going forward,
-            // rather than only ever the pre-ride estimate.
-            completionFields["fare"] = NSDecimalNumber(decimal: finalFare).doubleValue
-        }
-        batch.setData(completionFields, forDocument: rideRef, merge: true)
-        batch.setData(completionFields, forDocument: requestRef, merge: true)
-        batch.commit { [weak self] error in
-            DispatchQueue.main.async {
-                self?.isUpdatingActiveRide = false
-                if let error {
-                    RydrCrashReporter.record(error, context: "complete_active_ride")
-                    self?.statusMessage = "Could not complete ride: \(error.localizedDescription)"
-                    return
+        Task { [weak self] in
+            do {
+                let response = try await RydrBackendService.transitionRide(rideId: ride.id, action: "complete")
+                var completedRide = ride
+                completedRide.finalDriverPayout = response.outcome.map { Double($0.driverPayoutCents) / 100.0 }
+                await MainActor.run {
+                    self?.isUpdatingActiveRide = false; self?.completedRideForRating = completedRide; self?.setActiveRide(nil)
+                    self?.statusMessage = "Ride completed. You are ready for the next request."; self?.promoteNextQueuedRideIfAvailable(); self?.resumeStandbyIfWaiting(); self?.updateDriverPresence(online: self?.isOnline ?? false)
                 }
-                self?.completedRideForRating = ride
-                self?.setActiveRide(nil)
-                self?.statusMessage = "Ride completed. You are ready for the next request."
-                self?.promoteNextQueuedRideIfAvailable()
-                self?.resumeStandbyIfWaiting()
-                self?.updateDriverPresence(online: self?.isOnline ?? false)
-            }
+            } catch { await MainActor.run { self?.isUpdatingActiveRide = false; self?.statusMessage = "Could not complete ride: \(error.localizedDescription)" } }
         }
     }
 
@@ -974,28 +669,28 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
         if waitStage == "pickup_grace_started" {
             paidWaitSeconds = 0
-            complimentaryWaitSeconds = Int(DriverRideLifecyclePolicy.pickupComplimentaryWaitSeconds)
+            complimentaryWaitSeconds = Int(DriverRidePresentationPolicy.pickupComplimentaryWaitSeconds)
         } else if waitStage == "pickup_paid_started" {
-            paidWaitSeconds = DriverRideLifecyclePolicy.pickupPaidWaitSeconds(
+            paidWaitSeconds = DriverRidePresentationPolicy.pickupPaidWaitSeconds(
                 waitStartedAt: ride.pickupWaitStartedAt,
                 paidWaitStartedAt: ride.pickupPaidWaitStartedAt,
                 now: now
             )
-            complimentaryWaitSeconds = Int(DriverRideLifecyclePolicy.pickupComplimentaryWaitSeconds)
+            complimentaryWaitSeconds = Int(DriverRidePresentationPolicy.pickupComplimentaryWaitSeconds)
         } else if waitStage == "stop_paid_started" {
-            paidWaitSeconds = DriverRideLifecyclePolicy.stopPaidWaitSeconds(stopWaitStartedAt: ride.stopWaitStartedAt, now: now)
+            paidWaitSeconds = DriverRidePresentationPolicy.stopPaidWaitSeconds(stopWaitStartedAt: ride.stopWaitStartedAt, now: now)
             complimentaryWaitSeconds = 0
         } else {
             if ride.normalizedStatus == "arrivedAtStop" {
-                paidWaitSeconds = DriverRideLifecyclePolicy.stopPaidWaitSeconds(stopWaitStartedAt: ride.stopWaitStartedAt, now: now)
+                paidWaitSeconds = DriverRidePresentationPolicy.stopPaidWaitSeconds(stopWaitStartedAt: ride.stopWaitStartedAt, now: now)
                 complimentaryWaitSeconds = 0
             } else {
-                paidWaitSeconds = DriverRideLifecyclePolicy.pickupPaidWaitSeconds(
+                paidWaitSeconds = DriverRidePresentationPolicy.pickupPaidWaitSeconds(
                     waitStartedAt: ride.pickupWaitStartedAt,
                     paidWaitStartedAt: ride.pickupPaidWaitStartedAt,
                     now: now
                 )
-                complimentaryWaitSeconds = Int(DriverRideLifecyclePolicy.pickupComplimentaryWaitSeconds)
+                complimentaryWaitSeconds = Int(DriverRidePresentationPolicy.pickupComplimentaryWaitSeconds)
             }
         }
 
@@ -1143,36 +838,13 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     func cancelActiveRide(reason: String) {
         guard let ride = activeRide else { return }
-        guard let uid = Auth.auth().currentUser?.uid else { return }
         let trimmedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
         let cancellationReason = trimmedReason.isEmpty ? "Other" : trimmedReason
-        var payload: [String: Any] = [
-            "status": "driverCancelled",
-            "cancelledBy": uid,
-            "cancelledByRole": "driver",
-            "cancellationReason": cancellationReason,
-            "driverCancellationReason": cancellationReason,
-            "cancelledAt": FieldValue.serverTimestamp(),
-            "riderRideState": DriverRideLifecyclePolicy.riderState(forDriverStatus: "driverCancelled"),
-            "riderStatusMessage": "Your driver cancelled this ride.",
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-        proratedCancellationFields(for: ride).forEach { payload[$0.key] = $0.value }
-        let batch = db.batch()
-        batch.setData(payload, forDocument: db.collection("rides").document(ride.id), merge: true)
-        batch.setData(payload, forDocument: db.collection("rideRequests").document(ride.id), merge: true)
-        batch.commit { [weak self] error in
-            DispatchQueue.main.async {
-                if let error {
-                    self?.statusMessage = "Could not cancel ride: \(error.localizedDescription)"
-                    return
-                }
-                self?.setActiveRide(nil)
-                self?.statusMessage = "Ride cancelled: \(cancellationReason)."
-                self?.promoteNextQueuedRideIfAvailable()
-                self?.resumeStandbyIfWaiting()
-                self?.updateDriverPresence(online: self?.isOnline ?? false)
-            }
+        Task { [weak self] in
+            do {
+                _ = try await RydrBackendService.transitionRide(rideId: ride.id, action: "driver_cancel", reason: cancellationReason)
+                await MainActor.run { self?.setActiveRide(nil); self?.statusMessage = "Ride cancelled: \(cancellationReason)."; self?.promoteNextQueuedRideIfAvailable(); self?.resumeStandbyIfWaiting(); self?.updateDriverPresence(online: self?.isOnline ?? false) }
+            } catch { await MainActor.run { self?.statusMessage = "Could not cancel ride: \(error.localizedDescription)" } }
         }
     }
 
@@ -1189,25 +861,25 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                         return
                     }
 
-                    let update: [String: Any] = [
-                        "driverQueueStatus": "active",
-                        "queuedRideStartedAt": FieldValue.serverTimestamp(),
-                        "riderStatusMessage": "Your driver is on the way.",
-                        "updatedAt": FieldValue.serverTimestamp()
-                    ]
                     guard let self else { return }
-                    let batch = self.db.batch()
-                    batch.setData(update, forDocument: self.db.collection("rides").document(doc.documentID), merge: true)
-                    batch.setData(update, forDocument: self.db.collection("rideRequests").document(doc.documentID), merge: true)
-                    batch.commit { error in
-                        DispatchQueue.main.async {
-                            if let error {
-                                self.statusMessage = "Could not start queued ride: \(error.localizedDescription)"
-                                return
+                    Task { [weak self] in
+                        do {
+                            _ = try await RydrBackendService.transitionRide(
+                                rideId: doc.documentID,
+                                action: "promote_queue"
+                            )
+                            await MainActor.run {
+                                guard let self else { return }
+                                var activeData = doc.data()
+                                activeData["driverQueueStatus"] = "active"
+                                self.setActiveRide(DriverActiveRide(id: doc.documentID, data: activeData))
+                                self.statusMessage = "Queued ride is now active. Head to pickup."
+                                self.updateDriverPresence(online: self.isOnline)
                             }
-                            self.setActiveRide(DriverActiveRide(id: doc.documentID, data: doc.data().merging(update) { _, new in new }))
-                            self.statusMessage = "Queued ride is now active. Head to pickup."
-                            self.updateDriverPresence(online: self.isOnline)
+                        } catch {
+                            await MainActor.run {
+                                self?.statusMessage = "Could not start queued ride: \(error.localizedDescription)"
+                            }
                         }
                     }
                 }
@@ -1250,7 +922,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 self.profilePhotoURL = data["profilePhotoURL"] as? String
                 self.pendingProfilePhotoURL = data["pendingProfilePhotoURL"] as? String
                 self.profilePhotoReviewStatus = data["profilePhotoReviewStatus"] as? String ?? (self.pendingProfilePhotoURL == nil ? "approved" : "pending")
-                self.publishPublicDriverProfile(uid: uid, displayName: self.driverDisplayName, online: self.isOnline)
+                self.publishPublicDriverProfile(uid: uid, displayName: self.driverDisplayName)
             }
         }
     }
@@ -1895,7 +1567,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             "tierRates": tierRatesPayload(),
             "updatedAt": FieldValue.serverTimestamp()
         ], merge: true)
-        publishPublicDriverProfile(uid: uid, displayName: displayName, online: isOnline)
+        publishPublicDriverProfile(uid: uid, displayName: displayName)
     }
 
     private func publishAutoAcceptPreference() {
@@ -1911,64 +1583,39 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func updateDriverPresence(online: Bool) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        var statusPayload: [String: Any] = [
-            "online": online,
-            "isOnline": online,
-            "availabilityStatus": online ? "available" : "offline",
-            "rideTypes": Array(selectedRideTypes).sorted(),
-            "selectedRideTypes": Array(selectedRideTypes).sorted(),
-            "qualifiedRideTypes": eligibleRideTypes,
-            "supportedRideTypes": eligibleRideTypes,
-            "tierRates": tierRatesPayload(),
-            "hasActiveRide": activeRide != nil,
-            "autoAcceptQueuedRides": autoAcceptQueuedRides,
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-        var driverPayload = statusPayload
-        let filterPayload = rideFilterPayload()
-        statusPayload["rideFilters"] = filterPayload
-        driverPayload["rideFilters"] = filterPayload
-
-        if let loc = lastLocation {
-            let location: [String: Any] = [
-                "lat": loc.coordinate.latitude,
-                "lng": loc.coordinate.longitude,
-                "updatedAt": FieldValue.serverTimestamp()
-            ]
-            statusPayload["lat"] = loc.coordinate.latitude
-            statusPayload["lng"] = loc.coordinate.longitude
-            statusPayload["speed"] = loc.speed
-            statusPayload["course"] = loc.course
-            statusPayload["location"] = location
-            driverPayload["location"] = location
-            driverPayload["geoPoint"] = GeoPoint(latitude: loc.coordinate.latitude, longitude: loc.coordinate.longitude)
+        let location = lastLocation.map {
+            RydrBackendService.DriverPresenceLocation(
+                lat: $0.coordinate.latitude,
+                lng: $0.coordinate.longitude,
+                speed: $0.speed,
+                course: $0.course
+            )
         }
-
-        db.collection("driver_status").document(uid).setData(statusPayload, merge: true) { [weak self] error in
-            if let error {
-                DispatchQueue.main.async {
-                    self?.statusMessage = "Could not update online status: \(error.localizedDescription)"
+        let request = RydrBackendService.DriverPresenceRequest(
+            online: online,
+            selectedRideTypes: Array(selectedRideTypes).sorted(),
+            location: location
+        )
+        Task { [weak self] in
+            do {
+                _ = try await RydrBackendService.updateDriverPresence(request)
+            } catch {
+                await MainActor.run {
+                    guard let self else { return }
+                    self.statusMessage = "Could not update online status: \(error.localizedDescription)"
+                    if online {
+                        self.isOnline = false
+                        self.isSearchingForRides = false
+                        self.stopPushingDriverPresence()
+                        self.stopRequestListener()
+                        self.pendingRequests = []
+                    }
                 }
             }
         }
-        db.collection("drivers").document(uid).setData(driverPayload, merge: true)
-        publishPublicDriverProfile(uid: uid, displayName: resolvedDriverDisplayName(), online: online)
     }
 
-    private func recordDriverPresenceEvent(online: Bool) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        db.collection("driverPresenceEvents").addDocument(data: [
-            "driverId": uid,
-            "isOnline": online,
-            "availabilityStatus": online ? "available" : "offline",
-            "selectedRideTypes": Array(selectedRideTypes).sorted(),
-            "hasActiveRide": activeRide != nil,
-            "createdAt": FieldValue.serverTimestamp()
-        ])
-    }
-
-    private func publishPublicDriverProfile(uid: String, displayName: String, online: Bool) {
+    private func publishPublicDriverProfile(uid: String, displayName: String) {
         let riderVisibleName = Self.firstNameOnly(displayName)
         var payload: [String: Any] = [
             "uid": uid,
@@ -1982,7 +1629,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             // place of a vehicle photo upload.
             "vehicleImageURL": vehicleImageURL ?? "",
             "vehicleColor": vehicleColor ?? "",
-            "isOnline": online,
             "eligibleRideTypes": Array(selectedRideTypes).sorted(),
             "tierRates": tierRatesPayload(),
             "rideFilters": rideFilterPayload(),
@@ -2011,7 +1657,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 DispatchQueue.main.async {
                     if let error {
                         print("⚠️ driver rating summary failed: \(error.localizedDescription)")
-                        self.publishPublicDriverProfile(uid: uid, displayName: self.resolvedDriverDisplayName(), online: self.isOnline)
+                        self.publishPublicDriverProfile(uid: uid, displayName: self.resolvedDriverDisplayName())
                         return
                     }
 
@@ -2022,7 +1668,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                     } ?? []
                     self.driverRatingCount = ratings.count
                     self.driverRating = ratings.isEmpty ? 5.0 : ratings.reduce(0, +) / Double(ratings.count)
-                    self.publishPublicDriverProfile(uid: uid, displayName: self.resolvedDriverDisplayName(), online: self.isOnline)
+                    self.publishPublicDriverProfile(uid: uid, displayName: self.resolvedDriverDisplayName())
                 }
             }
     }
@@ -2528,7 +2174,10 @@ struct DriverDashboardView: View {
         case .fareInsights:
             activeSheet = .fareInsights
         case .logout:
-            session.logout()
+            Task {
+                await vm.prepareForLogout()
+                session.logout()
+            }
         default:
             activeSheet = .menu(item)
         }

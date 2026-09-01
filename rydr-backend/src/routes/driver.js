@@ -1,5 +1,6 @@
 const express = require("express");
 const driverService = require("../services/driverService");
+const { updateDriverPresence } = require("../services/driverPresenceService");
 const { requireFirebaseAuth, assertOwnsUid } = require("../middleware/firebaseAuth");
 
 const router = express.Router();
@@ -9,6 +10,20 @@ const router = express.Router();
 // security audit). Ownership of the specific uid/driverId in the body is
 // then checked per-route below — the body is never trusted on its own.
 router.use(requireFirebaseAuth);
+
+router.post("/presence", async (req, res, next) => {
+  try {
+    const result = await updateDriverPresence({
+      uid: req.firebaseUid,
+      online: req.body?.online,
+      selectedRideTypes: req.body?.selectedRideTypes,
+      location: req.body?.location
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return next(err);
+  }
+});
 
 router.post("/wait-time-events", async (req, res, next) => {
   try {
