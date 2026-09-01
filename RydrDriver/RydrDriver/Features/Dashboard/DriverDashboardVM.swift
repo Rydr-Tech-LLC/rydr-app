@@ -2333,6 +2333,7 @@ struct DriverDashboardView: View {
     @State private var mapPosition: MapCameraPosition = .region(DriverMapDefaults.pilotRegion)
     @State private var activeSheet: DriverDashboardSheet?
     @State private var mapZoomLevel: MapZoomLevel = .normal
+    @State private var showScheduledRides = false
     var body: some View {
         GeometryReader { proxy in
             let metrics = DashboardLayoutMetrics(size: proxy.size)
@@ -2393,6 +2394,7 @@ struct DriverDashboardView: View {
                 VStack(spacing: metrics.sideButtonSpacing) {
                     FloatingCircleButton(systemName: "chart.bar.fill") { activeSheet = .fareInsights }
                     FloatingCircleButton(systemName: "shield.fill") { activeSheet = .menu(.safety) }
+                    FloatingCircleButton(systemName: "calendar") { showScheduledRides = true }
                 }
                 .padding(.trailing, metrics.horizontalPadding - 6)
                 .padding(.bottom, metrics.sideControlsBottomPadding)
@@ -2484,6 +2486,12 @@ struct DriverDashboardView: View {
                 }
             )
             .presentationDetents([.medium])
+        }
+        .fullScreenCover(isPresented: $showScheduledRides) {
+            ScheduledRidesDashboardView(
+                driverCoordinate: vm.lastLocation?.coordinate,
+                driverId: Auth.auth().currentUser?.uid ?? ""
+            )
         }
     }
 
