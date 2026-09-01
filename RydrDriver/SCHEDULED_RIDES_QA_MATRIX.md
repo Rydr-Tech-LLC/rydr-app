@@ -1,25 +1,36 @@
 # Scheduled Rides QA Matrix
 
-Shared test-planning reference for the Scheduled Rides feature, spanning Rider app, Driver app, and Firebase. It reflects what's actually true today. Note that several scenarios below are documented as **not yet testable** as they are dependent on back end components being developped. 
+Shared test-planning reference for the Scheduled Rides feature, spanning Rider
+app, Driver app, and Firebase. Product expectations come from
+[`../SCHEDULED_RIDES_MVP.md`](../SCHEDULED_RIDES_MVP.md). The Firebase matching
+foundation now exists and has emulator coverage; both iOS scheduled-ride
+services remain mock-backed and are not integrated with it yet.
+
+Baseline verified on September 1, 2026: `Rydr_Firebase/functions/npm test`
+completed with 8/8 tests passing, including Firestore transaction and rules
+coverage.
 
 
 ## Status legend
 
 | Status | Meaning |
 | --- | --- |
-| ✅ Testable now | Real logic exists in the Driver app today; can be exercised and verified |
-| ⚠️ Partially testable | Something exists, but the test is trivial or incomplete until a dependency lands |
-| 🚧 Blocked | Depends on backend work (Cloud Functions, Firestore emulator, rider-side UI) not built yet |
+| ✅ Testable now | Real logic and a meaningful local/emulator test path exist |
+| ⚠️ Partially testable | UI or backend logic exists, but the end-to-end client path is not wired |
+| 🚧 Blocked | Required MVP behavior is not implemented yet |
 
 ## Acceptance criteria
 
 | Criterion | Status | Notes |
 | --- | --- | --- |
-| Drivers can view and explicitly accept eligible scheduled requests | ✅ | Map pins → `ScheduledRideOpportunityCard` → `ScheduledRidesDashboardVM.accept(_:driverId:)` |
-| Confirmed reservations appear in Scheduled Rides | ✅ | Accept moves the opportunity into `vm.reservations`, shown in the reservations sheet |
-| Conflicting rides cannot be accepted | ✅ | `ScheduledRideOpportunity.eligibility(against:)` — pickup/trip time-window overlap check |
-| Check-in produces a pickup ETA for the activation calculation | ✅ | `ScheduledRidesDashboardVM.checkIn(_:driverId:driverCoordinate:)` — real MapKit call via `RideRequestRouteEstimator` |
-| QA covers Rider, Driver, and Firebase behavior rather than only Driver UI | 🚧 | Firebase Functions don't exist yet, so their rows below are placeholders, not coverage |
+| Drivers can view and explicitly accept eligible scheduled requests | ⚠️ | Driver map/card flow exists against mocks; `respondToScheduledRide` exists but is not called by the app |
+| Confirmed reservations appear in Scheduled Rides | ⚠️ | Reservations UI exists against mocks; real assigned-request and price-lock listeners are missing |
+| Conflicting rides cannot be accepted | ⚠️ | Local Driver checks and server schedule-lock transactions exist; end-to-end client coverage is missing |
+| Check-in produces a pickup ETA for activation | ⚠️ | Real MapKit ETA calculation exists; Firebase check-in persistence and activation do not |
+| Quick Schedule assigns only the first eligible driver | ✅ | Firestore emulator concurrency test passes |
+| Choose My Driver admits no more than three offers | ✅ | Firestore emulator concurrency test passes and rider selection creates locks |
+| Client writes cannot change protected scheduled data | ✅ | Firestore rules emulator tests deny request, offer, price-lock, and schedule-lock mutations |
+| QA covers Rider, Driver, and Firebase behavior | ⚠️ | Firebase foundation coverage exists; real Rider/Driver integration and iOS automated coverage are missing |
 
 ## Test scenarios
 
@@ -40,18 +51,28 @@ Shared test-planning reference for the Scheduled Rides feature, spanning Rider a
 - **Steps:** Open Scheduled Rides, tap the `mock-opp-3` pin (Sandy Springs, $29.00)
 - **Expected:** Card shows "This opportunity has expired," Accept button disabled
 
-### First-come acceptance — 🚧 Blocked
+### First-come acceptance — ✅ Testable now
 
 - **Layer:** Firebase
-- **Depends on:** the real `respondToScheduledRide` callable and a Firestore emulator running two concurrent driver clients
-- **Why it can't be tested today:** this is a Firestore-transaction race condition by definition — two drivers responding to the same Quick Schedule opportunity within the same moment, only one should win. `ScheduledRideService.acceptOpportunity` is a single-client mock with no second driver to race against; it always succeeds.
-- **Expected once buildable:** matches the existing `runTransaction` 409 pattern already used by `accept()` for on-demand rides (per the research sprint doc)
+- **Coverage:** `firebase-foundation.test.js` creates two eligible driver responses concurrently against one Quick Schedule request
+- **Expected:** exactly one response succeeds, the request becomes `confirmed`, and one immutable price lock exists
+- **Current result:** passing in the Firestore emulator
+- **Remaining integration:** `ScheduledRideService.acceptOpportunity` still assumes success and must call the real callable
 
-### Three-offer limits — 🚧 Blocked
+### Three-offer limits — ✅ Testable now
 
 - **Layer:** Firebase
-- **Depends on:** Choose My Driver backend logic and the (currently removed) `selectionMode` distinction — deliberately deferred, see Open Items
-- **Expected once buildable:** a 4th driver's offer attempt against an already-full `offers` subcollection is rejected
+- **Coverage:** four eligible drivers respond concurrently to one Choose My Driver request
+- **Expected:** exactly three offers succeed, the fourth is rejected, and selecting an offer creates immutable price and schedule locks
+- **Current result:** passing in the Firestore emulator
+- **Remaining integration:** Rider and Driver apps still use legacy mode values and mock offer flows
+
+### Schedule-lock conflicts — ✅ Testable now
+
+- **Layer:** Firebase
+- **Coverage:** an assigned driver attempts to accept an overlapping scheduled request
+- **Expected:** the overlapping assignment is rejected transactionally
+- **Current result:** passing in the Firestore emulator
 
 ### Missed check-in — 🚧 Blocked
 
@@ -59,7 +80,7 @@ Shared test-planning reference for the Scheduled Rides feature, spanning Rider a
 - **Depends on:** no-show detection and the resulting compensation/penalty policy — flagged as an open product question in both the MVP doc and the research sprint doc, not answered yet
 - **Expected once buildable:** TBD pending that product decision
 
-### App relaunch — ⚠️ Partially testable
+### App relaunch — 🚧 Blocked
 
 - **Layer:** Driver
 - **Why it's trivial today:** mock data is static — a relaunch always reproduces the same 3 opportunities and 2 reservations, so "does state survive a relaunch" isn't a meaningful question yet
@@ -68,7 +89,7 @@ Shared test-planning reference for the Scheduled Rides feature, spanning Rider a
 ### Offline behavior — 🚧 Blocked
 
 - **Layer:** Driver + Firebase
-- **Why it can't be tested today:** `ScheduledRideService`'s mock methods never fail — every method is `Task.sleep` then unconditional success. There's no real network call to interrupt yet.
+- **Why it can't be tested today:** `ScheduledRideService`'s mock methods never fail — every method is `Task.sleep` then unconditional success. The Rider manager also defaults to mock mode, so there is no real scheduled-ride network call to interrupt yet.
 - **Expected once buildable:** `acceptError`/`cancelError`/`checkInError` already exist as the UI-facing failure surfaces (see `ScheduledRidesDashboardVM`) — a real network failure should route into those same alerts, not a new mechanism
 
 ## Test fixtures

@@ -2,10 +2,11 @@
 //  ScheduledRideService.swift
 //  Rydr Driver
 //
-//  Mock-backed for now. Method signatures are what the Firestore-backed
-//  version will keep — only the bodies change when scheduledRideOpportunities
-//  / scheduledRideRequests reads land, matching how DriverRideChatService
-//  wraps its Firestore calls in async throws methods.
+//  Mock-backed for now. The Firebase opportunity/request collections and the
+//  respondToScheduledRide callable now exist, but this client has not been
+//  wired to them. The Driver integration sprint replaces these bodies with
+//  authorized reads/listeners and callable Functions while preserving the
+//  deterministic mock fixtures for QA.
 //
 
 import Foundation

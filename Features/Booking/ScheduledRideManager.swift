@@ -10,18 +10,17 @@
 //  are backend/driver-owned. Firestore Security Rules should enforce this
 //  server-side as well — this file only guarantees the client doesn't attempt it.
 //
-//  CONTRACT STATUS (per Ashank, 8/10/26): the shared Firestore contract
-//  between rider/driver/backend has NOT been published yet — he said he'd
-//  try to have it done "by tomorrow." He told James to build the driver
-//  side against mock data until then, same story applies here: there is no
-//  real driver-side code yet to ever populate `offers`, so the live
-//  Firestore path below has nothing to talk to right now.
+//  CONTRACT STATUS: the shared MVP workflow and Firebase implementation
+//  contract now exist. This original live path predates them and is not
+//  compatible with the protected callable-only contract. Keep mock mode on
+//  until the Rider integration sprint replaces the direct writes and legacy
+//  field/status names with callable Functions and canonical DTOs.
 //
 //  → Set `useMockData = true` (default) to demo/test the full rider flow
 //    with simulated offers and matches, no backend required.
-//  → Once Ashank's contract lands, reconcile the field names in
-//    ScheduledRide.swift against it, flip `useMockData = false`, and this
-//    manager switches to real Firestore listeners with no call-site changes.
+//  → Do not flip `useMockData` to false as-is. Reconcile ScheduledRide.swift,
+//    use server price previews, replace protected writes with callables, and
+//    then retain Firestore listeners only for authorized reads.
 //
 
 import Foundation
@@ -32,8 +31,8 @@ import Combine
 
 @MainActor
 final class ScheduledRideManager: ObservableObject {
-    /// TODO: flip to false once Ashank's shared contract is published and
-    /// the driver side is actually writing offers/assignments.
+    /// Mock mode stays enabled until the callable-only Rider integration is
+    /// complete. The existing non-mock write path is intentionally not live.
     static let useMockData = true
 
     private let db = Firestore.firestore()

@@ -1,6 +1,11 @@
 # Scheduled Rides MVP data contract
 
-Status: implementation candidate; review before Firebase deployment. Schema version: `1`.
+Status: technical baseline for the MVP; review open configuration and
+interface decisions before Firebase deployment. Schema version: `1`.
+
+Product source of truth: [`../SCHEDULED_RIDES_MVP.md`](../SCHEDULED_RIDES_MVP.md).
+Canonical client/server mappings and remaining MVP interfaces are tracked in
+[`SCHEDULED_RIDES_IMPLEMENTATION_CONTRACT.md`](SCHEDULED_RIDES_IMPLEMENTATION_CONTRACT.md).
 
 ## Ownership and invariants
 
@@ -54,6 +59,10 @@ Feature flag, rollout allowlists, allowed tiers, versioned rate bounds, offer/sc
 - `respondToScheduledRide`: revalidates driver approval, tier eligibility, active-ride state, configured rates, price ceiling, and conflicts. Quick Schedule atomically assigns the first eligible driver; Choose My Driver atomically caps offers at three.
 - `selectScheduledRideOffer`: rider-only selection that revalidates eligibility/conflicts and atomically creates the immutable price and schedule locks.
 
-## Deferred integration work
+## MVP integration work not yet implemented
 
 Check-in, ETA-based activation (`pickup time - travel ETA - configurable buffer`), reminders/expiration, replacement matching/approval, edits/cancellation, standard `rides` activation, payment preflight, notifications, and cleanup/release of locks belong to later sprints. The fields and statuses above reserve that shared path without exposing unsafe client writes now.
+
+These items are deferred from the Firebase foundation only; they remain
+required for the final proposed MVP workflow and must be complete before an
+enabled rollout.

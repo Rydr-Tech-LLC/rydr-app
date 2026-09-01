@@ -4,14 +4,13 @@
 //
 //  Models for the Scheduled Rides feature (Sprint 1 — Rider Experience).
 //
-//  SCHEMA NOTE: This defines the client-side shape of the assumed Firestore
-//  contract for scheduled rides. It has NOT been reconciled against a shared
-//  backend contract doc, because none existed in the codebase at the time
-//  this was written. Coordinate with the backend/driver-side owner before
-//  this ships — field names below (especially the "protected" ones) should
-//  become the source of truth for firestore.rules once agreed.
+//  SCHEMA NOTE: This is the original mock-backed Rider shape. The authoritative
+//  product workflow now lives in SCHEDULED_RIDES_MVP.md and the canonical
+//  server mapping lives in Rydr_Firebase/SCHEDULED_RIDES_IMPLEMENTATION_CONTRACT.md.
+//  These legacy mode/status names must be translated or replaced during the
+//  Rider integration sprint; they are not Firestore authority.
 //
-//  Collections (assumed):
+//  Legacy assumed collection shape (reference only; do not implement as-is):
 //    scheduledRideRequests/{requestId}
 //      - rider-writable fields: riderId, pickup, dropoff, pickupCoordinate,
 //        dropoffCoordinate, rideType, mode, requestedPickupDate, status
