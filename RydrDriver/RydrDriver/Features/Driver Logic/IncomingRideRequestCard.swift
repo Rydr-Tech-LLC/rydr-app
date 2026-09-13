@@ -29,11 +29,22 @@ struct IncomingRideRequestCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Incoming \(request.rideType)")
+                    // Not a new offer — accepted earlier at a locked price.
+                    // Presenting it like fresh dispatch invites a decline that
+                    // costs the driver a ride they committed to.
+                    Text(request.isScheduledRydr
+                         ? "Your scheduled \(request.rideType)"
+                         : "Incoming \(request.rideType)")
                         .font(.title3.weight(.heavy))
-                    Text("New ride request")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if request.isScheduledRydr {
+                        Label("Scheduled ride — fare already locked", systemImage: "calendar.badge.clock")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Color.green)
+                    } else {
+                        Text("New ride request")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Spacer()

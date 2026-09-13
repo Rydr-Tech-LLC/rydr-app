@@ -40,6 +40,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var hasSavedRateSettings: Bool = false
     @Published var isSearchingForRides: Bool = false
     @Published var pendingRequests: [DriverRideRequest] = []
+    /// Held while a scheduled ride is activating. Backend-owned, read-only.
+    @Published var scheduledDispatchLock: ScheduledRideDispatchLock?
+    /// The reservation behind the lock, so we can name the pickup.
+    @Published var activatingReservation: ScheduledRideReservation?
     @Published var respondingRequestIDs: Set<String> = []
     @Published var autoAcceptQueuedRides: Bool = false {
         didSet {
@@ -217,6 +221,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private let db = Firestore.firestore()
     private var driverListener: ListenerRegistration?
     private var requestListener: ListenerRegistration?
+    private var scheduledDispatchLockListener: ListenerRegistration?
+    private var scheduledReservationListener: ListenerRegistration?
+    private var scheduledReservations: [ScheduledRideReservation] = []
+    private let scheduledRideBackend: any ScheduledRideBackend = FirebaseScheduledRideBackend()
     private var mapRequestBlipListener: ListenerRegistration?
     private var activeRideListener: ListenerRegistration?
     private var activeRideDocumentListener: ListenerRegistration?
@@ -278,6 +286,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         startMapRequestBlipListener()
         startActiveRideListener()
         startNotificationListeners()
+        startScheduledDispatchListeners()
         refreshDriverRatingSummary()
         publishDriverProfile()
     }
@@ -438,6 +447,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         isSearchingForRides = false
         stopPushingDriverPresence()
         stopRequestListener()
+        stopScheduledDispatchListeners()
         stopMapRequestBlipListener()
         locationManager.stopUpdatingLocation()
         pendingRequests = []
@@ -515,7 +525,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 _ = try await RydrBackendService.transitionRide(rideId: request.id, action: "driver_accept", queued: queued)
                 await MainActor.run {
                     self?.respondingRequestIDs.remove(request.id); self?.pendingRequests.removeAll { $0.id == request.id }
-                    if queued { self?.statusMessage = "Ride added to queue." } else { self?.isSearchingForRides = false; self?.setActiveRide(DriverActiveRide(id: request.id, data: ["driverId": uid, "riderId": request.riderId, "riderName": request.riderName, "pickup": request.pickup, "dropoff": request.dropoff, "rideType": request.rideType, "status": "accepted"])); self?.statusMessage = "Ride accepted. Head to pickup." }
+                    if queued { self?.statusMessage = "Ride added to queue." } else { self?.isSearchingForRides = false; self?.setActiveRide(DriverActiveRide(id: request.id, data: ["driverId": uid, "riderId": request.riderId, "riderName": request.riderName, "pickup": request.pickup, "dropoff": request.dropoff, "rideType": request.rideType, "status": "accepted"])); self?.statusMessage = ScheduledRideDispatchPolicy.acceptedMessage(for: request) }
                     self?.updateDriverPresence(online: true)
                 }
             } catch { await MainActor.run { self?.respondingRequestIDs.remove(request.id); self?.statusMessage = "Could not accept ride: \(error.localizedDescription)" } }
@@ -523,11 +533,15 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func decline(_ request: DriverRideRequest) {
-        decline(request, message: "You have chosen to decline this ride.")
+        decline(request, message: ScheduledRideDispatchPolicy.declineMessage(for: request, missed: false))
     }
 
     func miss(_ request: DriverRideRequest) {
-        decline(request, status: "missed", message: "Looks like you missed this ride.")
+        decline(
+            request,
+            status: "missed",
+            message: ScheduledRideDispatchPolicy.declineMessage(for: request, missed: true)
+        )
     }
 
     private func decline(
@@ -548,8 +562,8 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                         DriverNotificationItem(
                             id: "missed-ride-\(request.id)",
                             type: "missed_ride_request",
-                            title: "Missed ride request",
-                            message: "\(request.rideType) request from \(request.pickup) expired before you accepted.",
+                            title: ScheduledRideDispatchPolicy.missedNotificationCopy(for: request).title,
+                            message: ScheduledRideDispatchPolicy.missedNotificationCopy(for: request).message,
                             createdAt: Date(),
                             isRead: false,
                             source: .local,
@@ -945,7 +959,13 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                         .filter { self?.canPresentAssignedRequest($0) == true }
                         .sorted(by: { lhs, rhs in self?.sortAssignedRequests(lhs, rhs) ?? false }) ?? []
                     self?.applyPendingRideNotifications(requests)
-                    self?.pendingRequests = (self?.isOnline == true) ? requests : []
+                    // Same online gate, plus an active dispatch lock suppresses
+                    // everything that isn't the scheduled ride.
+                    self?.pendingRequests = ScheduledRideDispatchPolicy.presentableRequests(
+                        requests,
+                        lock: self?.scheduledDispatchLock,
+                        isOnline: self?.isOnline == true
+                    )
                     self?.autoAcceptPendingQueuedRequestsIfNeeded()
                     if self?.pendingRequests.isEmpty == false {
                         self?.isSearchingForRides = false
@@ -960,6 +980,68 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         guard isOnline, autoAcceptQueuedRides, activeRide != nil else { return }
         guard let request = pendingRequests.first(where: { !respondingRequestIDs.contains($0.id) }) else { return }
         accept(request, queued: true)
+    }
+
+    /// Watches the activation lock and its reservation.
+    ///
+    /// Not gated on `isOnline`: knowing a ride activated is separate from being
+    /// dispatchable for it. An offline driver gets told to go online.
+    private func startScheduledDispatchListeners() {
+        stopScheduledDispatchListeners()
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+
+        scheduledDispatchLockListener = scheduledRideBackend.listenToDispatchLock(driverId: uid) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self, case .success(let lock) = result else { return }
+                self.scheduledDispatchLock = lock
+                self.refreshActivatingReservation()
+                self.applyScheduledDispatch()
+            }
+        }
+
+        scheduledReservationListener = scheduledRideBackend.listenToReservations(driverId: uid) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self, case .success(let snapshot) = result else { return }
+                self.scheduledReservations = snapshot.items
+                self.refreshActivatingReservation()
+                self.applyScheduledDispatch()
+            }
+        }
+    }
+
+    /// Names the pickup, so the dashboard can say where rather than just that
+    /// something is happening.
+    private func refreshActivatingReservation() {
+        guard let lock = scheduledDispatchLock, lock.isActive() else {
+            activatingReservation = nil
+            return
+        }
+        activatingReservation = scheduledReservations.first { $0.id == lock.requestId }
+    }
+
+    /// Re-applies what depended on the lock — the queue was filtered under the
+    /// previous one.
+    private func applyScheduledDispatch() {
+        pendingRequests = ScheduledRideDispatchPolicy.presentableRequests(
+            pendingRequests,
+            lock: scheduledDispatchLock,
+            isOnline: isOnline
+        )
+        if let message = ScheduledRideDispatchPolicy.statusMessage(
+            lock: scheduledDispatchLock,
+            reservation: activatingReservation,
+            isOnline: isOnline
+        ) {
+            statusMessage = message
+            isSearchingForRides = false
+        }
+    }
+
+    private func stopScheduledDispatchListeners() {
+        scheduledDispatchLockListener?.remove()
+        scheduledDispatchLockListener = nil
+        scheduledReservationListener?.remove()
+        scheduledReservationListener = nil
     }
 
     private func stopRequestListener() {
@@ -1325,6 +1407,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func canPresentAssignedRequest(_ request: DriverRideRequest) -> Bool {
+        // A scheduled ride bypasses ride-type filters: those describe what new
+        // work the driver wants, not what they already promised.
+        if request.isScheduledRydr { return true }
+
         let eligible = Set(eligibleRideTypes.map(RydrRideTierCatalog.canonicalRideType))
         guard eligible.contains(RydrRideTierCatalog.canonicalRideType(request.rideType)) else { return false }
 
@@ -2135,7 +2221,9 @@ struct DriverDashboardView: View {
         }
         .fullScreenCover(isPresented: $showScheduledRides) {
             ScheduledRidesDashboardView(
-                driverCoordinate: vm.lastLocation?.coordinate,
+                // The full CLLocation — check-in needs horizontalAccuracy to
+                // judge whether the fix is good enough for an ETA.
+                driverLocation: vm.lastLocation,
                 driverId: Auth.auth().currentUser?.uid ?? ""
             )
         }
