@@ -42,6 +42,18 @@ struct DriverRideRequest: Identifiable, Equatable {
     let dropoffCoordinate: CLLocationCoordinate2D?
     let createdAt: Date?
     let ridePreferences: DriverVisibleRidePreferences?
+    /// `scheduledRydr` when activation created this from a reservation the
+    /// driver already accepted.
+    let source: String?
+    /// Equal to `id`, since activation reuses the same document ID — carried
+    /// explicitly so the link survives if that changes.
+    let scheduledRideRequestId: String?
+
+    /// A ride the driver committed to earlier, now handed to standard
+    /// dispatch. Bypasses ride-type filters, which describe new work.
+    nonisolated var isScheduledRydr: Bool {
+        source == "scheduledRydr" || scheduledRideRequestId != nil
+    }
 
     init(
         id: String,
@@ -62,7 +74,9 @@ struct DriverRideRequest: Identifiable, Equatable {
         stopCoordinate: CLLocationCoordinate2D? = nil,
         dropoffCoordinate: CLLocationCoordinate2D? = nil,
         createdAt: Date? = nil,
-        ridePreferences: DriverVisibleRidePreferences? = nil
+        ridePreferences: DriverVisibleRidePreferences? = nil,
+        source: String? = nil,
+        scheduledRideRequestId: String? = nil
     ) {
         self.id = id
         self.riderId = riderId
@@ -83,6 +97,8 @@ struct DriverRideRequest: Identifiable, Equatable {
         self.dropoffCoordinate = dropoffCoordinate
         self.createdAt = createdAt
         self.ridePreferences = ridePreferences
+        self.source = source
+        self.scheduledRideRequestId = scheduledRideRequestId
     }
 
     nonisolated init(document: QueryDocumentSnapshot) {
@@ -108,6 +124,8 @@ struct DriverRideRequest: Identifiable, Equatable {
         dropoffCoordinate = Self.coordinate(from: data["dropoffCoordinate"] ?? data["dropoffLocation"] ?? data["dropoffGeoPoint"])
         createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
         ridePreferences = DriverVisibleRidePreferences(data: data["ridePreferences"])
+        source = data["source"] as? String
+        scheduledRideRequestId = data["scheduledRideRequestId"] as? String
     }
 
     static func == (lhs: DriverRideRequest, rhs: DriverRideRequest) -> Bool {
