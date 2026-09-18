@@ -20,6 +20,13 @@ struct BookingView: View {
     @State private var showDriverSheet = false
     @State private var showInProgress = false
 
+    // MARK: - Scheduled Rides (Sprint 1, ene)
+    @StateObject private var scheduledRideManager = ScheduledRideManager()
+    @State private var showScheduleSheet = false
+    @State private var showQuickScheduleReview = false
+    @State private var activeScheduledRequestId: String?
+    @State private var showScheduledRideConfirmation = false
+
     // Map / region
     @State private var region = RydrMapDefaults.atlantaRegion
     @State private var mapPosition: MapCameraPosition = .region(RydrMapDefaults.atlantaRegion)
@@ -207,6 +214,62 @@ struct BookingView: View {
                     releaseAppliedRydrBankCodeIfNeeded()
                 }
             )
+        }
+        // 🔹 Scheduled Rides flow: Now/Schedule + mode → review → confirmation
+        .sheet(isPresented: $showScheduleSheet) {
+            ScheduleTimeSelectionView(
+                scheduledRideManager: scheduledRideManager,
+                rideType: rideType,
+                pickup: pickupText,
+                dropoff: dropoffText,
+                estimate: currentEstimate,
+                onCancel: { showScheduleSheet = false },
+                onContinue: {
+                    showScheduleSheet = false
+                    showQuickScheduleReview = true
+                }
+            )
+        }
+        .sheet(isPresented: $showQuickScheduleReview) {
+            QuickScheduleReviewView(
+                scheduledRideManager: scheduledRideManager,
+                rideManager: rideManager,
+                rideType: rideType,
+                pickup: pickupText,
+                dropoff: dropoffText,
+                pickupCoordinate: pickupCoordinate,
+                dropoffCoordinate: dropoffCoordinate,
+                estimate: currentEstimate,
+                onClose: { showQuickScheduleReview = false },
+                onConfirmed: { requestId in
+                    activeScheduledRequestId = requestId
+                    showQuickScheduleReview = false
+                    showScheduledRideConfirmation = true
+                }
+            )
+        }
+        .sheet(isPresented: $showScheduledRideConfirmation) {
+            if let activeScheduledRequestId {
+                ScheduledRideConfirmationView(
+                    scheduledRideManager: scheduledRideManager,
+                    rideManager: rideManager,
+                    requestId: activeScheduledRequestId,
+                    onClose: { showScheduledRideConfirmation = false },
+                    onEditTrip: { request in
+                        // Khris's feedback: editing/retrying shouldn't feel like
+                        // starting over. Pickup/dropoff text is already sitting
+                        // in BookingView's own state untouched, so we only need
+                        // to void the old request and prefill the time/mode
+                        // picker before dropping the rider back into the same
+                        // schedule sheet for a fresh quote.
+                        Task { try? await scheduledRideManager.cancelRequest(request.id) }
+                        scheduledRideManager.requestedPickupDate = request.requestedPickupDate
+                        scheduledRideManager.selectedMode = request.mode
+                        showScheduledRideConfirmation = false
+                        showScheduleSheet = true
+                    }
+                )
+            }
         }
         // 🔹 Present in-progress view
         .fullScreenCover(isPresented: $showInProgress, onDismiss: {
@@ -1082,6 +1145,22 @@ struct BookingView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(BookingGradientButtonStyle())
+            .disabled(!canRequestRide)
+            .opacity(canRequestRide ? 1 : 0.45)
+
+            Button {
+                showScheduleSheet = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "calendar.badge.clock")
+                    Text("Schedule for later")
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Styles.rydrGradient)
             .disabled(!canRequestRide)
             .opacity(canRequestRide ? 1 : 0.45)
 
