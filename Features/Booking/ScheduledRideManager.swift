@@ -7,21 +7,23 @@
 //  IMPORTANT (Acceptance Criteria): this manager NEVER writes lockedPriceCents,
 //  assignedDriverId, or any status other than .cancelledByRider to
 //  scheduledRideRequests, and NEVER writes to the offers subcollection. Those
-//  are backend/driver-owned. Firestore Security Rules should enforce this
-//  server-side as well — this file only guarantees the client doesn't attempt it.
+//  are backend/driver-owned. Firestore Security Rules enforce this
+//  server-side too (see firestore.rules, scheduledRideRiderCreate /
+//  scheduledRideRiderProposeOffer / scheduledRideRiderCancel) — this file
+//  only guarantees the client doesn't attempt it.
 //
-//  CONTRACT STATUS (per Ashank, 8/10/26): the shared Firestore contract
-//  between rider/driver/backend has NOT been published yet — he said he'd
-//  try to have it done "by tomorrow." He told James to build the driver
-//  side against mock data until then, same story applies here: there is no
-//  real driver-side code yet to ever populate `offers`, so the live
-//  Firestore path below has nothing to talk to right now.
+//  CONTRACT STATUS: implemented. The backend counterpart is
+//  Rydr_Firebase/functions/src/triggers/scheduledRideMatching.ts — it
+//  matches drivers, writes the `offers` subcollection, auto-locks a Quick
+//  Schedule match, confirms a Choose My Driver selection, re-matches on a
+//  driver cancellation, and expires stale requests. Field names here match
+//  that contract exactly (this file was written slightly ahead of it, per
+//  the original "Ashank's contract" note below — the two have since been
+//  reconciled rather than either side changing shape).
 //
-//  → Set `useMockData = true` (default) to demo/test the full rider flow
-//    with simulated offers and matches, no backend required.
-//  → Once Ashank's contract lands, reconcile the field names in
-//    ScheduledRide.swift against it, flip `useMockData = false`, and this
-//    manager switches to real Firestore listeners with no call-site changes.
+//  → `useMockData` is `false` by default now that the real functions exist.
+//    Flip it back to `true` only for offline demoing without deploying
+//    functions (e.g. no network, or iterating on UI only).
 //
 
 import Foundation
@@ -32,9 +34,11 @@ import Combine
 
 @MainActor
 final class ScheduledRideManager: ObservableObject {
-    /// TODO: flip to false once Ashank's shared contract is published and
-    /// the driver side is actually writing offers/assignments.
-    static let useMockData = true
+    /// The rider/driver/backend contract is now implemented — see
+    /// Rydr_Firebase/functions/src/triggers/scheduledRideMatching.ts.
+    /// Flip back to `true` only for offline demoing without deploying
+    /// functions.
+    static let useMockData = false
 
     private let db = Firestore.firestore()
     private var offersListener: ListenerRegistration?
