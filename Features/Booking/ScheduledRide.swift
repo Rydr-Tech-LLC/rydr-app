@@ -4,12 +4,10 @@
 //
 //  Models for the Scheduled Rides feature (Sprint 1 — Rider Experience).
 //
-//  SCHEMA NOTE: This defines the client-side shape of the assumed Firestore
-//  contract for scheduled rides. It has NOT been reconciled against a shared
-//  backend contract doc, because none existed in the codebase at the time
-//  this was written. Coordinate with the backend/driver-side owner before
-//  this ships — field names below (especially the "protected" ones) should
-//  become the source of truth for firestore.rules once agreed.
+//  SCHEMA NOTE: this is the real Firestore contract now — implemented
+//  server-side in Rydr_Firebase/functions/src/triggers/scheduledRideMatching.ts
+//  and enforced in firestore.rules. Field names below (including the
+//  "protected" ones) are what those functions and rules actually key off of.
 //
 //  Collections (assumed):
 //    scheduledRideRequests/{requestId}
