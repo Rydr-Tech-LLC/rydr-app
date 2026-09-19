@@ -52,6 +52,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
     @Published var mapRideRequestBlips: [DriverRideRadarBlip] = []
     @Published var demandSnapshot = DriverDemandSnapshot()
+    @Published var demandByRideType: [String: DriverDemandLevel] = [:]
     @Published var rideFilterPreferences = DriverRideFilterPreferences()
     @Published var driverDisplayName: String = "Rydr Driver"
     @Published var driverRating: Double = 5.0
@@ -357,15 +358,26 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         tierRates[rideType] ?? .defaultValue(for: rideType)
     }
 
-    func saveRate(rideType: String, perMile: Double, perMinute: Double) {
+    func demandLevel(for rideType: String) -> DriverDemandLevel {
+        demandByRideType[RydrRideTierCatalog.canonicalRideType(rideType)] ?? .low
+    }
+
+    func saveRate(
+        rideType: String,
+        minimumFare: Double,
+        perMile: Double,
+        perMinute: Double,
+        useSuggestedPricing: Bool
+    ) {
         guard !isOnline else {
             statusMessage = "Rates may only be adjusted while offline."
             return
         }
-        let pricing = RydrRideTierCatalog.pricing(for: rideType)
         var setting = rate(for: rideType)
-        setting.perMile = pricing.clampedPerMile(perMile)
-        setting.perMinute = pricing.clampedPerMinute(perMinute)
+        setting.minimumFare = max(0, minimumFare)
+        setting.perMile = max(0, perMile)
+        setting.perMinute = max(0, perMinute)
+        setting.useSuggestedPricing = useSuggestedPricing
         tierRates[rideType] = setting
         hasSavedRateSettings = true
         statusMessage = "\(rideType) rate saved. You can go online when ready."
@@ -1195,6 +1207,14 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                         .map(DriverRideRequest.init(document:)) ?? []
                     let demand = self.demandSnapshot(from: liveRequests)
                     self.demandSnapshot = demand
+                    for rideType in DriverDashboardVM.availableRideTypes {
+                        let key = RydrRideTierCatalog.canonicalRideType(rideType)
+                        let tierRequests = liveRequests.filter {
+                            RydrRideTierCatalog.canonicalRideType($0.rideType) == key
+                        }
+                        self.demandByRideType[key] = self.demandSnapshot(from: tierRequests).level
+                    }
+                    self.applySuggestedRatesForCurrentDemand()
                     self.applyDemandNotification(demand)
 
                     let visibleRequests = liveRequests
@@ -1827,12 +1847,12 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             let raw = rawRates[rideType] as? [String: Any] ?? rawRates[key] as? [String: Any]
             guard let raw else { continue }
             didLoadStoredRate = true
-            let pricing = RydrRideTierCatalog.pricing(for: rideType)
-            let perMile = Self.doubleValue(raw["perMile"]) ?? pricing.minPerMile
-            let perMinute = Self.doubleValue(raw["perMinute"]) ?? pricing.minPerMinute
+            let defaults = DriverRateSetting.defaultValue(for: rideType)
             nextRates[rideType] = DriverRateSetting(
-                perMile: pricing.clampedPerMile(perMile),
-                perMinute: pricing.clampedPerMinute(perMinute)
+                minimumFare: max(0, Self.doubleValue(raw["minimumFare"]) ?? defaults.minimumFare),
+                perMile: max(0, Self.doubleValue(raw["perMile"]) ?? defaults.perMile),
+                perMinute: max(0, Self.doubleValue(raw["perMinute"]) ?? defaults.perMinute),
+                useSuggestedPricing: raw["useSuggestedPricing"] as? Bool ?? false
             )
         }
         tierRates = nextRates
@@ -1844,6 +1864,25 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private func ensureDefaultRates(for rideTypes: [String]) {
         for rideType in rideTypes where tierRates[rideType] == nil {
             tierRates[rideType] = .defaultValue(for: rideType)
+        }
+    }
+
+    private func applySuggestedRatesForCurrentDemand() {
+        var changed = false
+        for rideType in eligibleRideTypes {
+            guard rate(for: rideType).useSuggestedPricing else { continue }
+            let suggested = RydrRideTierCatalog.pricing(for: rideType)
+                .suggestedRates(for: demandLevel(for: rideType))
+            let current = rate(for: rideType)
+            guard abs(current.minimumFare - suggested.minimumFare) > 0.001
+                    || abs(current.perMile - suggested.perMile) > 0.001
+                    || abs(current.perMinute - suggested.perMinute) > 0.001 else { continue }
+            tierRates[rideType] = suggested
+            changed = true
+        }
+        if changed {
+            publishDriverProfile()
+            if isOnline { updateDriverPresence(online: true) }
         }
     }
 
@@ -2154,10 +2193,17 @@ struct DriverDashboardView: View {
                 isEligible: vm.eligibleRideTypes.contains(rideType),
                 isSelected: vm.selectedRideTypes.contains(rideType),
                 hasSavedRate: vm.hasSavedRateSettings,
+                demandLevel: vm.demandLevel(for: rideType),
                 rate: vm.rate(for: rideType),
                 onToggle: { vm.toggleRideType(rideType) },
-                onSaveRate: { perMile, perMinute in
-                    vm.saveRate(rideType: rideType, perMile: perMile, perMinute: perMinute)
+                onSaveRate: { minimumFare, perMile, perMinute, useSuggestedPricing in
+                    vm.saveRate(
+                        rideType: rideType,
+                        minimumFare: minimumFare,
+                        perMile: perMile,
+                        perMinute: perMinute,
+                        useSuggestedPricing: useSuggestedPricing
+                    )
                 }
             )
             .presentationDetents([.medium, .large])

@@ -377,6 +377,20 @@ private struct DriverCard: View {
                 }
             }
 
+            HStack(spacing: 10) {
+                rateLabel(driver.minimumFare, "minimum")
+                Divider().frame(height: 16)
+                rateLabel(driver.perMile, "/mi")
+                rateLabel(driver.perMinute, "/min")
+                Spacer()
+                if driver.usesSuggestedPricing {
+                    Label("Suggested", systemImage: "sparkles")
+                        .font(.caption2.weight(.semibold))
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
             if fareBreakdown.minimumFareAdjustment > 0 {
                 HStack {
                     Text("Minimum fare adjustment")
@@ -402,6 +416,11 @@ private struct DriverCard: View {
                 .stroke(Color.black.opacity(0.06), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.08), radius: 20, y: 10)
+    }
+
+    private func rateLabel(_ value: Double, _ unit: String) -> some View {
+        Text("$\(max(0, value), specifier: "%.2f") \(unit)")
+            .monospacedDigit()
     }
 
     private var driverAvatar: some View {

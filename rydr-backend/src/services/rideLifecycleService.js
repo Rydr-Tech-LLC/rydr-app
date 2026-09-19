@@ -1,5 +1,12 @@
 const { admin, getFirestore } = require("../config/firebase");
-const { calculateOutcome, applyFullRideCredit } = require("./rideFinancialService");
+const {
+  calculateOutcome,
+  applyFullRideCredit,
+  PRICING_VERSION,
+  DEFAULT_MINIMUM_FARE_CENTS,
+  TIERS,
+  tierFor
+} = require("./rideFinancialService");
 const { calculateAndStoreRideRouteEstimate } = require("./rideRouteService");
 
 const ACTIONS = {
@@ -29,10 +36,63 @@ function serverRateFields(driver, rideType) {
   const rate = (key && rates[key]) || {};
   const perMile = Number(rate.perMile ?? driver?.perMile);
   const perMinute = Number(rate.perMinute ?? driver?.perMinute);
+  const minimumFare = Number(rate.minimumFare);
+  const tier = TIERS[tierFor(rideType)];
   return {
-    driverRatePerMileCents: Number.isFinite(perMile) ? Math.round(perMile * 100) : undefined,
-    driverRatePerMinuteCents: Number.isFinite(perMinute) ? Math.round(perMinute * 100) : undefined
+    driverMinimumFareCents: Number.isFinite(minimumFare) && minimumFare >= 0
+      ? Math.round(minimumFare * 100)
+      : DEFAULT_MINIMUM_FARE_CENTS,
+    driverRatePerMileCents: Number.isFinite(perMile) && perMile >= 0
+      ? Math.round(perMile * 100)
+      : tier.suggestedMile,
+    driverRatePerMinuteCents: Number.isFinite(perMinute) && perMinute >= 0
+      ? Math.round(perMinute * 100)
+      : tier.suggestedMinute,
+    driverUsesSuggestedPricing: rate.useSuggestedPricing === true,
+    acceptedPricingVersion: PRICING_VERSION
   };
+}
+
+function timestampMillis(value) {
+  if (!value) return null;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") return value.toDate().getTime();
+  if (Number.isFinite(value?._seconds)) return value._seconds * 1000;
+  if (Number.isFinite(value?.seconds)) return value.seconds * 1000;
+  return null;
+}
+
+function telemetryCoordinate(data) {
+  const lat = Number(data?.lat);
+  const lng = Number(data?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+function distanceMiles(a, b) {
+  const radiusMiles = 3958.7613;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const aLat = (a.lat * Math.PI) / 180;
+  const bLat = (b.lat * Math.PI) / 180;
+  const haversine = Math.sin(dLat / 2) ** 2 + Math.cos(aLat) * Math.cos(bLat) * Math.sin(dLng / 2) ** 2;
+  return radiusMiles * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+async function actualTripDistanceMiles(db, rideId) {
+  const snapshot = await db.collection("rides").doc(rideId).collection("telemetry").orderBy("recordedAt", "asc").get();
+  const points = snapshot.docs
+    .map((doc) => doc.data())
+    .filter((data) => ["inProgress", "navigatingToStop", "arrivedAtStop", "navigatingToDropoff"].includes(data.status))
+    .map((data) => ({ coordinate: telemetryCoordinate(data), at: timestampMillis(data.recordedAt) }))
+    .filter((point) => point.coordinate && point.at !== null);
+  let total = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const segment = distanceMiles(points[index - 1].coordinate, points[index].coordinate);
+    // Ignore impossible GPS jumps while retaining ordinary highway travel.
+    if (segment <= 5) total += segment;
+  }
+  return points.length >= 2 ? total : null;
 }
 
 function rydrBankRewardGroup(rideType) {
@@ -52,6 +112,17 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
   const requestRef = db.collection("rideRequests").doc(rideId);
   const signalRef = db.collection("rideRequestSignals").doc(rideId);
   const outcomeRef = rideRef.collection("financial").doc("outcome");
+
+  let backendActualDistanceMiles = null;
+  if (policy.finalizes && action.endsWith("cancel")) {
+    try {
+      backendActualDistanceMiles = await actualTripDistanceMiles(db, rideId);
+    } catch (telemetryError) {
+      if (process.env.NODE_ENV !== "test") {
+        console.warn("Unable to reduce trip telemetry for cancellation", { rideId, message: telemetryError.message });
+      }
+    }
+  }
 
   if (policy.finalizes) {
     try {
@@ -82,6 +153,26 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     }
 
     const driverSnap = ride.driverId ? await tx.get(db.collection("drivers").doc(ride.driverId)) : null;
+    let bookingCreditSourceRef = null;
+    let bookingFeeCreditCents = 0;
+    const replacementForRideId = typeof ride.replacementForRideId === "string" ? ride.replacementForRideId.trim() : "";
+    if (policy.finalizes && replacementForRideId && replacementForRideId !== rideId) {
+      bookingCreditSourceRef = db.collection("rides").doc(replacementForRideId);
+      const sourceSnap = await tx.get(bookingCreditSourceRef);
+      const source = sourceSnap.exists ? sourceSnap.data() : null;
+      const validSource = source
+        && source.riderId === ride.riderId
+        && source.status === "riderCancelled"
+        && String(source.cancellationReason || "").includes("find another driver")
+        && !source.replacementBookingFeeCreditUsedByRideId;
+      if (validSource) {
+        bookingFeeCreditCents = Math.max(
+          0,
+          Number(source.bookingFeeBeforeCreditCents ?? source.bookingFeeCents) || 0
+        );
+      }
+      else bookingCreditSourceRef = null;
+    }
     let rydrBankCredit = null;
     const rydrBankCode = typeof ride.rydrBankCode === "string" ? ride.rydrBankCode.trim() : "";
     if (action === "complete" && !outcomeSnap.exists && rydrBankCode) {
@@ -113,14 +204,39 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     if (action === "start_paid_wait") update.pickupComplimentaryWaitSeconds = 180;
     if (action === "promote_queue") update.driverQueueStatus = "active";
     if (action.endsWith("cancel")) Object.assign(update, { cancelledBy: uid, cancelledByRole: isRiderAction ? "rider" : "driver", cancellationReason: String(reason || "Other").slice(0, 500) });
-    if (action === "driver_accept") Object.assign(update, { acceptedDriverId: uid, driverId: uid, driverQueueStatus: queued ? "queued" : "active", acceptedAt: now, [queued ? "queuedAt" : "activeAt"]: now, riderStatusMessage: queued ? "Your driver is finishing a current ride. You're next in their queue." : policy.message });
-    const finalRide = { ...ride, ...serverRateFields(driverSnap?.data(), ride.rideType), ...update };
+    if (action === "driver_accept") {
+      Object.assign(update, {
+        acceptedDriverId: uid,
+        driverId: uid,
+        driverQueueStatus: queued ? "queued" : "active",
+        acceptedAt: now,
+        [queued ? "queuedAt" : "activeAt"]: now,
+        riderStatusMessage: queued ? "Your driver is finishing a current ride. You're next in their queue." : policy.message,
+        ...serverRateFields(driverSnap?.data(), ride.rideType)
+      });
+    }
+    const legacyRateFallback = ride.driverRatePerMileCents != null && ride.driverRatePerMinuteCents != null
+      ? {}
+      : serverRateFields(driverSnap?.data(), ride.rideType);
+    const finalRide = {
+      ...ride,
+      ...legacyRateFallback,
+      ...(backendActualDistanceMiles !== null ? { backendActualDistanceMiles } : {}),
+      ...(bookingFeeCreditCents > 0 ? { bookingFeeCreditCents } : {}),
+      ...update
+    };
     let outcome = outcomeSnap.exists ? outcomeSnap.data() : null;
     if (policy.finalizes && !outcome) {
       let calculatedOutcome = calculateOutcome(finalRide, { nowMillis: now.toMillis() });
       if (rydrBankCredit) calculatedOutcome = applyFullRideCredit(calculatedOutcome, true);
       outcome = { rideId, ...calculatedOutcome, calculatedAt: now, createdAt: now, updatedAt: now };
       tx.create(outcomeRef, outcome);
+      if (bookingCreditSourceRef && outcome.bookingFeeCreditCents > 0) {
+        tx.set(bookingCreditSourceRef, {
+          replacementBookingFeeCreditUsedByRideId: rideId,
+          replacementBookingFeeCreditUsedAt: now
+        }, { merge: true });
+      }
       if (rydrBankCredit) {
         tx.update(rydrBankCredit.codeRef, { status: "used", usedRideId: rideId, reservedRideId: null, usedAt: now });
         tx.set(db.collection("users").doc(rydrBankCredit.ownerUid), {
@@ -134,8 +250,12 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
         currency: outcome.currency,
         distanceChargeCents: outcome.distanceChargeCents,
         timeChargeCents: outcome.timeChargeCents,
+        timeAdjustmentCents: outcome.timeAdjustmentCents,
+        driverMinimumFareCents: outcome.minimumFareCents,
         minimumFareAdjustmentCents: outcome.minimumFareAdjustmentCents,
         rideSubtotalCents: outcome.rideSubtotalCents,
+        bookingFeeBeforeCreditCents: outcome.bookingFeeBeforeCreditCents,
+        bookingFeeCreditCents: outcome.bookingFeeCreditCents,
         bookingFeeCents: outcome.bookingFeeCents,
         waitChargeCents: outcome.waitChargeCents,
         cancellationFeeCents: outcome.cancellationFeeCents,
@@ -145,7 +265,11 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
         finalRiderChargeCents: outcome.finalRiderChargeCents,
         driverPayoutCents: outcome.driverPayoutCents,
         platformShareCents: outcome.platformShareCents,
+        backendActualDistanceMiles: finalRide.backendActualDistanceMiles ?? null,
         proratedCancellationChargeCents: outcome.outcomeType === "mid_ride_cancellation" ? outcome.finalRiderChargeCents : null,
+        proratedCancellationDistanceMiles: outcome.outcomeType === "mid_ride_cancellation"
+          ? outcome.calculationInputs.billableDistance
+          : null,
         cancellationTotalChargeCents: outcome.outcomeType === "rider_cancellation" ? outcome.finalRiderChargeCents : null,
         financialOutcomeStatus: "finalized",
         paymentStatus: "pending"

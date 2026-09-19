@@ -26,12 +26,16 @@ struct RideTypeConfigurationView: View {
     let isEligible: Bool
     let isSelected: Bool
     let hasSavedRate: Bool
+    let demandLevel: DriverDemandLevel
     let rate: DriverRateSetting
     let onToggle: () -> Void
-    let onSaveRate: (Double, Double) -> Void
+    let onSaveRate: (Double, Double, Double, Bool) -> Void
 
+    @State private var draftMinimumFare: Double?
     @State private var draftPerMile: Double?
     @State private var draftPerMinute: Double?
+    @State private var draftUsesSuggestedPricing: Bool?
+    @State private var minimumFareText: String = ""
     @State private var perMileText: String = ""
     @State private var perMinuteText: String = ""
 
@@ -43,33 +47,39 @@ struct RideTypeConfigurationView: View {
         draftPerMile ?? rate.perMile
     }
 
+    private var currentMinimumFare: Double {
+        draftMinimumFare ?? rate.minimumFare
+    }
+
+    private var currentUsesSuggestedPricing: Bool {
+        draftUsesSuggestedPricing ?? rate.useSuggestedPricing
+    }
+
     private var currentPerMinute: Double {
         draftPerMinute ?? rate.perMinute
     }
 
     private var hasDraftChanges: Bool {
-        abs(currentPerMile - rate.perMile) > 0.001 || abs(currentPerMinute - rate.perMinute) > 0.001
+        abs(currentMinimumFare - rate.minimumFare) > 0.001
+            || abs(currentPerMile - rate.perMile) > 0.001
+            || abs(currentPerMinute - rate.perMinute) > 0.001
+            || currentUsesSuggestedPricing != rate.useSuggestedPricing
     }
 
+    private var isMinimumFareInputValid: Bool { isValidRateText(minimumFareText) }
     private var isPerMileInputValid: Bool {
-        isValidRateText(perMileText, bounds: pricing.minPerMile...pricing.maxPerMile)
+        isValidRateText(perMileText)
     }
 
     private var isPerMinuteInputValid: Bool {
-        isValidRateText(perMinuteText, bounds: pricing.minPerMinute...pricing.maxPerMinute)
+        isValidRateText(perMinuteText)
     }
 
     private var canSaveRate: Bool {
-        !isOnline && isEligible && hasDraftChanges && isPerMileInputValid && isPerMinuteInputValid
+        !isOnline && isEligible && hasDraftChanges && isMinimumFareInputValid && isPerMileInputValid && isPerMinuteInputValid
     }
 
-    private var suggestedPerMile: Double {
-        suggestedRate(min: pricing.minPerMile, max: pricing.maxPerMile)
-    }
-
-    private var suggestedPerMinute: Double {
-        suggestedRate(min: pricing.minPerMinute, max: pricing.maxPerMinute)
-    }
+    private var suggestedRates: DriverRateSetting { pricing.suggestedRates(for: demandLevel) }
 
     var body: some View {
         NavigationStack {
@@ -102,6 +112,12 @@ struct RideTypeConfigurationView: View {
             resetDrafts()
         }
         .onChange(of: rate.perMinute) { _, _ in
+            resetDrafts()
+        }
+        .onChange(of: rate.minimumFare) { _, _ in
+            resetDrafts()
+        }
+        .onChange(of: rate.useSuggestedPricing) { _, _ in
             resetDrafts()
         }
     }
@@ -211,18 +227,51 @@ struct RideTypeConfigurationView: View {
                     .foregroundStyle(rateStatusColor)
             }
 
+            Toggle(isOn: Binding(
+                get: { currentUsesSuggestedPricing },
+                set: { enabled in
+                    draftUsesSuggestedPricing = enabled
+                    if enabled { applyAllSuggestedRates() }
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Use Suggested Rates")
+                        .font(.headline.weight(.bold))
+                    Text("Updates with \(demandLabel.lowercased()) demand near you")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .tint(.red)
+            .disabled(isOnline || !isEligible)
+
+            rateRow(
+                title: "Minimum Fare",
+                range: "Your minimum ride subtotal",
+                icon: "dollarsign.circle",
+                value: currentMinimumFare,
+                text: $minimumFareText,
+                isInputValid: isMinimumFareInputValid,
+                suggested: suggestedRates.minimumFare,
+                suggestedSuffix: " minimum",
+                onTextChange: { updateRateText($0, field: .minimumFare) },
+                onApplySuggested: { setRate(field: .minimumFare, value: suggestedRates.minimumFare) },
+                onStep: { stepRate(field: .minimumFare, delta: $0) }
+            )
+
+            Divider().padding(.leading, 72)
+
             rateRow(
                 title: "Per Mile",
-                range: pricing.perMileRangeText,
+                range: "Set your own rate",
                 icon: "speedometer",
                 value: currentPerMile,
                 text: $perMileText,
                 isInputValid: isPerMileInputValid,
-                bounds: pricing.minPerMile...pricing.maxPerMile,
-                suggested: suggestedPerMile,
+                suggested: suggestedRates.perMile,
                 suggestedSuffix: "/mi",
                 onTextChange: { updateRateText($0, field: .perMile) },
-                onApplySuggested: { setRate(field: .perMile, value: suggestedPerMile) },
+                onApplySuggested: { setRate(field: .perMile, value: suggestedRates.perMile) },
                 onStep: { stepRate(field: .perMile, delta: $0) }
             )
 
@@ -231,16 +280,15 @@ struct RideTypeConfigurationView: View {
 
             rateRow(
                 title: "Per Minute",
-                range: pricing.perMinuteRangeText,
+                range: "Set your own rate",
                 icon: "clock",
                 value: currentPerMinute,
                 text: $perMinuteText,
                 isInputValid: isPerMinuteInputValid,
-                bounds: pricing.minPerMinute...pricing.maxPerMinute,
-                suggested: suggestedPerMinute,
+                suggested: suggestedRates.perMinute,
                 suggestedSuffix: "/min",
                 onTextChange: { updateRateText($0, field: .perMinute) },
-                onApplySuggested: { setRate(field: .perMinute, value: suggestedPerMinute) },
+                onApplySuggested: { setRate(field: .perMinute, value: suggestedRates.perMinute) },
                 onStep: { stepRate(field: .perMinute, delta: $0) }
             )
 
@@ -269,8 +317,8 @@ struct RideTypeConfigurationView: View {
                 Label("Rates may only be adjusted while offline.", systemImage: "lock.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
-            } else if !isPerMileInputValid || !isPerMinuteInputValid {
-                Label("Custom rates must stay inside the listed range and use a 0.00 format.", systemImage: "exclamationmark.triangle.fill")
+            } else if !isMinimumFareInputValid || !isPerMileInputValid || !isPerMinuteInputValid {
+                Label("Rates must be zero or greater and use a 0.00 format.", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
             }
@@ -290,7 +338,7 @@ struct RideTypeConfigurationView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Unsaved rate changes")
                     .font(.subheadline.weight(.bold))
-                Text("$\(rateText(currentPerMile))/mi · $\(rateText(currentPerMinute))/min")
+                Text("$\(rateText(currentMinimumFare)) minimum · $\(rateText(currentPerMile))/mi · $\(rateText(currentPerMinute))/min")
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .foregroundStyle(.secondary)
             }
@@ -348,6 +396,7 @@ struct RideTypeConfigurationView: View {
     }
 
     private enum RateField {
+        case minimumFare
         case perMile
         case perMinute
     }
@@ -359,7 +408,6 @@ struct RideTypeConfigurationView: View {
         value: Double,
         text: Binding<String>,
         isInputValid: Bool,
-        bounds: ClosedRange<Double>,
         suggested: Double,
         suggestedSuffix: String,
         onTextChange: @escaping (String) -> Void,
@@ -426,7 +474,7 @@ struct RideTypeConfigurationView: View {
                                 .font(.title3.weight(.bold))
                                 .frame(width: 48, height: 42)
                         }
-                        .disabled(isOnline || !isEligible || value <= bounds.lowerBound + 0.001)
+                        .disabled(isOnline || !isEligible || value <= 0.001)
 
                         Rectangle()
                             .fill(Color(.separator))
@@ -439,7 +487,7 @@ struct RideTypeConfigurationView: View {
                                 .font(.title3.weight(.bold))
                                 .frame(width: 48, height: 42)
                         }
-                        .disabled(isOnline || !isEligible || value >= bounds.upperBound - 0.001)
+                        .disabled(isOnline || !isEligible)
                     }
                     .foregroundStyle(Color.red)
                     .background(Capsule().fill(Color(.systemGray6)))
@@ -517,23 +565,30 @@ struct RideTypeConfigurationView: View {
 
     private func updateRateText(_ text: String, field: RateField) {
         switch field {
+        case .minimumFare:
+            guard let value = parsedRate(text), value >= 0 else { return }
+            draftMinimumFare = roundToCents(value)
         case .perMile:
-            guard let value = parsedRate(text), (pricing.minPerMile...pricing.maxPerMile).contains(value) else { return }
+            guard let value = parsedRate(text), value >= 0 else { return }
             draftPerMile = roundToCents(value)
         case .perMinute:
-            guard let value = parsedRate(text), (pricing.minPerMinute...pricing.maxPerMinute).contains(value) else { return }
+            guard let value = parsedRate(text), value >= 0 else { return }
             draftPerMinute = roundToCents(value)
         }
     }
 
     private func stepRate(field: RateField, delta: Double) {
         switch field {
+        case .minimumFare:
+            let next = roundToCents(max(0, currentMinimumFare + delta))
+            draftMinimumFare = next
+            minimumFareText = rateText(next)
         case .perMile:
-            let next = roundToCents(min(max(currentPerMile + delta, pricing.minPerMile), pricing.maxPerMile))
+            let next = roundToCents(max(0, currentPerMile + delta))
             draftPerMile = next
             perMileText = rateText(next)
         case .perMinute:
-            let next = roundToCents(min(max(currentPerMinute + delta, pricing.minPerMinute), pricing.maxPerMinute))
+            let next = roundToCents(max(0, currentPerMinute + delta))
             draftPerMinute = next
             perMinuteText = rateText(next)
         }
@@ -541,33 +596,40 @@ struct RideTypeConfigurationView: View {
 
     private func setRate(field: RateField, value: Double) {
         switch field {
+        case .minimumFare:
+            let next = roundToCents(max(0, value))
+            draftMinimumFare = next
+            minimumFareText = rateText(next)
         case .perMile:
-            let next = roundToCents(min(max(value, pricing.minPerMile), pricing.maxPerMile))
+            let next = roundToCents(max(0, value))
             draftPerMile = next
             perMileText = rateText(next)
         case .perMinute:
-            let next = roundToCents(min(max(value, pricing.minPerMinute), pricing.maxPerMinute))
+            let next = roundToCents(max(0, value))
             draftPerMinute = next
             perMinuteText = rateText(next)
         }
     }
 
     private func resetDrafts() {
+        draftMinimumFare = nil
         draftPerMile = nil
         draftPerMinute = nil
+        draftUsesSuggestedPricing = nil
+        minimumFareText = rateText(rate.minimumFare)
         perMileText = rateText(rate.perMile)
         perMinuteText = rateText(rate.perMinute)
     }
 
     private func saveRateChanges() {
         guard canSaveRate else { return }
-        onSaveRate(currentPerMile, currentPerMinute)
+        onSaveRate(currentMinimumFare, currentPerMile, currentPerMinute, currentUsesSuggestedPricing)
         resetDrafts()
     }
 
-    private func isValidRateText(_ text: String, bounds: ClosedRange<Double>) -> Bool {
+    private func isValidRateText(_ text: String) -> Bool {
         guard let value = parsedRate(text) else { return false }
-        return bounds.contains(value)
+        return value >= 0
     }
 
     private func parsedRate(_ text: String) -> Double? {
@@ -581,8 +643,18 @@ struct RideTypeConfigurationView: View {
         String(format: "%.2f", value)
     }
 
-    private func suggestedRate(min: Double, max: Double) -> Double {
-        roundToCents(min + ((max - min) * 0.30))
+    private func applyAllSuggestedRates() {
+        setRate(field: .minimumFare, value: suggestedRates.minimumFare)
+        setRate(field: .perMile, value: suggestedRates.perMile)
+        setRate(field: .perMinute, value: suggestedRates.perMinute)
+    }
+
+    private var demandLabel: String {
+        switch demandLevel {
+        case .low: return "Low"
+        case .moderate: return "Moderate"
+        case .high: return "High"
+        }
     }
 
     private func roundToCents(_ value: Double) -> Double {

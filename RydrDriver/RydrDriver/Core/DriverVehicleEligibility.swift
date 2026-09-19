@@ -18,46 +18,36 @@ enum RydrRideTierCatalog {
             return .init(
                 title: "Rydr Eco",
                 purpose: "Electric and environmentally conscious transportation.",
-                minPerMile: 0.50,
-                maxPerMile: 1.10,
-                minPerMinute: 0.15,
-                maxPerMinute: 0.25
+                suggestedPerMile: 1.10,
+                suggestedPerMinute: 0.25
             )
         case "xl":
             return .init(
                 title: "Rydr XL",
                 purpose: "Groups, larger parties, and luggage.",
-                minPerMile: 0.50,
-                maxPerMile: 1.25,
-                minPerMinute: 0.15,
-                maxPerMinute: 0.25
+                suggestedPerMile: 1.25,
+                suggestedPerMinute: 0.25
             )
         case "prestine":
             return .init(
                 title: "Rydr Prestine",
                 purpose: "Premium transportation with elevated vehicle standards.",
-                minPerMile: 0.75,
-                maxPerMile: 1.50,
-                minPerMinute: 0.15,
-                maxPerMinute: 0.35
+                suggestedPerMile: 1.50,
+                suggestedPerMinute: 0.35
             )
         case "executive":
             return .init(
                 title: "Rydr Executive",
                 purpose: "More Than A Ride. An Arrival.",
-                minPerMile: 1.00,
-                maxPerMile: 2.00,
-                minPerMinute: 0.25,
-                maxPerMinute: 0.50
+                suggestedPerMile: 2.00,
+                suggestedPerMinute: 0.50
             )
         default:
             return .init(
                 title: "Rydr Go",
                 purpose: "Affordable everyday transportation.",
-                minPerMile: 0.50,
-                maxPerMile: 1.00,
-                minPerMinute: 0.15,
-                maxPerMinute: 0.25
+                suggestedPerMile: 1.00,
+                suggestedPerMinute: 0.25
             )
         }
     }
@@ -95,44 +85,54 @@ enum RydrRideTierCatalog {
 struct RydrDriverTierPricing {
     let title: String
     let purpose: String
-    let minPerMile: Double
-    let maxPerMile: Double
-    let minPerMinute: Double
-    let maxPerMinute: Double
+    let suggestedPerMile: Double
+    let suggestedPerMinute: Double
+    let suggestedMinimumFare: Double = 7.00
 
-    var perMileRangeText: String {
-        "$\(minPerMile.formattedRate) - $\(maxPerMile.formattedRate)/mi"
-    }
-
-    var perMinuteRangeText: String {
-        "$\(minPerMinute.formattedRate) - $\(maxPerMinute.formattedRate)/min"
-    }
-
-    func clampedPerMile(_ value: Double) -> Double {
-        min(max(value, minPerMile), maxPerMile)
-    }
-
-    func clampedPerMinute(_ value: Double) -> Double {
-        min(max(value, minPerMinute), maxPerMinute)
+    func suggestedRates(for demand: DriverDemandLevel) -> DriverRateSetting {
+        let adjustment: Double
+        switch demand {
+        case .low: adjustment = -0.10
+        case .moderate: adjustment = 0.10
+        case .high: adjustment = 0.20
+        }
+        return DriverRateSetting(
+            minimumFare: suggestedMinimumFare,
+            perMile: max(0, suggestedPerMile + adjustment),
+            perMinute: max(0, suggestedPerMinute + adjustment),
+            useSuggestedPricing: true
+        )
     }
 }
 
 struct DriverRateSetting {
+    var minimumFare: Double
     var perMile: Double
     var perMinute: Double
+    var useSuggestedPricing: Bool
 
     func dictionary(for rideType: String) -> [String: Any] {
-        let pricing = RydrRideTierCatalog.pricing(for: rideType)
         return [
-            "perMile": pricing.clampedPerMile(perMile),
-            "perMinute": pricing.clampedPerMinute(perMinute)
+            "minimumFare": max(0, minimumFare).currencyRounded,
+            "perMile": max(0, perMile).currencyRounded,
+            "perMinute": max(0, perMinute).currencyRounded,
+            "useSuggestedPricing": useSuggestedPricing
         ]
     }
 
     static func defaultValue(for rideType: String) -> DriverRateSetting {
         let pricing = RydrRideTierCatalog.pricing(for: rideType)
-        return DriverRateSetting(perMile: pricing.minPerMile, perMinute: pricing.minPerMinute)
+        return DriverRateSetting(
+            minimumFare: pricing.suggestedMinimumFare,
+            perMile: pricing.suggestedPerMile,
+            perMinute: pricing.suggestedPerMinute,
+            useSuggestedPricing: false
+        )
     }
+}
+
+private extension Double {
+    var currencyRounded: Double { (self * 100).rounded() / 100 }
 }
 
 enum DriverVehicleFuelType: String, CaseIterable, Identifiable {

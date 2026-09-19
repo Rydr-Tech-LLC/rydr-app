@@ -7,7 +7,7 @@
 import SwiftUI
 
 /// Swipeable tile showing a single driver with image, rating, car, compliments,
-/// and a price that honors the selected ride tier caps + booking fee.
+/// and a price that reflects the driver's own rate card + booking fee.
 struct DriverCardView: View {
     let driver: Driver
     var estimate: RideEstimate = .init(distanceMiles: 6.2, durationMinutes: 18) // fallback if host doesn't pass one
@@ -18,9 +18,8 @@ struct DriverCardView: View {
         RideManager.pricingConfig(for: rideType)
     }
 
-    // Validated rates for this tier
-    private var perMile: Double { pricingConfig.clampedPerMile(driver.perMile) }
-    private var perMinute: Double { pricingConfig.clampedPerMinute(driver.perMinute) }
+    private var perMile: Double { max(0, driver.perMile) }
+    private var perMinute: Double { max(0, driver.perMinute) }
 
     // Estimated fare (booking fee + time + distance)
     private var fareBreakdown: RideFareEstimateBreakdown {
@@ -115,6 +114,8 @@ struct DriverCardView: View {
 
                 // Rate breakdown row (small print)
                 HStack(spacing: 10) {
+                    label(value: driver.minimumFare, unit: "minimum")
+                    Divider().frame(height: 14)
                     label(value: fareBreakdown.bookingFee, unit: "booking")
                     Divider().frame(height: 14)
                     label(value: perMile, unit: "/mi")
@@ -123,6 +124,12 @@ struct DriverCardView: View {
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+
+                if driver.usesSuggestedPricing {
+                    Label("Driver is using Rydr suggested rates", systemImage: "sparkles")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
 
                 if fareBreakdown.minimumFareAdjustment > 0 {
                     HStack {

@@ -446,11 +446,11 @@ async function driverAccountForRide(rideData) {
 }
 
 // Matches RydrPricing.driverPayoutShare in Features/Booking/RideManager.swift —
-// the platform keeps 30% of the ride fare (plus, on the client's existing fare
+// the platform keeps 10% of the ride fare (plus, on the client's existing fare
 // breakdown, the full booking fee). Used as a safety ceiling so a tampered
 // applicationFeeAmount can never let a rider's full charge bypass the
 // platform's cut entirely.
-const PLATFORM_MIN_FEE_SHARE = 0.30;
+const PLATFORM_MIN_FEE_SHARE = 0.10;
 
 const PAYMENT_STATUSES = new Set(["pending", "processing", "succeeded", "failed", "refunded"]);
 const CANCELLATION_CHARGE_STATUSES = new Set(["riderCancelled", "cancelled"]);

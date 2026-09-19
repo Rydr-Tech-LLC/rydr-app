@@ -65,6 +65,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         estimate: RideEstimate?,
         pricingSnapshot: RidePriceEstimateSnapshot,
         rydrBankCode: String?,
+        replacementForRideId: String?,
         riderPreferences: RiderRidePreferences?,
         riderVerified: Bool
     ) async throws -> String {
@@ -114,6 +115,9 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         payload["displayEstimatedDriverPayoutCents"] = pricingSnapshot.estimatedDriverPayoutCents
         if let rydrBankCode, !rydrBankCode.isEmpty {
             payload["rydrBankCode"] = rydrBankCode
+        }
+        if let replacementForRideId, !replacementForRideId.isEmpty {
+            payload["replacementForRideId"] = replacementForRideId
         }
         if let preferencePayload = riderPreferences?.rideRequestPayload {
             payload["ridePreferences"] = preferencePayload
@@ -360,6 +364,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                 compliments: data["compliments"] as? [String] ?? [],
                 perMinute: rate.perMinute,
                 perMile: rate.perMile,
+                minimumFare: rate.minimumFare,
+                usesSuggestedPricing: rate.usesSuggestedPricing,
                 coordinate: coordinate,
                 score: score,
                 ratingCount: ratingCount,
@@ -518,16 +524,19 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         from data: [String: Any],
         rideType: String,
         pricing: RideTierPricing
-    ) -> (perMile: Double, perMinute: Double) {
+    ) -> (minimumFare: Double, perMile: Double, perMinute: Double, usesSuggestedPricing: Bool) {
         let tierRates = data["tierRates"] as? [String: Any]
         let canonical = canonicalRideType(rideType)
         let rawRate = tierRates?[canonical] as? [String: Any]
             ?? tierRates?[pricing.title] as? [String: Any]
-        let rawPerMile = Self.doubleValue(rawRate?["perMile"]) ?? Self.doubleValue(data["perMile"]) ?? pricing.minPerMile
-        let rawPerMinute = Self.doubleValue(rawRate?["perMinute"]) ?? Self.doubleValue(data["perMinute"]) ?? pricing.minPerMinute
+        let rawMinimumFare = Self.doubleValue(rawRate?["minimumFare"]) ?? pricing.suggestedMinimumFare
+        let rawPerMile = Self.doubleValue(rawRate?["perMile"]) ?? Self.doubleValue(data["perMile"]) ?? pricing.suggestedPerMile
+        let rawPerMinute = Self.doubleValue(rawRate?["perMinute"]) ?? Self.doubleValue(data["perMinute"]) ?? pricing.suggestedPerMinute
         return (
-            perMile: pricing.clampedPerMile(rawPerMile),
-            perMinute: pricing.clampedPerMinute(rawPerMinute)
+            minimumFare: max(0, rawMinimumFare),
+            perMile: max(0, rawPerMile),
+            perMinute: max(0, rawPerMinute),
+            usesSuggestedPricing: rawRate?["useSuggestedPricing"] as? Bool ?? false
         )
     }
 
