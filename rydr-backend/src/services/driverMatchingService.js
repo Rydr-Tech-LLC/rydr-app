@@ -50,11 +50,24 @@ function findBestDrivers(rideRequest, candidates) {
             matchReason = ("Highly Rated Driver");
         }
 
+        if (rideRequest.tripLength == driver.preferences.tripLength || driver.preferences.tripLength == "any"){
+            score += 15;
+            matchReason = ("Preferred trip length");
+            
+        }
+        
+        if (driver.preferences.destination !=null && driver.preferences.destination == rideRequest.destinationZone ){
+            score += 30;
+            matchReason = ("Perfect destination match");
+
+        }
+
         return {
             driverId: driver.driverId,
             score: score,
             matchReason: matchReason
         };
+
     });
     
     // Step 4: Sort by highest score and return the top 3
@@ -72,8 +85,8 @@ function calculateDistance(lat1, lon1, lat2, lon2){
     const dLat = (lat2 - lat1) * (Math.PI / 180);
     const dlon = (lon2 - lon1) * (Math.PI / 180);
     const a = 
-        Math.sin(dlat/2) * Math.sin(dLar/2) +
-        Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon/2) * Math.sin(dlon/2);
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dlon/2) * Math.sin(dlon/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return R * c;
 }
