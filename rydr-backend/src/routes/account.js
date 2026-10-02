@@ -32,4 +32,18 @@ router.post("/identity/sync", async (req, res, next) => {
   }
 });
 
+router.post("/cash-hub-rider-profile", async (req, res, next) => {
+  try {
+    const result = await syncAccountIdentity({
+      uid: req.firebaseUid,
+      role: "rider",
+      token: req.firebaseToken,
+      profileData: req.body
+    });
+    return res.status(201).json({ ok: true, ...result });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 module.exports = router;

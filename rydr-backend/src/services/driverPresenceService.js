@@ -61,6 +61,7 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   const statusRef = db.collection("driver_status").doc(uid);
   const publicRef = db.collection("publicDriverProfiles").doc(uid);
   const cashHubRef = db.collection("cashHubDriverProfiles").doc(uid);
+  const cashHubEligibilityRef = db.collection("cashHubDriverEligibility").doc(uid);
   const [driverSnap, cashHubConfigSnap] = await Promise.all([
     driverRef.get(),
     db.collection("platformConfig").doc("cashRydrHub").get()
@@ -150,6 +151,14 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
       updatedAt: now
     };
   }
+  const cashHubEligibility = {
+    driverUid: uid,
+    isOnline: cashHubPresence.isOnline,
+    availabilityStatus: cashHubPresence.availabilityStatus,
+    approximateLocation: publicPresence.approximateLocation || null,
+    updatedAt: now,
+    projectionOwner: "rydr_backend"
+  };
 
   const previousStatusSnap = await statusRef.get();
   const previousOnline = previousStatusSnap.exists ? previousStatusSnap.data().isOnline === true : null;
@@ -158,6 +167,7 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   batch.set(driverRef, { ...common, location: privatePresence.location || driver.location || null }, { merge: true });
   batch.set(publicRef, publicPresence, { merge: true });
   batch.set(cashHubRef, cashHubPresence, { merge: true });
+  batch.set(cashHubEligibilityRef, cashHubEligibility, { merge: true });
   if (previousOnline !== online) {
     batch.set(db.collection("driverPresenceEvents").doc(), {
       driverId: uid,

@@ -149,6 +149,10 @@ private struct CashHubRequestDraft {
     var budgetRange = ""
     var tripFormat = "One-way"
     var visibility = CashHubVisibility.publicCommunity.rawValue
+    var pickupLatitude: Double?
+    var pickupLongitude: Double?
+    var destinationLatitude: Double?
+    var destinationLongitude: Double?
 
     init() {}
 
@@ -161,6 +165,17 @@ private struct CashHubRequestDraft {
         budgetRange = cashHubCurrencyInput(request.budgetRange)
         tripFormat = request.tripFormat
         visibility = CashHubVisibility.normalized(request.visibility).rawValue
+    }
+
+    var coordinatePayload: [String: Any] {
+        var payload: [String: Any] = [:]
+        if let pickupLatitude, let pickupLongitude {
+            payload["pickupCoordinate"] = ["latitude": pickupLatitude, "longitude": pickupLongitude]
+        }
+        if let destinationLatitude, let destinationLongitude {
+            payload["destinationCoordinate"] = ["latitude": destinationLatitude, "longitude": destinationLongitude]
+        }
+        return payload
     }
 }
 
@@ -485,69 +500,27 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func removeFavoriteDriver(_ driver: CashHubFavoriteDriver) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             errorMessage = "Please log in to update favorite drivers."
             return
         }
-        logFavoriteDriversPath(uid: uid, operation: "delete favorite driver \(driver.id)")
-        db.collection("riders").document(uid)
-            .collection("cashHubFavoriteDrivers").document(driver.id)
-            .delete { [weak self] error in
-                Task { @MainActor in
-                    self?.errorMessage = error?.localizedDescription
-                    if error == nil {
-                        self?.confirmationMessage = "\(driver.name) was removed from your favorite drivers."
-                    }
-                }
-            }
+        Task { [weak self] in do { try await RiderCashHubBackend.relationship(action:"remove_favorite_driver",targetUid:driver.driverUid);await MainActor.run{self?.confirmationMessage="\(driver.name) was removed from your favorite drivers."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func blockFavoriteDriver(_ driver: CashHubFavoriteDriver) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             errorMessage = "Please log in to block a driver."
             return
         }
-        let riderDocument = db.collection("riders").document(uid)
-        riderDocument.collection("cashHubBlockedDrivers").document(driver.driverUid).setData([
-            "driverUid": driver.driverUid,
-            "driverName": driver.name,
-            "blockedAt": FieldValue.serverTimestamp()
-        ], merge: true) { [weak self] error in
-            if let error {
-                Task { @MainActor in self?.errorMessage = error.localizedDescription }
-                return
-            }
-            self?.logFavoriteDriversPath(uid: uid, operation: "delete blocked favorite driver \(driver.id)")
-            riderDocument.collection("cashHubFavoriteDrivers").document(driver.id).delete { [weak self] error in
-                Task { @MainActor [weak self] in
-                    self?.errorMessage = error?.localizedDescription
-                    if error == nil {
-                        self?.confirmationMessage = "\(driver.name) has been blocked."
-                    }
-                }
-            }
-        }
+        Task { [weak self] in do { try await RiderCashHubBackend.relationship(action:"block_driver",targetUid:driver.driverUid);await MainActor.run{self?.confirmationMessage="\(driver.name) has been blocked."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func blockDriver(_ offer: CashHubResponse) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             errorMessage = "Please log in to block a driver."
             return
         }
-        let riderDocument = db.collection("riders").document(uid)
-        riderDocument.collection("cashHubBlockedDrivers").document(offer.authorUid).setData([
-            "driverUid": offer.authorUid,
-            "driverName": offer.authorName,
-            "conversationId": offer.id,
-            "blockedAt": FieldValue.serverTimestamp()
-        ], merge: true) { [weak self] error in
-            Task { @MainActor [weak self] in
-                self?.errorMessage = error?.localizedDescription
-                if error == nil {
-                    self?.confirmationMessage = "\(offer.authorName) has been blocked."
-                }
-            }
-        }
+        Task { [weak self] in do { try await RiderCashHubBackend.relationship(action:"block_driver",targetUid:offer.authorUid,conversationId:offer.id);await MainActor.run{self?.confirmationMessage="\(offer.authorName) has been blocked."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func reportDriver(_ offer: CashHubResponse, for request: CashRydrRequest) {
@@ -565,7 +538,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func addFavoriteDriver(from offer: CashHubResponse) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             errorMessage = "Please log in to save favorite drivers."
             return
         }
@@ -577,42 +550,7 @@ private final class CashRydrHubVM: ObservableObject {
             errorMessage = "You can save up to \(favoriteDriverLimit) favorite drivers. Remove one before adding another."
             return
         }
-        let riderDocument = db.collection("riders").document(uid)
-        riderDocument.collection("cashHubBlockedDrivers").document(offer.authorUid)
-            .getDocument { [weak self] blockedSnapshot, error in
-                if let error {
-                    Task { @MainActor in self?.errorMessage = error.localizedDescription }
-                    return
-                }
-                guard blockedSnapshot?.exists != true else {
-                    Task { @MainActor in
-                        self?.errorMessage = "This driver is blocked and cannot be added to favorites."
-                    }
-                    return
-                }
-                var data: [String: Any] = [
-                    "driverUid": offer.authorUid,
-                    "driverName": offer.authorName,
-                    "vehicleInfo": offer.vehicleInfo,
-                    "isIdentityVerified": offer.isIdentityVerified,
-                    "isLicenseVerified": offer.isLicenseVerified,
-                    "isRydrVerifiedDriver": offer.isRydrVerifiedDriver,
-                    "addedAt": FieldValue.serverTimestamp()
-                ]
-                if let rating = offer.cashHubRating {
-                    data["cashHubRating"] = rating
-                }
-                self?.logFavoriteDriversPath(uid: uid, operation: "set favorite driver \(offer.authorUid)")
-                riderDocument.collection("cashHubFavoriteDrivers").document(offer.authorUid)
-                    .setData(data, merge: true) { [weak self] error in
-                        Task { @MainActor in
-                            self?.errorMessage = error?.localizedDescription
-                            if error == nil {
-                                self?.confirmationMessage = "\(offer.authorName) was added to your favorite drivers."
-                            }
-                        }
-                    }
-            }
+        Task { [weak self] in do { try await RiderCashHubBackend.relationship(action:"add_favorite_driver",targetUid:offer.authorUid);await MainActor.run{self?.confirmationMessage="\(offer.authorName) was added to your favorite drivers."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func createRequest(from draft: CashHubRequestDraft, riderName: String) -> Bool {
@@ -633,7 +571,7 @@ private final class CashRydrHubVM: ObservableObject {
             "budgetRange": draft.budgetRange.trimmingCharacters(in: .whitespacesAndNewlines),
             "tripFormat": draft.tripFormat,
             "visibility": draft.visibility
-        ]
+        ].merging(draft.coordinatePayload) { _, new in new }
         Task { [weak self] in
             do { try await RiderCashHubBackend.create(data); await MainActor.run { self?.isSaving=false;self?.confirmationMessage="Your request has been posted. Drivers may respond with price offers and messages." } }
             catch { await MainActor.run { self?.isSaving=false;self?.errorMessage=error.localizedDescription } }
@@ -654,7 +592,7 @@ private final class CashRydrHubVM: ObservableObject {
             "budgetRange": draft.budgetRange.trimmingCharacters(in: .whitespacesAndNewlines),
             "tripFormat": draft.tripFormat,
             "visibility": draft.visibility
-        ]
+        ].merging(draft.coordinatePayload) { _, new in new }
         Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"edit",body:data);await MainActor.run{self?.isSaving=false} } catch { await MainActor.run{self?.isSaving=false;self?.errorMessage=error.localizedDescription} } }
         return true
     }
@@ -3440,7 +3378,16 @@ private struct CashHubRequestForm: View {
             }
             .safeAreaInset(edge: .bottom) {
                 Button(title == "Edit Ride Request" ? "Save Changes" : "Submit Post") {
-                    onSave(draft)
+                    var submission = draft
+                    if let coordinate = pickupMapItem?.placemark.coordinate {
+                        submission.pickupLatitude = coordinate.latitude
+                        submission.pickupLongitude = coordinate.longitude
+                    }
+                    if let coordinate = destinationMapItem?.placemark.coordinate {
+                        submission.destinationLatitude = coordinate.latitude
+                        submission.destinationLongitude = coordinate.longitude
+                    }
+                    onSave(submission)
                 }
                 .font(.headline.weight(.bold))
                 .foregroundStyle(.white)

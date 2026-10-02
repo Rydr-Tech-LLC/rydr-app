@@ -44,6 +44,14 @@
       ]
     },
     {
+      "collectionGroup": "cashRydrRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "eligibleDriverUids", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "responses",
       "queryScope": "COLLECTION_GROUP",
       "fields": [

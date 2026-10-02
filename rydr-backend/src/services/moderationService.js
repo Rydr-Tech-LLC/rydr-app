@@ -78,7 +78,7 @@ async function finalizeProfilePhoto({ storagePath, uid }) {
         profilePhotoUpdatedAt: now,
         updatedAt: now
       }
-    : { photoURL, profilePhotoUpdatedAt: now, updatedAt: now };
+    : { photoURL, profilePhotoURL: photoURL, cashHubProfilePhotoURL: photoURL, profilePhotoUpdatedAt: now, updatedAt: now };
   const batch = db.batch();
   batch.set(profileRef, profileUpdate, { merge: true });
   if (isDriver) batch.set(db.collection("publicDriverProfiles").doc(uid), { profilePhotoURL: photoURL, updatedAt: now }, { merge: true });

@@ -17,6 +17,7 @@ interface CashHubMessage {
   senderRole?: string;
   senderName?: string;
   kind?: string;
+  recipientUid?: string;
 }
 
 interface CashHubRequest {
@@ -27,6 +28,7 @@ interface CashHubRequest {
   driverQueueStatus?: string;
   visibility?: string;
   allowedDriverUids?: string[];
+  eligibleDriverUids?: string[];
   tripFormat?: string;
 }
 
@@ -34,9 +36,12 @@ export const onCashHubRequestCreated = onDocumentCreated("cashRydrRequests/{requ
   const request = event.data?.data() as CashHubRequest | undefined;
   if (!request || request.status !== "open" || !request.riderUid) return;
   let driverIds: string[] = [];
-  if (request.visibility === "Favorite Drivers") {
+  if (Array.isArray(request.eligibleDriverUids)) {
+    driverIds = request.eligibleDriverUids.slice(0, 100);
+  } else if (request.visibility === "Favorite Drivers") {
     driverIds = Array.isArray(request.allowedDriverUids) ? request.allowedDriverUids.slice(0, 10) : [];
   } else {
+    // Legacy posts created before backend-owned audience selection.
     const drivers = await db.collection("cashHubDriverProfiles").where("isOnline", "==", true).limit(100).get();
     driverIds = drivers.docs.map((doc) => doc.id);
   }
@@ -72,7 +77,30 @@ export const onCashHubMessageCreated = onDocumentCreated("cashHubConversations/{
   const conversationSnap = await db.collection("cashHubConversations").doc(event.params.conversationId).get();
   const conversation = conversationSnap.data() as CashHubConversation | undefined;
   if (!conversation || !conversation.riderUid || !conversation.driverUid || !conversation.requestId) return;
-  if (["cancelled", "completed", "declined", "released", "removed"].includes(conversation.status ?? "")) return;
+  if (message.kind === "listingTaken") {
+    await sendPushToUser({
+      audience: "driver",
+      uid: conversation.driverUid,
+      title: "Cash Hub negotiation ended",
+      body: "This negotiation ended because the rider connected with another driver.",
+      route: { type: "cashHubUpdate", target: "cashHub", requestId: conversation.requestId, chatId: event.params.conversationId }
+    });
+    return;
+  }
+  if (message.kind === "priceAccepted") return;
+  if (["cancelled", "completed", "declined", "released", "removed", "ended", "expired", "unavailable"].includes(conversation.status ?? "")) return;
+
+  if ((message.kind === "offerDeclined" || message.kind === "chatEnded") && message.recipientUid) {
+    const audience = message.recipientUid === conversation.driverUid ? "driver" : "rider";
+    await sendPushToUser({
+      audience,
+      uid: message.recipientUid,
+      title: message.kind === "offerDeclined" ? "Cash Hub price declined" : "Cash Hub chat ended",
+      body: message.kind === "offerDeclined" ? "The price was declined, but the negotiation can continue." : "The other participant ended this chat.",
+      route: { type: "cashHubMessage", target: "cashHub", requestId: conversation.requestId, chatId: event.params.conversationId }
+    });
+    return;
+  }
 
   const senderIsRider = message.senderUid === conversation.riderUid || message.senderRole === "rider";
   await conversationSnap.ref.set({ updatedAt: FieldValue.serverTimestamp() }, { merge: true });

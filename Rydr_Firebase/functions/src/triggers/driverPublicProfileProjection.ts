@@ -6,8 +6,9 @@ export const onDriverPublicProfileProjection = onDocumentWritten("drivers/{uid}"
   const uid = event.params.uid;
   const ref = db.collection("publicDriverProfiles").doc(uid);
   const cashHubRef = db.collection("cashHubDriverProfiles").doc(uid);
+  const cashHubEligibilityRef = db.collection("cashHubDriverEligibility").doc(uid);
   if (!driver) {
-    await Promise.all([ref.delete().catch(() => undefined), cashHubRef.delete().catch(() => undefined)]);
+    await Promise.all([ref.delete().catch(() => undefined), cashHubRef.delete().catch(() => undefined), cashHubEligibilityRef.delete().catch(() => undefined)]);
     return;
   }
   const fullName = String(driver.displayName ?? [driver.firstName, driver.lastName].filter(Boolean).join(" ") ?? "Rydr Driver").trim();
@@ -48,6 +49,16 @@ export const onDriverPublicProfileProjection = onDocumentWritten("drivers/{uid}"
     && !["delinquent", "past_due", "review_required", "suspended", "revoked", "optedout", "opted_out"].includes(accessStatus)
     && (acceptedTermsVersion === currentTermsVersion || (!acceptedTermsVersion && currentTermsVersion === "legacy"));
   const vehicleInfo = [vehicle.color, vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ");
+  const sourceLocation = driver.location ?? {};
+  const latitude = Number(sourceLocation.lat ?? sourceLocation.latitude);
+  const longitude = Number(sourceLocation.lng ?? sourceLocation.longitude);
+  const approximateLocation = Number.isFinite(latitude) && Number.isFinite(longitude)
+    ? {
+        lat: Math.round(latitude * 1000) / 1000,
+        lng: Math.round(longitude * 1000) / 1000,
+        updatedAt: FieldValue.serverTimestamp()
+      }
+    : undefined;
   await cashHubRef.set({
     driverUid: uid,
     driverName: fullName || "Cash Hub Driver",
@@ -61,6 +72,16 @@ export const onDriverPublicProfileProjection = onDocumentWritten("drivers/{uid}"
     availabilityStatus: driver.isOnline === true && accessActive && approved && safe
       ? String(driver.availabilityStatus ?? "available")
       : "offline",
+    projectionOwner: "firebase_function",
+    updatedAt: FieldValue.serverTimestamp()
+  }, { merge: true });
+  await cashHubEligibilityRef.set({
+    driverUid: uid,
+    isOnline: driver.isOnline === true && accessActive && approved && safe,
+    availabilityStatus: driver.isOnline === true && accessActive && approved && safe
+      ? String(driver.availabilityStatus ?? "available")
+      : "offline",
+    approximateLocation: approximateLocation ?? null,
     projectionOwner: "firebase_function",
     updatedAt: FieldValue.serverTimestamp()
   }, { merge: true });

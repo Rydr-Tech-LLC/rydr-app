@@ -100,10 +100,18 @@ struct RydrBankAPI {
 /// canonical Rider phone index and records the providers attached to the UID.
 enum RiderBackendIdentityService {
     static func sync() async throws {
+        try await send(path: "/account/identity/sync", body: ["role": "rider"])
+    }
+
+    static func createCashHubProfile(firstName: String, lastName: String, email: String) async throws {
+        try await send(path: "/account/cash-hub-rider-profile", body: ["firstName": firstName, "lastName": lastName, "email": email])
+    }
+
+    private static func send(path: String, body: [String: Any]) async throws {
         guard let user = Auth.auth().currentUser else { throw RydrBankAPIError.notSignedIn }
         guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
               let base = URL(string: rawBase),
-              let url = URL(string: "/account/identity/sync", relativeTo: base) else {
+              let url = URL(string: path, relativeTo: base) else {
             throw URLError(.badURL)
         }
         let token = try await user.getIDToken()
@@ -111,7 +119,7 @@ enum RiderBackendIdentityService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["role": "rider"])
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -153,6 +161,7 @@ enum RiderCashHubBackend {
     static func offer(requestId:String, body:[String:Any]) async throws { var value=body;value["idempotencyKey"]=UUID().uuidString;try await send(path:"/cash-hub/requests/\(requestId)/offers",body:value) }
     static func message(conversationId:String, text:String, kind:String) async throws { try await send(path:"/cash-hub/conversations/\(conversationId)/messages",body:["message":text,"kind":kind,"idempotencyKey":UUID().uuidString]) }
     static func conversationCommand(conversationId:String, action:String, body:[String:Any]=[:]) async throws { var value=body;value["action"]=action;value["idempotencyKey"]=UUID().uuidString;try await send(path:"/cash-hub/conversations/\(conversationId)/command",body:value) }
+    static func relationship(action:String, targetUid:String, conversationId:String?=nil) async throws { var value:[String:Any] = ["action":action,"targetUid":targetUid,"idempotencyKey":UUID().uuidString];if let conversationId{value["conversationId"]=conversationId};try await send(path:"/cash-hub/relationships/command",body:value) }
 }
 
 enum RiderSafetyBackend {

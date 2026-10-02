@@ -220,7 +220,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
             }
         openRequestListener = db.collection("cashRydrRequests")
             .whereField("status", isEqualTo: "open")
-            .whereField("visibility", isEqualTo: "Public CashRydr Hub Community")
+            .whereField("eligibleDriverUids", arrayContains: uid)
             .addSnapshotListener { snapshot, error in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
@@ -237,23 +237,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
                 }
             }
 
-        favoriteRequestListener = db.collection("cashRydrRequests")
-            .whereField("allowedDriverUids", arrayContains: uid)
-            .addSnapshotListener { snapshot, error in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    if let error {
-                        self.isLoading = false
-                        self.errorMessage = error.localizedDescription
-                        return
-                    }
-                    self.favoriteOpenRequestBuffer = (snapshot?.documents ?? [])
-                        .compactMap(Self.makeRequest)
-                        .filter { $0.status == "open" }
-                        .sorted { $0.scheduledTime < $1.scheduledTime }
-                    self.applyRequestBuffers()
-                }
-            }
+        favoriteOpenRequestBuffer = []
 
         scheduledRequestListener = db.collection("cashRydrRequests")
             .whereField("connectedDriverUid", isEqualTo: uid)
@@ -453,23 +437,8 @@ private final class DriverCashRydrHubVM: ObservableObject {
             errorMessage = "Sign in before blocking a rider."
             return
         }
-        db.collection("drivers").document(uid)
-            .collection("cashHubBlockedRiders").document(request.riderUid)
-            .setData([
-                "riderUid": request.riderUid,
-                "riderName": request.riderName,
-                "cashHubRequestId": request.id,
-                "blockedAt": FieldValue.serverTimestamp()
-            ], merge: true) { [weak self] error in
-                Task { @MainActor [weak self] in
-                    self?.errorMessage = error?.localizedDescription
-                    if error == nil {
-                        self?.blockedRiderUIDs.insert(request.riderUid)
-                        self?.applyRequestBuffers()
-                        self?.confirmationMessage = "\(request.riderName) has been blocked in Cash Hub."
-                    }
-                }
-            }
+        let conversationId = driverCashHubConversationId(requestId: request.id, driverUid: uid)
+        Task { [weak self] in do { try await RydrBackendService.cashHubRelationship(action:"block_rider",targetUid:request.riderUid,conversationId:conversationId);await MainActor.run{self?.blockedRiderUIDs.insert(request.riderUid);self?.applyRequestBuffers();self?.confirmationMessage="\(request.riderName) has been blocked in Cash Hub."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     private func addConversationMessage(to request: DriverCashRideRequest, driverUid: String, driverName: String, kind: String, text: String) {

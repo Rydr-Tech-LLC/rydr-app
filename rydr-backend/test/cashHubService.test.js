@@ -17,6 +17,9 @@ const {
   normalizeCashHubOffer,
   cashHubOfferOpeningMessage,
   cashHubAccessAllowed,
+  distanceMilesBetween,
+  suggestedContribution,
+  validateLifecycleEvidence,
   PUBLIC_VISIBILITY,
   FAVORITES_VISIBILITY
 } = require("../src/services/cashHubService");
@@ -44,9 +47,34 @@ test("Cash Hub uses arrangement formats rather than Rydr Dispatch tiers", () => 
 
 test("favorite-only Cash Hub requests reject drivers outside the backend-owned audience", () => {
   assert.equal(driverCanAccessRequest({ status: "open", visibility: PUBLIC_VISIBILITY }, "driver-a"), true);
+  assert.equal(driverCanAccessRequest({ status: "open", visibility: PUBLIC_VISIBILITY, eligibleDriverUids: ["driver-a"] }, "driver-a"), true);
+  assert.equal(driverCanAccessRequest({ status: "open", visibility: PUBLIC_VISIBILITY, eligibleDriverUids: ["driver-a"] }, "driver-b"), false);
   assert.equal(driverCanAccessRequest({ status: "open", visibility: FAVORITES_VISIBILITY, allowedDriverUids: ["driver-a"] }, "driver-a"), true);
   assert.equal(driverCanAccessRequest({ status: "open", visibility: FAVORITES_VISIBILITY, allowedDriverUids: ["driver-a"] }, "driver-b"), false);
   assert.equal(driverCanAccessRequest({ status: "connected", visibility: PUBLIC_VISIBILITY }, "driver-a"), false);
+});
+
+test("Cash Hub computes its server-owned route suggestion from the fixed marketplace rates", () => {
+  assert.equal(suggestedContribution(2.3, 8), 4.31);
+  assert.equal(suggestedContribution(-1, 8), null);
+});
+
+test("Cash Hub audience distance is calculated in miles", () => {
+  const miles = distanceMilesBetween({ latitude: 33.749, longitude: -84.388 }, { latitude: 33.6407, longitude: -84.4277 });
+  assert.ok(miles > 7 && miles < 9);
+});
+
+test("Cash Hub lifecycle requires recent canonical driver presence", () => {
+  const now = Date.parse("2026-10-02T18:00:00Z");
+  const request = {
+    scheduledTime: { toMillis: () => now },
+    pickupCoordinate: { latitude: 33.749, longitude: -84.388 },
+    destinationCoordinate: { latitude: 33.75, longitude: -84.39 },
+    cashRideStartedAt: { toMillis: () => now - 120000 }
+  };
+  const driver = { location: { lat: 33.749, lng: -84.388, updatedAt: { toMillis: () => now - 1000 } } };
+  assert.deepEqual(validateLifecycleEvidence(request, "arrived", driver, now), { latitude: 33.749, longitude: -84.388 });
+  assert.throws(() => validateLifecycleEvidence(request, "arrived", { location: { lat: 33.749, lng: -84.388, updatedAt: { toMillis: () => now - 700000 } } }, now), /recent driver location/);
 });
 
 test("Cash Hub derives the offered car from the driver's canonical vehicle", () => {

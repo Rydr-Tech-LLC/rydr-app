@@ -566,7 +566,15 @@ service cloud.firestore {
     function cashHubPublicOpenRequest(data) {
       return cashHubAuthorizedDriverAccess()
         && data.status == "open"
-        && data.visibility in ["public", "Public CashRydr Hub Community"];
+        && data.visibility in ["public", "Public CashRydr Hub Community"]
+        && (
+          !("backendAudienceVersion" in data)
+          || (
+            data.backendAudienceVersion == 1
+            && data.eligibleDriverUids is list
+            && request.auth.uid in data.eligibleDriverUids
+          )
+        );
     }
 
     function cashHubFavoriteOpenRequest(data) {
@@ -574,7 +582,11 @@ service cloud.firestore {
         && data.status == "open"
         && data.visibility == "Favorite Drivers"
         && data.allowedDriverUids is list
-        && request.auth.uid in data.allowedDriverUids;
+        && request.auth.uid in data.allowedDriverUids
+        && (
+          !("backendAudienceVersion" in data)
+          || (data.eligibleDriverUids is list && request.auth.uid in data.eligibleDriverUids)
+        );
     }
 
     function cashHubRequestReadable(data) {
@@ -843,11 +855,13 @@ service cloud.firestore {
       }
 
       match /cashHubFavoriteDrivers/{driverUid} {
-        allow read, create, update, delete: if isSelf(uid);
+        allow read: if isSelf(uid) || isAdmin();
+        allow create, update, delete: if isAdmin();
       }
 
       match /cashHubBlockedDrivers/{driverUid} {
-        allow read, create, update, delete: if isSelf(uid);
+        allow read: if isSelf(uid) || isAdmin();
+        allow create, update, delete: if isAdmin();
       }
 
       match /ridePreferences/{preferenceId} {
@@ -897,7 +911,8 @@ service cloud.firestore {
       }
 
       match /cashHubBlockedRiders/{riderUid} {
-        allow read, create, update, delete: if isSelf(uid);
+        allow read: if isSelf(uid) || isAdmin();
+        allow create, update, delete: if isAdmin();
       }
 
       match /documentReviews/{reviewId} {
@@ -965,6 +980,10 @@ service cloud.firestore {
     match /cashHubDriverProfiles/{driverUid} {
       allow read: if cashHubAuthorizedMarketplaceAccess() || isAdmin();
       allow create, update, delete: if isAdmin();
+    }
+
+    match /cashHubDriverEligibility/{driverUid} {
+      allow read, create, update, delete: if isAdmin();
     }
 
     match /cashHubAccessReceipts/{receiptId} {

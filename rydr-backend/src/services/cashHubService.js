@@ -1,5 +1,6 @@
 const { admin, getFirestore } = require("../config/firebase");
 const { isApprovedDriver } = require("./driverPresenceService");
+const { getDirections } = require("./appleMapsService");
 
 const PUBLIC_VISIBILITY = "Public CashRydr Hub Community";
 const FAVORITES_VISIBILITY = "Favorite Drivers";
@@ -19,6 +20,10 @@ const DRIVER_QUEUE_TRANSITIONS = {
 const CASH_HUB_FEE_CENTS = 499;
 const CASH_HUB_GRACE_DAYS = 5;
 const CASH_HUB_TIME_ZONE = "America/New_York";
+const CASH_HUB_AUDIENCE_LIMIT = 100;
+const CASH_HUB_PUBLIC_RADIUS_MILES = 50;
+const CASH_HUB_SUGGESTED_PER_MILE = 0.90;
+const CASH_HUB_SUGGESTED_PER_MINUTE = 0.28;
 
 function error(message, statusCode) { const err = new Error(message); err.statusCode = statusCode; return err; }
 function text(value, max = 500) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
@@ -26,6 +31,28 @@ function amount(value) { const n = Number(value); return Number.isFinite(n) && n
 function idempotencyKey(value) {
   const candidate = text(value, 160);
   return /^[A-Za-z0-9_-]{8,160}$/.test(candidate) ? candidate : null;
+}
+function coordinate(value) {
+  if (!value || typeof value !== "object") return null;
+  const latitude = Number(value.latitude ?? value.lat);
+  const longitude = Number(value.longitude ?? value.lng);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  return { latitude, longitude };
+}
+function distanceMilesBetween(a, b) {
+  const first = coordinate(a); const second = coordinate(b);
+  if (!first || !second) return null;
+  const radians = (degrees) => degrees * Math.PI / 180;
+  const dLat = radians(second.latitude - first.latitude);
+  const dLng = radians(second.longitude - first.longitude);
+  const lat1 = radians(first.latitude); const lat2 = radians(second.latitude);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 3958.7613 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+function suggestedContribution(distanceMiles, durationMinutes) {
+  const miles = Number(distanceMiles); const minutes = Number(durationMinutes);
+  if (!Number.isFinite(miles) || miles < 0 || !Number.isFinite(minutes) || minutes < 0) return null;
+  return Math.round((miles * CASH_HUB_SUGGESTED_PER_MILE + minutes * CASH_HUB_SUGGESTED_PER_MINUTE) * 100) / 100;
 }
 function date(value) { const d = new Date(value); return Number.isFinite(d.getTime()) ? admin.firestore.Timestamp.fromDate(d) : null; }
 function timestampMillis(value) {
@@ -57,10 +84,77 @@ function normalizeTripFormat(value) {
 }
 function driverCanAccessRequest(request, driverUid) {
   if (!request || request.status !== "open") return false;
-  if (request.visibility === PUBLIC_VISIBILITY) return true;
+  if (request.visibility === PUBLIC_VISIBILITY) {
+    return !Array.isArray(request.eligibleDriverUids) || request.eligibleDriverUids.includes(driverUid);
+  }
   return request.visibility === FAVORITES_VISIBILITY
     && Array.isArray(request.allowedDriverUids)
     && request.allowedDriverUids.includes(driverUid);
+}
+
+async function eligibleDriverAudience(db, pickupCoordinate, visibility, favoriteUids = []) {
+  if (visibility === FAVORITES_VISIBILITY) return favoriteUids.slice(0, CASH_HUB_AUDIENCE_LIMIT);
+  const [publicProfiles, privateEligibility] = await Promise.all([
+    db.collection("cashHubDriverProfiles").where("isOnline", "==", true).limit(200).get(),
+    db.collection("cashHubDriverEligibility").where("isOnline", "==", true).limit(200).get()
+  ]);
+  const eligibilityByUid = new Map(privateEligibility.docs.map((doc) => [doc.id, doc.data()]));
+  return publicProfiles.docs.filter((doc) => {
+    const profile = eligibilityByUid.get(doc.id) || doc.data();
+    if (profile.availabilityStatus && profile.availabilityStatus !== "available") return false;
+    const driverCoordinate = coordinate(profile.approximateLocation);
+    if (!pickupCoordinate || !driverCoordinate) return true;
+    const miles = distanceMilesBetween(pickupCoordinate, driverCoordinate);
+    return miles !== null && miles <= CASH_HUB_PUBLIC_RADIUS_MILES;
+  }).map((doc) => doc.id).slice(0, CASH_HUB_AUDIENCE_LIMIT);
+}
+
+async function routeEvidence(payload, scheduledTime) {
+  const pickupCoordinate = coordinate(payload?.pickupCoordinate);
+  const destinationCoordinate = coordinate(payload?.destinationCoordinate);
+  if (!pickupCoordinate || !destinationCoordinate) return {};
+  const result = await getDirections({
+    origin: pickupCoordinate,
+    destination: destinationCoordinate,
+    departureDate: scheduledTime.toDate().toISOString()
+  });
+  const route = result.route;
+  return {
+    pickupCoordinate,
+    destinationCoordinate,
+    routeDistanceMiles: Math.round(route.distanceMiles * 100) / 100,
+    routeDurationMinutes: Math.round(route.durationMinutes * 10) / 10,
+    suggestedContribution: suggestedContribution(route.distanceMiles, route.durationMinutes),
+    suggestedPricing: { perMile: CASH_HUB_SUGGESTED_PER_MILE, perMinute: CASH_HUB_SUGGESTED_PER_MINUTE },
+    routeProvider: result.provider,
+    routeCalculatedAt: admin.firestore.Timestamp.now()
+  };
+}
+
+function validateLifecycleEvidence(request, next, driver, nowMillis) {
+  if (next === "confirmed") return null;
+  const location = coordinate(driver?.location);
+  const locationUpdatedAt = timestampMillis(driver?.location?.updatedAt ?? driver?.updatedAt);
+  if (!location || !locationUpdatedAt || nowMillis - locationUpdatedAt > 10 * 60 * 1000) {
+    throw error("A recent driver location is required for this trip update", 409);
+  }
+  const scheduledMillis = timestampMillis(request.scheduledTime);
+  if (next === "arrived") {
+    if (scheduledMillis && nowMillis < scheduledMillis - 90 * 60 * 1000) throw error("Arrival cannot be recorded more than 90 minutes before pickup", 409);
+    const miles = distanceMilesBetween(location, request.pickupCoordinate);
+    if (miles !== null && miles > 2) throw error("Arrival can only be recorded near the pickup", 409);
+  }
+  if (next === "started") {
+    const miles = distanceMilesBetween(location, request.pickupCoordinate);
+    if (miles !== null && miles > 2) throw error("The trip can only start near the pickup", 409);
+  }
+  if (next === "completed") {
+    const startedMillis = timestampMillis(request.cashRideStartedAt);
+    if (!startedMillis || nowMillis - startedMillis < 60 * 1000) throw error("A trip must be in progress before it can be completed", 409);
+    const miles = distanceMilesBetween(location, request.destinationCoordinate);
+    if (miles !== null && miles > 3) throw error("The trip can only be completed near the destination", 409);
+  }
+  return { latitude: location.latitude, longitude: location.longitude };
 }
 function driverVehicleSummary(driver) {
   const vehicle = driver?.vehicle && typeof driver.vehicle === "object" ? driver.vehicle : {};
@@ -165,14 +259,7 @@ async function closeCompetingCashHubNegotiations({ tx, db, requestId, selectedCo
     const explanation = "This negotiation ended because the rider connected with another driver.";
     tx.set(doc.ref, { status:"unavailable", offerStatus:"unavailable", chatStatus:"ended", closedReason:"another_driver_connected", lastMessage:explanation, lastMessageAt:now, closedAt:now, updatedAt:now }, { merge:true });
     tx.create(doc.ref.collection("messages").doc(), { requestId, conversationId:doc.id, senderUid:"system", senderName:"CashRydr Hub", senderRole:"system", kind:"listingTaken", text:explanation, auditVisibleToAdmin:true, createdAt:now });
-    if (conversation.driverUid) {
-      tx.create(db.collection("drivers").doc(conversation.driverUid).collection("notifications").doc(), { type:"cash_hub_listing_taken", title:"Cash Hub negotiation ended", message:explanation, body:explanation, requestId, conversationId:doc.id, isRead:false, createdAt:now });
-    }
   }
-  const riderMessage = "Your Cash Hub post is connected. Any other open price negotiations were closed.";
-  tx.create(db.collection("riders").doc(riderUid).collection("notifications").doc(), { type:"cash_hub_connected", title:"Cash Hub trip connected", body:riderMessage, message:riderMessage, requestId, conversationId:selectedConversationId, isRead:false, createdAt:now });
-  const driverMessage = "This Cash Hub trip is connected and was added to your queue.";
-  tx.create(db.collection("drivers").doc(selectedDriverUid).collection("notifications").doc(), { type:"cash_hub_connected", title:"Cash Hub trip connected", body:driverMessage, message:driverMessage, requestId, conversationId:selectedConversationId, isRead:false, createdAt:now });
 }
 function cashHubAccessAllowed(profile, config, role) {
   if (!hasCurrentTerms(profile, config)) return false;
@@ -310,6 +397,84 @@ async function favoriteDriverUids(db, riderUid) {
   return snapshot.docs.map((doc) => doc.id).filter(Boolean);
 }
 
+async function updateCashHubRelationship({ uid, action, payload, db = getFirestore() }) {
+  const targetUid = text(payload?.targetUid, 160);
+  if (!targetUid || targetUid === uid) throw error("A valid Cash Hub user is required", 400);
+  const riderActions = new Set(["add_favorite_driver", "remove_favorite_driver", "block_driver"]);
+  const driverActions = new Set(["block_rider"]);
+  if (!riderActions.has(action) && !driverActions.has(action)) throw error("Unknown Cash Hub relationship action", 400);
+  const operationKey = idempotencyKey(payload?.idempotencyKey);
+  const receiptRef = operationKey ? db.collection("cashHubOperationReceipts").doc(`${uid}_${operationKey}`) : null;
+  const operation = `relationship:${action}:${targetUid}`;
+  if (receiptRef) {
+    const receipt = await receiptRef.get();
+    if (receipt.exists) {
+      if (receipt.data().operation !== operation) throw error("Idempotency key was already used for another operation", 409);
+      return { ...receipt.data().result, duplicate: true };
+    }
+  }
+  const role = riderActions.has(action) ? "rider" : "driver";
+  await requireAccess(db, uid, role);
+  const now = admin.firestore.Timestamp.now();
+  const batch = db.batch();
+
+  if (action === "add_favorite_driver") {
+    const [driverSnap, blockedSnap, favorites] = await Promise.all([
+      db.collection("cashHubDriverProfiles").doc(targetUid).get(),
+      db.collection("riders").doc(uid).collection("cashHubBlockedDrivers").doc(targetUid).get(),
+      db.collection("riders").doc(uid).collection("cashHubFavoriteDrivers").limit(11).get()
+    ]);
+    if (!driverSnap.exists || driverSnap.data().isRydrVerifiedDriver !== true) throw error("This driver is not eligible for Cash Hub favorites", 409);
+    if (blockedSnap.exists) throw error("Unblock this driver before adding them to favorites", 409);
+    const favoriteRef = db.collection("riders").doc(uid).collection("cashHubFavoriteDrivers").doc(targetUid);
+    if (!favorites.docs.some((doc) => doc.id === targetUid) && favorites.size >= 10) throw error("You can save up to 10 favorite drivers", 409);
+    const driver = driverSnap.data();
+    batch.set(favoriteRef, {
+      driverUid: targetUid,
+      driverName: text(driver.driverName, 80) || "Cash Hub Driver",
+      profilePhotoURL: text(driver.profilePhotoURL, 1000),
+      vehicleInfo: text(driver.vehicleInfo, 200),
+      cashHubRating: Number(driver.cashHubRating) || 5,
+      isIdentityVerified: driver.isIdentityVerified === true,
+      isLicenseVerified: driver.isLicenseVerified === true,
+      isRydrVerifiedDriver: true,
+      addedAt: now,
+      managedBy: "rydr_backend"
+    }, { merge: true });
+  } else if (action === "remove_favorite_driver") {
+    batch.delete(db.collection("riders").doc(uid).collection("cashHubFavoriteDrivers").doc(targetUid));
+  } else {
+    const targetCollection = action === "block_driver" ? "drivers" : "riders";
+    if (!(await db.collection(targetCollection).doc(targetUid).get()).exists) throw error("Cash Hub user not found", 404);
+    if (action === "block_driver") {
+      batch.set(db.collection("riders").doc(uid).collection("cashHubBlockedDrivers").doc(targetUid), {
+        driverUid: targetUid, blockedAt: now, managedBy: "rydr_backend"
+      }, { merge: true });
+      batch.delete(db.collection("riders").doc(uid).collection("cashHubFavoriteDrivers").doc(targetUid));
+    } else {
+      batch.set(db.collection("drivers").doc(uid).collection("cashHubBlockedRiders").doc(targetUid), {
+        riderUid: targetUid, blockedAt: now, managedBy: "rydr_backend"
+      }, { merge: true });
+    }
+    const conversationId = text(payload?.conversationId, 300);
+    if (conversationId) {
+      const conversationRef = db.collection("cashHubConversations").doc(conversationId);
+      const conversationSnap = await conversationRef.get();
+      if (conversationSnap.exists) {
+        const conversation = conversationSnap.data();
+        if (![conversation.riderUid, conversation.driverUid].includes(uid) || ![conversation.riderUid, conversation.driverUid].includes(targetUid)) throw error("Conversation does not match these users", 403);
+        const explanation = "This chat was closed after a participant was blocked.";
+        batch.set(conversationRef, { status:"ended", offerStatus:"ended", chatStatus:"ended", closedReason:"participant_blocked", lastMessage:explanation, lastMessageAt:now, closedAt:now, updatedAt:now }, { merge:true });
+        batch.create(conversationRef.collection("messages").doc(), { requestId:conversation.requestId, conversationId, senderUid:"system", senderName:"CashRydr Hub", senderRole:"system", kind:"chatEnded", text:explanation, auditVisibleToAdmin:true, createdAt:now });
+      }
+    }
+  }
+  const result = { action, targetUid };
+  if (receiptRef) batch.create(receiptRef, { uid, operation, result, createdAt: now });
+  await batch.commit();
+  return result;
+}
+
 function requestFields(payload, nowMillis, fallbackVisibility = PUBLIC_VISIBILITY) {
   const pickup = text(payload?.pickup, 300);
   const destination = text(payload?.destination, 300);
@@ -329,15 +494,17 @@ function requestFields(payload, nowMillis, fallbackVisibility = PUBLIC_VISIBILIT
 }
 
 async function createCashHubRequest({ uid, payload, db = getFirestore(), nowMillis = Date.now() }) {
+  const operationKey = idempotencyKey(payload?.idempotencyKey);
+  if (operationKey) {
+    const receipt = await db.collection("cashHubOperationReceipts").doc(`${uid}_${operationKey}`).get();
+    if (receipt.exists && receipt.data().operation === "create_request") return { ...receipt.data().result, duplicate: true };
+  }
   const rider = await requireAccess(db, uid, "rider");
   const fields = requestFields(payload, nowMillis);
   const allowedDriverUids = fields.visibility === FAVORITES_VISIBILITY ? await favoriteDriverUids(db, uid) : [];
   if (fields.visibility === FAVORITES_VISIBILITY && allowedDriverUids.length === 0) throw error("Add at least one favorite driver before using favorite-only visibility", 409);
-  const operationKey = idempotencyKey(payload?.idempotencyKey);
-  if (operationKey) {
-    const receipt = await db.collection("cashHubOperationReceipts").doc(`${uid}_${operationKey}`).get();
-    if (receipt.exists && receipt.data().operation === "create_request") return receipt.data().result;
-  }
+  const evidence = await routeEvidence(payload, fields.scheduledTime);
+  const eligibleDriverUids = await eligibleDriverAudience(db, evidence.pickupCoordinate, fields.visibility, allowedDriverUids);
   const ref = db.collection("cashRydrRequests").doc();
   const now = admin.firestore.Timestamp.fromMillis(nowMillis);
   const result = { requestId: ref.id, status: "open" };
@@ -346,6 +513,9 @@ async function createCashHubRequest({ uid, payload, db = getFirestore(), nowMill
     riderUid: uid,
     riderName: text(rider.preferredName ?? rider.displayName, 80) || "Cash Hub Rider",
     ...fields,
+    ...evidence,
+    eligibleDriverUids,
+    backendAudienceVersion: 1,
     ...(allowedDriverUids.length > 0 ? { allowedDriverUids } : {}),
     status: "open", stateOwner: "rydr_backend", createdAt: now, updatedAt: now
   });
@@ -355,11 +525,46 @@ async function createCashHubRequest({ uid, payload, db = getFirestore(), nowMill
 }
 
 async function commandCashHubRequest({ uid, requestId, action, payload, db = getFirestore(), nowMillis = Date.now() }) {
+  const requestRef = db.collection("cashRydrRequests").doc(requestId);
+  const operationKey = idempotencyKey(payload?.idempotencyKey);
+  const receiptRef = operationKey ? db.collection("cashHubOperationReceipts").doc(`${uid}_${operationKey}`) : null;
+  const operation = `request_command:${requestId}:${action}`;
+  if (receiptRef) {
+    const receipt = await receiptRef.get();
+    if (receipt.exists) {
+      if (receipt.data().operation !== operation) throw error("Idempotency key was already used for another operation", 409);
+      return { ...receipt.data().result, duplicate: true };
+    }
+  }
   let actorProfile = null;
   if (cashHubActionRequiresActiveAccess(action)) actorProfile = await requireAccess(db, uid, "driver");
+  if (action === "driver_status") {
+    const actorSnap = await db.collection("drivers").doc(uid).get();
+    actorProfile = actorSnap.exists ? actorSnap.data() : null;
+  }
   if (["edit", "visibility", "remove", "accept_offer", "decline_offer", "cancel_connection", "rider_cancel"].includes(action)) await requireAccess(db, uid, "rider");
-  const requestRef = db.collection("cashRydrRequests").doc(requestId);
   const favoriteAudience = ["edit", "visibility"].includes(action) ? await favoriteDriverUids(db, uid) : [];
+  let preparedEdit = null;
+  let preparedVisibility = null;
+  if (action === "edit") {
+    const fields = requestFields(payload, nowMillis);
+    const evidence = await routeEvidence(payload, fields.scheduledTime);
+    preparedEdit = {
+      ...fields,
+      ...evidence,
+      eligibleDriverUids: await eligibleDriverAudience(db, evidence.pickupCoordinate, fields.visibility, favoriteAudience),
+      backendAudienceVersion: 1
+    };
+  } else if (action === "visibility") {
+    const preflightRequest = await requestRef.get();
+    if (!preflightRequest.exists) throw error("Cash Hub request not found", 404);
+    const visibility = normalizeVisibility(payload?.visibility, preflightRequest.data().visibility);
+    preparedVisibility = {
+      visibility,
+      eligibleDriverUids: await eligibleDriverAudience(db, preflightRequest.data().pickupCoordinate, visibility, favoriteAudience),
+      backendAudienceVersion: 1
+    };
+  }
   // Cross-document access and safety checks happen before the transaction. The
   // transaction still revalidates request/offer state so concurrent accepts are safe.
   if (action === "driver_connect") {
@@ -381,7 +586,14 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
     ]);
   }
   return db.runTransaction(async (tx) => {
-    const requestSnap = await tx.get(requestRef);
+    const [requestSnap, receiptSnap] = await Promise.all([
+      tx.get(requestRef),
+      receiptRef ? tx.get(receiptRef) : Promise.resolve(null)
+    ]);
+    if (receiptSnap?.exists) {
+      if (receiptSnap.data().operation !== operation) throw error("Idempotency key was already used for another operation", 409);
+      return { ...receiptSnap.data().result, duplicate: true };
+    }
     if (!requestSnap.exists) throw error("Cash Hub request not found", 404);
     const request = requestSnap.data();
     const isRider = request.riderUid === uid;
@@ -392,14 +604,14 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
 
     if (action === "edit") {
       if (request.status !== "open") throw error("Only open requests may be edited", 409);
-      update = { ...update, ...requestFields(payload, nowMillis, request.visibility) };
+      update = { ...update, ...preparedEdit };
       if (update.visibility === FAVORITES_VISIBILITY) {
         if (favoriteAudience.length === 0) throw error("Add at least one favorite driver before using favorite-only visibility", 409);
         update.allowedDriverUids = favoriteAudience;
       } else update.allowedDriverUids = admin.firestore.FieldValue.delete();
     } else if (action === "visibility") {
       if (request.status !== "open") throw error("Only open requests may change visibility", 409);
-      update.visibility = normalizeVisibility(payload?.visibility, request.visibility);
+      update = { ...update, ...preparedVisibility };
       if (update.visibility === FAVORITES_VISIBILITY) {
         if (favoriteAudience.length === 0) throw error("Add at least one favorite driver before using favorite-only visibility", 409);
         update.allowedDriverUids = favoriteAudience;
@@ -442,8 +654,10 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
       if (offerSnap.data().priceProposedByUid === uid) throw error("The other participant must respond to this price", 409);
       const systemMessageRef = conversationRef.collection("messages").doc();
       tx.set(conversationRef, { status: "open", offerStatus: "negotiating", lastMessage:"Price declined — conversation remains open.", lastMessageAt:now, updatedAt:now }, { merge: true });
-      tx.create(systemMessageRef, { requestId, conversationId:offerId, senderUid:"system", senderName:"CashRydr Hub", senderRole:"system", kind:"offerDeclined", text:"Price declined — conversation remains open.", auditVisibleToAdmin:true, createdAt:now });
-      return { status: request.status };
+      tx.create(systemMessageRef, { requestId, conversationId:offerId, senderUid:"system", senderName:"CashRydr Hub", senderRole:"system", recipientUid:offerSnap.data().priceProposedByUid, kind:"offerDeclined", text:"Price declined — conversation remains open.", auditVisibleToAdmin:true, createdAt:now });
+      const result = { status: request.status };
+      if (receiptRef) tx.create(receiptRef, { uid, operation, result, createdAt: now });
+      return result;
     } else if (action === "cancel_connection") {
       if (!isCashHubConnectedStatus(request.status)) throw error("Request is not connected", 409);
       const conversationId = request.selectedOfferId || (request.connectedDriverUid ? `${requestId}_${request.connectedDriverUid}` : null);
@@ -463,7 +677,11 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
       const next = text(payload?.status, 30);
       const fields = { confirmed: "driverConfirmedAt", arrived: "driverArrivedAt", started: "cashRideStartedAt", completed: "cashCompletedAt" };
       if (!fields[next] || !canTransitionDriverQueue(request.driverQueueStatus, next)) throw error("Invalid Cash Hub status transition", 409);
+      const evidenceLocation = validateLifecycleEvidence(request, next, actorProfile, nowMillis);
       update.driverQueueStatus = next; update[fields[next]] = now;
+      if (evidenceLocation) {
+        update[`${next}Evidence`] = { location: evidenceLocation, recordedAt: now, source: "backend_driver_presence" };
+      }
       if (next === "completed") {
         update.status = "completed";
         const conversationId = request.selectedOfferId || `${requestId}_${uid}`;
@@ -483,7 +701,9 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
       }
     } else throw error("Unknown Cash Hub action", 400);
     tx.set(requestRef, update, { merge: true });
-    return { status: update.status ?? request.status, lateReleasePenalty: update.lateReleasePenalty === true };
+    const result = { status: update.status ?? request.status, lateReleasePenalty: update.lateReleasePenalty === true };
+    if (receiptRef) tx.create(receiptRef, { uid, operation, result, createdAt: now });
+    return result;
   });
 }
 
@@ -492,7 +712,8 @@ async function createCashHubOffer({ uid, requestId, payload, db = getFirestore()
   const now = admin.firestore.Timestamp.now(); const conversationId = `${requestId}_${uid}`;
   const requestRef = db.collection("cashRydrRequests").doc(requestId);
   const conversationRef = db.collection("cashHubConversations").doc(conversationId);
-  const messageRef = conversationRef.collection("messages").doc();
+  const operationKey = idempotencyKey(payload?.idempotencyKey);
+  const messageRef = conversationRef.collection("messages").doc(operationKey || undefined);
   const driverName = text(driver.displayName ?? `${driver.firstName ?? ""} ${driver.lastName ?? ""}`, 80) || "Cash Hub Driver";
   const vehicleInfo = driverVehicleSummary(driver);
   const { offerAmount, message } = normalizeCashHubOffer(payload);
@@ -504,9 +725,10 @@ async function createCashHubOffer({ uid, requestId, payload, db = getFirestore()
     if (!driverCanAccessRequest(request, uid)) throw error("This CashRydr Hub request is not available to this driver", 403);
     const riderBlockRef = db.collection("riders").doc(request.riderUid).collection("cashHubBlockedDrivers").doc(uid);
     const driverBlockRef = db.collection("drivers").doc(uid).collection("cashHubBlockedRiders").doc(request.riderUid);
-    const [existingConversation, riderBlock, driverBlock] = await Promise.all([
-      tx.get(conversationRef), tx.get(riderBlockRef), tx.get(driverBlockRef)
+    const [existingConversation, riderBlock, driverBlock, existingMessage] = await Promise.all([
+      tx.get(conversationRef), tx.get(riderBlockRef), tx.get(driverBlockRef), operationKey ? tx.get(messageRef) : Promise.resolve(null)
     ]);
+    if (existingMessage?.exists) return { conversationId, duplicate: true };
     if (riderBlock.exists || driverBlock.exists) throw error("Cash Rydr Hub contact is blocked", 403);
     if (existingConversation.exists) {
       const existing = existingConversation.data();
@@ -552,6 +774,16 @@ async function sendCashHubMessage({ uid, conversationId, payload, db = getFirest
 async function commandCashHubConversation({ uid, conversationId, action, payload, db = getFirestore(), nowMillis = Date.now() }) {
   if (!["end_chat", "propose_price", "accept_price", "decline_price"].includes(action)) throw error("Unknown Cash Hub conversation action", 400);
   const conversationRef = db.collection("cashHubConversations").doc(conversationId);
+  const operationKey = idempotencyKey(payload?.idempotencyKey);
+  const receiptRef = operationKey ? db.collection("cashHubOperationReceipts").doc(`${uid}_${operationKey}`) : null;
+  const operation = `conversation_command:${conversationId}:${action}`;
+  if (receiptRef) {
+    const receipt = await receiptRef.get();
+    if (receipt.exists) {
+      if (receipt.data().operation !== operation) throw error("Idempotency key was already used for another operation", 409);
+      return { ...receipt.data().result, duplicate: true };
+    }
+  }
   const preliminary = await conversationRef.get();
   if (!preliminary.exists) throw error("Conversation not found", 404);
   const preliminaryConversation = preliminary.data();
@@ -559,7 +791,14 @@ async function commandCashHubConversation({ uid, conversationId, action, payload
   if (!preliminaryRole) throw error("Not a conversation participant", 403);
   if (["propose_price", "accept_price"].includes(action)) await requireAccess(db, uid, preliminaryRole);
   return db.runTransaction(async (tx) => {
-    const snap = await tx.get(conversationRef);
+    const [snap, receiptSnap] = await Promise.all([
+      tx.get(conversationRef),
+      receiptRef ? tx.get(receiptRef) : Promise.resolve(null)
+    ]);
+    if (receiptSnap?.exists) {
+      if (receiptSnap.data().operation !== operation) throw error("Idempotency key was already used for another operation", 409);
+      return { ...receiptSnap.data().result, duplicate: true };
+    }
     if (!snap.exists) throw error("Conversation not found", 404);
     const conversation = snap.data();
     const role = uid === conversation.riderUid ? "rider" : uid === conversation.driverUid ? "driver" : null;
@@ -573,8 +812,10 @@ async function commandCashHubConversation({ uid, conversationId, action, payload
       const update = { chatStatus:"ended", endedByUid:uid, chatEndedAt:now, updatedAt:now };
       if (!connected) Object.assign(update, { status:"ended", offerStatus:"ended", closedAt:now });
       tx.set(conversationRef, update, { merge:true });
-      tx.create(messageRef, { requestId:conversation.requestId, conversationId, senderUid:"system", senderName:"CashRydr Hub", senderRole:"system", kind:"chatEnded", text:"This chat was ended by a participant.", auditVisibleToAdmin:true, createdAt:now });
-      return { status:update.status || conversation.status };
+      tx.create(messageRef, { requestId:conversation.requestId, conversationId, senderUid:"system", senderName:"CashRydr Hub", senderRole:"system", recipientUid:uid === conversation.riderUid ? conversation.driverUid : conversation.riderUid, kind:"chatEnded", text:"This chat was ended by a participant.", auditVisibleToAdmin:true, createdAt:now });
+      const result = { status:update.status || conversation.status };
+      if (receiptRef) tx.create(receiptRef, { uid, operation, result, createdAt: now });
+      return result;
     }
 
     if (conversation.chatStatus === "ended" || conversation.status !== "open") throw error("This price conversation is closed", 409);
@@ -590,7 +831,9 @@ async function commandCashHubConversation({ uid, conversationId, action, payload
       const proposalText = cashHubOfferOpeningMessage(recipientName, offerAmount, payload?.message);
       tx.set(conversationRef, { offerAmount, offerStatus:"pending", priceProposedByUid:uid, priceProposedByRole:role, lastMessage:proposalText, lastMessageAt:now, updatedAt:now }, { merge:true });
       tx.create(messageRef, { requestId:conversation.requestId, conversationId, senderUid:uid, senderName:role === "rider" ? conversation.riderName : conversation.driverName, senderRole:role, kind:"priceProposal", text:proposalText, offerAmount, auditVisibleToAdmin:true, createdAt:now });
-      return { status:"pending", offerAmount };
+      const result = { status:"pending", offerAmount };
+      if (receiptRef) tx.create(receiptRef, { uid, operation, result, createdAt: now });
+      return result;
     }
 
     if (conversation.offerStatus !== "pending" || amount(conversation.offerAmount) === null) throw error("There is no pending price to respond to", 409);
@@ -598,8 +841,10 @@ async function commandCashHubConversation({ uid, conversationId, action, payload
 
     if (action === "decline_price") {
       tx.set(conversationRef, { offerStatus:"negotiating", lastMessage:"Price declined — conversation remains open.", lastMessageAt:now, updatedAt:now }, { merge:true });
-      tx.create(messageRef, { requestId:conversation.requestId, conversationId, senderUid:"system", senderName:"CashRydr Hub", senderRole:"system", kind:"offerDeclined", text:"Price declined — conversation remains open.", auditVisibleToAdmin:true, createdAt:now });
-      return { status:"negotiating" };
+      tx.create(messageRef, { requestId:conversation.requestId, conversationId, senderUid:"system", senderName:"CashRydr Hub", senderRole:"system", recipientUid:conversation.priceProposedByUid, kind:"offerDeclined", text:"Price declined — conversation remains open.", auditVisibleToAdmin:true, createdAt:now });
+      const result = { status:"negotiating" };
+      if (receiptRef) tx.create(receiptRef, { uid, operation, result, createdAt: now });
+      return result;
     }
 
     const agreedPrice = amount(conversation.offerAmount);
@@ -609,12 +854,15 @@ async function commandCashHubConversation({ uid, conversationId, action, payload
     tx.set(requestRef, { status:"connected", driverQueueStatus:"scheduled", connectedDriverUid:driverUid, connectedDriverName:conversation.driverName, connectedVehicleInfo:conversation.vehicleInfo, acceptedByUid:driverUid, acceptedByName:conversation.driverName, selectedOfferId:conversationId, agreedPrice, connectedAt:now, acceptedAt:now, expiresAt:admin.firestore.Timestamp.fromMillis(scheduledMillis + 24 * 60 * 60 * 1000), updatedAt:now, stateOwner:"rydr_backend" }, { merge:true });
     tx.set(conversationRef, { status:"connected", offerStatus:"accepted", chatStatus:"active", connectedAt:now, updatedAt:now }, { merge:true });
     tx.create(messageRef, { requestId:conversation.requestId, conversationId, senderUid:"system", senderName:"CashRydr Hub", senderRole:"system", kind:"priceAccepted", text:`Price accepted at ${agreedPrice.toLocaleString("en-US", { style:"currency", currency:"USD" })}. The trip is now connected.`, offerAmount:agreedPrice, auditVisibleToAdmin:true, createdAt:now });
-    return { status:"connected", agreedPrice };
+    const result = { status:"connected", agreedPrice };
+    if (receiptRef) tx.create(receiptRef, { uid, operation, result, createdAt: now });
+    return result;
   });
 }
 
 module.exports = {
-  acceptCashHubTerms, optOutCashHub, createCashHubRequest, commandCashHubRequest, createCashHubOffer, sendCashHubMessage, commandCashHubConversation,
+  acceptCashHubTerms, optOutCashHub, createCashHubRequest, commandCashHubRequest, createCashHubOffer, sendCashHubMessage, commandCashHubConversation, updateCashHubRelationship,
   normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, isCashHubConnectedStatus, cashHubRemovalUpdate, cashHubReleaseVisibilityUpdate, cashHubRiderCancellationUpdate, cashHubActionRequiresActiveAccess, normalizeCashHubOffer, cashHubOfferOpeningMessage, cashHubAccessAllowed,
+  coordinate, distanceMilesBetween, suggestedContribution, validateLifecycleEvidence,
   PUBLIC_VISIBILITY, FAVORITES_VISIBILITY, MINIMUM_LEAD_TIME_MS
 };

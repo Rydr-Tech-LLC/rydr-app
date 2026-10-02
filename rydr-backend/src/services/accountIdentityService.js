@@ -23,7 +23,7 @@ function linkedProviders(token) {
   return [...new Set(providers)].sort();
 }
 
-async function syncAccountIdentity({ uid, role, token, db = getFirestore() }) {
+async function syncAccountIdentity({ uid, role, token, profileData = null, db = getFirestore() }) {
   if (!ROLES.has(role)) throw error("role must be rider or driver", 400);
   const phone = normalizePhone(token?.phone_number);
   if (!phone) throw error("A verified Firebase phone number is required", 409);
@@ -33,6 +33,23 @@ async function syncAccountIdentity({ uid, role, token, db = getFirestore() }) {
   const indexRef = db.collection(indexCollection).doc(phone);
   const accountLinkRef = db.collection("accountLinks").doc(uid);
   const inviteRef = db.collection("betaInvites").doc(role).collection("phones").doc(phone);
+  let canonicalProfile = {};
+  if (profileData !== null) {
+    if (role !== "rider" || typeof profileData !== "object") throw error("Cash Hub profile data is only supported for riders", 400);
+    const firstName = String(profileData.firstName || "").trim().slice(0, 80);
+    const lastName = String(profileData.lastName || "").trim().slice(0, 80);
+    const email = String(profileData.email || "").trim().toLowerCase().slice(0, 320);
+    if (!firstName || !lastName || !/^\S+@\S+\.\S+$/.test(email)) throw error("First name, last name, and a valid email are required", 400);
+    canonicalProfile = {
+      firstName,
+      lastName,
+      preferredName: `${firstName} ${lastName}`,
+      displayName: `${firstName} ${lastName}`,
+      email,
+      cashHubRole: "rider",
+      hasRydrRiderAccess: false
+    };
+  }
 
   return db.runTransaction(async (tx) => {
     const [profileSnap, indexSnap, accountLinkSnap, inviteSnap] = await Promise.all([
@@ -71,10 +88,12 @@ async function syncAccountIdentity({ uid, role, token, db = getFirestore() }) {
     }, { merge: true });
     tx.set(profileRef, {
       uid,
+      ...canonicalProfile,
       phoneNumber: phone,
       phoneE164: phone,
       linkedAuthProviders: providers,
       accountLinkUpdatedAt: now,
+      createdAt: profileSnap.exists ? profileSnap.data().createdAt ?? now : now,
       updatedAt: now
     }, { merge: true });
     tx.set(accountLinkRef, {

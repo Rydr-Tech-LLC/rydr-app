@@ -8,7 +8,6 @@
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
-import FirebaseStorage
 import PhotosUI
 import UIKit
 
@@ -713,85 +712,29 @@ struct CashHubSignupView: View {
         let cleanFirstName = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanLastName = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayName = "\(cleanFirstName) \(cleanLastName)"
-        var fields: [String: Any] = [
-            "uid": uid,
-            "firstName": cleanFirstName,
-            "lastName": cleanLastName,
-            "preferredName": displayName,
-            "email": normalizedEmail,
-            "phoneNumber": normalizedPhone,
-            "phoneE164": normalizedPhone,
-            "cashHubRole": CashHubRole.rider.rawValue,
-            "hasRydrRiderAccess": false,
-            "createdAt": FieldValue.serverTimestamp()
-        ]
-
-        func writeProfile() {
-            Firestore.firestore().collection("riders").document(uid).setData(fields, merge: true) { error in
-                Task { @MainActor in
-                    if let error {
-                        isSaving = false
-                        errorMessage = error.localizedDescription
-                        return
-                    }
-                    do {
-                        try await RiderCashHubBackend.acceptTerms()
-                        writePhoneIndex(phoneE164: normalizedPhone, uid: uid)
-                        isSaving = false
-                        session.login(
-                            name: displayName,
-                            email: normalizedEmail,
-                            startingTab: .cashHub,
-                            access: .cashHubOnly
-                        )
-                    } catch {
-                        isSaving = false
-                        errorMessage = error.localizedDescription
-                    }
+        let profileImage = selectedProfileImageData.flatMap(UIImage.init(data:))
+        Task { @MainActor in
+            do {
+                try await RiderBackendIdentityService.createCashHubProfile(
+                    firstName: cleanFirstName,
+                    lastName: cleanLastName,
+                    email: normalizedEmail
+                )
+                try await RiderCashHubBackend.acceptTerms()
+                if let profileImage {
+                    _ = try await ImageModerationService.shared.submitProfilePhoto(profileImage)
                 }
+                isSaving = false
+                session.login(
+                    name: displayName,
+                    email: normalizedEmail,
+                    startingTab: .cashHub,
+                    access: .cashHubOnly
+                )
+            } catch {
+                isSaving = false
+                errorMessage = error.localizedDescription
             }
-        }
-
-        guard let selectedProfileImageData else {
-            writeProfile()
-            return
-        }
-
-        let photoRef = Storage.storage().reference().child("riders/\(uid)/cashHubProfilePhoto.jpg")
-        let metadata = StorageMetadata()
-        metadata.contentType = "image/jpeg"
-
-        photoRef.putData(selectedProfileImageData, metadata: metadata) { _, error in
-            if let error {
-                Task { @MainActor in
-                    isSaving = false
-                    errorMessage = "Unable to upload profile photo: \(error.localizedDescription)"
-                }
-                return
-            }
-
-            photoRef.downloadURL { url, error in
-                if let error {
-                    Task { @MainActor in
-                        isSaving = false
-                        errorMessage = "Unable to finish profile photo upload: \(error.localizedDescription)"
-                    }
-                    return
-                }
-
-                if let url {
-                    fields["profilePhotoURL"] = url.absoluteString
-                    fields["cashHubProfilePhotoURL"] = url.absoluteString
-                }
-                writeProfile()
-            }
-        }
-    }
-
-    private func writePhoneIndex(phoneE164: String, uid: String) {
-        Task {
-            do { try await RiderBackendIdentityService.sync() }
-            catch { print("⚠️ backend identity sync failed: \(error.localizedDescription)") }
         }
     }
 }
