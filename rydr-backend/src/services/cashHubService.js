@@ -84,6 +84,27 @@ function hasCurrentTerms(profile, config) {
 function canTransitionDriverQueue(current, next) {
   return DRIVER_QUEUE_TRANSITIONS[String(current || "scheduled")]?.has(next) === true;
 }
+function cashHubRemovalUpdate(request, now) {
+  const status = text(request?.status, 30).toLowerCase();
+  const hasAgreement = ["connected", "accepted", "completed"].includes(status)
+    || Boolean(text(request?.connectedDriverUid, 160))
+    || Boolean(text(request?.acceptedByUid, 160))
+    || Boolean(request?.connectedAt)
+    || Boolean(request?.acceptedAt)
+    || amount(request?.agreedPrice) !== null;
+  const update = {
+    riderHiddenFromMyPosts: true,
+    riderRemovedAt: now
+  };
+  // Removing a marketplace card must not destroy an accepted arrangement.
+  // The connected driver can still finish it, and the completed request stays
+  // available to the rider's Activity history.
+  if (!hasAgreement && status === "open") {
+    update.status = "removed";
+    update.removedAt = now;
+  }
+  return update;
+}
 function cashHubAccessAllowed(profile, config, role) {
   if (!hasCurrentTerms(profile, config)) return false;
   const accountStatus = text(profile.accountStatus, 40).toLowerCase();
@@ -315,8 +336,7 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
         update.allowedDriverUids = favoriteAudience;
       } else update.allowedDriverUids = admin.firestore.FieldValue.delete();
     } else if (action === "remove") {
-      if (request.status !== "open") throw error("Cancel the active connection before removing this request", 409);
-      update = { ...update, status: "removed", removedAt: now };
+      update = { ...update, ...cashHubRemovalUpdate(request, now) };
     } else if (action === "driver_connect") {
       if (request.status !== "open" || request.connectedDriverUid) throw error("Request is no longer available", 409);
       if (!driverCanAccessRequest(request, uid)) throw error("This CashRydr Hub request is not available to this driver", 403);
@@ -433,6 +453,6 @@ async function sendCashHubMessage({ uid, conversationId, payload, db = getFirest
 
 module.exports = {
   acceptCashHubTerms, optOutCashHub, createCashHubRequest, commandCashHubRequest, createCashHubOffer, sendCashHubMessage,
-  normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, cashHubAccessAllowed,
+  normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, cashHubRemovalUpdate, cashHubAccessAllowed,
   PUBLIC_VISIBILITY, FAVORITES_VISIBILITY, MINIMUM_LEAD_TIME_MS
 };

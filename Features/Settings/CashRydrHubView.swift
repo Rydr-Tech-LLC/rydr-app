@@ -49,6 +49,7 @@ struct CashRydrRequest: Identifiable, Equatable {
     var selectedOfferId: String?
     var agreedPrice: Double?
     var createdAt: Date?
+    var isHiddenFromMyPosts: Bool
 
     var isOpen: Bool { status == "open" }
     var isConnected: Bool { status == "connected" || status == "accepted" }
@@ -673,7 +674,7 @@ private final class CashRydrHubVM: ObservableObject {
             errorMessage = "Only the rider who posted this request can delete it."
             return
         }
-        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"remove");await MainActor.run{self?.confirmationMessage="Your request has been deleted."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"remove");await MainActor.run{self?.confirmationMessage="Your request was removed from My Posts. Accepted ride history remains in Activity."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func sendOffer(to request: CashRydrRequest, draft: CashHubOfferDraft, driverName: String) -> Bool {
@@ -904,7 +905,8 @@ private final class CashRydrHubVM: ObservableObject {
             connectedDriverName: data["connectedDriverName"] as? String ?? data["acceptedByName"] as? String,
             selectedOfferId: data["selectedOfferId"] as? String,
             agreedPrice: data["agreedPrice"] as? Double,
-            createdAt: (data["createdAt"] as? Timestamp)?.dateValue()
+            createdAt: (data["createdAt"] as? Timestamp)?.dateValue(),
+            isHiddenFromMyPosts: data["riderHiddenFromMyPosts"] as? Bool ?? false
         )
     }
 
@@ -1018,9 +1020,10 @@ struct CashRydrHubView: View {
     @State private var activityRange: CashHubActivityRange = .days30
 
     private var currentUID: String { Auth.auth().currentUser?.uid ?? "" }
-    private var myRequests: [CashRydrRequest] { vm.requests.filter { $0.riderUid == currentUID } }
+    private var riderRequests: [CashRydrRequest] { vm.requests.filter { $0.riderUid == currentUID } }
+    private var myRequests: [CashRydrRequest] { riderRequests.filter { !$0.isHiddenFromMyPosts } }
     private var completedCashRideCount: Int {
-        myRequests.filter { $0.status == "completed" }.count
+        riderRequests.filter { $0.status == "completed" }.count
     }
 
     private var cashHubFeedEvents: [CashHubFeedEvent] {
@@ -1055,7 +1058,7 @@ struct CashRydrHubView: View {
             ))
         }
 
-        for request in myRequests {
+        for request in riderRequests where !request.isHiddenFromMyPosts || request.status == "completed" {
             let offers = vm.offers(for: request)
             for offer in offers where !request.isConnected {
                 events.append(.init(
@@ -1272,7 +1275,9 @@ struct CashRydrHubView: View {
             Button("Cancel", role: .cancel) { requestPendingDeletion = nil }
         } message: {
             if requestPendingDeletion?.isConnected == true {
-                Text("This cancels the connected Cash Hub request and removes it from My Posts.")
+                Text("This removes the request from My Posts. The driver can still complete the agreed listing, and its history will remain in Activity.")
+            } else if requestPendingDeletion?.status == "completed" {
+                Text("This removes the request from My Posts. Its completed listing history will remain in Activity.")
             } else {
                 Text("This cancels and removes your Cash Hub request from My Posts.")
             }
@@ -1340,7 +1345,7 @@ struct CashRydrHubView: View {
                             }
                         }
                     case .activity:
-                        let completedRequests = myRequests.filter { $0.status == "completed" }
+                        let completedRequests = riderRequests.filter { $0.status == "completed" }
                         let rangeStart = Calendar.current.date(byAdding: .day, value: -activityRange.dayCount, to: Date()) ?? .distantPast
                         let activityRequests = completedRequests
                             .filter { $0.scheduledTime >= rangeStart }
@@ -3130,9 +3135,11 @@ private struct CashHubRiderPanelView: View {
                 Button("Cancel", role: .cancel) { requestPendingDeletion = nil }
             } message: {
                 if requestPendingDeletion?.isConnected == true {
-                    Text("This permanently deletes your request and removes the connected request from your Cash Hub view.")
+                    Text("This removes the request from My Posts. The driver can still complete the agreed listing, and its history will remain in Activity.")
+                } else if requestPendingDeletion?.status == "completed" {
+                    Text("This removes the request from My Posts. Its completed listing history will remain in Activity.")
                 } else {
-                    Text("This permanently deletes your request from Cash Rydr Hub.")
+                    Text("This cancels and removes your request from My Posts.")
                 }
             }
         }

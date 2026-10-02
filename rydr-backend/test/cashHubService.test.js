@@ -9,6 +9,7 @@ const {
   validateScheduledTime,
   hasCurrentTerms,
   canTransitionDriverQueue,
+  cashHubRemovalUpdate,
   cashHubAccessAllowed,
   PUBLIC_VISIBILITY,
   FAVORITES_VISIBILITY
@@ -65,6 +66,28 @@ test("Cash Hub driver lifecycle cannot skip forward or regress", () => {
   assert.equal(canTransitionDriverQueue("started", "completed"), true);
   assert.equal(canTransitionDriverQueue("scheduled", "completed"), false);
   assert.equal(canTransitionDriverQueue("started", "arrived"), false);
+});
+
+test("removing an open Cash Hub post cancels and hides it", () => {
+  const now = { marker: "now" };
+  assert.deepEqual(cashHubRemovalUpdate({ status: "open" }, now), {
+    riderHiddenFromMyPosts: true,
+    riderRemovedAt: now,
+    status: "removed",
+    removedAt: now
+  });
+});
+
+test("removing an accepted or completed Cash Hub post preserves its lifecycle", () => {
+  const now = { marker: "now" };
+  assert.deepEqual(cashHubRemovalUpdate({ status: "connected", connectedDriverUid: "driver-1" }, now), {
+    riderHiddenFromMyPosts: true,
+    riderRemovedAt: now
+  });
+  assert.deepEqual(cashHubRemovalUpdate({ status: "completed", agreedPrice: 25 }, now), {
+    riderHiddenFromMyPosts: true,
+    riderRemovedAt: now
+  });
 });
 
 test("Cash Hub driver access rejects opt-outs, billing suspension, and safety holds", () => {
