@@ -24,6 +24,10 @@ DerivedData/
 *.log
 npm-debug.log*
 
+# Generated review/render artifacts
+tmp/
+output/
+
 # Private signing keys
 *.p8
 
