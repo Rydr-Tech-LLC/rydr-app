@@ -49,6 +49,10 @@ service cloud.firestore {
       return [
         "admin",
         "adminRole",
+        "accountLinkUpdatedAt",
+        "accountDeletionRequestedAt",
+        "accountDeletionStatus",
+        "accountStatus",
         "approvalStatus",
         "availabilityStatus",
         "approvedAt",
@@ -67,6 +71,15 @@ service cloud.firestore {
         "autoApprovedAt",
         "autoApprovedBy",
         "canGoOnline",
+        "cashHubAccessStatus",
+        "cashHubAccessReviewReason",
+        "cashHubAccessRestoredAt",
+        "cashHubAccessRestoredBy",
+        "cashHubAccessSuspendedAt",
+        "cashHubDriverAccessFeeAcknowledged",
+        "cashHubDriverAccessFeeAcknowledgedAt",
+        "cashHubDriverAccessFeeCents",
+        "cashHubDriverAccessFeeVersion",
         "cashHubLastLateReleaseAt",
         "cashHubLastLateReleaseRequestId",
         "cashHubLateReleaseCount",
@@ -74,6 +87,11 @@ service cloud.firestore {
         "cashHubRating",
         "cashHubTrustScore",
         "cashHubWarnings",
+        "cashHubOptedOut",
+        "cashHubOptedOutAt",
+        "cashHubTermsAccepted",
+        "cashHubTermsAcceptedAt",
+        "cashHubTermsVersion",
         "debugApprovalBypassEnabled",
         "debugApprovalBypassUpdatedAt",
         "documents",
@@ -89,6 +107,7 @@ service cloud.firestore {
         "isOnline",
         "isRydrVerifiedDriver",
         "isVerified",
+        "linkedAuthProviders",
         "missionControlApprovalOverride",
         "missionControlApprovalOverrideAt",
         "missionControlApprovalOverrideBy",
@@ -97,8 +116,13 @@ service cloud.firestore {
         "online",
         "paymentStatus",
         "pendingBalance",
+        "photoURL",
         "rating",
+        "ratingCount",
+        "reputation",
         "reviewStatus",
+        "resolvedSuggestedRates",
+        "suggestedPricingResolvedAt",
         "stripeAccountId",
         "stripeCustomerId",
         "trustScore",
@@ -109,6 +133,39 @@ service cloud.firestore {
         "verifiedAt",
         "walletBalance",
         "walletCents"
+      ];
+    }
+
+    function backendOwnedDriverProfileFields() {
+      return [
+        "backgroundAcknowledgementVersion",
+        "backgroundCheckAcknowledged",
+        "backgroundCheckAcknowledgedAt",
+        "backgroundCheckDob",
+        "backgroundCheckEmail",
+        "backgroundCheckFlow",
+        "backgroundCheckLegalFirstName",
+        "backgroundCheckLegalLastName",
+        "backgroundCheckLicenseNumberLast4",
+        "backgroundCheckLicenseState",
+        "backgroundCheckManualReviewRequired",
+        "backgroundCheckPhone",
+        "backgroundCheckProvider",
+        "backgroundCheckRedirectedAt",
+        "backgroundCheckRedirectURL",
+        "backgroundCheckSource",
+        "backgroundCheckStepCompleted",
+        "compliments",
+        "eligibleRideTypes",
+        "pendingProfilePhotoPath",
+        "pendingProfilePhotoURL",
+        "profilePhotoReviewStatus",
+        "profilePhotoUpdatedAt",
+        "profilePhotoURL",
+        "qualifiedRideTypes",
+        "supportedRideTypes",
+        "tierRates",
+        "vehicleEligibility"
       ];
     }
 
@@ -136,7 +193,6 @@ service cloud.firestore {
 
     function cashHubOptOutFields() {
       return [
-        "cashHubAccessStatus",
         "cashHubOptedOut",
         "cashHubOptedOutAt",
         "cashHubRole",
@@ -170,6 +226,30 @@ service cloud.firestore {
             && cashHubCurrentTermsAcceptedIn(/databases/$(database)/documents/drivers/$(request.auth.uid))
           )
         );
+    }
+
+    function cashHubAuthorizedMarketplaceAccess() {
+      let riderPath = /databases/$(database)/documents/riders/$(request.auth.uid);
+      let driverPath = /databases/$(database)/documents/drivers/$(request.auth.uid);
+      let riderAllowed = exists(riderPath)
+        && cashHubCurrentTermsAcceptedIn(riderPath)
+        && (!("accountStatus" in get(riderPath).data) || !(get(riderPath).data.accountStatus in ["deletion_requested", "removed", "suspended"]));
+      let driverAllowed = exists(driverPath)
+        && cashHubCurrentTermsAcceptedIn(driverPath)
+        && (!("cashHubOptedOut" in get(driverPath).data) || get(driverPath).data.cashHubOptedOut != true)
+        && (!("cashHubAccessStatus" in get(driverPath).data) || !(get(driverPath).data.cashHubAccessStatus in ["delinquent", "past_due", "review_required", "suspended", "revoked", "optedout", "opted_out"]))
+        && (get(driverPath).data.isApproved == true || get(driverPath).data.driverApprovalStatus == "approved" || get(driverPath).data.approvalStatus == "approved");
+      return signedIn() && (riderAllowed || driverAllowed);
+    }
+
+    function cashHubAuthorizedDriverAccess() {
+      let driverPath = /databases/$(database)/documents/drivers/$(request.auth.uid);
+      return signedIn()
+        && exists(driverPath)
+        && cashHubCurrentTermsAcceptedIn(driverPath)
+        && (!("cashHubOptedOut" in get(driverPath).data) || get(driverPath).data.cashHubOptedOut != true)
+        && (!("cashHubAccessStatus" in get(driverPath).data) || !(get(driverPath).data.cashHubAccessStatus in ["delinquent", "past_due", "review_required", "suspended", "revoked", "optedout", "opted_out"]))
+        && (get(driverPath).data.isApproved == true || get(driverPath).data.driverApprovalStatus == "approved" || get(driverPath).data.approvalStatus == "approved");
     }
 
     function noCashHubTermsAcceptanceOnCreateWhenDisabled() {
@@ -210,8 +290,9 @@ service cloud.firestore {
       return signedIn()
         && request.resource.data.riderId == request.auth.uid
         && request.resource.data.status == "pending"
+        && riderAccountCanRequestRide()
         && !request.resource.data.keys().hasAny([
-          "acceptedPricingVersion", "authorizedRiderChargeCents", "backendActualDistanceMiles",
+          "acceptedDemandLevel", "acceptedPricingVersion", "authorizedRiderChargeCents", "backendActualDistanceMiles",
           "bookingFeeBeforeCreditCents", "bookingFeeCreditCents", "bookingFeeCents", "calculatedSubtotalCents",
           "cancellationFeeCents", "cancellationTotalChargeCents", "driverPayoutCents",
           "driverMinimumFareCents", "driverRatePerMileCents", "driverRatePerMinuteCents",
@@ -220,8 +301,16 @@ service cloud.firestore {
           "financialOutcomeStatus", "grossChargeCents", "outcomeType",
           "minimumFareAdjustmentCents", "paymentStatus", "platformShareCents", "pricingVersion",
           "promoDiscountCents", "promotionDiscountCents", "rideSubtotalCents",
-          "timeAdjustmentCents", "timeCostCents", "distanceCostCents", "waitChargeCents"
+          "timeAdjustmentCents", "timeCostCents", "distanceCostCents", "waitChargeCents",
+          "attemptedDriverIds", "dispatchAttemptNumber", "dispatchCandidateIds", "dispatchStatus",
+          "dispatchUpdatedAt", "lastDispatchRequestId", "offerCreatedAt", "offerExpiresAt", "terminalReason"
         ]);
+    }
+
+    function riderAccountCanRequestRide() {
+      let riderPath = /databases/$(database)/documents/riders/$(request.auth.uid);
+      return exists(riderPath)
+        && (!("accountStatus" in get(riderPath).data) || !(get(riderPath).data.accountStatus in ["deletion_requested", "removed", "suspended"]));
     }
 
     function matchingAcceptedRideRequest(rideId) {
@@ -285,7 +374,7 @@ service cloud.firestore {
     function validRideLifecycleUpdate() {
       return rideParticipant(resource.data)
         && !affectedKeys().hasAny([
-          "arrivedAtPickupAt", "arrivedAtStopAt", "cancelledAt", "cancelledBy",
+          "acceptedDemandLevel", "arrivedAtPickupAt", "arrivedAtStopAt", "cancelledAt", "cancelledBy",
           "cancelledByRole", "cancellationBookingFeeCents", "cancellationDriverPayoutCents",
           "cancellationFeeApplies", "cancellationFeeCents", "cancellationPlatformFeeCents",
           "cancellationTotalChargeCents", "completedAt", "driverPayoutCents",
@@ -297,7 +386,9 @@ service cloud.firestore {
           "proratedCancellationDriverPayoutCents", "proratedCancellationPlatformFeeCents",
           "activeAt", "driverQueueStatus", "queuedAt", "queuedRideStartedAt",
           "rideStartedAt", "riderRideState", "riderStatusMessage", "startedAt", "status",
-          "stopWaitStartedAt", "waitChargeCents"
+          "stopWaitStartedAt", "waitChargeCents", "attemptedDriverIds", "dispatchAttemptNumber",
+          "dispatchCandidateIds", "dispatchStatus", "dispatchUpdatedAt", "lastDispatchRequestId",
+          "offerCreatedAt", "offerExpiresAt", "terminalReason"
         ])
         && affectedKeys().hasOnly([
           "acceptedAt",
@@ -383,11 +474,7 @@ service cloud.firestore {
     function validRideParticipantMetadataUpdate() {
       return rideParticipant(resource.data)
         && affectedKeys().hasOnly([
-          "driverLocation",
-          "driverLocationUpdatedAt",
-          "driverRiderRating",
           "navigationProvider",
-          "riderDriverRating",
           "updatedAt"
         ]);
     }
@@ -443,7 +530,10 @@ service cloud.firestore {
       return signedIn()
         && chatParticipant(get(/databases/$(database)/documents/rideChats/$(chatId)).data)
         && request.resource.data.senderId == request.auth.uid
-        && request.resource.data.senderRole in ["rider", "driver", "support"]
+        && (
+          (get(/databases/$(database)/documents/rideChats/$(chatId)).data.riderId == request.auth.uid && request.resource.data.senderRole == "rider") ||
+          (get(/databases/$(database)/documents/rideChats/$(chatId)).data.driverId == request.auth.uid && request.resource.data.senderRole == "driver")
+        )
         && request.resource.data.ciphertext is string
         && request.resource.data.nonce is string
         && request.resource.data.algorithm == "AES.GCM.v1"
@@ -474,15 +564,24 @@ service cloud.firestore {
     }
 
     function cashHubPublicOpenRequest(data) {
-      return signedIn()
+      return cashHubAuthorizedDriverAccess()
         && data.status == "open"
         && data.visibility in ["public", "Public CashRydr Hub Community"];
+    }
+
+    function cashHubFavoriteOpenRequest(data) {
+      return cashHubAuthorizedDriverAccess()
+        && data.status == "open"
+        && data.visibility == "Favorite Drivers"
+        && data.allowedDriverUids is list
+        && request.auth.uid in data.allowedDriverUids;
     }
 
     function cashHubRequestReadable(data) {
       return cashHubRequestOwner(data)
         || cashHubConnectedDriver(data)
         || cashHubPublicOpenRequest(data)
+        || cashHubFavoriteOpenRequest(data)
         || isAdmin();
     }
 
@@ -698,10 +797,6 @@ service cloud.firestore {
       return [
         "approximateLocation",
         "displayName",
-        "eligibleRideTypes",
-        "profilePhotoURL",
-        "rating",
-        "ratingCount",
         "rideFilters",
         "tierRates",
         "uid",
@@ -768,8 +863,12 @@ service cloud.firestore {
     match /drivers/{uid} {
       allow get: if isSelf(uid) || phoneMatches(resource.data) || isAdmin();
       allow list: if false;
-      allow create: if isSelf(uid) && hasApprovedBetaInvite("driver") && noBackendOwnedKeysOnCreate() && noCashHubTermsAcceptanceOnCreateWhenDisabled();
-      allow update: if isSelf(uid) && noBackendOwnedKeysChanged() && noCashHubTermsAcceptanceChangedWhenDisabled();
+      allow create: if isSelf(uid) && hasApprovedBetaInvite("driver") && noBackendOwnedKeysOnCreate()
+        && !request.resource.data.keys().hasAny(backendOwnedDriverProfileFields())
+        && noCashHubTermsAcceptanceOnCreateWhenDisabled();
+      allow update: if isSelf(uid) && noBackendOwnedKeysChanged()
+        && !affectedKeys().hasAny(backendOwnedDriverProfileFields())
+        && noCashHubTermsAcceptanceChangedWhenDisabled();
       allow delete: if isAdmin();
 
       match /notificationTokens/{tokenId} {
@@ -813,69 +912,29 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
-    // Lightweight phone -> uid pointer used to resolve a driver's phone number
-    // without ever needing to run a `list`/query against /drivers (which is
-    // disabled there to prevent phone-number enumeration). The document only
-    // ever contains a uid pointer, never profile data, so a public `get` is safe.
+    // Backend-owned phone -> uid pointers. A caller may only read the exact
+    // index matching the verified phone claim in their Firebase ID token.
     match /driverPhoneIndex/{phone} {
-      allow get: if true;
+      allow get: if hasVerifiedPhone() && request.auth.token.phone_number == phone;
       allow list: if false;
-      allow create: if signedIn()
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.keys().hasOnly(["uid", "createdAt"]);
-      allow update: if isSelf(resource.data.uid)
-        && request.resource.data.uid == resource.data.uid;
-      allow delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
-    // Rider phone -> uid pointer used for phone login without allowing
-    // collection queries against /riders.
+    // Rider equivalent; list and all client writes remain denied.
     match /riderPhoneIndex/{phone} {
-      allow get: if true;
+      allow get: if hasVerifiedPhone() && request.auth.token.phone_number == phone;
       allow list: if false;
-      allow create: if signedIn()
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.keys().hasOnly(["uid", "createdAt"]);
-      allow update: if isSelf(resource.data.uid)
-        && request.resource.data.uid == resource.data.uid;
-      allow delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /accountLinks/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow write: if isAdmin();
     }
 
     match /driver_status/{uid} {
       allow read: if signedIn();
-      allow create: if isSelf(uid)
-        && request.resource.data.keys().hasOnly([
-          "autoAcceptQueuedRides",
-          "course",
-          "lat",
-          "lng",
-          "location",
-          "qualifiedRideTypes",
-          "rideFilters",
-          "rideTypes",
-          "selectedRideTypes",
-          "speed",
-          "supportedRideTypes",
-          "tierRates",
-          "updatedAt"
-        ]);
-      allow update: if isSelf(uid)
-        && affectedKeys().hasOnly([
-          "autoAcceptQueuedRides",
-          "course",
-          "lat",
-          "lng",
-          "location",
-          "qualifiedRideTypes",
-          "rideFilters",
-          "rideTypes",
-          "selectedRideTypes",
-          "speed",
-          "supportedRideTypes",
-          "tierRates",
-          "updatedAt"
-        ]);
-      allow delete: if isSelf(uid) || isAdmin();
+      allow write: if isAdmin();
     }
 
     match /driverPresenceEvents/{eventId} {
@@ -885,9 +944,7 @@ service cloud.firestore {
 
     match /publicDriverProfiles/{driverUid} {
       allow read: if signedIn();
-      allow create: if validPublicDriverProfileOwnerCreate(driverUid) || isAdmin();
-      allow update: if validPublicDriverProfileOwnerUpdate(driverUid) || isAdmin();
-      allow delete: if isSelf(driverUid) || isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     match /driverApprovalRequests/{uid} {
@@ -906,10 +963,13 @@ service cloud.firestore {
     }
 
     match /cashHubDriverProfiles/{driverUid} {
-      allow read: if signedIn();
-      allow create: if isSelf(driverUid) && noBackendOwnedKeysOnCreate();
-      allow update: if isSelf(driverUid) && noBackendOwnedKeysChanged();
-      allow delete: if isAdmin();
+      allow read: if cashHubAuthorizedMarketplaceAccess() || isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /cashHubAccessReceipts/{receiptId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     match /rideRequests/{rideId} {
@@ -927,7 +987,6 @@ service cloud.firestore {
         && request.resource.data.source == "standardRydr"
         && request.resource.data.keys().hasOnly([
           "createdAt",
-          "expiresAt",
           "id",
           "pickupCoordinate",
           "pickupGeoPoint",
@@ -949,23 +1008,7 @@ service cloud.firestore {
 
       match /telemetry/{eventId} {
         allow read: if rideParticipant(get(/databases/$(database)/documents/rides/$(rideId)).data) || isAdmin();
-        allow create: if signedIn()
-          && get(/databases/$(database)/documents/rides/$(rideId)).data.driverId == request.auth.uid
-          && request.resource.data.rideId == rideId
-          && request.resource.data.driverId == request.auth.uid
-          && request.resource.data.keys().hasOnly([
-            "course",
-            "driverId",
-            "horizontalAccuracy",
-            "lat",
-            "lng",
-            "recordedAt",
-            "rideId",
-            "riderId",
-            "speed",
-            "status"
-          ]);
-        allow update, delete: if false;
+        allow create, update, delete: if false;
       }
 
       match /financial/{documentId} {
@@ -976,8 +1019,7 @@ service cloud.firestore {
 
     match /rideChats/{rideId} {
       allow read: if chatParticipant(resource.data) || isAdmin();
-      allow create: if validRideChatCreate() || isAdmin();
-      allow update: if validRideChatUpdate() || isAdmin();
+      allow create, update: if isAdmin();
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
@@ -995,7 +1037,7 @@ service cloud.firestore {
           signedIn()
           && get(/databases/$(database)/documents/rideChats/$(rideId)).data.driverId == request.auth.uid
           && request.resource.data.senderId == request.auth.uid
-          && request.resource.data.senderRole in ["driver", "system"]
+          && request.resource.data.senderRole == "driver"
           && request.resource.data.text is string
           && request.resource.data.visibility == "driverOnly"
           && request.resource.data.keys().hasOnly([
@@ -1011,51 +1053,39 @@ service cloud.firestore {
     }
 
     match /riderRatings/{ratingId} {
-      allow create: if signedIn() && request.resource.data.driverId == request.auth.uid;
       allow read: if signedIn() && (resource.data.driverId == request.auth.uid || isAdmin());
-      allow update, delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     match /driverRatings/{ratingId} {
-      allow create: if signedIn()
-        && request.resource.data.riderId == request.auth.uid
-        && request.resource.data.rideId == ratingId
-        && get(/databases/$(database)/documents/rides/$(ratingId)).data.riderId == request.auth.uid;
-      allow update: if signedIn()
-        && resource.data.riderId == request.auth.uid
-        && request.resource.data.riderId == request.auth.uid
-        && request.resource.data.rideId == ratingId;
       allow read: if signedIn() && (
+        resource.data.reporterUid == request.auth.uid ||
         resource.data.riderId == request.auth.uid ||
         resource.data.driverId == request.auth.uid ||
         isAdmin()
       );
-      allow delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     match /cashRydrRequests/{requestId} {
       allow read: if cashHubRequestReadable(resource.data);
-      allow create: if validCashHubRequestCreate();
-      allow update: if validCashHubOwnerUpdate() || validCashHubDriverConnect() || validCashHubConnectedDriverUpdate() || isAdmin();
-      allow delete: if cashHubRequestOwner(resource.data) || isAdmin();
+      allow create, update, delete: if isAdmin();
 
       match /responses/{responseId} {
         allow read: if cashHubResponseReadable(requestId);
-        allow create: if validCashHubResponseCreate(requestId);
-        allow update: if validCashHubResponseUpdate(requestId) || isAdmin();
+        allow create, update: if isAdmin();
         allow delete: if isAdmin();
       }
     }
 
     match /cashHubConversations/{conversationId} {
       allow read: if cashHubConversationParticipant(resource.data) || isAdmin();
-      allow create: if validCashHubConversationCreate() || isAdmin();
-      allow update: if validCashHubConversationUpdate() || isAdmin();
+      allow create, update: if isAdmin();
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
         allow read: if cashHubConversationParticipant(get(/databases/$(database)/documents/cashHubConversations/$(conversationId)).data) || isAdmin();
-        allow create: if validCashHubConversationMessageCreate(conversationId) || isAdmin();
+        allow create: if isAdmin();
         allow update, delete: if isAdmin();
       }
     }
@@ -1066,52 +1096,35 @@ service cloud.firestore {
         resource.data.riderId == request.auth.uid ||
         isAdmin()
       );
-      allow create: if signedIn()
-        && request.resource.data.driverId == request.auth.uid
-        && request.resource.data.status == "open";
+      allow create: if isAdmin();
       allow update, delete: if isAdmin();
     }
 
     match /supportTickets/{ticketId} {
       allow read: if supportOwner(resource.data) || isAdmin();
-      allow create: if signedIn()
-        && request.resource.data.userId == request.auth.uid
-        && request.resource.data.userRole in ["rider", "driver"];
-      allow update: if (supportOwner(resource.data) && affectedKeys().hasOnly(["status", "updatedAt"])) || isAdmin();
+      allow create, update: if isAdmin();
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
         allow read: if supportOwner(get(/databases/$(database)/documents/supportTickets/$(ticketId)).data) || isAdmin();
-        allow create: if signedIn()
-          && supportOwner(get(/databases/$(database)/documents/supportTickets/$(ticketId)).data)
-          && request.resource.data.senderId == request.auth.uid
-          && request.resource.data.senderRole in ["rider", "driver"]
-          && request.resource.data.text is string;
+        allow create: if isAdmin();
         allow update, delete: if isAdmin();
       }
     }
 
     match /supportCallRequests/{requestId} {
       allow read: if supportOwner(resource.data) || isAdmin();
-      allow create: if signedIn()
-        && request.resource.data.userId == request.auth.uid
-        && request.resource.data.userRole in ["rider", "driver"];
+      allow create: if isAdmin();
       allow update, delete: if isAdmin();
     }
 
     match /accountDeletionRequests/{requestId} {
-      allow create: if signedIn()
-        && (
-          requestId == request.auth.uid ||
-          request.resource.data.uid == request.auth.uid ||
-          request.resource.data.userId == request.auth.uid
-        );
-      allow read: if (
+      allow read: if isAdmin() || (signedIn() && (
           requestId == request.auth.uid ||
           resource.data.uid == request.auth.uid ||
           resource.data.userId == request.auth.uid
-        ) || isAdmin();
-      allow update, delete: if isAdmin();
+        ));
+      allow create, update, delete: if isAdmin();
     }
 
     match /waitTimeEvents/{eventId} {
@@ -1246,16 +1259,12 @@ service cloud.firestore {
     // entirely via the Admin SDK — this rule only governs the mobile apps.
     match /safetyReports/{reportId} {
       allow read: if signedIn() && (
+        resource.data.reporterUid == request.auth.uid ||
         resource.data.riderId == request.auth.uid ||
         resource.data.driverId == request.auth.uid ||
         isAdmin()
       );
-      allow create: if signedIn()
-        && (
-          request.resource.data.riderId == request.auth.uid ||
-          request.resource.data.driverId == request.auth.uid
-        )
-        && request.resource.data.status == "open";
+      allow create: if isAdmin();
       allow update, delete: if isAdmin();
     }
 
@@ -1275,20 +1284,7 @@ service cloud.firestore {
         resource.data.driverId == request.auth.uid ||
         isAdmin()
       );
-      allow create: if signedIn()
-        && request.resource.data.driverId == request.auth.uid
-        && request.resource.data.status == "submitted"
-        && request.resource.data.keys().hasOnly([
-          "penaltyId",
-          "driverId",
-          "rideId",
-          "riderReportId",
-          "category",
-          "reason",
-          "status",
-          "createdAt",
-          "updatedAt"
-        ]);
+      allow create: if isAdmin();
       allow update, delete: if isAdmin();
     }
 

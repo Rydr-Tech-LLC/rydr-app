@@ -61,50 +61,13 @@ async function recordWaitTimeEvent(payload) {
 
   await ref.set(event);
 
-  // TODO: Feed this event into production billing/ledger logic on the backend.
-  // The iOS client reports lifecycle state only and must not be trusted for final fare calculation.
-
-  return ref.id;
-}
-
-async function createAccountDeletionRequest(payload) {
-  const uid = cleanString(payload.uid);
-
-  if (!uid) {
-    throw validationError("uid is required");
-  }
-
-  const db = getFirestore();
-  // Keyed by uid (not a random doc id) so this call is idempotent with the
-  // driver app's own direct Firestore write to the same path
-  // (DriverDashboardVM.requestAccountDeletion), and so Mission Control's
-  // processing queue and Firestore rules (`requestId == request.auth.uid`)
-  // both have exactly one request document per account to act on.
-  const ref = db.collection("accountDeletionRequests").doc(uid);
-  const request = {
-    uid,
-    userId: uid,
-    role: cleanOptionalString(payload.role) || "driver",
-    email: cleanOptionalString(payload.email) || null,
-    reason: cleanOptionalString(payload.reason) || null,
-    status: "requested",
-    source: "driver_app",
-    clientRequestedAt: cleanOptionalString(payload.requestedAt) || null,
-    requestedAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-  };
-
-  // The actual deletion (Firebase Auth user removal, Firestore
-  // anonymization, Stripe customer/Connect cleanup) is performed by Mission
-  // Control's admin-only processing route after human review — see
-  // RydrMissionControl/app/api/account-deletions/[id]/process/route.ts.
-  // This service only ever enqueues the request.
-  await ref.set(request, { merge: true });
+  // This is audit/presentation telemetry only. Financial calculation uses the
+  // backend-authored lifecycle timestamps on the ride document, never these
+  // client-reported durations.
 
   return ref.id;
 }
 
 module.exports = {
-  recordWaitTimeEvent,
-  createAccountDeletionRequest
+  recordWaitTimeEvent
 };

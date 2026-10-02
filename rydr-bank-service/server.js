@@ -8,6 +8,7 @@
 import express from "express";
 import cors from "cors";
 import admin from "firebase-admin";
+import { completedRideEvidence, normalizeEmail, verifyWebBookingToken } from "./policy.js";
 
 // ---------- Firebase Admin ----------
 if (!admin.apps.length) {
@@ -24,7 +25,67 @@ const db = admin.firestore();
 // ---------- Express ----------
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: true })); // tighten later
+const allowedOrigins = (process.env.CORS_ORIGINS || "https://www.rydr-go.com,https://rydr-go.com")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error("cors_origin_denied"));
+  },
+}));
+
+const webBuckets = new Map();
+function webRateLimit(req, res, next) {
+  const now = Date.now();
+  if (webBuckets.size > 10_000) {
+    for (const [bucketKey, value] of webBuckets) {
+      if (value.resetAt <= now) webBuckets.delete(bucketKey);
+    }
+  }
+  const key = req.ip || "unknown";
+  const bucket = webBuckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    webBuckets.set(key, { count: 1, resetAt: now + 60_000 });
+    return next();
+  }
+  if (bucket.count >= 30) return res.status(429).json({ error: "too_many_requests" });
+  bucket.count += 1;
+  return next();
+}
+
+function routeError(res, error, fallback) {
+  const status = Number.isInteger(error?.statusCode) ? error.statusCode : (fallback === "server_error" ? 500 : 400);
+  const message = status >= 500 ? fallback : (error?.message || fallback);
+  return res.status(status).json({ error: message });
+}
+
+async function authoritativeRideEvidence(rideId, uid) {
+  const rideRef = db.collection("rides").doc(String(rideId));
+  const [rideSnap, outcomeSnap] = await Promise.all([
+    rideRef.get(),
+    rideRef.collection("financial").doc("outcome").get(),
+  ]);
+  const ride = rideSnap.exists ? rideSnap.data() : null;
+  return completedRideEvidence(ride ? { ...ride, hasFinancialOutcome: outcomeSnap.exists } : null, uid);
+}
+
+function requireSignedWebBooking(action) {
+  return (req, res, next) => {
+    try {
+      const body = req.body || {};
+      verifyWebBookingToken({
+        token: req.get("x-rydr-booking-token"),
+        secret: process.env.RYDR_WEB_BOOKING_SECRET,
+        expected: { ...body, action },
+      });
+      return next();
+    } catch (error) {
+      return routeError(res, error, "invalid_booking_token");
+    }
+  };
+}
 
 // ---------- Auth middleware ----------
 async function requireAuth(req, res, next) {
@@ -268,19 +329,19 @@ async function accrueAndMaybeMintInOneTxn(uid, rideId, distanceMi, rideType) {
 
 // Health
 app.get("/", (_, res) => res.send("RydrBank service up"));
+app.get("/health", (_, res) => res.json({ status: "healthy", service: "rydr-bank" }));
 
 // Earn (simulate ride completion). distanceMi >= 5 required to be eligible.
 app.post("/rides/complete", requireAuth, async (req, res) => {
   try {
-    const { rideId, distanceMi, rideType } = req.body || {};
-    if (!rideId || typeof distanceMi !== "number") {
-      return res.status(400).json({ error: "rideId and distanceMi required" });
-    }
+    const { rideId } = req.body || {};
+    if (!rideId) return res.status(400).json({ error: "rideId required" });
+    const { distanceMi, rideType } = await authoritativeRideEvidence(rideId, req.uid);
     const out = await accrueAndMaybeMintInOneTxn(req.uid, rideId, distanceMi, rideType);
     return res.json(out);
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ error: "server_error" });
+    return routeError(res, e, "server_error");
   }
 });
 
@@ -360,10 +421,11 @@ app.post("/promo/release", requireAuth, async (req, res) => {
 
 // Consume a code after the ride is completed (mobile)
 app.post("/promo/consume", requireAuth, async (req, res) => {
-  const { code, rideId, rideType, distanceMi } = req.body || {};
+  const { code, rideId } = req.body || {};
   if (!code || !rideId) return res.status(400).json({ error: "code and rideId required" });
 
   try {
+    const { rideType, distanceMi } = await authoritativeRideEvidence(rideId, req.uid);
     await db.runTransaction(async (t) => {
       const idxRef = db.collection("codes_index").doc(code);
       const idxSnap = await t.get(idxRef);
@@ -535,9 +597,9 @@ app.post("/promo/transfer", requireAuth, async (req, res) => {
 // ===== Web booking (no auth) for non-user recipients =====
 
 // Preview/apply (no auth) -> check external email owns the code
-app.post("/web/promo/preview", async (req, res) => {
+app.post("/web/promo/preview", webRateLimit, requireSignedWebBooking("preview"), async (req, res) => {
   const { code, email, bookingId, rideType, distanceMi } = req.body || {};
-  if (!code || !email) return res.status(400).json({ error: "code and email required" });
+  if (!code || !email || !bookingId) return res.status(400).json({ error: "code, email, and bookingId required" });
 
   try {
     let rewardLabel = "Rydr Go / Rydr Eco";
@@ -547,7 +609,7 @@ app.post("/web/promo/preview", async (req, res) => {
       if (!idxSnap.exists) throw new Error("not_found");
 
       const owner = idxSnap.get("currentOwnerUid");
-      if (owner !== `external:${email.toLowerCase()}`) throw new Error("not_owner_external");
+      if (owner !== `external:${normalizeEmail(email)}`) throw new Error("not_owner_external");
       assertCodeMatchesRide(
         {
           rewardGroup: idxSnap.get("rewardGroup") || "go_eco",
@@ -574,7 +636,7 @@ app.post("/web/promo/preview", async (req, res) => {
 });
 
 // Consume (no auth) -> mark external code as used
-app.post("/web/promo/consume", async (req, res) => {
+app.post("/web/promo/consume", webRateLimit, requireSignedWebBooking("consume"), async (req, res) => {
   const { code, email, rideId, rideType, distanceMi } = req.body || {};
   if (!code || !email || !rideId)
     return res.status(400).json({ error: "code, email, rideId required" });
@@ -586,7 +648,11 @@ app.post("/web/promo/consume", async (req, res) => {
       if (!idxSnap.exists) throw new Error("not_found");
 
       const owner = idxSnap.get("currentOwnerUid");
-      if (owner !== `external:${email.toLowerCase()}`) throw new Error("not_owner_external");
+      if (owner !== `external:${normalizeEmail(email)}`) throw new Error("not_owner_external");
+      if (idxSnap.get("status") === "used") {
+        if (idxSnap.get("usedRideId") === rideId) return;
+        throw new Error("already_used");
+      }
       assertCodeMatchesRide(
         {
           rewardGroup: idxSnap.get("rewardGroup") || "go_eco",
@@ -597,7 +663,7 @@ app.post("/web/promo/consume", async (req, res) => {
       );
 
       t.update(idxRef, {
-        usedByExternal: email.toLowerCase(),
+        usedByExternal: normalizeEmail(email),
         usedRideId: rideId,
         usedAt: admin.firestore.FieldValue.serverTimestamp(),
         status: "used", // informational

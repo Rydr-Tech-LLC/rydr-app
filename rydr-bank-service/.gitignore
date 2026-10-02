@@ -13,6 +13,7 @@ coverage/
 # Env & secrets
 .env
 .env.*
+!.env.example
 firebase-service-account.json
 /etc/secrets/
 /secrets/

@@ -6,6 +6,7 @@ test("driver presence approval rejects safety holds and suspensions", () => {
   assert.equal(isApprovedDriver({ driverApprovalStatus: "approved" }), true);
   assert.equal(isApprovedDriver({ isApproved: true, safetyHold: true }), false);
   assert.equal(isApprovedDriver({ isApproved: true, accountStatus: "suspended" }), false);
+  assert.equal(isApprovedDriver({ isApproved: true, accountStatus: "deletion_requested" }), false);
   assert.equal(isApprovedDriver({ approvalStatus: "pending" }), false);
 });
 

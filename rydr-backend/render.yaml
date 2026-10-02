@@ -21,6 +21,8 @@ services:
         sync: false
       - key: FIREBASE_STORAGE_BUCKET
         sync: false
+      - key: REQUIRE_FIREBASE_APP_CHECK
+        value: "true"
       - key: TICKETMASTER_API_KEY
         sync: false
       - key: APPLE_MAPS_TEAM_ID

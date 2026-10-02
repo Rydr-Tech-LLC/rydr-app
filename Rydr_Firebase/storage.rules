@@ -31,11 +31,7 @@ service firebase.storage {
 
     match /profilePhotos/{fileName} {
       allow read: if true;
-      allow create, update: if signedIn()
-        && fileName == request.auth.uid + ".jpg"
-        && validImageUpload();
-      allow delete: if signedIn()
-        && fileName == request.auth.uid + ".jpg";
+      allow write: if false;
     }
 
     match /riders/{uid}/cashHubProfilePhoto.jpg {
@@ -56,15 +52,11 @@ service firebase.storage {
     // profilePhotos/{fileName} above. Distinct path depth from the pending
     // rule directly above (driverProfilePhotos/{uid}/{fileName} is two
     // segments after the prefix; this is one), so the two rules don't
-    // overlap. Only ever written by DriverImageModerationService after an
-    // "approved" verdict from POST /moderation/check-image.
+    // overlap. Only the backend writes this path after an "approved"
+    // verdict from POST /moderation/profile-photo/finalize.
     match /driverProfilePhotos/{fileName} {
       allow read: if true;
-      allow create, update: if signedIn()
-        && fileName == request.auth.uid + ".jpg"
-        && validImageUpload();
-      allow delete: if signedIn()
-        && fileName == request.auth.uid + ".jpg";
+      allow write: if false;
     }
 
     match /driverDocuments/{uid}/{allPaths=**} {

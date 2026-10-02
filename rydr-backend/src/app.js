@@ -6,10 +6,14 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 
 const healthRoutes = require("./routes/health");
+const accountRoutes = require("./routes/account");
 const eventRoutes = require("./routes/events");
 const driverRoutes = require("./routes/driver");
 const moderationRoutes = require("./routes/moderation");
 const rideRoutes = require("./routes/rides");
+const cashHubRoutes = require("./routes/cashHub");
+const safetyRoutes = require("./routes/safety");
+const supportRoutes = require("./routes/support");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -24,10 +28,14 @@ app.use(express.json());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 app.use("/", healthRoutes);
+app.use("/account", accountRoutes);
 app.use("/events", eventRoutes);
 app.use("/driver", driverRoutes);
 app.use("/moderation", moderationRoutes);
 app.use("/rides", rideRoutes);
+app.use("/cash-hub", cashHubRoutes);
+app.use("/safety", safetyRoutes);
+app.use("/support", supportRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

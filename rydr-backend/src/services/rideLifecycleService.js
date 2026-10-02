@@ -8,6 +8,13 @@ const {
   tierFor
 } = require("./rideFinancialService");
 const { calculateAndStoreRideRouteEstimate } = require("./rideRouteService");
+const { advanceRideDispatch } = require("./rideDispatchService");
+const {
+  demandSnapshotForSignals,
+  driverCoordinate,
+  suggestedRatesFor
+} = require("./driverDemandService");
+const { queuedCandidates, ACTIVE_STATUSES } = require("./driverQueueService");
 
 const ACTIONS = {
   driver_accept: { from: ["pending"], status: "accepted", fields: ["acceptedAt"], message: "Your driver is on the way." },
@@ -27,7 +34,7 @@ const ACTIONS = {
 
 function error(message, statusCode) { const err = new Error(message); err.statusCode = statusCode; return err; }
 
-function serverRateFields(driver, rideType) {
+function serverRateFields(driver, rideType, demandLevel = "low") {
   const rates = driver?.tierRates || {};
   const key = Object.keys(rates).find((candidate) => {
     const a = candidate.toLowerCase(); const b = String(rideType || "").toLowerCase();
@@ -38,17 +45,26 @@ function serverRateFields(driver, rideType) {
   const perMinute = Number(rate.perMinute ?? driver?.perMinute);
   const minimumFare = Number(rate.minimumFare);
   const tier = TIERS[tierFor(rideType)];
+  const usesSuggestedPricing = rate.useSuggestedPricing === true;
+  const suggested = suggestedRatesFor(rideType, demandLevel);
   return {
-    driverMinimumFareCents: Number.isFinite(minimumFare) && minimumFare >= 0
+    driverMinimumFareCents: usesSuggestedPricing
+      ? suggested.minimumFareCents
+      : Number.isFinite(minimumFare) && minimumFare >= 0
       ? Math.round(minimumFare * 100)
       : DEFAULT_MINIMUM_FARE_CENTS,
-    driverRatePerMileCents: Number.isFinite(perMile) && perMile >= 0
+    driverRatePerMileCents: usesSuggestedPricing
+      ? suggested.perMileCents
+      : Number.isFinite(perMile) && perMile >= 0
       ? Math.round(perMile * 100)
       : tier.suggestedMile,
-    driverRatePerMinuteCents: Number.isFinite(perMinute) && perMinute >= 0
+    driverRatePerMinuteCents: usesSuggestedPricing
+      ? suggested.perMinuteCents
+      : Number.isFinite(perMinute) && perMinute >= 0
       ? Math.round(perMinute * 100)
       : tier.suggestedMinute,
-    driverUsesSuggestedPricing: rate.useSuggestedPricing === true,
+    driverUsesSuggestedPricing: usesSuggestedPricing,
+    acceptedDemandLevel: usesSuggestedPricing ? suggested.demandLevel : null,
     acceptedPricingVersion: PRICING_VERSION
   };
 }
@@ -107,11 +123,28 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
   const policy = ACTIONS[action];
   if (!policy) throw error("Unsupported ride action", 400);
   if (!requestId || !/^[A-Za-z0-9_-]{8,80}$/.test(requestId)) throw error("requestId is required", 400);
+  if (action === "driver_decline" || action === "driver_miss") {
+    return advanceRideDispatch({
+      rideId,
+      actorUid: uid,
+      actorRole: "driver",
+      reason: action === "driver_miss" ? "missed" : "declined",
+      requestId
+    });
+  }
   const db = getFirestore();
   const rideRef = db.collection("rides").doc(rideId);
   const requestRef = db.collection("rideRequests").doc(rideId);
   const signalRef = db.collection("rideRequestSignals").doc(rideId);
   const outcomeRef = rideRef.collection("financial").doc("outcome");
+
+  if (action === "promote_queue") {
+    const queueSnapshot = await db.collection("rides").where("driverId", "==", uid).limit(100).get();
+    const active = queueSnapshot.docs.find((doc) => ACTIVE_STATUSES.has(doc.data().status) && doc.data().driverQueueStatus !== "queued");
+    if (active) throw error("Driver still has an active ride", 409);
+    const next = queuedCandidates(queueSnapshot.docs)[0];
+    if (!next || next.id !== rideId) throw error("Only the next queued ride may be promoted", 409);
+  }
 
   let backendActualDistanceMiles = null;
   if (policy.finalizes && action.endsWith("cancel")) {
@@ -147,6 +180,11 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     if ((isRiderAction ? ride.riderId : assignedDriverId) !== uid) throw error("Ride action is not allowed for this user", 403);
     if (ride.lastLifecycleRequestId === requestId) return { status: ride.status, outcome: outcomeSnap.exists ? outcomeSnap.data() : null, duplicate: true };
     if (!policy.from.includes(ride.status)) throw error(`Cannot ${action} from ${ride.status}`, 409);
+    if (action === "driver_accept") {
+      if (!["offered", "rematching"].includes(ride.dispatchStatus)) throw error("Ride offer is not active", 409);
+      const offerExpiresAt = timestampMillis(ride.offerExpiresAt);
+      if (offerExpiresAt === null || offerExpiresAt <= Date.now()) throw error("Ride offer expired", 409);
+    }
     if (action === "promote_queue" && ride.driverQueueStatus !== "queued") throw error("Ride is not queued", 409);
     if (!["driver_accept", "promote_queue", "driver_cancel", "rider_cancel"].includes(action) && ride.driverQueueStatus === "queued") {
       throw error("Queued ride must be promoted before navigation starts", 409);
@@ -192,6 +230,27 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
       rydrBankCredit = { code: rydrBankCode, codeRef, ownerUid: ride.riderId };
     }
 
+    let acceptanceDemandLevel = "low";
+    const acceptanceRateFields = action === "driver_accept"
+      ? serverRateFields(driverSnap?.data(), ride.rideType)
+      : null;
+    if (acceptanceRateFields?.driverUsesSuggestedPricing) {
+      const center = driverCoordinate(driverSnap?.data());
+      if (center) {
+        const signalSnapshot = await tx.get(
+          db.collection("rideRequestSignals")
+            .where("status", "==", "pending")
+            .limit(200)
+        );
+        const demand = demandSnapshotForSignals({
+          signals: signalSnapshot.docs,
+          center,
+          rideTypes: [ride.rideType]
+        });
+        acceptanceDemandLevel = demand.byRideType[tierFor(ride.rideType)]?.level ?? "low";
+      }
+    }
+
     const now = admin.firestore.Timestamp.now();
     const hasStop = Boolean(ride.stop || ride.addedStop || ride.stopCoordinate || ride.stopGeoPoint);
     const resolvedStatus = action === "start_ride" && hasStop ? "navigatingToStop" : policy.status;
@@ -205,15 +264,38 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     if (action === "promote_queue") update.driverQueueStatus = "active";
     if (action.endsWith("cancel")) Object.assign(update, { cancelledBy: uid, cancelledByRole: isRiderAction ? "rider" : "driver", cancellationReason: String(reason || "Other").slice(0, 500) });
     if (action === "driver_accept") {
+      const attemptNumber = Number(ride.dispatchAttemptNumber || 1);
+      const attemptRef = requestRef.collection("dispatchAttempts").doc(String(attemptNumber).padStart(4, "0"));
+      tx.set(attemptRef, {
+        attemptNumber,
+        driverId: uid,
+        outcome: "accepted",
+        actorRole: "driver",
+        actorUid: uid,
+        offeredAt: ride.offerCreatedAt ?? ride.createdAt ?? null,
+        endedAt: now,
+        createdAt: now
+      });
       Object.assign(update, {
         acceptedDriverId: uid,
         driverId: uid,
         driverQueueStatus: queued ? "queued" : "active",
         acceptedAt: now,
         [queued ? "queuedAt" : "activeAt"]: now,
+        dispatchStatus: "accepted",
         riderStatusMessage: queued ? "Your driver is finishing a current ride. You're next in their queue." : policy.message,
-        ...serverRateFields(driverSnap?.data(), ride.rideType)
+        ...serverRateFields(driverSnap?.data(), ride.rideType, acceptanceDemandLevel)
       });
+      tx.set(db.collection("rideChats").doc(rideId), {
+        rideId,
+        riderId: ride.riderId,
+        driverId: uid,
+        participants: [ride.riderId, uid].sort(),
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+        channelOwner: "rydr_backend"
+      }, { merge: true });
     }
     const legacyRateFallback = ride.driverRatePerMileCents != null && ride.driverRatePerMinuteCents != null
       ? {}
@@ -231,6 +313,17 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
       if (rydrBankCredit) calculatedOutcome = applyFullRideCredit(calculatedOutcome, true);
       outcome = { rideId, ...calculatedOutcome, calculatedAt: now, createdAt: now, updatedAt: now };
       tx.create(outcomeRef, outcome);
+      // The payment worker watches this durable job. Charging must not depend
+      // on the rider app remaining open after the lifecycle transition.
+      tx.set(db.collection("paymentJobs").doc(rideId), {
+        rideId,
+        riderId: ride.riderId,
+        status: "pending",
+        outcomeType: outcome.outcomeType,
+        attemptCount: 0,
+        createdAt: now,
+        updatedAt: now
+      }, { merge: true });
       if (bookingCreditSourceRef && outcome.bookingFeeCreditCents > 0) {
         tx.set(bookingCreditSourceRef, {
           replacementBookingFeeCreditUsedByRideId: rideId,
@@ -277,7 +370,11 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     }
     if (!policy.requestOnly) tx.set(rideRef, !rideSnap.exists || action === "driver_accept" ? { ...ride, ...update } : update, { merge: true });
     tx.set(requestRef, update, { merge: true });
+    if (action === "driver_accept") tx.set(signalRef, { status: "accepted", updatedAt: now }, { merge: true });
     if (action.endsWith("cancel")) tx.set(signalRef, { status: "cancelled", updatedAt: now }, { merge: true });
+    if (policy.finalizes && !policy.requestOnly) {
+      tx.set(db.collection("rideChats").doc(rideId), { status: "closed", closedAt: now, updatedAt: now }, { merge: true });
+    }
     return { status: resolvedStatus, outcome, duplicate: false };
   });
 
@@ -297,4 +394,4 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
   return result;
 }
 
-module.exports = { transitionRide, ACTIONS };
+module.exports = { transitionRide, ACTIONS, serverRateFields };

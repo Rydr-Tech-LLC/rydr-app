@@ -1,0 +1,4 @@
+const express=require("express");const{requireFirebaseAuth}=require("../middleware/firebaseAuth");const{createTicket,ticketCommand,createCallRequest}=require("../services/supportService");const router=express.Router();router.use(requireFirebaseAuth);
+router.post("/tickets",async(req,res,next)=>{try{res.status(201).json({ok:true,...await createTicket({uid:req.firebaseUid,payload:req.body})});}catch(e){next(e);}});
+router.post("/tickets/:ticketId/:action",async(req,res,next)=>{try{res.json({ok:true,...await ticketCommand({uid:req.firebaseUid,ticketId:req.params.ticketId,action:req.params.action,payload:req.body})});}catch(e){next(e);}});
+router.post("/call-requests",async(req,res,next)=>{try{res.status(201).json({ok:true,...await createCallRequest({uid:req.firebaseUid,payload:req.body})});}catch(e){next(e);}});module.exports=router;

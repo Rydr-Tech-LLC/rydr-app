@@ -1,5 +1,6 @@
 const { getVisionClient } = require("../config/vision");
-const { getStorageBucketsForReads } = require("../config/firebase");
+const { admin, getFirestore, getStorageBucketsForReads } = require("../config/firebase");
+const { randomUUID } = require("crypto");
 
 // SafeSearch returns a likelihood for each category: UNKNOWN, VERY_UNLIKELY,
 // UNLIKELY, POSSIBLE, LIKELY, VERY_LIKELY.
@@ -34,6 +35,65 @@ async function fetchImageBytes(storagePath) {
   throw new NotFoundError(
     `No file found at storage path: ${storagePath}. Checked buckets: ${checkedBuckets.join(", ")}`
   );
+}
+
+async function findStoredFile(storagePath) {
+  for (const bucket of getStorageBucketsForReads()) {
+    const file = bucket.file(storagePath);
+    const [exists] = await file.exists();
+    if (exists) return { bucket, file };
+  }
+  throw new NotFoundError(`No file found at storage path: ${storagePath}`);
+}
+
+async function finalizeProfilePhoto({ storagePath, uid }) {
+  const isDriver = storagePath.startsWith(`driverProfilePhotos/${uid}/`);
+  const isRider = storagePath.startsWith(`pendingProfilePhotos/${uid}/`);
+  if (!isDriver && !isRider) throw Object.assign(new Error("Profile photo path is not allowed"), { statusCode: 403 });
+  const { bucket, file } = await findStoredFile(storagePath);
+  const [buffer] = await file.download();
+  const token = randomUUID();
+  const finalPath = isDriver ? `driverProfilePhotos/${uid}.jpg` : `profilePhotos/${uid}.jpg`;
+  const finalFile = bucket.file(finalPath);
+  const db = getFirestore();
+  const profileRef = db.collection(isDriver ? "drivers" : "riders").doc(uid);
+  const profileSnap = await profileRef.get();
+  if (!profileSnap.exists) throw Object.assign(new Error("Profile not found"), { statusCode: 404 });
+  await finalFile.save(buffer, {
+    resumable: false,
+    metadata: {
+      contentType: "image/jpeg",
+      cacheControl: "public,max-age=3600",
+      metadata: { firebaseStorageDownloadTokens: token }
+    }
+  });
+  const photoURL = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(finalPath)}?alt=media&token=${token}`;
+  const now = admin.firestore.Timestamp.now();
+  const profileUpdate = isDriver
+    ? {
+        profilePhotoURL: photoURL,
+        profilePhotoReviewStatus: "approved",
+        pendingProfilePhotoURL: admin.firestore.FieldValue.delete(),
+        pendingProfilePhotoPath: admin.firestore.FieldValue.delete(),
+        profilePhotoUpdatedAt: now,
+        updatedAt: now
+      }
+    : { photoURL, profilePhotoUpdatedAt: now, updatedAt: now };
+  const batch = db.batch();
+  batch.set(profileRef, profileUpdate, { merge: true });
+  if (isDriver) batch.set(db.collection("publicDriverProfiles").doc(uid), { profilePhotoURL: photoURL, updatedAt: now }, { merge: true });
+  await batch.commit();
+  await file.delete({ ignoreNotFound: true });
+  return { photoURL, finalPath, role: isDriver ? "driver" : "rider" };
+}
+
+async function discardPendingPhoto(storagePath) {
+  try {
+    const { file } = await findStoredFile(storagePath);
+    await file.delete({ ignoreNotFound: true });
+  } catch (err) {
+    if (!(err instanceof NotFoundError)) throw err;
+  }
 }
 
 function evaluateSafeSearch(safeSearchAnnotation = {}) {
@@ -76,5 +136,7 @@ async function checkImage(storagePath) {
 module.exports = {
   checkImage,
   evaluateSafeSearch,
-  NotFoundError
+  NotFoundError,
+  finalizeProfilePhoto,
+  discardPendingPhoto
 };

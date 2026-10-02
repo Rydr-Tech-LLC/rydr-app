@@ -4,9 +4,9 @@
 // beta hardening sprint: "Ride accepted", "Driver arrived", "Ride started",
 // "Ride completed", "Ride cancelled", "Payment failed". They fire on the
 // SAME `rides/{rideId}` document the driver app authoritatively writes and
-// the rider app listens to (FirestoreRideService.rideLifecycleStream),
-// so notifications are always a reflection of real, persisted state —
-// never of client-side simulation.
+// the rider app listens to (FirestoreRideService.rideLifecycleStream). The
+// backend owns lifecycle transitions, so notifications reflect persisted,
+// server-validated state rather than a client-side simulation.
 
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { sendPushToUser } from "../services/notificationSender";

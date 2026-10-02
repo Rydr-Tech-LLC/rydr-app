@@ -37,4 +37,25 @@ router.post("/check-image", async (req, res, next) => {
   }
 });
 
+router.post("/profile-photo/finalize", async (req, res, next) => {
+  try {
+    const { storagePath } = req.body || {};
+    if (!storagePath || typeof storagePath !== "string") {
+      return res.status(400).json({ error: "storagePath (string) is required" });
+    }
+    if (!storagePathBelongsToUser(storagePath, req.firebaseUid)) {
+      return res.status(403).json({ error: "storagePath is not allowed for this user" });
+    }
+    const result = await moderationService.checkImage(storagePath);
+    if (result.verdict !== "approved") {
+      await moderationService.discardPendingPhoto(storagePath);
+      return res.status(200).json({ ok: false, verdict: result.verdict, flagged: result.flagged });
+    }
+    const finalized = await moderationService.finalizeProfilePhoto({ storagePath, uid: req.firebaseUid });
+    return res.status(200).json({ ok: true, verdict: result.verdict, flagged: result.flagged, ...finalized });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 module.exports = router;

@@ -6,8 +6,9 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 const admin = require("firebase-admin");
 const Stripe = require("stripe");
-const { randomInt } = require("crypto");
+const { randomInt, timingSafeEqual } = require("crypto");
 const { rideWithFinancialOutcome } = require("./financialOutcome");
+const { reserveCashHubFee, finalizeCashHubFee, releaseCashHubFee, applyCashHubWithholding } = require("./cashHubBilling");
 
 dotenv.config();
 
@@ -22,6 +23,13 @@ const identityFlows = {
   driver: process.env.STRIPE_DRIVER_VERIFICATION_FLOW_ID,
   verified_rider: process.env.STRIPE_RIDER_VERIFICATION_FLOW_ID,
 };
+
+function secureStringEquals(supplied, expected) {
+  if (!supplied || !expected) return false;
+  const left = Buffer.from(String(supplied));
+  const right = Buffer.from(String(expected));
+  return left.length === right.length && timingSafeEqual(left, right);
+}
 
 function isValidIdentityRole(role) {
   return role === "driver" || role === "verified_rider";
@@ -169,7 +177,7 @@ async function requireFirebaseUid(req, res) {
 async function requireAdminUid(req, res) {
   try {
     const sharedSecret = req.header("x-internal-admin-secret");
-    if (sharedSecret && process.env.RYDR_INTERNAL_ADMIN_SECRET && sharedSecret === process.env.RYDR_INTERNAL_ADMIN_SECRET) {
+    if (secureStringEquals(sharedSecret, process.env.RYDR_INTERNAL_ADMIN_SECRET)) {
       const onBehalfOf = req.header("x-admin-uid") || "mission-control";
       return onBehalfOf;
     }
@@ -966,6 +974,7 @@ app.use(cors({
 
 // --- Health ---
 app.get("/", (_req, res) => res.send("✅ Rydr Stripe backend is running"));
+app.get("/health", (_req, res) => res.json({ status: "healthy", service: "rydr-stripe-backend" }));
 
 // --- Public runtime config ---
 // The publishable key is intentionally safe to send to apps. Keep the
@@ -1023,6 +1032,16 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
               failureReason: null,
               failureCode: null,
             });
+            const cashHubFeeCents = Number(pi.metadata?.cashHubFeeCents || 0);
+            if (cashHubFeeCents > 0 && pi.metadata?.driverId && pi.metadata?.cashHubBillingPeriod) {
+              await finalizeCashHubFee({
+                admin,
+                driverId: pi.metadata.driverId,
+                rideId,
+                periodId: pi.metadata.cashHubBillingPeriod,
+                paymentIntentId: pi.id
+              });
+            }
           }
         }
         break;
@@ -1050,6 +1069,16 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
               failureReason: pi.last_payment_error?.message || "Payment failed",
               failureCode: pi.last_payment_error?.code || null,
             });
+            const cashHubFeeCents = Number(pi.metadata?.cashHubFeeCents || 0);
+            if (cashHubFeeCents > 0 && pi.metadata?.driverId && pi.metadata?.cashHubBillingPeriod) {
+              await releaseCashHubFee({
+                admin,
+                driverId: pi.metadata.driverId,
+                rideId,
+                periodId: pi.metadata.cashHubBillingPeriod,
+                reason: pi.last_payment_error?.code || "payment_intent_failed"
+              });
+            }
           }
         }
         break;
@@ -1383,6 +1412,11 @@ async function chargeRideAttempt({
   const targetDriverPayout = driverPayoutCents(effectiveRide, resolvedCharge);
   if (authoritativeAmount <= 0) {
     const driverAccountId = await driverAccountForRide(ride);
+    const cashHubReservation = driverAccountId && ride.driverId
+      ? await reserveCashHubFee({ admin, driverId: ride.driverId, rideId, driverPayoutCents: targetDriverPayout })
+      : { amountCents: 0, periodId: null };
+    const promoTransferEconomics = applyCashHubWithholding({ grossDriverPayoutCents: targetDriverPayout, chargeAmountCents: 0, baseApplicationFeeCents: 0, reservedCents: cashHubReservation.amountCents });
+    const { cashHubFeeWithheldCents, netDriverTransferCents } = promoTransferEconomics;
     let subsidyResult = { subsidyCents: 0, transferId: null, transferStatus: "not_needed" };
     try {
       subsidyResult = await transferPromoSubsidyIfNeeded({
@@ -1390,10 +1424,11 @@ async function chargeRideAttempt({
         rideId,
         ride: effectiveRide,
         driverAccountId,
-        targetDriverPayoutCents: targetDriverPayout,
+        targetDriverPayoutCents: netDriverTransferCents,
         amountTransferredFromChargeCents: 0,
       });
     } catch (err) {
+      await releaseCashHubFee({ admin, driverId: ride.driverId, rideId, periodId: cashHubReservation.periodId, reason: "promo_subsidy_transfer_failed" });
       const message = err instanceof Error ? err.message : "Promo subsidy transfer failed.";
       await recordPaymentStatus(rideRef, "failed", {
         retryCount: attempt,
@@ -1402,6 +1437,12 @@ async function chargeRideAttempt({
         driverPayoutCents: targetDriverPayout,
       });
       return { httpStatus: 500, body: { error: "promo_subsidy_transfer_failed", message } };
+    }
+
+    if (cashHubFeeWithheldCents > 0 && subsidyResult.transferStatus === "succeeded") {
+      await finalizeCashHubFee({ admin, driverId: ride.driverId, rideId, periodId: cashHubReservation.periodId });
+    } else if (cashHubFeeWithheldCents > 0) {
+      await releaseCashHubFee({ admin, driverId: ride.driverId, rideId, periodId: cashHubReservation.periodId, reason: "driver_transfer_not_completed" });
     }
 
     await recordPaymentStatus(rideRef, "succeeded", {
@@ -1420,6 +1461,9 @@ async function chargeRideAttempt({
       pickupPaidWaitSeconds: resolvedCharge.pickupPaidWaitSeconds,
       pickupWaitChargeCents: resolvedCharge.pickupWaitChargeCents,
       driverPayoutCents: targetDriverPayout,
+      cashHubFeeWithheldCents,
+      netDriverTransferCents,
+      cashHubBillingPeriod: cashHubReservation.periodId,
       promoSubsidyTransferCents: subsidyResult.subsidyCents,
       promoSubsidyTransferId: subsidyResult.transferId,
       promoSubsidyTransferStatus: subsidyResult.transferStatus,
@@ -1443,6 +1487,8 @@ async function chargeRideAttempt({
         status: "succeeded",
         noCharge: true,
         driverPayoutCents: targetDriverPayout,
+        cashHubFeeWithheldCents,
+        netDriverTransferCents,
         backendPromotionDiscountCents,
         appliedPromotionId: riderPromotion?.promotion.id || null,
         promoSubsidyTransferStatus: subsidyResult.transferStatus,
@@ -1520,6 +1566,19 @@ async function chargeRideAttempt({
   if (suppliedDriverAccountId && suppliedDriverAccountId !== driverAccountId) {
     return { httpStatus: 403, body: { error: "driver_account_not_owned" } };
   }
+  const cashHubReservation = driverAccountId && ride.driverId
+    ? await reserveCashHubFee({ admin, driverId: ride.driverId, rideId, driverPayoutCents: targetDriverPayout })
+    : { amountCents: 0, periodId: null };
+  const baseApplicationFeeAmount = driverAccountId
+    ? applicationFeeForGuaranteedDriverPayout(effectiveRide, authoritativeAmount, resolvedCharge)
+    : 0;
+  const transferEconomics = applyCashHubWithholding({
+    grossDriverPayoutCents: targetDriverPayout,
+    chargeAmountCents: authoritativeAmount,
+    baseApplicationFeeCents: baseApplicationFeeAmount,
+    reservedCents: cashHubReservation.amountCents
+  });
+  const { cashHubFeeWithheldCents, netDriverTransferCents } = transferEconomics;
   let applicationFeeAmount;
   let amountTransferredFromChargeCents = 0;
   if (driverAccountId) {
@@ -1527,7 +1586,7 @@ async function chargeRideAttempt({
     // ride discounts reduce Rydr's platform economics first; if the rider
     // charge is lower than the driver payout, Rydr funds the difference with
     // a separate transfer after payment succeeds.
-    applicationFeeAmount = applicationFeeForGuaranteedDriverPayout(effectiveRide, authoritativeAmount, resolvedCharge);
+    applicationFeeAmount = transferEconomics.applicationFeeCents;
     amountTransferredFromChargeCents = Math.max(0, authoritativeAmount - applicationFeeAmount);
   }
 
@@ -1546,6 +1605,9 @@ async function chargeRideAttempt({
     pickupPaidWaitSeconds: resolvedCharge.pickupPaidWaitSeconds,
     pickupWaitChargeCents: resolvedCharge.pickupWaitChargeCents,
     driverPayoutCents: targetDriverPayout,
+    cashHubFeeWithheldCents,
+    netDriverTransferCents,
+    cashHubBillingPeriod: cashHubReservation.periodId,
   });
 
   const params = {
@@ -1555,7 +1617,11 @@ async function chargeRideAttempt({
     payment_method: resolvedPaymentMethodId,
     confirm: true,
     off_session: true,
-    metadata: { rideId, riderId: uid, driverId: ride.driverId || "", attempt: String(attempt), paymentType },
+    metadata: {
+      rideId, riderId: uid, driverId: ride.driverId || "", attempt: String(attempt), paymentType,
+      cashHubFeeCents: String(cashHubFeeWithheldCents),
+      cashHubBillingPeriod: cashHubReservation.periodId || ""
+    },
   };
   if (driverAccountId) {
     params.application_fee_amount = applicationFeeAmount;
@@ -1572,11 +1638,11 @@ async function chargeRideAttempt({
           rideId,
           ride: effectiveRide,
           driverAccountId,
-          targetDriverPayoutCents: targetDriverPayout,
+          targetDriverPayoutCents: netDriverTransferCents,
           amountTransferredFromChargeCents,
         });
       } catch (err) {
-        subsidyResult = { subsidyCents: Math.max(0, targetDriverPayout - amountTransferredFromChargeCents), transferId: null, transferStatus: "failed" };
+        subsidyResult = { subsidyCents: Math.max(0, netDriverTransferCents - amountTransferredFromChargeCents), transferId: null, transferStatus: "failed" };
         await rideRef.set(
           {
             promoSubsidyTransferError: err instanceof Error ? err.message : "Promo subsidy transfer failed.",
@@ -1590,11 +1656,17 @@ async function chargeRideAttempt({
       stripePaymentIntentId: pi.id,
       retryCount: attempt,
       driverPayoutCents: targetDriverPayout,
+      cashHubFeeWithheldCents,
+      netDriverTransferCents,
+      cashHubBillingPeriod: cashHubReservation.periodId,
       promoSubsidyTransferCents: subsidyResult.subsidyCents,
       promoSubsidyTransferId: subsidyResult.transferId,
       promoSubsidyTransferStatus: subsidyResult.transferStatus,
     });
     if (pi.status === "succeeded") {
+      if (cashHubFeeWithheldCents > 0) {
+        await finalizeCashHubFee({ admin, driverId: ride.driverId, rideId, periodId: cashHubReservation.periodId, paymentIntentId: pi.id });
+      }
       await outcomeRef.set({ status: "paid", paymentIntentId: pi.id, paidAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
     }
     if (pi.status === "succeeded" && paymentType === "ride_fare") {
@@ -1614,12 +1686,17 @@ async function chargeRideAttempt({
         paymentIntentId: pi.id,
         status: pi.status,
         driverPayoutCents: targetDriverPayout,
+        cashHubFeeWithheldCents,
+        netDriverTransferCents,
         backendPromotionDiscountCents,
         appliedPromotionId: riderPromotion?.promotion.id || null,
         promoSubsidyTransferStatus: subsidyResult.transferStatus,
       },
     };
   } catch (e) {
+    if (cashHubFeeWithheldCents > 0) {
+      await releaseCashHubFee({ admin, driverId: ride.driverId, rideId, periodId: cashHubReservation.periodId, reason: e?.raw?.code || e?.code || "payment_intent_failed" });
+    }
     const code = e?.raw?.code || e?.code;
     const message = e?.raw?.message || e.message || "payment_intent_failed";
     await recordPaymentStatus(rideRef, "failed", {
@@ -1637,6 +1714,31 @@ async function chargeRideAttempt({
     return { httpStatus: 402, body: { error: message } };
   }
 }
+
+function validInternalServiceToken(req) {
+  const expected = process.env.RYDR_INTERNAL_SERVICE_TOKEN || "";
+  const supplied = req.get("x-rydr-internal-token") || "";
+  return secureStringEquals(supplied, expected);
+}
+
+// Called only by the payment-job Cloud Function. The rider identity and all
+// charge inputs are derived from Firestore; no client credentials are used.
+app.post("/internal/rides/:rideId/charge", async (req, res) => {
+  try {
+    if (!validInternalServiceToken(req)) return res.status(401).json({ error: "invalid_internal_service_token" });
+    initializeFirebase();
+    const rideId = String(req.params.rideId || "");
+    const rideSnap = await admin.firestore().collection("rides").doc(rideId).get();
+    if (!rideSnap.exists) return res.status(404).json({ error: "ride_not_found" });
+    const riderId = rideSnap.data()?.riderId;
+    if (typeof riderId !== "string" || !riderId) return res.status(409).json({ error: "ride_rider_missing" });
+    const result = await chargeRideAttempt({ uid: riderId, rideId, currency: "usd" });
+    return res.status(result.httpStatus).json(result.body);
+  } catch (e) {
+    console.error("❌ internal ride charge:", e);
+    return res.status(500).json({ error: "internal_payment_dispatch_failed" });
+  }
+});
 
 // Body: { rideId, amount?: <int cents>, currency?, paymentMethodId? } -> { clientSecret, paymentIntentId, status }
 // Auth required. The optional `amount` is only checked against Firestore's

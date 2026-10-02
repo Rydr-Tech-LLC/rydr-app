@@ -22,7 +22,9 @@ function isApprovedDriver(driver) {
   const approved = approvalStatus === "approved" || driver?.isApproved === true;
   const accountStatus = String(driver?.accountStatus ?? "").toLowerCase();
   const safetyReviewStatus = String(driver?.safetyReviewStatus ?? "").toLowerCase();
-  const safetySuspended = accountStatus === "suspended" || safetyReviewStatus === "suspended" || driver?.safetyHold === true;
+  const safetySuspended = ["suspended", "deletion_requested", "removed"].includes(accountStatus)
+    || safetyReviewStatus === "suspended"
+    || driver?.safetyHold === true;
   return approved && !safetySuspended;
 }
 
@@ -58,7 +60,11 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   const driverRef = db.collection("drivers").doc(uid);
   const statusRef = db.collection("driver_status").doc(uid);
   const publicRef = db.collection("publicDriverProfiles").doc(uid);
-  const driverSnap = await driverRef.get();
+  const cashHubRef = db.collection("cashHubDriverProfiles").doc(uid);
+  const [driverSnap, cashHubConfigSnap] = await Promise.all([
+    driverRef.get(),
+    db.collection("platformConfig").doc("cashRydrHub").get()
+  ]);
   if (!driverSnap.exists) throw error("Driver profile not found", 404);
 
   const driver = driverSnap.data();
@@ -114,6 +120,29 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
     eligibleRideTypes: effectiveRideTypes,
     updatedAt: now
   };
+  const cashHubConfig = cashHubConfigSnap.exists ? cashHubConfigSnap.data() : {};
+  const currentTermsVersion = String(cashHubConfig.cashHubTermsVersion || "legacy");
+  const acceptedTermsVersion = String(driver.cashHubTermsVersion || "");
+  const cashHubAccessActive = cashHubConfig.termsAcceptanceEnabled === true
+    && driver.cashHubTermsAccepted === true
+    && driver.cashHubOptedOut !== true
+    && !["delinquent", "past_due", "review_required", "suspended", "revoked", "optedout", "opted_out"].includes(String(driver.cashHubAccessStatus || "").toLowerCase())
+    && (acceptedTermsVersion === currentTermsVersion || (!acceptedTermsVersion && currentTermsVersion === "legacy"));
+  const vehicle = driver.vehicle || {};
+  const cashHubPresence = {
+    driverUid: uid,
+    driverName: String(driver.displayName || [driver.firstName, driver.lastName].filter(Boolean).join(" ") || "Cash Hub Driver").trim(),
+    profilePhotoURL: driver.profilePhotoURL || driver.photoURL || "",
+    vehicleInfo: [vehicle.color, vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "),
+    cashHubRating: Number(driver.cashHubRating ?? driver.rating ?? 5),
+    isIdentityVerified: driver.identityVerified === true || driver.stripeIdentityStatus === "verified",
+    isLicenseVerified: driver.isLicenseVerified === true || driver.driverLicenseStatus === "approved",
+    isRydrVerifiedDriver: isApprovedDriver(driver),
+    isOnline: online && cashHubAccessActive,
+    availabilityStatus: online && cashHubAccessActive ? availabilityStatus : "offline",
+    projectionOwner: "rydr_backend",
+    updatedAt: now
+  };
   if (cleanLocation) {
     publicPresence.approximateLocation = {
       lat: Math.round(cleanLocation.lat * 1000) / 1000,
@@ -128,6 +157,7 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   batch.set(statusRef, privatePresence, { merge: true });
   batch.set(driverRef, { ...common, location: privatePresence.location || driver.location || null }, { merge: true });
   batch.set(publicRef, publicPresence, { merge: true });
+  batch.set(cashHubRef, cashHubPresence, { merge: true });
   if (previousOnline !== online) {
     batch.set(db.collection("driverPresenceEvents").doc(), {
       driverId: uid,

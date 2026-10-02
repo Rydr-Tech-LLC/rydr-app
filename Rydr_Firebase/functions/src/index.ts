@@ -4,18 +4,25 @@ import { db, FieldValue } from "./admin";
 import { vehicleDecoderService, VinDecodeError } from "./services/vehicleDecoderService";
 import { vehicleImageService } from "./services/vehicleImageService";
 import { VEHICLE_COLORS, type VehicleColor, type VehicleBodyStyle } from "./types";
+import { evaluateVehicleEligibility, mergeDefaultTierRates } from "./services/vehicleEligibilityService";
 
 // Push notification sender architecture (Part 9 of the beta hardening
 // sprint). Each trigger below listens to the same Firestore documents the
 // rider/driver apps and Mission Control already write/read, so every
 // notification is a reflection of real, persisted server state.
 export { onRideUpdated } from "./triggers/rideNotifications";
-export { onRideRequestCreated, onRideChatMessageCreated } from "./triggers/rideRequestNotifications";
+export { onRideRequestCreated, onRideRequestRematched, onRideChatMessageCreated } from "./triggers/rideRequestNotifications";
+export { onCashHubRequestCreated, onCashHubConversationCreated, onCashHubMessageCreated, onCashHubRequestUpdated } from "./triggers/cashHubNotifications";
+export { maintainCashHubBilling } from "./triggers/cashHubBillingLifecycle";
+export { expireCashHubRequests, onCashHubLateReleaseCreated } from "./triggers/cashHubLifecycle";
+export { onCashHubBillingUpdated } from "./triggers/cashHubBillingNotifications";
 export { onSupportMessageCreated } from "./triggers/supportNotifications";
 export { onDriverApprovalDecision } from "./triggers/driverApprovalNotifications";
 export { onDriverAutoApprovalEligibility } from "./triggers/driverAutoApproval";
 export { onRydrBankCodeCreated, onRydrBankSummaryUpdated } from "./triggers/rydrBankNotifications";
 export { onDocumentUploadedForReview } from "./triggers/documentReview";
+export { onPaymentJobCreated } from "./triggers/paymentJobs";
+export { onDriverPublicProfileProjection } from "./triggers/driverPublicProfileProjection";
 
 const VEHICLE_BODY_STYLES: readonly VehicleBodyStyle[] = [
   "sedan",
@@ -179,24 +186,29 @@ export const submitVehicleVin = onCall(async (request) => {
     libraryMatchedColor: lookup.result?.matchedColor ?? null
   };
   const libraryRideTypes = lookup.result?.eligibleRideTypes ?? [];
+  const driverSnap = await driverRef.get();
+  const driver = driverSnap.data() ?? {};
+  const eligibility = evaluateVehicleEligibility({
+    make: decoded.make,
+    model: decoded.model,
+    fuelType: decoded.fuelTypePrimary,
+    libraryRideTypes,
+    approvedRideTypes: driver.approvedRideTypes
+  });
 
   await driverRef.set(
     {
-      vehicle: vehicleFields,
-      ...(libraryRideTypes.length > 0
-        ? {
-            vehicleEligibility: {
-              rideTypes: libraryRideTypes,
-              source: "vehicleLibrary",
-              matchedVehicleId: lookup.result?.matchedVehicleId ?? null,
-              evaluatedAt: FieldValue.serverTimestamp()
-            },
-            qualifiedRideTypes: libraryRideTypes,
-            supportedRideTypes: libraryRideTypes,
-            selectedRideTypes: libraryRideTypes,
-            rideTypes: libraryRideTypes
-          }
-        : {}),
+      vehicle: { ...vehicleFields, class: eligibility.vehicleClass },
+      vehicleEligibility: {
+        ...eligibility,
+        matchedVehicleId: lookup.result?.matchedVehicleId ?? null,
+        evaluatedAt: FieldValue.serverTimestamp()
+      },
+      qualifiedRideTypes: eligibility.rideTypes,
+      supportedRideTypes: eligibility.rideTypes,
+      selectedRideTypes: eligibility.rideTypes,
+      rideTypes: eligibility.rideTypes,
+      tierRates: mergeDefaultTierRates(driver.tierRates, eligibility.rideTypes),
       vinDecodeStatus: "decoded",
       vehicleImageStatus: lookup.status,
       updatedAt: FieldValue.serverTimestamp()
@@ -204,7 +216,7 @@ export const submitVehicleVin = onCall(async (request) => {
     { merge: true }
   );
 
-  return { vehicle: vehicleFields, eligibleRideTypes: libraryRideTypes, vinDecodeStatus: "decoded", vehicleImageStatus: lookup.status };
+  return { vehicle: { ...vehicleFields, class: eligibility.vehicleClass }, eligibleRideTypes: eligibility.rideTypes, vinDecodeStatus: "decoded", vehicleImageStatus: lookup.status };
 });
 
 /**
@@ -269,24 +281,29 @@ export const submitVehicleManual = onCall(async (request) => {
     libraryMatchedColor: lookup.result?.matchedColor ?? null
   };
   const libraryRideTypes = lookup.result?.eligibleRideTypes ?? [];
+  const driverSnap = await driverRef.get();
+  const driver = driverSnap.data() ?? {};
+  const eligibility = evaluateVehicleEligibility({
+    make,
+    model,
+    fuelType,
+    libraryRideTypes,
+    approvedRideTypes: driver.approvedRideTypes
+  });
 
   await driverRef.set(
     {
-      vehicle: vehicleFields,
-      ...(libraryRideTypes.length > 0
-        ? {
-            vehicleEligibility: {
-              rideTypes: libraryRideTypes,
-              source: "vehicleLibrary",
-              matchedVehicleId: lookup.result?.matchedVehicleId ?? null,
-              evaluatedAt: FieldValue.serverTimestamp()
-            },
-            qualifiedRideTypes: libraryRideTypes,
-            supportedRideTypes: libraryRideTypes,
-            selectedRideTypes: libraryRideTypes,
-            rideTypes: libraryRideTypes
-          }
-        : {}),
+      vehicle: { ...vehicleFields, class: eligibility.vehicleClass },
+      vehicleEligibility: {
+        ...eligibility,
+        matchedVehicleId: lookup.result?.matchedVehicleId ?? null,
+        evaluatedAt: FieldValue.serverTimestamp()
+      },
+      qualifiedRideTypes: eligibility.rideTypes,
+      supportedRideTypes: eligibility.rideTypes,
+      selectedRideTypes: eligibility.rideTypes,
+      rideTypes: eligibility.rideTypes,
+      tierRates: mergeDefaultTierRates(driver.tierRates, eligibility.rideTypes),
       vinDecodeStatus: "manual",
       vehicleImageStatus: lookup.status,
       updatedAt: FieldValue.serverTimestamp()
@@ -294,5 +311,5 @@ export const submitVehicleManual = onCall(async (request) => {
     { merge: true }
   );
 
-  return { vehicle: vehicleFields, eligibleRideTypes: libraryRideTypes, vinDecodeStatus: "manual", vehicleImageStatus: lookup.status };
+  return { vehicle: { ...vehicleFields, class: eligibility.vehicleClass }, eligibleRideTypes: eligibility.rideTypes, vinDecodeStatus: "manual", vehicleImageStatus: lookup.status };
 });
