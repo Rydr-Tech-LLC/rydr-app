@@ -15,6 +15,7 @@ const {
   cashHubRiderCancellationUpdate,
   cashHubActionRequiresActiveAccess,
   normalizeCashHubOffer,
+  cashHubOfferOpeningMessage,
   cashHubAccessAllowed,
   PUBLIC_VISIBILITY,
   FAVORITES_VISIBILITY
@@ -135,6 +136,17 @@ test("Cash Hub offers negotiate price without client-entered vehicle or availabi
     message: ""
   });
   assert.throws(() => normalizeCashHubOffer({ availability: "Any time", vehicleInfo: "Blue car" }), /valid offer amount/);
+});
+
+test("Cash Hub creates a friendly server-owned opening price message", () => {
+  assert.equal(
+    cashHubOfferOpeningMessage("Maya Reynolds", 24, "I can arrive a little early."),
+    "Hi Maya, would you be open to a fare of $24.00 for this trip? I can arrive a little early."
+  );
+  assert.equal(
+    cashHubOfferOpeningMessage("", 18.5),
+    "Hi there, would you be open to a fare of $18.50 for this trip?"
+  );
 });
 
 test("Cash Hub driver access rejects opt-outs, billing suspension, and safety holds", () => {

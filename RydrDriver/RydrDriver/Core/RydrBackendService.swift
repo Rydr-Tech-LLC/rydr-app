@@ -172,6 +172,11 @@ enum RydrBackendService {
         try await sendAuthenticatedJSON(path: "/cash-hub/conversations/\(conversationId)/messages", body: ["message": text, "kind": kind, "idempotencyKey": UUID().uuidString])
     }
 
+    static func cashHubConversationCommand(conversationId: String, action: String, body: [String: Any] = [:]) async throws {
+        var payload = body; payload["action"] = action; payload["idempotencyKey"] = UUID().uuidString
+        try await sendAuthenticatedJSON(path: "/cash-hub/conversations/\(conversationId)/command", body: payload)
+    }
+
     static func submitSafetyReport(_ body: [String: Any]) async throws { try await sendAuthenticatedJSON(path: "/safety/reports", body: body) }
     static func submitSafetyAppeal(_ body: [String: Any]) async throws { try await sendAuthenticatedJSON(path: "/safety/appeals", body: body) }
 

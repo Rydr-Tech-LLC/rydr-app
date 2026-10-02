@@ -748,7 +748,52 @@ private final class CashRydrHubVM: ObservableObject {
             errorMessage = "Only the rider who posted this request can decline an offer."
             return
         }
-        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"decline_offer",body:["offerId":offer.id]) } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"decline_offer",body:["offerId":offer.id]);await MainActor.run{self?.confirmationMessage="That price was declined. The conversation is still open."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+    }
+
+    func proposePrice(_ context: CashHubMessageContext, amountText: String, message: String) -> Bool {
+        guard let conversationId = context.conversationId,
+              let offerAmount = cleanAmount(amountText) else {
+            errorMessage = "Enter a valid proposed price."
+            return false
+        }
+        var body: [String: Any] = ["offerAmount": offerAmount]
+        let note = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !note.isEmpty { body["message"] = note }
+        Task { [weak self] in do { try await RiderCashHubBackend.conversationCommand(conversationId:conversationId,action:"propose_price",body:body);await MainActor.run{self?.confirmationMessage="Your price was sent for the driver to accept or decline."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+        return true
+    }
+
+    func acceptPrice(_ context: CashHubMessageContext) {
+        guard let conversationId = context.conversationId else { errorMessage = "Conversation not found."; return }
+        Task { [weak self] in do { try await RiderCashHubBackend.conversationCommand(conversationId:conversationId,action:"accept_price");await MainActor.run{self?.confirmationMessage="Price accepted. You and the driver are now connected."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+    }
+
+    func declinePrice(_ context: CashHubMessageContext) {
+        guard let conversationId = context.conversationId else { errorMessage = "Conversation not found."; return }
+        Task { [weak self] in do { try await RiderCashHubBackend.conversationCommand(conversationId:conversationId,action:"decline_price");await MainActor.run{self?.confirmationMessage="Price declined. The conversation remains open."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+    }
+
+    func endChat(_ context: CashHubMessageContext) {
+        guard let conversationId = context.conversationId else {
+            errorMessage = "Conversation not found."
+            return
+        }
+        Task { [weak self] in do { try await RiderCashHubBackend.conversationCommand(conversationId:conversationId,action:"end_chat");await MainActor.run{self?.confirmationMessage="Chat ended."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+    }
+
+    func reportChat(_ context: CashHubMessageContext) {
+        guard let conversationId = context.conversationId else {
+            errorMessage = "Conversation not found."
+            return
+        }
+        let payload: [String: Any] = [
+            "reportType": "Cash Hub chat report",
+            "cashHubRequestId": context.request.id,
+            "cashHubConversationId": conversationId,
+            "description": "Rider reported a Cash Hub chat for review."
+        ]
+        Task { [weak self] in do { try await RiderSafetyBackend.submit(payload);await MainActor.run{self?.confirmationMessage="Chat reported to Rydr safety support."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func cancelListing(_ request: CashRydrRequest) {
@@ -771,6 +816,11 @@ private final class CashRydrHubVM: ObservableObject {
     func messages(for context: CashHubMessageContext) -> [CashHubResponse] {
         guard let conversationId = context.conversationId else { return [] }
         return messagesByConversation[conversationId] ?? []
+    }
+
+    func conversation(for context: CashHubMessageContext) -> CashHubResponse? {
+        guard let conversationId = context.conversationId else { return nil }
+        return responsesByRequest[context.request.id]?.first { $0.id == conversationId }
     }
 
     private func validate(_ draft: CashHubRequestDraft) -> Bool {
@@ -917,7 +967,7 @@ private final class CashRydrHubVM: ObservableObject {
             authorName: data["driverName"] as? String ?? "Cash Hub Driver",
             authorRole: "driver",
             kind: "offer",
-            status: data["offerStatus"] as? String ?? "pending",
+            status: (data["chatStatus"] as? String == "ended") ? "ended" : (data["offerStatus"] as? String ?? "pending"),
             message: data["lastMessage"] as? String ?? "",
             offerAmount: data["offerAmount"] as? Double,
             availability: data["availability"] as? String ?? "Availability provided by message",
@@ -1192,12 +1242,14 @@ struct CashRydrHubView: View {
                 request: context.request,
                 mode: context.mode,
                 messages: vm.messages(for: context),
-                mentionCandidates: context.driverName.map { [$0] } ?? []
-            ) { text in
-                if vm.sendMessage(to: context, message: text, authorName: session.userName) {
-                    messagingContext = nil
-                }
-            }
+                conversation: vm.conversation(for: context),
+                onSend: { text in vm.sendMessage(to: context, message: text, authorName: session.userName) },
+                onProposePrice: { amount, note in vm.proposePrice(context, amountText: amount, message: note) },
+                onAccept: { vm.acceptPrice(context) },
+                onDecline: { vm.declinePrice(context) },
+                onEndChat: { vm.endChat(context) },
+                onReportChat: { vm.reportChat(context) }
+            )
         }
         .sheet(item: $viewingConnection) { request in
             CashHubAcceptedRequestView(
@@ -3897,101 +3949,272 @@ private struct CashHubMessageForm: View {
     let request: CashRydrRequest
     let mode: CashHubMessageMode
     let messages: [CashHubResponse]
-    let mentionCandidates: [String]
-    var onSend: (String) -> Void
+    let conversation: CashHubResponse?
+    var onSend: (String) -> Bool
+    var onProposePrice: (String, String) -> Bool
+    var onAccept: () -> Void
+    var onDecline: () -> Void
+    var onEndChat: () -> Void
+    var onReportChat: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var message = ""
+    @State private var confirmEndChat = false
+    @State private var showPriceEditor = false
+    @State private var priceDraft = ""
+    @State private var priceMessage = ""
 
-    private var canSend: Bool {
-        switch mode {
-        case .requestThread: return !request.isConnected
-        case .directConnection: return request.isConnected
+    private var canSend: Bool { conversation?.status != "ended" }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                tripSummary.padding(.horizontal).padding(.top, 10)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            Text("Today").font(.caption).foregroundStyle(.secondary).padding(.vertical, 4)
+                            if messages.isEmpty {
+                                Text(mode == .requestThread ? "The price conversation will appear here." : "Start coordinating the trip here.")
+                                    .font(.subheadline).foregroundStyle(.secondary).padding(.top, 30)
+                            } else {
+                                ForEach(messages) { response in
+                                    CashHubChatBubble(response: response).id(response.id)
+                                }
+                            }
+                            if shouldShowPriceDecision { priceDecisionCard }
+                            if isWaitingForPriceResponse {
+                                Label("Waiting for the driver to respond to your price", systemImage: "clock")
+                                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 14).padding(.vertical, 9)
+                                    .background(Capsule().fill(Color(.secondarySystemGroupedBackground)))
+                            }
+                            if conversation?.status == "ended" {
+                                Text("Chat ended")
+                                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 14).padding(.vertical, 7)
+                                    .background(Capsule().fill(Color(.secondarySystemGroupedBackground)))
+                            }
+                        }
+                        .padding()
+                    }
+                    .onChange(of: messages.count) { _, _ in
+                        if let last = messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                    }
+                }
+                if canSend { composer }
+            }
+            .background(Color(.systemBackground))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { dismiss() } label: { Image(systemName: "chevron.left") }
+                }
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 9) {
+                        Circle().fill(Styles.rydrGradient).frame(width: 38, height: 38)
+                            .overlay(Text(driverInitial).font(.headline.weight(.black)).foregroundStyle(.white))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(conversation?.authorName ?? "Cash Hub Driver").font(.headline.weight(.black))
+                            HStack(spacing: 4) {
+                                Circle().fill(.green).frame(width: 7, height: 7)
+                                Text(request.isConnected ? "Connected" : "Price conversation")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Menu {
+                        if canNegotiatePrice {
+                            Button("Propose or Edit Price", systemImage: "dollarsign.arrow.circlepath") { beginPriceProposal() }
+                        }
+                        Button("End Chat", systemImage: "xmark.bubble", role: .destructive) { confirmEndChat = true }
+                        Button("Report Chat", systemImage: "exclamationmark.bubble", role: .destructive, action: onReportChat)
+                    } label: { Image(systemName: "ellipsis").font(.title3.weight(.black)) }
+                }
+            }
+            .confirmationDialog("End this chat?", isPresented: $confirmEndChat, titleVisibility: .visible) {
+                Button("End Chat", role: .destructive) { onEndChat(); dismiss() }
+                Button("Keep Chat Open", role: .cancel) {}
+            } message: {
+                Text(request.isConnected ? "This closes messaging but does not cancel the connected listing." : "This closes the negotiation without accepting the price.")
+            }
+            .sheet(isPresented: $showPriceEditor) {
+                CashHubPriceProposalEditor(
+                    amount: $priceDraft,
+                    message: $priceMessage,
+                    recipientName: conversation?.authorName ?? "the driver"
+                ) {
+                    if onProposePrice(priceDraft, priceMessage) {
+                        showPriceEditor = false
+                        priceMessage = ""
+                    }
+                }
+            }
         }
     }
 
-    private var mentionSuggestions: [String] {
-        guard let query = activeMentionQuery else { return [] }
-        return mentionCandidates
-            .filter { $0.localizedCaseInsensitiveContains(query) || query.isEmpty }
-            .prefix(4)
-            .map { $0 }
+    private var tripSummary: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack {
+                Text("CashRydr Trip Post").font(.subheadline.weight(.bold)).foregroundStyle(.secondary)
+                Text(request.isConnected ? "CONNECTED" : "OPEN")
+                    .font(.caption2.weight(.black)).foregroundStyle(request.isConnected ? .green : .red)
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(Capsule().fill((request.isConnected ? Color.green : Color.red).opacity(0.1)))
+                Spacer()
+            }
+            Label(request.pickup, systemImage: "a.circle.fill").font(.subheadline.weight(.bold)).foregroundStyle(.green)
+            Label(request.destination, systemImage: "b.circle.fill").font(.subheadline.weight(.bold)).foregroundStyle(.red)
+            Divider()
+            HStack {
+                Label(request.scheduledTime.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
+                Spacer()
+                Label("\(request.passengers) rider\(request.passengers == 1 ? "" : "s")", systemImage: "person")
+                Spacer()
+                Text(priceSummary).font(.caption.weight(.black)).foregroundStyle(.red)
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(15)
+        .background(RoundedRectangle(cornerRadius: 20).fill(Color(.secondarySystemGroupedBackground)))
     }
 
-    private var activeMentionQuery: String? {
-        guard let atIndex = message.lastIndex(of: "@") else { return nil }
-        let afterAt = message[message.index(after: atIndex)...]
-        if afterAt.contains(where: { $0.isWhitespace || $0.isNewline }) { return nil }
-        return String(afterAt)
+    private var composer: some View {
+        HStack(spacing: 10) {
+            TextField("Message \(conversation?.authorName ?? "driver")…", text: $message, axis: .vertical)
+                .lineLimit(1...4).padding(.horizontal, 15).padding(.vertical, 11)
+                .background(Capsule().stroke(Color.secondary.opacity(0.3)))
+            Button {
+                let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                if onSend(trimmed) { message = "" }
+            } label: {
+                Image(systemName: "arrow.up.circle.fill").font(.system(size: 34)).foregroundStyle(Styles.rydrGradient)
+            }
+            .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        .padding(.horizontal).padding(.vertical, 10).background(.ultraThinMaterial)
+    }
+
+    private var priceDecisionCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("New price proposed", systemImage: "dollarsign.circle.fill").font(.headline.weight(.black)).foregroundStyle(.red)
+            if let amount = unresolvedPriceProposal?.offerAmount {
+                Text(amount.formatted(.currency(code: "USD"))).font(.title3.weight(.black))
+            }
+            HStack {
+                Button("Decline", action: onDecline).buttonStyle(.bordered).tint(.red)
+                Button("Accept Price") { onAccept(); dismiss() }.buttonStyle(.borderedProminent).tint(.green)
+            }
+        }
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 20).fill(Color.green.opacity(0.08)))
+    }
+
+    private var shouldShowPriceDecision: Bool {
+        mode == .requestThread && !request.isConnected && unresolvedPriceProposal?.authorUid != Auth.auth().currentUser?.uid
+    }
+    private var isWaitingForPriceResponse: Bool {
+        mode == .requestThread && !request.isConnected && unresolvedPriceProposal?.authorUid == Auth.auth().currentUser?.uid
+    }
+    private var canNegotiatePrice: Bool {
+        mode == .requestThread
+            && !request.isConnected
+            && canSend
+            && ["pending", "negotiating"].contains(conversation?.status ?? "")
+    }
+    private var unresolvedPriceProposal: CashHubResponse? {
+        for response in messages.sorted(by: { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }) {
+            if ["priceAccepted", "offerDeclined"].contains(response.kind) { return nil }
+            if ["offer", "priceProposal"].contains(response.kind), response.offerAmount != nil { return response }
+        }
+        return nil
+    }
+    private func beginPriceProposal() {
+        if let amount = unresolvedPriceProposal?.offerAmount ?? conversation?.offerAmount {
+            priceDraft = String(format: "%.2f", amount)
+        }
+        showPriceEditor = true
+    }
+    private var driverInitial: String { String((conversation?.authorName ?? "D").prefix(1)).uppercased() }
+    private var priceSummary: String {
+        if let agreedPrice = request.agreedPrice { return agreedPrice.formatted(.currency(code: "USD")) }
+        if let amount = conversation?.offerAmount { return "\(amount.formatted(.currency(code: "USD"))) proposed" }
+        guard !request.budgetRange.isEmpty else { return "Open price" }
+        return request.budgetRange.hasPrefix("$") ? request.budgetRange : "$\(request.budgetRange)"
+    }
+}
+
+private struct CashHubPriceProposalEditor: View {
+    @Binding var amount: String
+    @Binding var message: String
+    let recipientName: String
+    let onSend: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private var isValid: Bool {
+        let cleaned = amount.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return (Double(cleaned) ?? 0) > 0
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Regarding") {
-                    Text("\(request.pickup) to \(request.destination)")
+                Section("Proposed price") {
+                    TextField("$0.00", text: $amount).keyboardType(.decimalPad)
                 }
-                Section(mode.title) {
-                    if messages.isEmpty {
-                        Text(mode == .requestThread ? "No offer conversation yet." : "No trip chat messages yet.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(messages) { response in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(response.authorName)
-                                    .font(.caption.weight(.semibold))
-                                Text(response.message)
-                                    .font(.subheadline)
-                            }
-                            .padding(.vertical, 3)
-                        }
-                    }
+                Section("Optional note") {
+                    TextField("Add context for \(recipientName)", text: $message, axis: .vertical).lineLimit(3, reservesSpace: true)
                 }
-                Section(mode == .requestThread ? "Reply" : "Trip Chat") {
-                    if canSend {
-                        TextField("Use @ to mention someone by profile name", text: $message, axis: .vertical)
-                            .lineLimit(5, reservesSpace: true)
-                        if !mentionSuggestions.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 8) {
-                                    ForEach(mentionSuggestions, id: \.self) { name in
-                                        Button("@\(name)") {
-                                            insertMention(name)
-                                        }
-                                        .font(.caption.weight(.semibold))
-                                        .buttonStyle(.bordered)
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        Text(mode == .requestThread
-                             ? "Offer conversations close after you connect with a driver."
-                             : "Trip Chat opens after you connect with a driver.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
+                Section {
+                    Text("The other person will receive an Accept or Decline choice. Declining keeps this chat open so either of you can propose another price.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle(mode.title)
+            .navigationTitle("Propose a Price")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Send") { onSend(message) }
-                        .disabled(!canSend || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Send") { onSend() }.disabled(!isValid) }
             }
         }
     }
+}
 
-    private func insertMention(_ name: String) {
-        guard let atIndex = message.lastIndex(of: "@") else {
-            message += "@\(name) "
-            return
+private struct CashHubChatBubble: View {
+    let response: CashHubResponse
+    private var isCurrentUser: Bool { response.authorUid == Auth.auth().currentUser?.uid }
+    private var isSystem: Bool { response.authorRole == "system" }
+
+    var body: some View {
+        if isSystem {
+            Text(response.message)
+                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                .padding(.horizontal, 13).padding(.vertical, 7)
+                .background(Capsule().fill(Color(.secondarySystemGroupedBackground)))
+        } else {
+            HStack(alignment: .bottom, spacing: 8) {
+                if isCurrentUser { Spacer(minLength: 44) }
+                if !isCurrentUser {
+                    Circle().fill(Color.gray.opacity(0.2)).frame(width: 30, height: 30)
+                        .overlay(Text(String(response.authorName.prefix(1))).font(.caption.weight(.black)))
+                }
+                VStack(alignment: isCurrentUser ? .trailing : .leading, spacing: 4) {
+                    if let amount = response.offerAmount {
+                        Text("Price proposal · \(amount.formatted(.currency(code: "USD")))")
+                            .font(.caption.weight(.black)).foregroundStyle(isCurrentUser ? .white.opacity(0.9) : .red)
+                    }
+                    if !response.message.isEmpty { Text(response.message).font(.body) }
+                    if let createdAt = response.createdAt {
+                        Text(createdAt.formatted(date: .omitted, time: .shortened))
+                            .font(.caption2).foregroundStyle(isCurrentUser ? .white.opacity(0.8) : .secondary)
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .foregroundStyle(isCurrentUser ? .white : .primary)
+                .background(RoundedRectangle(cornerRadius: 20).fill(isCurrentUser ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color(.secondarySystemGroupedBackground))))
+                if !isCurrentUser { Spacer(minLength: 44) }
+            }
         }
-        message.replaceSubrange(atIndex..<message.endIndex, with: "@\(name) ")
     }
 }
 

@@ -399,6 +399,55 @@ private final class DriverCashRydrHubVM: ObservableObject {
         Task { [weak self] in do { try await RydrBackendService.submitSafetyReport(payload);await MainActor.run{self?.confirmationMessage="Post reported to Rydr safety support."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
+    func endChat(_ request: DriverCashRideRequest) {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            errorMessage = "Sign in before ending a chat."
+            return
+        }
+        let conversationId = driverCashHubConversationId(requestId: request.id, driverUid: uid)
+        Task { [weak self] in do { try await RydrBackendService.cashHubConversationCommand(conversationId:conversationId,action:"end_chat");await MainActor.run{self?.confirmationMessage="Chat ended."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+    }
+
+    func proposePrice(_ request: DriverCashRideRequest, amountText: String, message: String) -> Bool {
+        guard let uid = Auth.auth().currentUser?.uid,
+              let offerAmount = cleanAmount(amountText) else {
+            errorMessage = "Enter a valid proposed price."
+            return false
+        }
+        var body: [String: Any] = ["offerAmount": offerAmount]
+        let note = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !note.isEmpty { body["message"] = note }
+        let conversationId = driverCashHubConversationId(requestId: request.id, driverUid: uid)
+        Task { [weak self] in do { try await RydrBackendService.cashHubConversationCommand(conversationId:conversationId,action:"propose_price",body:body);await MainActor.run{self?.confirmationMessage="Your price was sent for the rider to accept or decline."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+        return true
+    }
+
+    func acceptPrice(_ request: DriverCashRideRequest) {
+        guard let uid = Auth.auth().currentUser?.uid else { errorMessage = "Sign in before accepting a price."; return }
+        let conversationId = driverCashHubConversationId(requestId: request.id, driverUid: uid)
+        Task { [weak self] in do { try await RydrBackendService.cashHubConversationCommand(conversationId:conversationId,action:"accept_price");await MainActor.run{self?.confirmationMessage="Price accepted. This trip was added to your queue."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+    }
+
+    func declinePrice(_ request: DriverCashRideRequest) {
+        guard let uid = Auth.auth().currentUser?.uid else { errorMessage = "Sign in before declining a price."; return }
+        let conversationId = driverCashHubConversationId(requestId: request.id, driverUid: uid)
+        Task { [weak self] in do { try await RydrBackendService.cashHubConversationCommand(conversationId:conversationId,action:"decline_price");await MainActor.run{self?.confirmationMessage="Price declined. The conversation remains open."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+    }
+
+    func reportChat(_ request: DriverCashRideRequest) {
+        guard let uid = Auth.auth().currentUser?.uid else {
+            errorMessage = "Sign in before reporting a chat."
+            return
+        }
+        let payload: [String: Any] = [
+            "reportType": "Cash Hub chat report",
+            "cashHubRequestId": request.id,
+            "cashHubConversationId": driverCashHubConversationId(requestId:request.id,driverUid:uid),
+            "description": "Driver reported a Cash Hub chat for review."
+        ]
+        Task { [weak self] in do { try await RydrBackendService.submitSafetyReport(payload);await MainActor.run{self?.confirmationMessage="Chat reported to Rydr safety support."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+    }
+
     func blockRider(_ request: DriverCashRideRequest) {
         guard let uid = Auth.auth().currentUser?.uid else {
             errorMessage = "Sign in before blocking a rider."
@@ -657,19 +706,23 @@ struct DriverCashRydrHubView: View {
         .sheet(item: $messagingRequest) { request in
             DriverCashMessageSheet(
                 request: request,
-                messages: vm.responsesByRequest[request.id] ?? []
-            ) { text in
-                if vm.sendMessage(to: request, text: text, driverName: session.driverName) {
-                    messagingRequest = nil
-                }
-            }
+                messages: vm.responsesByRequest[request.id] ?? [],
+                onSend: { text in vm.sendMessage(to: request, text: text, driverName: session.driverName) },
+                onEndChat: { vm.endChat(request) },
+                onReportChat: { vm.reportChat(request) }
+            )
         }
         .sheet(item: $offeringRequest) { request in
             DriverCashOfferSheet(
                 request: request,
                 messages: vm.responsesByRequest[request.id] ?? [],
                 onSendOffer: { draft in vm.sendOffer(to: request, draft: draft) },
-                onSendMessage: { text in vm.sendMessage(to: request, text: text, driverName: session.driverName) }
+                onSendMessage: { text in vm.sendMessage(to: request, text: text, driverName: session.driverName) },
+                onProposePrice: { amount, note in vm.proposePrice(request, amountText: amount, message: note) },
+                onAcceptPrice: { vm.acceptPrice(request) },
+                onDeclinePrice: { vm.declinePrice(request) },
+                onEndChat: { vm.endChat(request) },
+                onReportChat: { vm.reportChat(request) }
             )
         }
         .fullScreenCover(item: $activeRideRequest) { request in
@@ -2370,65 +2423,58 @@ private struct DriverCashNavigationDetailRow: View {
 private struct DriverCashMessageSheet: View {
     let request: DriverCashRideRequest
     let messages: [DriverCashHubResponse]
-    var onSend: (String) -> Void
+    var onSend: (String) -> Bool
+    var onEndChat: () -> Void
+    var onReportChat: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
-
-    private var title: String {
-        request.status == "open" ? "Offer Conversation" : "Trip Chat"
-    }
-
-    private var inputTitle: String {
-        request.status == "open" ? "Reply" : "Trip Chat"
-    }
+    @State private var confirmEndChat = false
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Ride") {
-                    Text("\(request.pickup) to \(request.destination)")
-                    Text(request.scheduledTime.formatted(date: .abbreviated, time: .shortened))
-                        .foregroundStyle(.secondary)
-                }
-
-                Section(title) {
-                    if messages.isEmpty {
-                        Text("No messages yet.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(messages) { message in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(message.authorName)
-                                    .font(.caption.weight(.semibold))
-                                if let amount = message.offerAmount {
-                                    Text(amount, format: .currency(code: "USD"))
-                                        .font(.caption)
-                                        .foregroundStyle(Styles.rydrGradient)
-                                }
-                                if !message.message.isEmpty {
-                                    Text(message.message)
-                                }
-                            }
+            VStack(spacing: 0) {
+                DriverCashTripChatHeader(request: request, status: "CONNECTED").padding(.horizontal).padding(.top, 10)
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        Text("Today").font(.caption).foregroundStyle(.secondary)
+                        ForEach(messages.sorted(by: messageSort)) { message in
+                            DriverCashThreadBubble(message: message)
                         }
                     }
+                    .padding()
                 }
-
-                Section(inputTitle) {
-                    TextField("Message", text: $text, axis: .vertical)
-                        .lineLimit(4, reservesSpace: true)
+                HStack(spacing: 10) {
+                    TextField("Message \(request.riderName)…", text: $text, axis: .vertical)
+                        .lineLimit(1...4).padding(.horizontal, 15).padding(.vertical, 11)
+                        .background(Capsule().stroke(Color.secondary.opacity(0.3)))
+                    Button {
+                        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if onSend(value) { text = "" }
+                    } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 34)).foregroundStyle(Styles.rydrGradient) }
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
+                .padding(.horizontal).padding(.vertical, 10).background(.ultraThinMaterial)
             }
-            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
+                ToolbarItem(placement: .cancellationAction) { Button { dismiss() } label: { Image(systemName: "chevron.left") } }
+                ToolbarItem(placement: .principal) { DriverCashChatIdentity(name: request.riderName, subtitle: "Connected") }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Send") { onSend(text) }
-                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Menu {
+                        Button("End Chat", systemImage: "xmark.bubble", role: .destructive) { confirmEndChat = true }
+                        Button("Report Chat", systemImage: "exclamationmark.bubble", role: .destructive, action: onReportChat)
+                    } label: { Image(systemName: "ellipsis").font(.title3.weight(.black)) }
                 }
             }
+            .confirmationDialog("End this chat?", isPresented: $confirmEndChat, titleVisibility: .visible) {
+                Button("End Chat", role: .destructive) { onEndChat(); dismiss() }
+                Button("Keep Chat Open", role: .cancel) {}
+            } message: { Text("This closes messaging but does not release or cancel the connected listing.") }
         }
+    }
+
+    private func messageSort(_ lhs: DriverCashHubResponse, _ rhs: DriverCashHubResponse) -> Bool {
+        (lhs.createdAt ?? .distantPast) < (rhs.createdAt ?? .distantPast)
     }
 }
 
@@ -2437,8 +2483,14 @@ private struct DriverCashOfferSheet: View {
     let messages: [DriverCashHubResponse]
     var onSendOffer: (DriverCashOfferDraft) -> Bool
     var onSendMessage: (String) -> Bool
+    var onProposePrice: (String, String) -> Bool
+    var onAcceptPrice: () -> Void
+    var onDeclinePrice: () -> Void
+    var onEndChat: () -> Void
+    var onReportChat: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var draft = DriverCashOfferDraft()
+    @State private var confirmEndChat = false
 
     private var hasExistingOffer: Bool {
         messages.contains { $0.isDriverAuthored && $0.kind == "offer" }
@@ -2485,6 +2537,24 @@ private struct DriverCashOfferSheet: View {
                             ForEach(messages.sorted(by: messageSort)) { message in
                                 DriverCashThreadBubble(message: message)
                             }
+                            if shouldShowPriceDecision {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Label("New price proposed", systemImage: "dollarsign.circle.fill")
+                                        .font(.headline.weight(.black)).foregroundStyle(.red)
+                                    if let amount = unresolvedPriceProposal?.offerAmount {
+                                        Text(amount, format: .currency(code: "USD")).font(.title3.weight(.black))
+                                    }
+                                    HStack {
+                                        Button("Decline", action: onDeclinePrice).buttonStyle(.bordered).tint(.red)
+                                        Button("Accept Price") { onAcceptPrice(); dismiss() }.buttonStyle(.borderedProminent).tint(.green)
+                                    }
+                                }
+                                .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(RoundedRectangle(cornerRadius: 20).fill(Color.green.opacity(0.08)))
+                            } else if isWaitingForPriceResponse {
+                                Label("Waiting for the rider to respond to your price", systemImage: "clock")
+                                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                            }
                         }
                     }
 
@@ -2499,7 +2569,10 @@ private struct DriverCashOfferSheet: View {
                             .textFieldStyle(.roundedBorder)
 
                         Button(hasExistingOffer ? "Update Price" : "Send Price Offer") {
-                            if onSendOffer(draft) {
+                            let didSend = hasExistingOffer
+                                ? onProposePrice(draft.amount, draft.message)
+                                : onSendOffer(draft)
+                            if didSend {
                                 draft.message = ""
                             }
                         }
@@ -2520,6 +2593,13 @@ private struct DriverCashOfferSheet: View {
                     }
                     .padding(16)
                     .background(RoundedRectangle(cornerRadius: 18).fill(Color(.secondarySystemGroupedBackground)))
+                    .disabled(isNegotiationClosed)
+                    .opacity(isNegotiationClosed ? 0.55 : 1)
+
+                    if isNegotiationClosed {
+                        Text("Price negotiation is closed. Accepted-trip chat is for pickup and trip coordination only.")
+                            .font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                    }
 
                     Text("Your vehicle comes from your approved Driver profile. Making an offer confirms you are available for the requested time.")
                         .font(.footnote)
@@ -2533,9 +2613,16 @@ private struct DriverCashOfferSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Menu {
+                        Button("End Chat", systemImage: "xmark.bubble", role: .destructive) { confirmEndChat = true }
+                        Button("Report Chat", systemImage: "exclamationmark.bubble", role: .destructive, action: onReportChat)
+                    } label: { Image(systemName: "ellipsis").font(.title3.weight(.black)) }
                 }
             }
+            .confirmationDialog("End this chat?", isPresented: $confirmEndChat, titleVisibility: .visible) {
+                Button("End Chat", role: .destructive) { onEndChat(); dismiss() }
+                Button("Keep Chat Open", role: .cancel) {}
+            } message: { Text("This closes this negotiation without accepting a price.") }
             .onAppear {
                 guard draft.amount.isEmpty,
                       let latestAmount = messages
@@ -2552,8 +2639,79 @@ private struct DriverCashOfferSheet: View {
         return request.budgetRange.hasPrefix("$") ? request.budgetRange : "$\(request.budgetRange)"
     }
 
+    private var unresolvedPriceProposal: DriverCashHubResponse? {
+        for response in messages.sorted(by: { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }) {
+            if ["priceAccepted", "offerDeclined"].contains(response.kind) { return nil }
+            if ["offer", "priceProposal"].contains(response.kind), response.offerAmount != nil { return response }
+        }
+        return nil
+    }
+
+    private var shouldShowPriceDecision: Bool {
+        unresolvedPriceProposal?.authorUid != nil && unresolvedPriceProposal?.authorUid != Auth.auth().currentUser?.uid
+    }
+
+    private var isWaitingForPriceResponse: Bool {
+        unresolvedPriceProposal?.authorUid == Auth.auth().currentUser?.uid
+    }
+
+    private var isNegotiationClosed: Bool {
+        request.status != "open" || messages.contains { ["priceAccepted", "listingTaken", "chatEnded"].contains($0.kind) }
+    }
+
     private func messageSort(_ lhs: DriverCashHubResponse, _ rhs: DriverCashHubResponse) -> Bool {
         (lhs.createdAt ?? .distantPast) < (rhs.createdAt ?? .distantPast)
+    }
+}
+
+private struct DriverCashChatIdentity: View {
+    let name: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Circle().fill(Styles.rydrGradient).frame(width: 38, height: 38)
+                .overlay(Text(String(name.prefix(1)).uppercased()).font(.headline.weight(.black)).foregroundStyle(.white))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.headline.weight(.black))
+                HStack(spacing: 4) {
+                    Circle().fill(.green).frame(width: 7, height: 7)
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+private struct DriverCashTripChatHeader: View {
+    let request: DriverCashRideRequest
+    let status: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack {
+                Text("CashRydr Trip Post").font(.subheadline.weight(.bold)).foregroundStyle(.secondary)
+                Text(status).font(.caption2.weight(.black)).foregroundStyle(.green)
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(Capsule().fill(Color.green.opacity(0.1)))
+                Spacer()
+            }
+            Label(request.pickup, systemImage: "a.circle.fill").font(.subheadline.weight(.bold)).foregroundStyle(.green)
+            Label(request.destination, systemImage: "b.circle.fill").font(.subheadline.weight(.bold)).foregroundStyle(.red)
+            Divider()
+            HStack {
+                Label(request.scheduledTime.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
+                Spacer()
+                Label("\(request.passengers) rider\(request.passengers == 1 ? "" : "s")", systemImage: "person")
+                if let price = request.agreedPrice {
+                    Spacer()
+                    Text(price, format: .currency(code: "USD")).fontWeight(.black).foregroundStyle(.red)
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(15)
+        .background(RoundedRectangle(cornerRadius: 20).fill(Color(.secondarySystemGroupedBackground)))
     }
 }
 

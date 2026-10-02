@@ -1,7 +1,7 @@
 const express = require("express");
 const { requireFirebaseAuth } = require("../middleware/firebaseAuth");
 const { requireFirebaseAppCheck } = require("../middleware/appCheck");
-const { acceptCashHubTerms, optOutCashHub, createCashHubRequest, commandCashHubRequest, createCashHubOffer, sendCashHubMessage } = require("../services/cashHubService");
+const { acceptCashHubTerms, optOutCashHub, createCashHubRequest, commandCashHubRequest, createCashHubOffer, sendCashHubMessage, commandCashHubConversation } = require("../services/cashHubService");
 const router = express.Router();
 router.use(requireFirebaseAuth);
 router.use(requireFirebaseAppCheck);
@@ -33,4 +33,5 @@ router.post("/requests", rateLimit("create", 10), async (req, res, next) => { tr
 router.post("/requests/:requestId/command", rateLimit("command", 60), async (req, res, next) => { try { res.json({ ok: true, ...(await commandCashHubRequest({ uid: req.firebaseUid, requestId: req.params.requestId, action: req.body?.action, payload: req.body })) }); } catch (e) { next(e); } });
 router.post("/requests/:requestId/offers", rateLimit("offer", 20), async (req,res,next)=>{try{res.status(201).json({ok:true,...await createCashHubOffer({uid:req.firebaseUid,requestId:req.params.requestId,payload:req.body})});}catch(e){next(e);}});
 router.post("/conversations/:conversationId/messages", rateLimit("message", 120), async (req,res,next)=>{try{res.status(201).json({ok:true,...await sendCashHubMessage({uid:req.firebaseUid,conversationId:req.params.conversationId,payload:req.body})});}catch(e){next(e);}});
+router.post("/conversations/:conversationId/command", rateLimit("conversation-command", 30), async (req,res,next)=>{try{res.json({ok:true,...await commandCashHubConversation({uid:req.firebaseUid,conversationId:req.params.conversationId,action:req.body?.action,payload:req.body})});}catch(e){next(e);}});
 module.exports = router;

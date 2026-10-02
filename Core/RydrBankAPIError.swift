@@ -152,6 +152,7 @@ enum RiderCashHubBackend {
     static func command(requestId:String, action:String, body:[String:Any]=[:]) async throws { var value=body;value["action"]=action;value["idempotencyKey"]=UUID().uuidString;try await send(path:"/cash-hub/requests/\(requestId)/command",body:value) }
     static func offer(requestId:String, body:[String:Any]) async throws { var value=body;value["idempotencyKey"]=UUID().uuidString;try await send(path:"/cash-hub/requests/\(requestId)/offers",body:value) }
     static func message(conversationId:String, text:String, kind:String) async throws { try await send(path:"/cash-hub/conversations/\(conversationId)/messages",body:["message":text,"kind":kind,"idempotencyKey":UUID().uuidString]) }
+    static func conversationCommand(conversationId:String, action:String, body:[String:Any]=[:]) async throws { var value=body;value["action"]=action;value["idempotencyKey"]=UUID().uuidString;try await send(path:"/cash-hub/conversations/\(conversationId)/command",body:value) }
 }
 
 enum RiderSafetyBackend {
