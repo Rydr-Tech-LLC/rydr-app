@@ -49,6 +49,7 @@ export default async function SettingsPage() {
     }) ?? [];
   const cashHubTermsAcceptanceEnabled = cashHubConfig.termsAcceptanceEnabled === true;
   const cashHubTermsVersion = typeof cashHubConfig.cashHubTermsVersion === "string" ? cashHubConfig.cashHubTermsVersion : null;
+  const cashHubBillingEnabled = cashHubConfig.cashHubBillingEnabled === true;
   const rydrExecutiveEnabled = executiveConfig.enabled === true;
 
   return (
@@ -62,7 +63,7 @@ export default async function SettingsPage() {
 
       <PasswordChangeForm />
 
-      <CashHubBetaToggle initialEnabled={cashHubTermsAcceptanceEnabled} initialTermsVersion={cashHubTermsVersion} />
+      <CashHubBetaToggle initialEnabled={cashHubTermsAcceptanceEnabled} initialTermsVersion={cashHubTermsVersion} initialBillingEnabled={cashHubBillingEnabled} />
 
       <RydrExecutiveBetaToggle initialEnabled={rydrExecutiveEnabled} />
 

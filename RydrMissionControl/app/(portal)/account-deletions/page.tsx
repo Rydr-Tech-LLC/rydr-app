@@ -45,7 +45,7 @@ export default async function AccountDeletionsPage() {
                       <p className="font-medium text-ink">{req.email ?? req.uid}</p>
                       <StatusPill status={req.status} />
                       <span className="rounded-full border border-line bg-grouped px-2 py-0.5 text-[11px] font-medium text-muted">
-                        {req.role}
+                        {(req.roles?.length ? req.roles : [req.role]).join(" + ")}
                       </span>
                     </div>
                     <p className="mt-0.5 text-xs text-muted">

@@ -11,13 +11,18 @@ export async function cleanupStripeAccount(
   requestId: string,
   uid: string
 ) {
+  const stripeCustomerId = typeof profile.stripeCustomerId === "string" ? profile.stripeCustomerId.trim() : "";
+  const stripeAccountId = typeof profile.stripeAccountId === "string" ? profile.stripeAccountId.trim() : "";
+  if (!stripeCustomerId && !stripeAccountId) {
+    return { notRequired: true };
+  }
+
   const base = process.env.STRIPE_BACKEND_BASE_URL;
   const secret = process.env.RYDR_INTERNAL_ADMIN_SECRET;
   if (!base || !secret) {
-    // Not configured — surface this clearly in the audit trail rather than
-    // silently skipping Stripe cleanup. Firestore/Auth deletion still
-    // proceeds; an admin can re-run cleanup once env vars are set.
-    return { skipped: true, reason: "STRIPE_BACKEND_BASE_URL or RYDR_INTERNAL_ADMIN_SECRET not configured" };
+    // Never orphan a live Stripe Customer or Connect account by continuing
+    // with Auth/Firestore deletion when the required cleanup path is absent.
+    throw new Error("Stripe account cleanup is not configured");
   }
 
   const res = await fetch(`${base.replace(/\/+$/, "")}/admin/cleanup-account`, {
@@ -31,8 +36,8 @@ export async function cleanupStripeAccount(
       role,
       requestId,
       uid,
-      stripeCustomerId: profile.stripeCustomerId ?? null,
-      stripeAccountId: profile.stripeAccountId ?? null
+      stripeCustomerId: stripeCustomerId || null,
+      stripeAccountId: stripeAccountId || null
     })
   });
 

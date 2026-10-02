@@ -265,6 +265,10 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
                 <Field label="Opted out" value={toDateSafe(driver.cashHubOptedOutAt)?.toLocaleString() ?? "—"} />
                 <Field label="Accepted terms version" value={driver.cashHubTermsVersion} />
                 <Field label="Fee terms version" value={driver.cashHubDriverAccessFeeVersion} />
+                <Field label="Late releases" value={driver.cashHubLateReleaseCount ?? 0} />
+                <Field label="Total penalties" value={driver.cashHubPenaltyCount ?? 0} />
+                <Field label="Review reason" value={driver.cashHubAccessReviewReason} />
+                <Field label="Access paused at" value={toDateSafe(driver.cashHubAccessSuspendedAt)?.toLocaleString() ?? "—"} />
               </Grid>
             </div>
           </Section>
@@ -275,7 +279,12 @@ export default async function DriverReviewPage({ params }: { params: { uid: stri
 
           <DriverProfileAdminTools uid={driver.uid} initial={adminProfileInitial} />
 
-          <DriverActions uid={driver.uid} missing={missing} activeRide={activeRide} />
+          <DriverActions
+            uid={driver.uid}
+            missing={missing}
+            activeRide={activeRide}
+            cashHubAccessStatus={driver.cashHubAccessStatus}
+          />
         </div>
       </div>
     </div>

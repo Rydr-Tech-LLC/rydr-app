@@ -7,11 +7,13 @@ import type { ActiveRideSummary } from "@/lib/activeRideTypes";
 export default function DriverActions({
   uid,
   missing,
-  activeRide
+  activeRide,
+  cashHubAccessStatus
 }: {
   uid: string;
   missing: string[];
   activeRide: ActiveRideSummary | null;
+  cashHubAccessStatus?: string;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
@@ -72,6 +74,26 @@ export default function DriverActions({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: reason || undefined })
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setError(body.error ?? "Something went wrong.");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function updateCashHubAccess(action: "restore" | "pause") {
+    setLoading(`cash_hub_${action}`);
+    setError(null);
+    try {
+      const response = await fetch(`/api/drivers/${uid}/cash-hub-access`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, reason: reason || undefined })
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -161,6 +183,28 @@ export default function DriverActions({
         >
           {loading === "rejected" ? "Rejecting…" : "Reject Driver"}
         </button>
+      </div>
+
+      <div className="mt-5 border-t border-line pt-4">
+        <p className="mb-2 text-[11px] font-medium text-muted">
+          CashRydr Hub access is {cashHubAccessStatus || "inactive"}. Restoring access requires current terms and no overdue monthly fee.
+        </p>
+        <div className="flex flex-col gap-2">
+          <button
+            disabled={loading !== null}
+            onClick={() => updateCashHubAccess("restore")}
+            className="rounded-md bg-emerald-700 py-2 text-xs font-semibold text-white transition disabled:opacity-40"
+          >
+            {loading === "cash_hub_restore" ? "Restoring…" : "Restore CashHub Access"}
+          </button>
+          <button
+            disabled={loading !== null}
+            onClick={() => updateCashHubAccess("pause")}
+            className="rounded-md border border-amber-600 bg-white py-2 text-xs font-semibold text-amber-700 transition disabled:opacity-40"
+          >
+            {loading === "cash_hub_pause" ? "Pausing…" : "Pause CashHub Access"}
+          </button>
+        </div>
       </div>
 
       {activeRide && (

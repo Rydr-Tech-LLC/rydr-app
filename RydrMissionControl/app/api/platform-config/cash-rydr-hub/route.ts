@@ -20,6 +20,9 @@ export async function GET() {
   return NextResponse.json({
     termsAcceptanceEnabled: data.termsAcceptanceEnabled === true,
     cashHubTermsVersion: typeof data.cashHubTermsVersion === "string" ? data.cashHubTermsVersion : null,
+    cashHubBillingEnabled: data.cashHubBillingEnabled === true,
+    cashHubMonthlyFeeCents: typeof data.cashHubMonthlyFeeCents === "number" ? data.cashHubMonthlyFeeCents : 499,
+    cashHubBillingLaunchAt: data.cashHubBillingLaunchAt ?? null,
     updatedAt: data.updatedAt ?? null,
     updatedBy: data.updatedBy ?? null
   });
@@ -29,7 +32,33 @@ export async function PATCH(request: NextRequest) {
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const body = (await request.json()) as { termsAcceptanceEnabled?: unknown; reason?: unknown };
+  const body = (await request.json()) as { termsAcceptanceEnabled?: unknown; cashHubBillingEnabled?: unknown; reason?: unknown };
+  if (typeof body.cashHubBillingEnabled === "boolean") {
+    const enabled = body.cashHubBillingEnabled;
+    const reason = typeof body.reason === "string" ? body.reason : undefined;
+    const snap = await configRef().get();
+    const current = snap.data() ?? {};
+    const wasEnabled = current.cashHubBillingEnabled === true;
+    await configRef().set({
+      cashHubBillingEnabled: enabled,
+      cashHubMonthlyFeeCents: 499,
+      cashHubBillingLaunchAt: enabled && !wasEnabled ? FieldValue.serverTimestamp() : current.cashHubBillingLaunchAt ?? null,
+      cashHubBillingDisabledAt: !enabled && wasEnabled ? FieldValue.serverTimestamp() : current.cashHubBillingDisabledAt ?? null,
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedBy: session.uid,
+      updatedByEmail: session.email ?? null
+    }, { merge: true });
+    await writeAuditLog({
+      adminUid: session.uid,
+      adminEmail: session.email ?? undefined,
+      action: enabled ? "Cash Hub Billing Enabled" : "Cash Hub Billing Disabled",
+      targetType: "platformConfig",
+      targetId: "cashRydrHub",
+      reason,
+      metadata: { feeCents: 499, collectionSource: "dispatch_earnings" }
+    });
+    return NextResponse.json({ ok: true, cashHubBillingEnabled: enabled, cashHubMonthlyFeeCents: 499 });
+  }
   if (typeof body.termsAcceptanceEnabled !== "boolean") {
     return NextResponse.json({ error: "termsAcceptanceEnabled must be a boolean" }, { status: 400 });
   }
@@ -48,6 +77,7 @@ export async function PATCH(request: NextRequest) {
     transaction.set(ref, {
       termsAcceptanceEnabled: enabled,
       cashHubTermsVersion: nextVersion,
+      ...(!enabled ? { cashHubBillingEnabled: false, cashHubBillingDisabledAt: FieldValue.serverTimestamp() } : {}),
       disabledAt: !enabled && currentEnabled ? FieldValue.serverTimestamp() : current.disabledAt ?? null,
       enabledAt: enabled && !currentEnabled ? FieldValue.serverTimestamp() : current.enabledAt ?? null,
       updatedAt: FieldValue.serverTimestamp(),

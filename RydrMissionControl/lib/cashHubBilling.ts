@@ -1,7 +1,7 @@
 import { adminDb } from "./firebaseAdmin";
 import type { DriverRecord } from "./types";
 
-export type CashHubBillingStatus = "active" | "feePending" | "partiallyCollected" | "collected" | "unknown";
+export type CashHubBillingStatus = "active" | "feePending" | "partiallyCollected" | "collected" | "pastDue" | "unknown";
 
 export interface CashHubBillingRecord {
   id: string;
@@ -53,6 +53,18 @@ export function cashHubAccessActive(driver: DriverRecord, config?: CashHubGateCo
 
 export function cashHubBillingDisplay(driver: DriverRecord, billing: CashHubBillingRecord | null, config?: CashHubGateConfig | null) {
   const period = currentCashHubBillingPeriod();
+  const accessStatus = String(driver.cashHubAccessStatus ?? "").toLowerCase();
+  if (["past_due", "suspended", "review_required", "revoked"].includes(accessStatus)) {
+    return {
+      status: "pastDue",
+      label: accessStatus === "review_required" ? "Review required" : accessStatus === "revoked" ? "Revoked" : "Access paused",
+      detail: accessStatus === "review_required"
+        ? driver.cashHubAccessReviewReason || "Repeated late releases require Mission Control review."
+        : billing
+          ? `${formatCents(billing.remainingCents)} remains. Access restores after eligible Dispatch earnings collect it.`
+          : "An outstanding CashRydr Hub fee must be collected from Dispatch earnings."
+    };
+  }
   if (!cashHubAccessActive(driver, config)) {
     const staleTerms = config?.cashHubTermsVersion && driver.cashHubTermsVersion !== config.cashHubTermsVersion;
     return {
@@ -93,6 +105,12 @@ export function cashHubBillingDisplay(driver: DriverRecord, billing: CashHubBill
         label: `Collected for ${period.label}`,
         detail: `${formatCents(billing.collectedCents || billing.feeCents)} collected.`
       };
+    case "pastDue":
+      return {
+        status: "pastDue",
+        label: "Access paused",
+        detail: `${formatCents(billing.remainingCents)} remains. Access restores after eligible Dispatch earnings collect it.`
+      };
     case "active":
       return {
         status: "active",
@@ -117,6 +135,7 @@ function normalizeCashHubBillingStatus(value: unknown): CashHubBillingStatus {
   if (value === "feePending" || value === "fee_pending") return "feePending";
   if (value === "partiallyCollected" || value === "partially_collected") return "partiallyCollected";
   if (value === "collected") return "collected";
+  if (value === "pastDue" || value === "past_due") return "pastDue";
   return "unknown";
 }
 

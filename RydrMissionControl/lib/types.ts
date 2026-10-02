@@ -148,6 +148,10 @@ export interface DriverRecord {
   cashHubOptedOut?: boolean;
   cashHubOptedOutAt?: { toDate?: () => Date } | null;
   cashHubAccessStatus?: string;
+  cashHubAccessReviewReason?: string;
+  cashHubAccessSuspendedAt?: { toDate?: () => Date } | null;
+  cashHubLateReleaseCount?: number;
+  cashHubPenaltyCount?: number;
   cashHubDriverAccessFeeAcknowledged?: boolean;
   cashHubDriverAccessFeeAcknowledgedAt?: { toDate?: () => Date } | null;
   cashHubDriverAccessFeeCents?: number;
@@ -242,9 +246,8 @@ export interface AuditLogEntry {
 }
 
 // --- Account deletion (Part 12 of the beta hardening sprint) -------------
-// Written by riders/drivers directly (rules: `accountDeletionRequests/{uid}`)
-// or by rydr-backend's /driver/account-deletion-requests route — both key
-// the document by uid so there is exactly one request per account.
+// Written only by rydr-backend's authenticated account-deletion endpoint and
+// keyed by uid so there is exactly one request per Firebase account.
 // Mission Control's admin-only process route is the only thing that ever
 // transitions `status` to "processing"/"completed"/"rejected".
 export type AccountDeletionStatus = "requested" | "processing" | "completed" | "rejected";
@@ -254,6 +257,8 @@ export interface AccountDeletionRequestRecord {
   uid: string;
   userId?: string;
   role: "rider" | "driver";
+  roles?: Array<"rider" | "driver">;
+  priorAccountStatuses?: Partial<Record<"rider" | "driver", string | null>>;
   email?: string | null;
   reason?: string | null;
   status: AccountDeletionStatus;
