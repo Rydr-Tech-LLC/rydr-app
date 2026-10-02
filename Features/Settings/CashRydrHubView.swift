@@ -8,6 +8,7 @@
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
+import CoreLocation
 import MapKit
 import UIKit
 
@@ -3294,6 +3295,11 @@ private struct CashHubAcceptedRequestView: View {
 }
 
 private struct CashHubRequestForm: View {
+    private enum SuggestedPricing {
+        static let perMile = 0.90
+        static let perMinute = 0.28
+    }
+
     let title: String
     var initialDraft = CashHubRequestDraft()
     var onSave: (CashHubRequestDraft) -> Void
@@ -3302,7 +3308,17 @@ private struct CashHubRequestForm: View {
     @State private var minimumScheduledTime: Date
     @StateObject private var pickupCompleter = SearchCompleter()
     @StateObject private var destinationCompleter = SearchCompleter()
+    @StateObject private var locationManager = LocationManager()
     @FocusState private var focusedAddressField: AddressField?
+    @State private var pickupMapItem: MKMapItem?
+    @State private var destinationMapItem: MKMapItem?
+    @State private var route: MKRoute?
+    @State private var mapPosition: MapCameraPosition = .automatic
+    @State private var isResolvingRoute = false
+    @State private var routeMessage: String?
+    @State private var lastSuggestedBudget: String?
+    @State private var resolvedPickupText = ""
+    @State private var resolvedDestinationText = ""
 
     private enum AddressField {
         case pickup
@@ -3319,93 +3335,383 @@ private struct CashHubRequestForm: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Trip") {
-                    addressField(
-                        title: "Pickup location",
-                        text: $draft.pickup,
-                        field: .pickup,
-                        completer: pickupCompleter
-                    )
-                    addressSuggestions(for: pickupCompleter, field: .pickup)
-
-                    addressField(
-                        title: "Destination",
-                        text: $draft.destination,
-                        field: .destination,
-                        completer: destinationCompleter
-                    )
-                    addressSuggestions(for: destinationCompleter, field: .destination)
-
-                    DatePicker(
-                        "Date and time",
-                        selection: $draft.scheduledTime,
-                        in: minimumScheduledTime...,
-                        displayedComponents: [.date, .hourAndMinute]
-                    )
-                    Text("Requests must be scheduled at least 2 hours in advance.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Stepper("Passengers: \(draft.passengers)", value: $draft.passengers, in: 1...12)
-                }
-                Section("Details") {
-                    Picker("Trip format", selection: $draft.tripFormat) {
-                        ForEach(["One-way", "Round trip", "Scheduled", "Flexible"], id: \.self) { Text($0) }
-                    }
-                    Picker("Visibility", selection: $draft.visibility) {
-                        ForEach(CashHubVisibility.allCases) { option in
-                            Text(option.rawValue).tag(option.rawValue)
-                        }
-                    }
-                    if let visibility = CashHubVisibility(rawValue: draft.visibility) {
-                        Text(visibility.explanation)
-                            .font(.caption)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(title == "Edit Ride Request" ? "Edit your post" : "Create a ride post")
+                            .font(.largeTitle.weight(.black))
+                        Text("Share your trip and connect with a driver traveling your route.")
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
-                    HStack {
-                        Text("$")
-                        TextField("Proposed payment amount (optional)", text: Binding(
-                            get: { draft.budgetRange },
-                            set: { draft.budgetRange = cashHubCurrencyInput($0) }
-                        ))
-                        .keyboardType(.decimalPad)
-                    }
-                    TextField("Luggage or special notes", text: $draft.notes, axis: .vertical)
-                        .lineLimit(3, reservesSpace: true)
+
+                    routeCard
+                    scheduleCard
+                    passengerCard
+                    visibilityCard
+                    contributionCard
+                    notesCard
                 }
+                .padding(.horizontal, 18)
+                .padding(.top, 12)
+                .padding(.bottom, 100)
             }
-            .navigationTitle(title)
+            .background(Color(.systemGroupedBackground))
+            .navigationBarTitleDisplayMode(.inline)
             .onAppear {
                 minimumScheduledTime = CashHubScheduling.earliestRequestTime()
                 if draft.scheduledTime < minimumScheduledTime {
                     draft.scheduledTime = minimumScheduledTime
                 }
+                if !draft.pickup.isEmpty && !draft.destination.isEmpty {
+                    Task { await resolveInitialRoute() }
+                }
+            }
+            .onChange(of: locationManager.lastLocation?.coordinate.latitude) { _, _ in
+                guard pickupMapItem == nil, let location = locationManager.lastLocation else { return }
+                Task { await useLocationAsPickup(location) }
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .fontWeight(.bold)
+                        .foregroundStyle(Color.red)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Post Request") { onSave(draft) }
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "car.side.fill")
+                            .foregroundStyle(Styles.rydrGradient)
+                        Text("CashRydr Hub")
+                            .font(.headline.weight(.black))
+                    }
                 }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button(title == "Edit Ride Request" ? "Save Changes" : "Submit Post") {
+                    onSave(draft)
+                }
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(Capsule().fill(Styles.rydrGradient))
+                .disabled(!canSubmit)
+                .opacity(canSubmit ? 1 : 0.45)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(.ultraThinMaterial)
             }
         }
     }
 
+    private var routeCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Where are you going?", systemImage: "mappin.and.ellipse")
+                .font(.title3.weight(.black))
+
+            pointAddressField(
+                point: "A",
+                color: .green,
+                title: "Pickup location",
+                text: $draft.pickup,
+                field: .pickup,
+                completer: pickupCompleter,
+                showsCurrentLocation: true
+            )
+            addressSuggestions(for: pickupCompleter, field: .pickup)
+
+            pointAddressField(
+                point: "B",
+                color: .red,
+                title: "Destination",
+                text: $draft.destination,
+                field: .destination,
+                completer: destinationCompleter,
+                showsCurrentLocation: false
+            )
+            addressSuggestions(for: destinationCompleter, field: .destination)
+
+            routeMap
+            tripPreview
+        }
+        .cashHubPremiumCard()
+    }
+
+    private var routeMap: some View {
+        Group {
+            if let route {
+                Map(position: $mapPosition, interactionModes: [.pan, .zoom]) {
+                    if let coordinate = pickupMapItem?.placemark.coordinate {
+                        Marker("Point A", systemImage: "a.circle.fill", coordinate: coordinate)
+                            .tint(.green)
+                    }
+                    if let coordinate = destinationMapItem?.placemark.coordinate {
+                        Marker("Point B", systemImage: "b.circle.fill", coordinate: coordinate)
+                            .tint(.red)
+                    }
+                    MapPolyline(route.polyline)
+                        .stroke(Styles.rydrGradient, lineWidth: 5)
+                }
+            } else {
+                ZStack {
+                    LinearGradient(colors: [Color.red.opacity(0.08), Color.gray.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    VStack(spacing: 8) {
+                        Image(systemName: isResolvingRoute ? "hourglass" : "map.fill")
+                            .font(.title)
+                            .foregroundStyle(Styles.rydrGradient)
+                        Text(isResolvingRoute ? "Building trip preview…" : "Choose Point A and Point B to preview your trip")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                }
+            }
+        }
+        .frame(height: 220)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.black.opacity(0.06)))
+    }
+
+    private var tripPreview: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Trip Preview")
+                .font(.headline.weight(.black))
+            HStack {
+                previewMetric(value: distanceText, label: "Distance")
+                Divider().frame(height: 38)
+                previewMetric(value: durationText, label: "Est. time")
+                Divider().frame(height: 38)
+                previewMetric(value: suggestedPriceText, label: "Suggested")
+            }
+            if let routeMessage {
+                Text(routeMessage)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else {
+                Text("Calculated from the live route at \(SuggestedPricing.perMile.formatted(.currency(code: "USD"))) per mile plus \(SuggestedPricing.perMinute.formatted(.currency(code: "USD"))) per minute.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemGroupedBackground)))
+    }
+
+    private var scheduleCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("When are you leaving?", systemImage: "calendar.badge.clock")
+                .font(.headline.weight(.black))
+            HStack(spacing: 12) {
+                DatePicker("Date", selection: $draft.scheduledTime, in: minimumScheduledTime..., displayedComponents: .date)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+                DatePicker("Time", selection: $draft.scheduledTime, in: minimumScheduledTime..., displayedComponents: .hourAndMinute)
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+            }
+            Text("Schedule at least 2 hours in advance.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .cashHubPremiumCard()
+    }
+
+    private var passengerCard: some View {
+        VStack(spacing: 14) {
+            HStack {
+                Label("Passengers", systemImage: "person.2.fill")
+                    .font(.headline.weight(.black))
+                Spacer()
+                HStack(spacing: 18) {
+                    Button { draft.passengers = max(1, draft.passengers - 1) } label: {
+                        Image(systemName: "minus")
+                    }
+                    .disabled(draft.passengers == 1)
+                    Text("\(draft.passengers)")
+                        .font(.headline.monospacedDigit())
+                        .frame(minWidth: 22)
+                    Button { draft.passengers = min(12, draft.passengers + 1) } label: {
+                        Image(systemName: "plus")
+                    }
+                    .disabled(draft.passengers == 12)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(Capsule().fill(Color(.secondarySystemGroupedBackground)))
+            }
+            Picker("Trip format", selection: $draft.tripFormat) {
+                Text("One way").tag("One-way")
+                Text("Round trip").tag("Round trip")
+            }
+            .pickerStyle(.segmented)
+        }
+        .cashHubPremiumCard()
+    }
+
+    private var visibilityCard: some View {
+        Menu {
+            ForEach(CashHubVisibility.allCases) { option in
+                Button {
+                    draft.visibility = option.rawValue
+                } label: {
+                    Label(option.rawValue, systemImage: option.rawValue == draft.visibility ? "checkmark" : "circle")
+                }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "person.3.fill")
+                    .font(.title3)
+                    .foregroundStyle(Styles.rydrGradient)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Visibility")
+                        .font(.headline.weight(.black))
+                    Text(CashHubVisibility.normalized(draft.visibility).explanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer()
+                Text(visibilityShortLabel)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .cashHubPremiumCard()
+    }
+
+    private var contributionCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Suggested shared contribution", systemImage: "dollarsign.circle.fill")
+                .font(.headline.weight(.black))
+            HStack(spacing: 4) {
+                Text("$")
+                    .font(.headline.weight(.bold))
+                TextField("Enter an amount", text: Binding(
+                    get: { draft.budgetRange },
+                    set: { draft.budgetRange = cashHubCurrencyInput($0) }
+                ))
+                .keyboardType(.decimalPad)
+                .font(.headline.weight(.semibold))
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemGroupedBackground)))
+            Text("Optional — drivers may propose a different amount.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .cashHubPremiumCard()
+    }
+
+    private var notesCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Luggage or special notes", systemImage: "note.text")
+                .font(.headline.weight(.black))
+            TextField("Add luggage, stops, accessibility needs, or other details", text: $draft.notes, axis: .vertical)
+                .lineLimit(4, reservesSpace: true)
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemGroupedBackground)))
+        }
+        .cashHubPremiumCard()
+    }
+
+    private var canSubmit: Bool {
+        !draft.pickup.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !draft.destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && CashHubScheduling.isAllowed(draft.scheduledTime)
+    }
+
+    private var distanceText: String {
+        guard let route else { return "—" }
+        return String(format: "%.1f mi", route.distance / 1609.344)
+    }
+
+    private var durationText: String {
+        guard let route else { return "—" }
+        return "\(Int((route.expectedTravelTime / 60).rounded())) min"
+    }
+
+    private var suggestedPriceText: String {
+        guard let suggestedAmount else { return "—" }
+        return suggestedAmount.formatted(.currency(code: "USD"))
+    }
+
+    private var suggestedAmount: Double? {
+        guard let route else { return nil }
+        let miles = route.distance / 1609.344
+        let minutes = route.expectedTravelTime / 60
+        return ((miles * SuggestedPricing.perMile + minutes * SuggestedPricing.perMinute) * 100).rounded() / 100
+    }
+
+    private var visibilityShortLabel: String {
+        CashHubVisibility.normalized(draft.visibility) == .publicCommunity ? "Public" : "Favorites"
+    }
+
+    private func previewMetric(value: String, label: String) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.headline.weight(.black))
+                .minimumScaleFactor(0.75)
+                .lineLimit(1)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     @ViewBuilder
-    private func addressField(
+    private func pointAddressField(
+        point: String,
+        color: Color,
         title: String,
         text: Binding<String>,
         field: AddressField,
-        completer: SearchCompleter
+        completer: SearchCompleter,
+        showsCurrentLocation: Bool
     ) -> some View {
-        TextField(title, text: text)
-            .textContentType(.fullStreetAddress)
-            .textInputAutocapitalization(.words)
-            .focused($focusedAddressField, equals: field)
-            .onChange(of: text.wrappedValue) { _, value in
-                completer.setQuery(value)
+        HStack(spacing: 12) {
+            Text(point)
+                .font(.caption.weight(.black))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(color))
+            TextField(title, text: text)
+                .textContentType(.fullStreetAddress)
+                .textInputAutocapitalization(.words)
+                .focused($focusedAddressField, equals: field)
+                .onChange(of: text.wrappedValue) { _, value in
+                    completer.setQuery(value)
+                    if field == .pickup, value != resolvedPickupText {
+                        pickupMapItem = nil
+                        invalidateRouteSuggestion()
+                    } else if field == .destination, value != resolvedDestinationText {
+                        destinationMapItem = nil
+                        invalidateRouteSuggestion()
+                    }
+                }
+            if showsCurrentLocation {
+                Button {
+                    if let location = locationManager.lastLocation {
+                        Task { await useLocationAsPickup(location) }
+                    } else {
+                        locationManager.requestIfNeeded()
+                    }
+                } label: {
+                    Image(systemName: "location.fill")
+                        .foregroundStyle(Color.red)
+                        .frame(width: 32, height: 32)
+                        .background(RoundedRectangle(cornerRadius: 9).fill(Color.red.opacity(0.1)))
+                }
+                .buttonStyle(.plain)
             }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemGroupedBackground)))
     }
 
     @ViewBuilder
@@ -3414,7 +3720,7 @@ private struct CashHubRequestForm: View {
             ForEach(Array(completer.results.prefix(5)).indices, id: \.self) { index in
                 let result = completer.results[index]
                 Button {
-                    selectAddress(result, for: field)
+                    Task { await selectAddress(result, for: field) }
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(result.title)
@@ -3427,6 +3733,8 @@ private struct CashHubRequestForm: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
             }
         }
     }
@@ -3438,19 +3746,105 @@ private struct CashHubRequestForm: View {
         }
     }
 
-    private func selectAddress(_ completion: MKLocalSearchCompletion, for field: AddressField) {
-        let fullAddress = completion.title + (completion.subtitle.isEmpty ? "" : ", \(completion.subtitle)")
-        switch field {
-        case .pickup:
-            draft.pickup = fullAddress
-            pickupCompleter.setQuery("")
-        case .destination:
-            draft.destination = fullAddress
-            destinationCompleter.setQuery("")
+    private func selectAddress(_ completion: MKLocalSearchCompletion, for field: AddressField) async {
+        do {
+            let response = try await MKLocalSearch(request: MKLocalSearch.Request(completion: completion)).start()
+            guard let mapItem = response.mapItems.first else { return }
+            let fullAddress = completion.title + (completion.subtitle.isEmpty ? "" : ", \(completion.subtitle)")
+            switch field {
+            case .pickup:
+                resolvedPickupText = fullAddress
+                draft.pickup = fullAddress
+                pickupMapItem = mapItem
+                pickupCompleter.setQuery("")
+            case .destination:
+                resolvedDestinationText = fullAddress
+                draft.destination = fullAddress
+                destinationMapItem = mapItem
+                destinationCompleter.setQuery("")
+            }
+            focusedAddressField = nil
+            await calculateRoute()
+        } catch {
+            routeMessage = "That location could not be resolved. Choose another search result."
         }
-        focusedAddressField = nil
     }
 
+    private func resolveInitialRoute() async {
+        pickupMapItem = await searchMapItem(for: draft.pickup)
+        destinationMapItem = await searchMapItem(for: draft.destination)
+        resolvedPickupText = draft.pickup
+        resolvedDestinationText = draft.destination
+        await calculateRoute()
+    }
+
+    private func searchMapItem(for query: String) async -> MKMapItem? {
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        request.resultTypes = [.address, .pointOfInterest]
+        return try? await MKLocalSearch(request: request).start().mapItems.first
+    }
+
+    private func calculateRoute() async {
+        guard let pickupMapItem, let destinationMapItem else { return }
+        isResolvingRoute = true
+        routeMessage = nil
+        let request = MKDirections.Request()
+        request.source = pickupMapItem
+        request.destination = destinationMapItem
+        request.transportType = .automobile
+        do {
+            let response = try await MKDirections(request: request).calculate()
+            guard let resolvedRoute = response.routes.first else {
+                routeMessage = "No driving route was found for these locations."
+                isResolvingRoute = false
+                return
+            }
+            route = resolvedRoute
+            mapPosition = .rect(resolvedRoute.polyline.boundingMapRect)
+            applySuggestedContribution()
+        } catch {
+            route = nil
+            routeMessage = "A driving route could not be calculated right now."
+        }
+        isResolvingRoute = false
+    }
+
+    private func applySuggestedContribution() {
+        guard let suggestedAmount else { return }
+        let suggestion = String(format: "%.2f", suggestedAmount)
+        if draft.budgetRange.isEmpty || draft.budgetRange == lastSuggestedBudget {
+            draft.budgetRange = suggestion
+        }
+        lastSuggestedBudget = suggestion
+    }
+
+    private func invalidateRouteSuggestion() {
+        route = nil
+        if draft.budgetRange == lastSuggestedBudget {
+            draft.budgetRange = ""
+        }
+        lastSuggestedBudget = nil
+    }
+
+    private func useLocationAsPickup(_ location: CLLocation) async {
+        do {
+            let placemark = try await CLGeocoder().reverseGeocodeLocation(location).first
+            let parts = [placemark?.name, placemark?.locality, placemark?.administrativeArea]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+            let address = parts.joined(separator: ", ")
+            resolvedPickupText = address
+            draft.pickup = address
+            pickupMapItem = MKMapItem(placemark: MKPlacemark(coordinate: location.coordinate))
+            pickupCompleter.setQuery("")
+            focusedAddressField = nil
+            await calculateRoute()
+        } catch {
+            routeMessage = "Your current pickup location could not be resolved."
+        }
+    }
 }
 
 private struct CashHubOfferForm: View {
