@@ -104,8 +104,10 @@ private final class DriverCashRydrHubVM: ObservableObject {
     private var openRequestListener: ListenerRegistration?
     private var favoriteRequestListener: ListenerRegistration?
     private var scheduledRequestListener: ListenerRegistration?
+    private var conversationListener: ListenerRegistration?
     private var responseListeners: [String: ListenerRegistration] = [:]
     private var blockedRiderListener: ListenerRegistration?
+    private var knownConversationIDs: Set<String> = []
     private var publicOpenRequestBuffer: [DriverCashRideRequest] = []
     private var favoriteOpenRequestBuffer: [DriverCashRideRequest] = []
     private var driverScheduledRequestBuffer: [DriverCashRideRequest] = []
@@ -193,8 +195,22 @@ private final class DriverCashRydrHubVM: ObservableObject {
         openRequestListener?.remove()
         favoriteRequestListener?.remove()
         scheduledRequestListener?.remove()
+        conversationListener?.remove()
         blockedRiderListener?.remove()
         isLoading = true
+        conversationListener = db.collection("cashHubConversations")
+            .whereField("driverUid", isEqualTo: uid)
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if let error {
+                        self.errorMessage = error.localizedDescription
+                        return
+                    }
+                    self.knownConversationIDs = Set((snapshot?.documents ?? []).map(\.documentID))
+                    self.syncResponseListeners(for: self.openRequests + self.scheduledRequests)
+                }
+            }
         blockedRiderListener = db.collection("drivers").document(uid)
             .collection("cashHubBlockedRiders")
             .addSnapshotListener { snapshot, _ in
@@ -266,6 +282,8 @@ private final class DriverCashRydrHubVM: ObservableObject {
         favoriteRequestListener = nil
         scheduledRequestListener?.remove()
         scheduledRequestListener = nil
+        conversationListener?.remove()
+        conversationListener = nil
         blockedRiderListener?.remove()
         blockedRiderListener = nil
         responseListeners.values.forEach { $0.remove() }
@@ -274,6 +292,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
         favoriteOpenRequestBuffer = []
         driverScheduledRequestBuffer = []
         blockedRiderUIDs = []
+        knownConversationIDs = []
     }
 
     private func applyRequestBuffers() {
@@ -416,6 +435,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     private func syncResponseListeners(for requests: [DriverCashRideRequest]) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         let activeIDs = Set(requests.map { driverCashHubConversationId(requestId: $0.id, driverUid: uid) })
+            .intersection(knownConversationIDs)
         for (id, listener) in responseListeners where !activeIDs.contains(id) {
             listener.remove()
             responseListeners[id] = nil
@@ -425,6 +445,10 @@ private final class DriverCashRydrHubVM: ObservableObject {
 
         for request in requests {
             let conversationId = driverCashHubConversationId(requestId: request.id, driverUid: uid)
+            guard activeIDs.contains(conversationId) else {
+                responsesByRequest[request.id] = nil
+                continue
+            }
             guard responseListeners[conversationId] == nil else { continue }
             responseListeners[conversationId] = db.collection("cashHubConversations")
                 .document(conversationId)
@@ -434,7 +458,14 @@ private final class DriverCashRydrHubVM: ObservableObject {
                     Task { @MainActor [weak self] in
                         guard let self else { return }
                         if let error {
-                            self.errorMessage = error.localizedDescription
+                            // A conversation may close or be removed between the
+                            // parent snapshot and this child listener. Chat is
+                            // optional for a marketplace post, so do not replace
+                            // the entire Cash Hub screen with a permission error.
+                            self.responseListeners[conversationId]?.remove()
+                            self.responseListeners[conversationId] = nil
+                            self.responsesByRequest[request.id] = []
+                            debugPrint("Cash Hub message listener ended:", error.localizedDescription)
                             return
                         }
                         self.responsesByRequest[request.id] = (snapshot?.documents ?? []).compactMap(Self.makeResponse)
