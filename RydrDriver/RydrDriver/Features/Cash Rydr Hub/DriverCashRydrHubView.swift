@@ -1451,7 +1451,7 @@ private struct DriverCashScheduledCard: View {
                 Button("View Details", action: onViewDetails)
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
-                Button("Release/Cancel", role: .destructive, action: onRelease)
+                Button("Release", role: .destructive, action: onRelease)
                     .buttonStyle(.bordered)
             }
 

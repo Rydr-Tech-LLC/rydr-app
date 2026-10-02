@@ -9,8 +9,11 @@ const {
   validateScheduledTime,
   hasCurrentTerms,
   canTransitionDriverQueue,
+  isCashHubConnectedStatus,
   cashHubRemovalUpdate,
   cashHubReleaseVisibilityUpdate,
+  cashHubRiderCancellationUpdate,
+  cashHubActionRequiresActiveAccess,
   normalizeCashHubOffer,
   cashHubAccessAllowed,
   PUBLIC_VISIBILITY,
@@ -70,6 +73,12 @@ test("Cash Hub driver lifecycle cannot skip forward or regress", () => {
   assert.equal(canTransitionDriverQueue("started", "arrived"), false);
 });
 
+test("connected lifecycle accepts current and legacy accepted status values", () => {
+  assert.equal(isCashHubConnectedStatus("connected"), true);
+  assert.equal(isCashHubConnectedStatus("accepted"), true);
+  assert.equal(isCashHubConnectedStatus("open"), false);
+});
+
 test("removing an open Cash Hub post cancels and hides it", () => {
   const now = { marker: "now" };
   assert.deepEqual(cashHubRemovalUpdate({ status: "open" }, now), {
@@ -99,6 +108,21 @@ test("a driver release restores a hidden post when the listing can reopen", () =
     riderRestoredToMyPostsAt: now
   });
   assert.deepEqual(cashHubReleaseVisibilityUpdate(false, now), {});
+});
+
+test("release is never blocked by a later Cash Hub access-state change", () => {
+  assert.equal(cashHubActionRequiresActiveAccess("driver_connect"), true);
+  assert.equal(cashHubActionRequiresActiveAccess("release"), false);
+  assert.equal(cashHubActionRequiresActiveAccess("driver_status"), false);
+});
+
+test("a rider can cancel an active listing without deleting its card", () => {
+  const now = { marker: "now" };
+  const update = cashHubRiderCancellationUpdate({ status: "connected" }, now);
+  assert.equal(update.status, "cancelled");
+  assert.equal(update.riderCancelledAt, now);
+  assert.equal(update.riderHiddenFromMyPosts, false);
+  assert.throws(() => cashHubRiderCancellationUpdate({ status: "completed" }, now), /active Cash Hub listing/);
 });
 
 test("Cash Hub offers negotiate price without client-entered vehicle or availability", () => {

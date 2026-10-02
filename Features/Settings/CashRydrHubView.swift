@@ -750,9 +750,12 @@ private final class CashRydrHubVM: ObservableObject {
         Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"decline_offer",body:["offerId":offer.id]) } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
-    func cancelConnection(for request: CashRydrRequest) {
-        guard Auth.auth().currentUser?.uid == request.riderUid else { return }
-        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"cancel_connection") } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+    func cancelListing(_ request: CashRydrRequest) {
+        guard Auth.auth().currentUser?.uid == request.riderUid else {
+            errorMessage = "Only the rider who posted this request can cancel it."
+            return
+        }
+        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"rider_cancel");await MainActor.run{self?.confirmationMessage="Your Cash Hub listing was cancelled."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func offers(for request: CashRydrRequest) -> [CashHubResponse] {
@@ -1004,6 +1007,7 @@ struct CashRydrHubView: View {
     @State private var viewingFavoriteDriver: CashHubFavoriteDriver?
     @State private var driverPendingBlock: CashHubFavoriteDriver?
     @State private var requestPendingDeletion: CashRydrRequest?
+    @State private var requestPendingCancellation: CashRydrRequest?
     @State private var selectedHomeTab: CashHubHomeTab = .feed
     @AppStorage("cashHubSafetyFooterDismissed") private var safetyFooterDismissed = false
     private var showSafetyFooter: Bool {
@@ -1203,8 +1207,8 @@ struct CashRydrHubView: View {
                     messagingContext = CashHubMessageContext(request: request, mode: .directConnection, offer: vm.selectedOffer(for: request))
                 },
                 onCancel: {
-                    vm.cancelConnection(for: request)
                     viewingConnection = nil
+                    requestPendingCancellation = request
                 }
             )
         }
@@ -1251,6 +1255,24 @@ struct CashRydrHubView: View {
             Button("Cancel", role: .cancel) { driverPendingBlock = nil }
         } message: {
             Text("This driver will be removed from your favorites and added to your blocked drivers.")
+        }
+        .confirmationDialog(
+            "Cancel this listing?",
+            isPresented: Binding(
+                get: { requestPendingCancellation != nil },
+                set: { if !$0 { requestPendingCancellation = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Cancel Listing", role: .destructive) {
+                if let requestPendingCancellation {
+                    vm.cancelListing(requestPendingCancellation)
+                }
+                requestPendingCancellation = nil
+            }
+            Button("Keep Listing", role: .cancel) { requestPendingCancellation = nil }
+        } message: {
+            Text("This ends the listing and any agreement with a connected driver. It does not delete the post from My Posts.")
         }
         .confirmationDialog(
             "Delete this request?",
@@ -1334,6 +1356,7 @@ struct CashRydrHubView: View {
                                     onOffers: { riderPanel = .offers },
                                     onTripChat: { messagingContext = CashHubMessageContext(request: request, mode: .directConnection, offer: vm.selectedOffer(for: request)) },
                                     onConnection: { viewingConnection = request },
+                                    onCancel: { requestPendingCancellation = request },
                                     onDelete: { requestPendingDeletion = request }
                                 )
                             }
@@ -2078,6 +2101,7 @@ private struct CashHubPostManagementCard: View {
     let onOffers: () -> Void
     let onTripChat: () -> Void
     let onConnection: () -> Void
+    let onCancel: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -2095,14 +2119,20 @@ private struct CashHubPostManagementCard: View {
                         Label("Edit Post", systemImage: "pencil")
                     }
                     .disabled(request.isConnected)
+                    if request.isOpen || request.isConnected {
+                        Button(role: .destructive, action: onCancel) {
+                            Label("Cancel Listing", systemImage: "xmark.circle.fill")
+                        }
+                    }
                     Button(role: .destructive, action: onDelete) {
                         Label("Delete Post", systemImage: "trash")
                     }
                 } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 10)
+                    Image(systemName: "ellipsis.circle.fill")
+                        .font(.title2.weight(.black))
+                        .foregroundStyle(Color.red)
+                        .frame(width: 38, height: 38)
+                        .contentShape(Rectangle())
                 }
             }
 
@@ -3250,7 +3280,7 @@ private struct CashHubAcceptedRequestView: View {
                 }
                 Section {
                     Button("Open Trip Chat", action: onMessage)
-                    Button("Cancel Connection", role: .destructive, action: onCancel)
+                    Button("Cancel Listing", role: .destructive, action: onCancel)
                 }
             }
             .navigationTitle("Connected Request")

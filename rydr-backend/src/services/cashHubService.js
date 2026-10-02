@@ -84,6 +84,9 @@ function hasCurrentTerms(profile, config) {
 function canTransitionDriverQueue(current, next) {
   return DRIVER_QUEUE_TRANSITIONS[String(current || "scheduled")]?.has(next) === true;
 }
+function isCashHubConnectedStatus(status) {
+  return ["connected", "accepted"].includes(text(status, 30).toLowerCase());
+}
 function cashHubRemovalUpdate(request, now) {
   const status = text(request?.status, 30).toLowerCase();
   const hasAgreement = ["connected", "accepted", "completed"].includes(status)
@@ -111,6 +114,31 @@ function cashHubReleaseVisibilityUpdate(canReopen, now) {
     riderHiddenFromMyPosts: false,
     riderRestoredToMyPostsAt: now
   };
+}
+function cashHubRiderCancellationUpdate(request, now) {
+  const status = text(request?.status, 30).toLowerCase();
+  if (!["open", "connected", "accepted"].includes(status)) {
+    throw error("Only an active Cash Hub listing may be cancelled", 409);
+  }
+  return {
+    status: "cancelled",
+    riderCancelledAt: now,
+    riderHiddenFromMyPosts: false,
+    driverQueueStatus: admin.firestore.FieldValue.delete(),
+    connectedDriverUid: admin.firestore.FieldValue.delete(),
+    connectedDriverName: admin.firestore.FieldValue.delete(),
+    connectedVehicleInfo: admin.firestore.FieldValue.delete(),
+    acceptedByUid: admin.firestore.FieldValue.delete(),
+    acceptedByName: admin.firestore.FieldValue.delete(),
+    selectedOfferId: admin.firestore.FieldValue.delete(),
+    agreedPrice: admin.firestore.FieldValue.delete(),
+    connectedAt: admin.firestore.FieldValue.delete(),
+    acceptedAt: admin.firestore.FieldValue.delete(),
+    expiresAt: now
+  };
+}
+function cashHubActionRequiresActiveAccess(action) {
+  return action === "driver_connect";
 }
 function normalizeCashHubOffer(payload) {
   const offerAmount = amount(payload?.offerAmount);
@@ -302,8 +330,8 @@ async function createCashHubRequest({ uid, payload, db = getFirestore(), nowMill
 
 async function commandCashHubRequest({ uid, requestId, action, payload, db = getFirestore(), nowMillis = Date.now() }) {
   let actorProfile = null;
-  if (["driver_connect", "driver_status", "release"].includes(action)) actorProfile = await requireAccess(db, uid, "driver");
-  if (["edit", "visibility", "remove", "accept_offer", "decline_offer", "cancel_connection"].includes(action)) await requireAccess(db, uid, "rider");
+  if (cashHubActionRequiresActiveAccess(action)) actorProfile = await requireAccess(db, uid, "driver");
+  if (["edit", "visibility", "remove", "accept_offer", "decline_offer", "cancel_connection", "rider_cancel"].includes(action)) await requireAccess(db, uid, "rider");
   const requestRef = db.collection("cashRydrRequests").doc(requestId);
   const favoriteAudience = ["edit", "visibility"].includes(action) ? await favoriteDriverUids(db, uid) : [];
   // Cross-document access and safety checks happen before the transaction. The
@@ -334,7 +362,7 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
     const isDriver = request.connectedDriverUid === uid || request.acceptedByUid === uid;
     const now = admin.firestore.Timestamp.fromMillis(nowMillis);
     let update = { updatedAt: now, stateOwner: "rydr_backend" };
-    if (["edit", "visibility", "remove", "accept_offer", "decline_offer", "cancel_connection"].includes(action) && !isRider) throw error("Only the request owner may perform this action", 403);
+    if (["edit", "visibility", "remove", "accept_offer", "decline_offer", "cancel_connection", "rider_cancel"].includes(action) && !isRider) throw error("Only the request owner may perform this action", 403);
 
     if (action === "edit") {
       if (request.status !== "open") throw error("Only open requests may be edited", 409);
@@ -384,13 +412,21 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
       tx.set(conversationRef, { status: "declined", offerStatus: "declined", closedAt: now, updatedAt: now }, { merge: true });
       return { status: request.status };
     } else if (action === "cancel_connection") {
-      if (request.status !== "connected") throw error("Request is not connected", 409);
+      if (!isCashHubConnectedStatus(request.status)) throw error("Request is not connected", 409);
       const conversationId = request.selectedOfferId || (request.connectedDriverUid ? `${requestId}_${request.connectedDriverUid}` : null);
       if ((timestampMillis(request.scheduledTime) || 0) <= nowMillis) throw error("This listing's pickup time has passed", 409);
       update = { ...update, status: "open", expiresAt: request.scheduledTime, driverQueueStatus: admin.firestore.FieldValue.delete(), connectedDriverUid: admin.firestore.FieldValue.delete(), connectedDriverName: admin.firestore.FieldValue.delete(), connectedVehicleInfo: admin.firestore.FieldValue.delete(), acceptedByUid: admin.firestore.FieldValue.delete(), acceptedByName: admin.firestore.FieldValue.delete(), selectedOfferId: admin.firestore.FieldValue.delete(), agreedPrice: admin.firestore.FieldValue.delete(), connectedAt: admin.firestore.FieldValue.delete(), acceptedAt: admin.firestore.FieldValue.delete() };
       if (conversationId) tx.set(db.collection("cashHubConversations").doc(conversationId), { status: "cancelled", offerStatus: "cancelled", closedAt: now, updatedAt: now }, { merge: true });
+    } else if (action === "rider_cancel") {
+      const conversationId = request.selectedOfferId || (request.connectedDriverUid ? `${requestId}_${request.connectedDriverUid}` : null);
+      update = { ...update, ...cashHubRiderCancellationUpdate(request, now) };
+      if (request.connectedDriverUid) update.cancelledDriverUid = request.connectedDriverUid;
+      if (request.connectedDriverName) update.cancelledDriverName = request.connectedDriverName;
+      if (request.selectedOfferId) update.cancelledOfferId = request.selectedOfferId;
+      if (amount(request.agreedPrice) !== null) update.cancelledAgreedPrice = amount(request.agreedPrice);
+      if (conversationId) tx.set(db.collection("cashHubConversations").doc(conversationId), { status: "cancelled", offerStatus: "cancelled", closedAt: now, updatedAt: now }, { merge: true });
     } else if (action === "driver_status") {
-      if (!isDriver || request.status !== "connected") throw error("Only the connected driver may update status", 403);
+      if (!isDriver || !isCashHubConnectedStatus(request.status)) throw error("Only the connected driver may update status", 403);
       const next = text(payload?.status, 30);
       const fields = { confirmed: "driverConfirmedAt", arrived: "driverArrivedAt", started: "cashRideStartedAt", completed: "cashCompletedAt" };
       if (!fields[next] || !canTransitionDriverQueue(request.driverQueueStatus, next)) throw error("Invalid Cash Hub status transition", 409);
@@ -401,7 +437,7 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
         tx.set(db.collection("cashHubConversations").doc(conversationId), { status: "completed", closedAt: now, updatedAt: now }, { merge: true });
       }
     } else if (action === "release") {
-      if (!isDriver || request.status !== "connected") throw error("Only the connected driver may release this request", 403);
+      if (!isDriver || !isCashHubConnectedStatus(request.status)) throw error("Only the connected driver may release this request", 403);
       const scheduledMillis = timestampMillis(request.scheduledTime) || 0;
       const late = scheduledMillis - nowMillis <= 3600000;
       const conversationId = request.selectedOfferId || `${requestId}_${uid}`;
@@ -476,6 +512,6 @@ async function sendCashHubMessage({ uid, conversationId, payload, db = getFirest
 
 module.exports = {
   acceptCashHubTerms, optOutCashHub, createCashHubRequest, commandCashHubRequest, createCashHubOffer, sendCashHubMessage,
-  normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, cashHubRemovalUpdate, cashHubReleaseVisibilityUpdate, normalizeCashHubOffer, cashHubAccessAllowed,
+  normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, isCashHubConnectedStatus, cashHubRemovalUpdate, cashHubReleaseVisibilityUpdate, cashHubRiderCancellationUpdate, cashHubActionRequiresActiveAccess, normalizeCashHubOffer, cashHubAccessAllowed,
   PUBLIC_VISIBILITY, FAVORITES_VISIBILITY, MINIMUM_LEAD_TIME_MS
 };
