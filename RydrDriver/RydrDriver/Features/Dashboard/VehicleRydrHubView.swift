@@ -273,7 +273,7 @@ private struct VehicleRydrRideTypeRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    Text("\(pricing.perMileRangeText) · \(pricing.perMinuteRangeText)")
+                    Text("Suggested \(pricing.suggestedPerMile, format: .currency(code: "USD"))/mi · \(pricing.suggestedPerMinute, format: .currency(code: "USD"))/min · \(pricing.suggestedMinimumFare, format: .currency(code: "USD")) minimum")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
@@ -380,45 +380,19 @@ private struct AddDriverVehicleSheet: View {
             saveError = "Sign in before adding a vehicle."
             return
         }
-        guard let decodedVehicle else {
+        guard decodedVehicle != nil else {
             onComplete()
             dismiss()
             return
         }
 
-        let eligibility = DriverVehicleEligibility.evaluate(
-            make: decodedVehicle.make,
-            model: decodedVehicle.model,
-            year: decodedVehicle.year,
-            fuelType: decodedVehicle.fuelType.rawValue
-        )
-        let libraryRideTypes = RydrRideTierCatalog.normalizedRideTypes(imageInfo?.eligibleRideTypes ?? [])
-        let eligibleRideTypes = libraryRideTypes.isEmpty ? eligibility.eligibleRideTypes : libraryRideTypes
-        let vehicleClass = libraryRideTypes.isEmpty ? eligibility.vehicleClass : DriverVehicleEligibility.vehicleClass(for: eligibleRideTypes)
-        let requiresManualReview = libraryRideTypes.isEmpty ? eligibility.requiresManualReview : false
-        var tierRates: [String: Any] = [:]
-        for rideType in eligibleRideTypes {
-            let key = RydrRideTierCatalog.canonicalRideType(rideType)
-            tierRates[key] = DriverRateSetting.defaultValue(for: rideType).dictionary(for: rideType)
-        }
-
+        // VIN/manual submission already asked the Cloud Function to resolve
+        // authoritative vehicle eligibility. This follow-up only stores the
+        // driver-entered plate; it must not recalculate qualified ride types.
         Firestore.firestore().collection("drivers").document(uid).setData([
             "vehicle": [
-                "class": vehicleClass,
                 "plate": plate.trimmingCharacters(in: .whitespacesAndNewlines)
-            ],
-            "vehicleEligibility": [
-                "rideTypes": eligibleRideTypes,
-                "requiresManualReview": requiresManualReview,
-                "vehicleClass": vehicleClass,
-                "source": libraryRideTypes.isEmpty ? "appRules" : "vehicleLibrary",
-                "evaluatedAt": FieldValue.serverTimestamp()
-            ],
-            "qualifiedRideTypes": eligibleRideTypes,
-            "supportedRideTypes": eligibleRideTypes,
-            "selectedRideTypes": eligibleRideTypes,
-            "rideTypes": eligibleRideTypes,
-            "tierRates": tierRates
+            ]
         ], merge: true) { error in
             if let error {
                 saveError = error.localizedDescription

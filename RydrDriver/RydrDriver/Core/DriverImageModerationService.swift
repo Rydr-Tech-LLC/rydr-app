@@ -4,13 +4,12 @@
 //
 //  Driver-app counterpart to the rider app's ImageModerationService. Uploads
 //  a driver-chosen profile photo to a pending Storage path, asks the
-//  rydr-backend /moderation/check-image route to run it through Google
-//  Cloud Vision SafeSearch, then either promotes it to a permanent path
-//  (approved) or deletes it (rejected / needs review).
+//  rydr-backend finalization route to run Google Cloud Vision SafeSearch.
+//  The backend then promotes approved bytes and owns the profile URL write.
 //
 //  This reuses the exact same backend endpoint (and therefore the exact
 //  same Vision API client/credentials) that already powers rider profile
-//  photo moderation — the backend's storagePathBelongsToUser check already
+//  photo moderation — the backend's storagePathBelongsToUser check
 //  recognizes driverProfilePhotos/{uid}/... paths, it just never got called
 //  from this app until now.
 //
@@ -18,7 +17,6 @@
 import Foundation
 import UIKit
 import FirebaseAuth
-import FirebaseFirestore
 import FirebaseStorage
 
 enum DriverImageModerationVerdict: String {
@@ -62,11 +60,12 @@ enum DriverImageModerationError: LocalizedError {
     }
 }
 
-/// Decoded response from POST /moderation/check-image
+/// Decoded response from POST /moderation/profile-photo/finalize
 private struct DriverModerationCheckResponse: Decodable {
     let ok: Bool
     let verdict: String
     let flagged: [FlaggedCategory]?
+    let photoURL: String?
 
     struct FlaggedCategory: Decodable {
         let category: String
@@ -90,7 +89,7 @@ final class DriverImageModerationService {
     }
 
     /// Uploads `image` as the driver's profile photo, moderates it, and on
-    /// approval writes the final download URL to `drivers/{uid}.profilePhotoURL`.
+    /// approval lets the backend write the final URL to `drivers/{uid}.profilePhotoURL`.
     /// Returns the approved download URL.
     func submitProfilePhoto(_ image: UIImage) async throws -> URL {
         guard let user = Auth.auth().currentUser else {
@@ -120,18 +119,15 @@ final class DriverImageModerationService {
 
             switch DriverImageModerationVerdict(rawValue: verdictResult.verdict) {
             case .approved:
-                let finalURL = try await promoteToProfilePhoto(jpegData: jpegData, uid: uid)
-                try? await pendingRef.delete()
+                guard let value = verdictResult.photoURL, let finalURL = URL(string: value) else {
+                    throw DriverImageModerationError.invalidServerResponse(status: 200, body: nil)
+                }
                 return finalURL
 
             case .rejected:
-                try? await pendingRef.delete()
-                try? await clearPendingState(uid: uid)
                 throw DriverImageModerationError.rejected(reason: verdictResult.flagged?.first?.category)
 
             case .needsReview, .none:
-                try? await pendingRef.delete()
-                try? await clearPendingState(uid: uid)
                 throw DriverImageModerationError.needsReview
             }
         } catch let error as DriverImageModerationError {
@@ -146,7 +142,7 @@ final class DriverImageModerationService {
 
     private func checkImage(storagePath: String) async throws -> DriverModerationCheckResponse {
         let backendBase = try resolvedBackendBase()
-        var request = URLRequest(url: backendBase.appendingPathComponent("moderation/check-image"))
+        var request = URLRequest(url: backendBase.appendingPathComponent("moderation/profile-photo/finalize"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["storagePath": storagePath])
@@ -175,47 +171,6 @@ final class DriverImageModerationService {
         }
 
         return try JSONDecoder().decode(DriverModerationCheckResponse.self, from: data)
-    }
-
-    // MARK: - Finalizing an approved photo
-
-    private func promoteToProfilePhoto(jpegData: Data, uid: String) async throws -> URL {
-        // Mirrors the rider app's permanent profilePhotos/{uid}.jpg path, just
-        // under a driver-specific prefix (see the new driverProfilePhotos/{fileName}
-        // storage.rules block — distinct from the pending driverProfilePhotos/{uid}/{fileName} one).
-        let finalRef = Storage.storage().reference(withPath: "driverProfilePhotos/\(uid).jpg")
-        let metadata = StorageMetadata()
-        metadata.contentType = "image/jpeg"
-
-        do {
-            _ = try await finalRef.putDataAsync(jpegData, metadata: metadata)
-            let url = try await finalRef.downloadURL()
-
-            try await Firestore.firestore()
-                .collection("drivers").document(uid)
-                .setData([
-                    "profilePhotoURL": url.absoluteString,
-                    "profilePhotoReviewStatus": "approved",
-                    "pendingProfilePhotoURL": FieldValue.delete(),
-                    "pendingProfilePhotoPath": FieldValue.delete(),
-                    "profilePhotoUpdatedAt": FieldValue.serverTimestamp()
-                ], merge: true)
-
-            return url
-        } catch {
-            throw DriverImageModerationError.uploadFailed(error)
-        }
-    }
-
-    private func clearPendingState(uid: String) async throws {
-        try await Firestore.firestore()
-            .collection("drivers").document(uid)
-            .setData([
-                "pendingProfilePhotoURL": FieldValue.delete(),
-                "pendingProfilePhotoPath": FieldValue.delete(),
-                "profilePhotoReviewStatus": "approved",
-                "profilePhotoUpdatedAt": FieldValue.serverTimestamp()
-            ], merge: true)
     }
 
     // MARK: - Helpers

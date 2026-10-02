@@ -28,6 +28,7 @@ struct RideTypeConfigurationView: View {
     let hasSavedRate: Bool
     let demandLevel: DriverDemandLevel
     let rate: DriverRateSetting
+    let suggestedRates: DriverRateSetting
     let onToggle: () -> Void
     let onSaveRate: (Double, Double, Double, Bool) -> Void
 
@@ -78,8 +79,6 @@ struct RideTypeConfigurationView: View {
     private var canSaveRate: Bool {
         !isOnline && isEligible && hasDraftChanges && isMinimumFareInputValid && isPerMileInputValid && isPerMinuteInputValid
     }
-
-    private var suggestedRates: DriverRateSetting { pricing.suggestedRates(for: demandLevel) }
 
     var body: some View {
         NavigationStack {

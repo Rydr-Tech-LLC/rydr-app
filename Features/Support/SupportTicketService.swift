@@ -89,35 +89,21 @@ final class SupportTicketService {
         let description = draft.description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !description.isEmpty else { throw SupportTicketServiceError.emptyDescription }
 
-        let ticketRef = db.collection("supportTickets").document()
-        let ticketId = ticketRef.documentID
         var payload: [String: Any] = [
-            "ticketId": ticketId,
-            "userId": userId,
-            "userRole": "rider",
             "category": draft.category,
             "issueType": draft.issueType,
             "subject": subject.isEmpty ? draft.issueType : subject,
             "description": description,
             "status": "open",
             "priority": draft.priority,
-            "contactPreference": draft.contactPreference,
-            "createdAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
+            "contactPreference": draft.contactPreference
         ]
         if let rideId = normalizedOptional(draft.rideId) {
             payload["rideId"] = rideId
         }
 
-        try await setData(payload, document: ticketRef, merge: false)
-
-        try await addData([
-            "senderId": userId,
-            "senderRole": "rider",
-            "text": description,
-            "createdAt": FieldValue.serverTimestamp(),
-            "isRead": false
-        ], collection: ticketRef.collection("messages"))
+        let response = try await backend(path: "/support/tickets", body: payload)
+        guard let ticketId = response["ticketId"] as? String else { throw SupportTicketServiceError.missingTicket }
 
         return SupportTicket(
             id: ticketId,
@@ -170,45 +156,27 @@ final class SupportTicketService {
         guard snapshot.exists else { throw SupportTicketServiceError.missingTicket }
         try validateTicket(snapshot: snapshot, userId: userId)
 
-        try await addData([
-            "senderId": userId,
-            "senderRole": "rider",
-            "text": trimmed,
-            "createdAt": FieldValue.serverTimestamp(),
-            "isRead": false
-        ], collection: ticketRef.collection("messages"))
-
-        try await setData([
-            "status": "open",
-            "updatedAt": FieldValue.serverTimestamp()
-        ], document: ticketRef, merge: true)
+        _ = try await backend(path: "/support/tickets/\(ticketId)/message", body: ["text": trimmed])
     }
 
     func createCallRequest(_ draft: SupportCallRequestDraft) async throws -> String {
-        let userId = try currentUserId()
+        _ = try currentUserId()
         let phoneNumber = draft.phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !phoneNumber.isEmpty else { throw SupportTicketServiceError.emptyPhoneNumber }
 
-        let requestRef = db.collection("supportCallRequests").document()
-        let requestId = requestRef.documentID
         var payload: [String: Any] = [
-            "requestId": requestId,
-            "userId": userId,
-            "userRole": "rider",
             "topic": draft.topic,
-            "preferredDate": Timestamp(date: draft.preferredDate),
+            "preferredDate": ISO8601DateFormatter().string(from: draft.preferredDate),
             "preferredTimeWindow": draft.preferredTimeWindow,
             "phoneNumber": phoneNumber,
-            "notes": draft.notes.trimmingCharacters(in: .whitespacesAndNewlines),
-            "status": "requested",
-            "createdAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
+            "notes": draft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         ]
         if let rideId = normalizedOptional(draft.rideId) {
             payload["rideId"] = rideId
         }
 
-        try await setData(payload, document: requestRef, merge: false)
+        let response = try await backend(path: "/support/call-requests", body: payload)
+        guard let requestId = response["requestId"] as? String else { throw SupportTicketServiceError.missingTicket }
         return requestId
     }
 
@@ -219,10 +187,7 @@ final class SupportTicketService {
         guard snapshot.exists else { throw SupportTicketServiceError.missingTicket }
         try validateTicket(snapshot: snapshot, userId: userId)
 
-        try await setData([
-            "status": "closed",
-            "updatedAt": FieldValue.serverTimestamp()
-        ], document: ticketRef, merge: true)
+        _ = try await backend(path: "/support/tickets/\(ticketId)/close", body: [:])
     }
 
     private func currentUserId() throws -> String {
@@ -299,5 +264,12 @@ final class SupportTicketService {
                 }
             }
         }
+    }
+
+    private func backend(path: String, body: [String: Any]) async throws -> [String: Any] {
+        guard let raw=Bundle.main.object(forInfoDictionaryKey:"RYDR_BACKEND_BASE_URL") as? String,let base=URL(string:raw),let url=URL(string:path,relativeTo:base),let user=Auth.auth().currentUser else{throw SupportTicketServiceError.notSignedIn}
+        var request=URLRequest(url:url);request.httpMethod="POST";request.setValue("application/json",forHTTPHeaderField:"Content-Type");request.setValue("Bearer \(try await user.getIDToken())",forHTTPHeaderField:"Authorization");request.httpBody=try JSONSerialization.data(withJSONObject:body)
+        let(data,response)=try await URLSession.shared.data(for:request);guard let http=response as? HTTPURLResponse,(200..<300).contains(http.statusCode) else{throw NSError(domain:"SupportTicketService",code:(response as? HTTPURLResponse)?.statusCode ?? -1,userInfo:[NSLocalizedDescriptionKey:"Support request failed."])}
+        return (try JSONSerialization.jsonObject(with:data) as? [String:Any]) ?? [:]
     }
 }

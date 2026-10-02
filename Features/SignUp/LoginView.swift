@@ -243,7 +243,9 @@ struct LoginView: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 64)
             }
-            .background(Styles.rydrGradient.opacity(canSendPhoneCode ? 1 : 0.45))
+            .background {
+                Styles.rydrGradient.opacity(canSendPhoneCode ? 1 : 0.45)
+            }
             .foregroundColor(.white)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .shadow(color: Color.red.opacity(canSendPhoneCode ? 0.24 : 0.05), radius: 18, x: 0, y: 12)
@@ -322,7 +324,9 @@ struct LoginView: View {
                     .frame(height: 62)
             }
             .disabled(!canSubmitEmail)
-            .background(Styles.rydrGradient.opacity(canSubmitEmail ? 1 : 0.45))
+            .background {
+                Styles.rydrGradient.opacity(canSubmitEmail ? 1 : 0.45)
+            }
             .foregroundColor(.white)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .shadow(color: Color.red.opacity(canSubmitEmail ? 0.2 : 0.05), radius: 18, x: 0, y: 12)
@@ -763,10 +767,9 @@ struct LoginView: View {
     }
 
     private func backfillPhoneIndexIfNeeded(phone: String, uid: String) {
-        let index = Firestore.firestore().collection("riderPhoneIndex").document(phone)
-        index.getDocument { snapshot, _ in
-            guard snapshot?.exists != true else { return }
-            index.setData(["uid": uid, "createdAt": FieldValue.serverTimestamp()])
+        Task {
+            do { try await RiderBackendIdentityService.sync() }
+            catch { print("⚠️ backend identity sync failed: \(error.localizedDescription)") }
         }
     }
 
@@ -815,6 +818,12 @@ struct LoginView: View {
                             return
                         }
 
+                        do {
+                            try await RiderBackendIdentityService.sync()
+                        } catch {
+                            errorMessage = "Phone linked, but account synchronization failed: \(error.localizedDescription)"
+                            return
+                        }
                         pendingPhoneLoginRepair = nil
                         phoneRepairPassword = ""
                         session.login(name: repair.profile.name, email: repair.profile.email)

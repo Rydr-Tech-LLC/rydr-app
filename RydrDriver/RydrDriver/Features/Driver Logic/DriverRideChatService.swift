@@ -43,17 +43,9 @@ final class DriverRideChatService {
 
     func createOrInitializeChat(rideId: String, riderId: String, driverId: String) async throws {
         try requireParticipant(riderId: riderId, driverId: driverId)
-
-        let chatRef = db.collection("rideChats").document(rideId)
-        let data: [String: Any] = [
-            "rideId": rideId,
-            "riderId": riderId,
-            "driverId": driverId,
-            "participants": [riderId, driverId].sorted(),
-            "status": "active",
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-        try await setData(data, document: chatRef, merge: true)
+        let snapshot = try await getDocument(db.collection("rideChats").document(rideId))
+        guard snapshot.exists else { throw DriverRideChatError.missingChat }
+        try validateChat(snapshot: snapshot, riderId: riderId, driverId: driverId)
     }
 
     func listenToMessages(
@@ -126,7 +118,7 @@ final class DriverRideChatService {
         try await createOrInitializeChat(rideId: rideId, riderId: riderId, driverId: driverId)
         try await addData([
             "senderId": driverId,
-            "senderRole": "system",
+            "senderRole": "driver",
             "text": "Rider preferences:\n\(trimmed)",
             "visibility": "driverOnly",
             "createdAt": FieldValue.serverTimestamp()

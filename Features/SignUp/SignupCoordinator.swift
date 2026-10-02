@@ -405,17 +405,10 @@ struct SignupCoordinator: View {
     }
 
     private func writePhoneIndex(phoneE164: String, uid: String) {
-        Firestore.firestore()
-            .collection("riderPhoneIndex")
-            .document(phoneE164)
-            .setData([
-                "uid": uid,
-                "createdAt": FieldValue.serverTimestamp()
-            ]) { err in
-                if let err = err {
-                    print("⚠️ writePhoneIndex failed: \(err.localizedDescription)")
-                }
-            }
+        Task {
+            do { try await RiderBackendIdentityService.sync() }
+            catch { print("⚠️ backend identity sync failed: \(error.localizedDescription)") }
+        }
     }
 
     // MARK: - Stripe customer provisioning (as requested)

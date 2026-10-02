@@ -40,7 +40,7 @@ struct CashRydrRequest: Identifiable, Equatable {
     var passengers: Int
     var notes: String
     var budgetRange: String
-    var rideType: String
+    var tripFormat: String
     var visibility: String
     var status: String
     var driverQueueStatus: String?
@@ -145,7 +145,7 @@ private struct CashHubRequestDraft {
     var passengers = 1
     var notes = ""
     var budgetRange = ""
-    var rideType = "One-way"
+    var tripFormat = "One-way"
     var visibility = CashHubVisibility.publicCommunity.rawValue
 
     init() {}
@@ -157,7 +157,7 @@ private struct CashHubRequestDraft {
         passengers = request.passengers
         notes = request.notes
         budgetRange = cashHubCurrencyInput(request.budgetRange)
-        rideType = request.rideType
+        tripFormat = request.tripFormat
         visibility = CashHubVisibility.normalized(request.visibility).rawValue
     }
 }
@@ -351,7 +351,8 @@ private final class CashRydrHubVM: ObservableObject {
         let configRef = db.collection("platformConfig").document("cashRydrHub")
         let riderRef = db.collection("riders").document(uid)
 
-        configRef.getDocument { configSnap, _ in
+        configRef.getDocument { [weak self] configSnap, _ in
+            guard self != nil else { return }
             riderRef.getDocument { [weak self] snap, error in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
@@ -379,7 +380,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func acceptTerms() {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             errorMessage = "Please log in to continue."
             return
         }
@@ -390,22 +391,21 @@ private final class CashRydrHubVM: ObservableObject {
         }
 
         isSaving = true
-        db.collection("riders").document(uid).setData([
-            "cashHubTermsAccepted": true,
-            "cashHubTermsAcceptedAt": FieldValue.serverTimestamp(),
-            "cashHubTermsVersion": cashHubTermsVersion,
-            "cashHubRole": CashHubRole.rider.rawValue
-        ], merge: true) { [weak self] error in
-            Task { @MainActor in
-                guard let self else { return }
-                self.isSaving = false
-                if let error {
-                    self.errorMessage = error.localizedDescription
-                    return
+        Task { [weak self] in
+            do {
+                try await RiderCashHubBackend.acceptTerms()
+                await MainActor.run {
+                    guard let self else { return }
+                    self.isSaving = false
+                    self.termsAccepted = true
+                    self.startMarketplace()
+                    self.startFavoriteDrivers()
                 }
-                self.termsAccepted = true
-                self.startMarketplace()
-                self.startFavoriteDrivers()
+            } catch {
+                await MainActor.run {
+                    self?.isSaving = false
+                    self?.errorMessage = error.localizedDescription
+                }
             }
         }
     }
@@ -551,29 +551,17 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func reportDriver(_ offer: CashHubResponse, for request: CashRydrRequest) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             errorMessage = "Please log in to report a driver."
             return
         }
-        db.collection("safetyReports").addDocument(data: [
+        let payload: [String: Any] = [
             "reportType": "Cash Hub driver report",
-            "surface": "cashHub",
             "cashHubRequestId": request.id,
             "cashHubConversationId": offer.id,
-            "riderId": uid,
-            "driverId": offer.authorUid,
-            "driverName": offer.authorName,
-            "description": "Rider reported a Cash Hub driver conversation for review.",
-            "status": "open",
-            "createdAt": FieldValue.serverTimestamp()
-        ]) { [weak self] error in
-            Task { @MainActor in
-                self?.errorMessage = error?.localizedDescription
-                if error == nil {
-                    self?.confirmationMessage = "Driver reported to Rydr safety support."
-                }
-            }
-        }
+            "description": "Rider reported a Cash Hub driver conversation for review."
+        ]
+        Task { [weak self] in do { try await RiderSafetyBackend.submit(payload);await MainActor.run{self?.confirmationMessage="Driver reported to Rydr safety support."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func addFavoriteDriver(from offer: CashHubResponse) {
@@ -628,7 +616,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func createRequest(from draft: CashHubRequestDraft, riderName: String) -> Bool {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             errorMessage = "Please log in to post a request."
             return false
         }
@@ -636,28 +624,19 @@ private final class CashRydrHubVM: ObservableObject {
 
         isSaving = true
         let data: [String: Any] = [
-            "riderUid": uid,
             "riderName": displayName(riderName, fallback: "Cash Hub Rider"),
             "pickup": draft.pickup.trimmingCharacters(in: .whitespacesAndNewlines),
             "destination": draft.destination.trimmingCharacters(in: .whitespacesAndNewlines),
-            "scheduledTime": Timestamp(date: draft.scheduledTime),
+            "scheduledTime": ISO8601DateFormatter().string(from: draft.scheduledTime),
             "passengers": draft.passengers,
             "notes": draft.notes.trimmingCharacters(in: .whitespacesAndNewlines),
             "budgetRange": draft.budgetRange.trimmingCharacters(in: .whitespacesAndNewlines),
-            "rideType": draft.rideType,
-            "visibility": draft.visibility,
-            "status": "open",
-            "createdAt": FieldValue.serverTimestamp()
+            "tripFormat": draft.tripFormat,
+            "visibility": draft.visibility
         ]
-        db.collection("cashRydrRequests").addDocument(data: data) { [weak self] error in
-            Task { @MainActor in
-                guard let self else { return }
-                self.isSaving = false
-                self.errorMessage = error?.localizedDescription
-                if error == nil {
-                    self.confirmationMessage = "Your request has been posted. Drivers may respond with availability, questions, or offers."
-                }
-            }
+        Task { [weak self] in
+            do { try await RiderCashHubBackend.create(data); await MainActor.run { self?.isSaving=false;self?.confirmationMessage="Your request has been posted. Drivers may respond with availability, questions, or offers." } }
+            catch { await MainActor.run { self?.isSaving=false;self?.errorMessage=error.localizedDescription } }
         }
         return true
     }
@@ -669,24 +648,14 @@ private final class CashRydrHubVM: ObservableObject {
         let data: [String: Any] = [
             "pickup": draft.pickup.trimmingCharacters(in: .whitespacesAndNewlines),
             "destination": draft.destination.trimmingCharacters(in: .whitespacesAndNewlines),
-            "scheduledTime": Timestamp(date: draft.scheduledTime),
+            "scheduledTime": ISO8601DateFormatter().string(from: draft.scheduledTime),
             "passengers": draft.passengers,
             "notes": draft.notes.trimmingCharacters(in: .whitespacesAndNewlines),
             "budgetRange": draft.budgetRange.trimmingCharacters(in: .whitespacesAndNewlines),
-            "rideType": draft.rideType,
-            "visibility": draft.visibility,
-            "status": "open",
-            "connectedDriverUid": FieldValue.delete(),
-            "connectedDriverName": FieldValue.delete(),
-            "selectedOfferId": FieldValue.delete(),
-            "agreedPrice": FieldValue.delete()
+            "tripFormat": draft.tripFormat,
+            "visibility": draft.visibility
         ]
-        db.collection("cashRydrRequests").document(request.id).setData(data, merge: true) { [weak self] error in
-            Task { @MainActor in
-                self?.isSaving = false
-                self?.errorMessage = error?.localizedDescription
-            }
-        }
+        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"edit",body:data);await MainActor.run{self?.isSaving=false} } catch { await MainActor.run{self?.isSaving=false;self?.errorMessage=error.localizedDescription} } }
         return true
     }
 
@@ -696,10 +665,7 @@ private final class CashRydrHubVM: ObservableObject {
             return
         }
         let normalizedVisibility = CashHubVisibility.normalized(visibility).rawValue
-        db.collection("cashRydrRequests").document(request.id)
-            .setData(["visibility": normalizedVisibility], merge: true) { [weak self] error in
-                Task { @MainActor in self?.errorMessage = error?.localizedDescription }
-            }
+        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"visibility",body:["visibility":normalizedVisibility]) } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func removeRequest(_ request: CashRydrRequest) {
@@ -707,18 +673,11 @@ private final class CashRydrHubVM: ObservableObject {
             errorMessage = "Only the rider who posted this request can delete it."
             return
         }
-        db.collection("cashRydrRequests").document(request.id).delete { [weak self] error in
-            Task { @MainActor in
-                self?.errorMessage = error?.localizedDescription
-                if error == nil {
-                    self?.confirmationMessage = "Your request has been deleted."
-                }
-            }
-        }
+        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"remove");await MainActor.run{self?.confirmationMessage="Your request has been deleted."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func sendOffer(to request: CashRydrRequest, draft: CashHubOfferDraft, driverName: String) -> Bool {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             errorMessage = "Please log in to make an offer."
             return false
         }
@@ -729,64 +688,26 @@ private final class CashRydrHubVM: ObservableObject {
 
         let availability = draft.availability.trimmingCharacters(in: .whitespacesAndNewlines)
         let vehicleInfo = draft.vehicleInfo.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !availability.isEmpty, !vehicleInfo.isEmpty else {
-            errorMessage = "Add your availability and vehicle information."
+        let message = draft.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !availability.isEmpty, !vehicleInfo.isEmpty, !message.isEmpty else {
+            errorMessage = "Add your availability, vehicle information, and a message."
             return false
         }
 
-        let driverName = displayName(driverName, fallback: "Cash Hub Driver")
-        let conversationId = cashHubConversationId(requestId: request.id, driverUid: uid)
-        var conversationData: [String: Any] = [
-            "requestId": request.id,
-            "riderUid": request.riderUid,
-            "riderName": request.riderName,
-            "driverUid": uid,
-            "driverName": driverName,
-            "participants": [request.riderUid, uid].sorted(),
-            "status": "open",
-            "offerStatus": "pending",
+        var offerData: [String: Any] = [
             "availability": availability,
             "vehicleInfo": vehicleInfo,
-            "lastMessage": draft.message.trimmingCharacters(in: .whitespacesAndNewlines),
-            "lastMessageAt": FieldValue.serverTimestamp(),
-            "cashHubOnly": true,
-            "managedByRydr": false,
-            "paymentHandledBy": "rider_driver_direct",
-            "updatedAt": FieldValue.serverTimestamp(),
-            "createdAt": FieldValue.serverTimestamp()
+            "message": message
         ]
         if let amount = cleanAmount(draft.offerAmount) {
-            conversationData["offerAmount"] = amount
+            offerData["offerAmount"] = amount
         }
-        let conversationRef = db.collection("cashHubConversations").document(conversationId)
-        let messageRef = conversationRef.collection("messages").document()
-        var messageData: [String: Any] = [
-            "requestId": request.id,
-            "conversationId": conversationId,
-            "senderUid": uid,
-            "senderName": driverName,
-            "senderRole": "driver",
-            "kind": "offer",
-            "text": draft.message.trimmingCharacters(in: .whitespacesAndNewlines),
-            "availability": availability,
-            "vehicleInfo": vehicleInfo,
-            "auditVisibleToAdmin": true,
-            "createdAt": FieldValue.serverTimestamp()
-        ]
-        if let amount = conversationData["offerAmount"] {
-            messageData["offerAmount"] = amount
-        }
-        let batch = db.batch()
-        batch.setData(conversationData, forDocument: conversationRef, merge: true)
-        batch.setData(messageData, forDocument: messageRef)
-        batch.commit { [weak self] error in
-            Task { @MainActor in self?.errorMessage = error?.localizedDescription }
-        }
+        Task { [weak self] in do { try await RiderCashHubBackend.offer(requestId:request.id,body:offerData) } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
         return true
     }
 
     func sendMessage(to context: CashHubMessageContext, message: String, authorName: String) -> Bool {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             errorMessage = "Please log in to send a message."
             return false
         }
@@ -799,7 +720,7 @@ private final class CashRydrHubVM: ObservableObject {
             errorMessage = "Trip Chat opens after you connect with a driver."
             return false
         }
-        guard let conversationId = context.conversationId, let driverUid = context.driverUid else {
+        guard let conversationId = context.conversationId, context.driverUid != nil else {
             errorMessage = "Choose a driver conversation first."
             return false
         }
@@ -809,39 +730,7 @@ private final class CashRydrHubVM: ObservableObject {
             return false
         }
 
-        let senderName = displayName(authorName, fallback: "Cash Hub User")
-        let conversationRef = db.collection("cashHubConversations").document(conversationId)
-        let messageRef = conversationRef.collection("messages").document()
-        let batch = db.batch()
-        batch.setData([
-            "requestId": request.id,
-            "riderUid": request.riderUid,
-            "riderName": request.riderName,
-            "driverUid": driverUid,
-            "driverName": context.driverName ?? request.connectedDriverName ?? "Cash Hub Driver",
-            "participants": [request.riderUid, driverUid].sorted(),
-            "status": request.isConnected ? "connected" : "open",
-            "lastMessage": trimmed,
-            "lastMessageAt": FieldValue.serverTimestamp(),
-            "cashHubOnly": true,
-            "managedByRydr": false,
-            "paymentHandledBy": "rider_driver_direct",
-            "updatedAt": FieldValue.serverTimestamp()
-        ], forDocument: conversationRef, merge: true)
-        batch.setData([
-            "requestId": request.id,
-            "conversationId": conversationId,
-            "senderUid": uid,
-            "senderName": senderName,
-            "senderRole": CashHubRole.rider.rawValue,
-            "kind": context.mode.responseKind,
-            "text": trimmed,
-            "auditVisibleToAdmin": true,
-            "createdAt": FieldValue.serverTimestamp()
-        ], forDocument: messageRef)
-        batch.commit { [weak self] error in
-            Task { @MainActor in self?.errorMessage = error?.localizedDescription }
-        }
+        Task { [weak self] in do { try await RiderCashHubBackend.message(conversationId:conversationId,text:trimmed,kind:context.mode.responseKind) } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
         return true
     }
 
@@ -855,34 +744,7 @@ private final class CashRydrHubVM: ObservableObject {
             return
         }
 
-        var data: [String: Any] = [
-            "status": "connected",
-            "connectedDriverUid": offer.authorUid,
-            "connectedDriverName": offer.authorName,
-            "selectedOfferId": offer.id,
-            "connectedAt": FieldValue.serverTimestamp()
-        ]
-        if let amount = offer.offerAmount {
-            data["agreedPrice"] = amount
-        }
-        let requestRef = db.collection("cashRydrRequests").document(request.id)
-        let conversationRef = db.collection("cashHubConversations").document(offer.id)
-        let batch = db.batch()
-        batch.setData(data, forDocument: requestRef, merge: true)
-        batch.setData([
-            "status": "connected",
-            "offerStatus": "accepted",
-            "connectedAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
-        ], forDocument: conversationRef, merge: true)
-        batch.commit { [weak self] error in
-            Task { @MainActor in
-                self?.errorMessage = error?.localizedDescription
-                if error == nil {
-                    self?.confirmationMessage = "You and this driver are now connected for this Cash Hub request."
-                }
-            }
-        }
+        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"accept_offer",body:["offerId":offer.id]);await MainActor.run{self?.confirmationMessage="You and this driver are now connected for this Cash Hub request."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func declineOffer(_ offer: CashHubResponse, for request: CashRydrRequest) {
@@ -890,24 +752,12 @@ private final class CashRydrHubVM: ObservableObject {
             errorMessage = "Only the rider who posted this request can decline an offer."
             return
         }
-        db.collection("cashHubConversations").document(offer.id)
-            .setData(["offerStatus": "declined", "updatedAt": FieldValue.serverTimestamp()], merge: true) { [weak self] error in
-                Task { @MainActor in self?.errorMessage = error?.localizedDescription }
-            }
+        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"decline_offer",body:["offerId":offer.id]) } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func cancelConnection(for request: CashRydrRequest) {
         guard Auth.auth().currentUser?.uid == request.riderUid else { return }
-        db.collection("cashRydrRequests").document(request.id).setData([
-            "status": "open",
-            "connectedDriverUid": FieldValue.delete(),
-            "connectedDriverName": FieldValue.delete(),
-            "selectedOfferId": FieldValue.delete(),
-            "agreedPrice": FieldValue.delete(),
-            "connectedAt": FieldValue.delete()
-        ], merge: true) { [weak self] error in
-            Task { @MainActor in self?.errorMessage = error?.localizedDescription }
-        }
+        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"cancel_connection") } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func offers(for request: CashRydrRequest) -> [CashHubResponse] {
@@ -1046,7 +896,7 @@ private final class CashRydrHubVM: ObservableObject {
             passengers: data["passengers"] as? Int ?? 1,
             notes: data["notes"] as? String ?? data["note"] as? String ?? "",
             budgetRange: budgetRange,
-            rideType: data["rideType"] as? String ?? "Scheduled",
+            tripFormat: data["tripFormat"] as? String ?? data["rideType"] as? String ?? "Scheduled",
             visibility: CashHubVisibility.normalized(data["visibility"] as? String).rawValue,
             status: data["status"] as? String ?? "open",
             driverQueueStatus: data["driverQueueStatus"] as? String,
@@ -2592,7 +2442,7 @@ private struct CashHubRideHistoryCard: View {
             CashHubRouteThumbnail(seed: request.id, pickupText: request.pickup, dropoffText: request.destination)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(request.rideType)
+                Text(request.tripFormat)
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(Color.red)
                     .padding(.horizontal, 8)
@@ -3095,7 +2945,7 @@ private struct CashHubRequestCard: View {
 
             Label(request.pickup, systemImage: "mappin.circle.fill")
             Label(request.destination, systemImage: "flag.checkered.circle.fill")
-            Text("\(request.rideType) | \(request.passengers) passenger\(request.passengers == 1 ? "" : "s") | \(request.visibility)")
+            Text("\(request.tripFormat) | \(request.passengers) passenger\(request.passengers == 1 ? "" : "s") | \(request.visibility)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if !request.notes.isEmpty {
@@ -3469,7 +3319,7 @@ private struct CashHubRequestForm: View {
                     Stepper("Passengers: \(draft.passengers)", value: $draft.passengers, in: 1...12)
                 }
                 Section("Details") {
-                    Picker("Ride type", selection: $draft.rideType) {
+                    Picker("Trip format", selection: $draft.tripFormat) {
                         ForEach(["One-way", "Round trip", "Scheduled", "Flexible"], id: \.self) { Text($0) }
                     }
                     Picker("Visibility", selection: $draft.visibility) {

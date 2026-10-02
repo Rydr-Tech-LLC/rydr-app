@@ -357,7 +357,13 @@ struct RideChatContext: Equatable {
 }
 
 // MARK: - Service protocol
-enum DriverDecision { case accepted, declined }
+enum DriverDecision { case accepted(driverId: String?), declined }
+
+struct RideDispatchRefresh {
+    let status: String
+    let dispatchStatus: String?
+    let driverId: String?
+}
 
 enum RideCancellationMode: String, Codable {
     case cancelRide
@@ -482,9 +488,11 @@ protocol RideService: AnyObject, Sendable {
         rydrBankCode: String?,
         replacementForRideId: String?,
         riderPreferences: RiderRidePreferences?,
-        riderVerified: Bool
+        riderVerified: Bool,
+        candidateDriverIds: [String]
     ) async throws -> String // returns rideId
     func awaitDriverDecision(rideId: String) async throws -> DriverDecision
+    func refreshRideDispatch(rideId: String) async throws -> RideDispatchRefresh
     func rideLifecycleStream(rideId: String) -> AsyncThrowingStream<RideLifecycleSnapshot, Error>
     func driverLocationStream(rideId: String) -> AsyncStream<CLLocationCoordinate2D>
     func cancelRide(rideId: String, mode: RideCancellationMode) async throws -> BackendRideFinancialOutcome?
@@ -554,11 +562,8 @@ final class RideManager: ObservableObject {
     private var decisionTask: Task<Void, Never>?
     private var rideLifecycleTask: Task<Void, Never>?
     private var pickupWaitCountdownTask: Task<Void, Never>?
-    private var chargedProratedCancellationRideIDs = Set<String>()
 
     // Internals used across steps
-    private var attemptedDriverIDs: Set<String> = []
-    private var activeMatchmakingKey = ""
     private var cachedEstimate: RideEstimate = .init(distanceMiles: 6.2, durationMinutes: 18)
     private var cachedPickup = ""
     private var cachedDropoff = ""
@@ -645,36 +650,10 @@ final class RideManager: ObservableObject {
         }
     }
 
-    private func resetMatchmakingAttempt() {
-        activeMatchmakingKey = ""
-        attemptedDriverIDs.removeAll()
-    }
-
-    private static func matchmakingKey(
-        pickup: String,
-        dropoff: String,
-        rideType: String,
-        pickupCoordinate: CLLocationCoordinate2D?,
-        dropoffCoordinate: CLLocationCoordinate2D?
-    ) -> String {
-        [
-            normalizedMatchmakingText(pickup),
-            normalizedMatchmakingText(dropoff),
-            normalizedMatchmakingText(rideType),
-            coordinateKey(pickupCoordinate),
-            coordinateKey(dropoffCoordinate)
-        ].joined(separator: "|")
-    }
-
     private static func normalizedMatchmakingText(_ value: String) -> String {
         value
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-    }
-
-    private static func coordinateKey(_ coordinate: CLLocationCoordinate2D?) -> String {
-        guard let coordinate else { return "" }
-        return String(format: "%.5f,%.5f", coordinate.latitude, coordinate.longitude)
     }
 
     // MARK: - Public API used by the UI
@@ -703,17 +682,6 @@ final class RideManager: ObservableObject {
         cachedDropoffCoordinate = effectiveDropoffCoordinate
         cachedRiderVerified = riderVerified
         cachedRidePreferences = nil
-        let matchmakingKey = Self.matchmakingKey(
-            pickup: pickup,
-            dropoff: dropoff,
-            rideType: rideType,
-            pickupCoordinate: effectivePickupCoordinate,
-            dropoffCoordinate: effectiveDropoffCoordinate
-        )
-        if matchmakingKey != activeMatchmakingKey {
-            activeMatchmakingKey = matchmakingKey
-            attemptedDriverIDs.removeAll()
-        }
         guard let estimate else {
             availableDrivers = []
             selectedDriver = nil
@@ -752,7 +720,7 @@ final class RideManager: ObservableObject {
 
                 guard !Task.isCancelled else { return }
 
-                let eligibleDrivers = drivers.filter { !self.attemptedDriverIDs.contains($0.id) }
+                let eligibleDrivers = drivers
                 let previewDrivers = Array(eligibleDrivers.prefix(3))
                 self.driverSearchTargetCount = 3
                 if eligibleDrivers.isEmpty {
@@ -799,7 +767,6 @@ final class RideManager: ObservableObject {
         }
 
         selectedDriver = driver
-        attemptedDriverIDs.insert(driver.id)
         rideRequestErrorMessage = nil
         state = .awaitingDriver
 
@@ -822,13 +789,17 @@ final class RideManager: ObservableObject {
                     rydrBankCode: self.currentAppliedRydrBankCode,
                     replacementForRideId: self.replacementForRideId,
                     riderPreferences: cachedRidePreferences,
-                    riderVerified: cachedRiderVerified
+                    riderVerified: cachedRiderVerified,
+                    candidateDriverIds: availableDrivers.map(\.id)
                 )
                 self.currentServiceRideId = rideId
 
                 let decision = try await self.awaitDriverDecisionWithTimeout(rideId: rideId)
                 switch decision {
-                case .accepted:
+                case .accepted(let driverId):
+                    if let driverId, let acceptedDriver = self.availableDrivers.first(where: { $0.id == driverId }) {
+                        self.selectedDriver = acceptedDriver
+                    }
                     self.handleAccept()
                 case .declined:
                     self.handleDecline(message: "That driver declined the ride. Pick another nearby driver.")
@@ -881,15 +852,9 @@ final class RideManager: ObservableObject {
 
     /// If driver declines, take user back to selection (remove that driver).
     func handleDecline(message: String? = nil) {
-        if let declined = selectedDriver {
-            attemptedDriverIDs.insert(declined.id)
-            availableDrivers.removeAll { $0.id == declined.id }
-        }
         selectedDriver = nil
         rideRequestErrorMessage = message
-        if availableDrivers.isEmpty {
-            rideRequestErrorMessage = RideRequestError.noDriversAvailable.localizedDescription
-        }
+        rideRequestErrorMessage = message ?? RideRequestError.noDriversAvailable.localizedDescription
         state = .selecting
     }
 
@@ -933,7 +898,6 @@ final class RideManager: ObservableObject {
             rideRequestErrorMessage = "The completed ride is missing its backend identifier."
             return
         }
-        let rideType = ride.rideType
         let trustedDistance = backendDistanceMiles
             ?? outcome.calculationInputs?.distanceMiles
             ?? ride.estimate.distanceMiles
@@ -951,8 +915,7 @@ final class RideManager: ObservableObject {
                 UserDefaults.standard.removeObject(forKey: "appliedRydrBankCode")
                 UserDefaults.standard.removeObject(forKey: "appliedRydrBankBookingId")
             }
-            _ = try? await RydrBankAPI.rideComplete(rideId: backendRideId, distanceMi: trustedDistance, rideType: rideType)
-            await chargeRiderForRide(rideId: backendRideId)
+            _ = try? await RydrBankAPI.rideComplete(rideId: backendRideId)
         }
     }
 
@@ -989,7 +952,6 @@ final class RideManager: ObservableObject {
         currentWaitChargePerMinute = 0
         hasPlayedTripStartedSoundForCurrentRide = false
         clearActiveRideSnapshot()
-        resetMatchmakingAttempt()
         state = .completed
         closeRideChatIfNeeded(chatContext)
     }
@@ -1029,35 +991,25 @@ final class RideManager: ObservableObject {
         }
 
         var payload: [String: Any] = [
-            "rideId": backendRideId,
-            "riderId": user.uid,
-            "driverName": receipt.driverName,
-            "pickup": receipt.pickup,
-            "dropoff": receipt.dropoff,
             "compliments": compliments,
             "feedback": trimmedFeedback,
-            "favoriteDriver": draft.favoriteDriver,
-            "source": "ios_rider_app",
-            "createdAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
+            "favoriteDriver": draft.favoriteDriver
         ]
-        if let driverId = lastCompletedDriverId {
-            payload["driverId"] = driverId
+        if let rating { payload["rating"] = rating }
+        guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
+              let base = URL(string: rawBase),
+              let url = URL(string: "/rides/\(backendRideId)/rating", relativeTo: base) else { throw URLError(.badURL) }
+        let token = try await user.getIDToken()
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw NSError(domain: "RydrRating", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: body?["error"] as? String ?? "Rating could not be saved."])
         }
-        if let rating {
-            payload["rating"] = rating
-        }
-
-        let db = Firestore.firestore()
-        let ratingRef = db.collection("driverRatings").document(backendRideId)
-        let rideRef = db.collection("rides").document(backendRideId)
-        let batch = db.batch()
-        batch.setData(payload, forDocument: ratingRef, merge: true)
-        batch.setData([
-            "riderDriverRating": payload,
-            "updatedAt": FieldValue.serverTimestamp()
-        ], forDocument: rideRef, merge: true)
-        try await batch.commit()
     }
 
     func cancelAll() {
@@ -1073,7 +1025,6 @@ final class RideManager: ObservableObject {
         hasPlayedTripStartedSoundForCurrentRide = false
         releaseAppliedRydrBankCodeIfNeeded()
         clearActiveRideSnapshot()
-        resetMatchmakingAttempt()
         state = .cancelled
         closeRideChatIfNeeded(chatContext)
     }
@@ -1174,11 +1125,6 @@ final class RideManager: ObservableObject {
         pickupWaitCountdownTask?.cancel()
         let chatContext = activeRideChatContext
 
-        if let selectedDriver {
-            attemptedDriverIDs.insert(selectedDriver.id)
-            availableDrivers.removeAll { $0.id == selectedDriver.id }
-        }
-
         let cancelledServiceRideId = currentServiceRideId
         if mode == .findAnotherDriver {
             replacementForRideId = cancelledServiceRideId
@@ -1214,7 +1160,6 @@ final class RideManager: ObservableObject {
         Task {
             if notifyBackend, let id = cancelledServiceRideId {
                 _ = try? await rideService.cancelRide(rideId: id, mode: mode)
-                await chargeCancellationFee(rideId: id)
             }
         }
         closeRideChatIfNeeded(chatContext)
@@ -1241,13 +1186,11 @@ final class RideManager: ObservableObject {
         hasPlayedTripStartedSoundForCurrentRide = false
         releaseAppliedRydrBankCodeIfNeeded()
         clearActiveRideSnapshot()
-        resetMatchmakingAttempt()
         state = .cancelled
 
         Task {
             if let id = cancelledServiceRideId {
                 _ = try? await rideService.cancelRide(rideId: id, mode: mode)
-                await chargeCancellationFee(rideId: id)
             }
         }
         closeRideChatIfNeeded(chatContext)
@@ -1275,7 +1218,6 @@ final class RideManager: ObservableObject {
                         durationMinutes: outcome.calculationInputs?.billableMinutes
                     )
                 }
-                await chargeCancellationFee(rideId: backendRideId)
             } catch {
                 await MainActor.run {
                     self.rideRequestErrorMessage = "Cancellation failed: \(error.localizedDescription)"
@@ -1364,13 +1306,6 @@ final class RideManager: ObservableObject {
                 return
             case .cancelled:
                 if snapshot.rawStatus == "driverCancelled" {
-                    if let chargeCents = snapshot.proratedCancellationChargeCents,
-                       chargeCents > 0,
-                       let rideId = currentServiceRideId,
-                       !chargedProratedCancellationRideIDs.contains(rideId) {
-                        chargedProratedCancellationRideIDs.insert(rideId)
-                        Task { await chargeCancellationFee(rideId: rideId) }
-                    }
                     handleDriverCancelledAndReturnToSelection()
                 } else {
                     cancelAll()
@@ -1441,23 +1376,33 @@ final class RideManager: ObservableObject {
     }
 
     private func awaitDriverDecisionWithTimeout(rideId: String) async throws -> DriverDecision {
-        try await withThrowingTaskGroup(of: DriverDecision.self) { group in
-            let service = rideService
-            let timeoutSeconds = driverDecisionTimeoutSeconds
-            group.addTask {
-                try await service.awaitDriverDecision(rideId: rideId)
-            }
-            group.addTask {
-                try await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
-                throw RideRequestError.driverTimedOut
-            }
+        while !Task.isCancelled {
+            do {
+                return try await withThrowingTaskGroup(of: DriverDecision.self) { group in
+                    let service = rideService
+                    let timeoutSeconds = driverDecisionTimeoutSeconds
+                    group.addTask {
+                        try await service.awaitDriverDecision(rideId: rideId)
+                    }
+                    group.addTask {
+                        try await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
+                        throw RideRequestError.driverTimedOut
+                    }
 
-            guard let decision = try await group.next() else {
-                throw RideRequestError.driverTimedOut
+                    guard let decision = try await group.next() else {
+                        throw RideRequestError.driverTimedOut
+                    }
+                    group.cancelAll()
+                    return decision
+                }
+            } catch RideRequestError.driverTimedOut {
+                let dispatch = try await rideService.refreshRideDispatch(rideId: rideId)
+                if dispatch.status.lowercased() == "nodriversavailable" {
+                    return .declined
+                }
             }
-            group.cancelAll()
-            return decision
         }
+        throw CancellationError()
     }
 
     private struct CoordinateSnapshot: Codable {
@@ -1657,10 +1602,6 @@ final class RideManager: ObservableObject {
         }
     }
 
-    private func chargeCancellationFee(rideId: String) async {
-        await performChargeRequest(path: "create-payment-intent", body: ["rideId": rideId, "currency": "usd"])
-    }
-
     /// Looks up (or creates, idempotently) the signed-in rider's Stripe customerId.
     /// The backend derives/owns this from the verified Firebase uid — only
     /// `email`/`name` (display data, not an identity the server trusts) are sent.
@@ -1697,17 +1638,6 @@ final class RideManager: ObservableObject {
         } else {
             selectedCardIndex = 0
         }
-    }
-
-    /// Off-session charges the rider for a completed (or prorated-cancelled) ride.
-    /// The backend re-derives the customerId, the driver's Connect account, and the
-    /// platform's fee share server-side from `rideId` — this client never sends a
-    /// customerId/driverAccountId/applicationFeeAmount it could tamper with.
-    /// Publishes `paymentStatus`/`paymentFailureReason` so the UI can show
-    /// "Payment Failed — Retry Payment" per the Phase 2 spec.
-    private func chargeRiderForRide(rideId: String) async {
-        let body: [String: Any] = ["rideId": rideId, "currency": "usd"]
-        await performChargeRequest(path: "create-payment-intent", body: body)
     }
 
     /// Retries a ride whose payment previously failed (Phase 2: "retry failed

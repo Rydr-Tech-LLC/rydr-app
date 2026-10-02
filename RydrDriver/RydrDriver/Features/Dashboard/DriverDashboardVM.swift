@@ -53,6 +53,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var mapRideRequestBlips: [DriverRideRadarBlip] = []
     @Published var demandSnapshot = DriverDemandSnapshot()
     @Published var demandByRideType: [String: DriverDemandLevel] = [:]
+    @Published var suggestedRatesByRideType: [String: DriverRateSetting] = [:]
     @Published var rideFilterPreferences = DriverRideFilterPreferences()
     @Published var driverDisplayName: String = "Rydr Driver"
     @Published var driverRating: Double = 5.0
@@ -279,7 +280,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         startMapRequestBlipListener()
         startActiveRideListener()
         startNotificationListeners()
-        refreshDriverRatingSummary()
         publishDriverProfile()
     }
 
@@ -362,6 +362,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         demandByRideType[RydrRideTierCatalog.canonicalRideType(rideType)] ?? .low
     }
 
+    func suggestedRate(for rideType: String) -> DriverRateSetting {
+        suggestedRatesByRideType[RydrRideTierCatalog.canonicalRideType(rideType)] ?? rate(for: rideType)
+    }
+
     func saveRate(
         rideType: String,
         minimumFare: Double,
@@ -373,16 +377,31 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             statusMessage = "Rates may only be adjusted while offline."
             return
         }
-        var setting = rate(for: rideType)
-        setting.minimumFare = max(0, minimumFare)
-        setting.perMile = max(0, perMile)
-        setting.perMinute = max(0, perMinute)
+        var setting = useSuggestedPricing ? suggestedRate(for: rideType) : rate(for: rideType)
+        if !useSuggestedPricing {
+            setting.minimumFare = max(0, minimumFare)
+            setting.perMile = max(0, perMile)
+            setting.perMinute = max(0, perMinute)
+        }
         setting.useSuggestedPricing = useSuggestedPricing
         tierRates[rideType] = setting
         hasSavedRateSettings = true
-        statusMessage = "\(rideType) rate saved. You can go online when ready."
-        publishDriverProfile()
-        if isOnline { updateDriverPresence(online: true) }
+        statusMessage = "Saving \(rideType) rate…"
+        let request = RydrBackendService.RateCardRequest(
+            rideType: rideType,
+            minimumFare: setting.minimumFare,
+            perMile: setting.perMile,
+            perMinute: setting.perMinute,
+            useSuggestedPricing: setting.useSuggestedPricing
+        )
+        Task { [weak self] in
+            do {
+                try await RydrBackendService.updateRateCard(request)
+                await MainActor.run { self?.statusMessage = "\(rideType) rate saved. You can go online when ready." }
+            } catch {
+                await MainActor.run { self?.statusMessage = "Could not save rate: \(error.localizedDescription)" }
+            }
+        }
     }
 
     func toggleOnline() {
@@ -723,7 +742,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     func requestAccountDeletion() {
         guard !isRequestingAccountDeletion else { return }
-        guard let user = Auth.auth().currentUser else {
+        guard Auth.auth().currentUser != nil else {
             accountDeletionMessage = "Sign in before requesting account deletion."
             return
         }
@@ -732,27 +751,13 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         accountDeletionMessage = nil
 
         let request = RydrBackendService.AccountDeletionRequest(
-            uid: user.uid,
-            role: "driver",
-            email: user.email,
-            reason: nil,
-            requestedAt: ISO8601DateFormatter().string(from: Date())
+            reason: nil
         )
 
         Task { [weak self] in
             do {
-                if RydrBackendService.isConfigured {
-                    try await RydrBackendService.requestAccountDeletion(request)
-                }
-
-                try await Firestore.firestore().collection("accountDeletionRequests").document(user.uid).setData([
-                    "uid": user.uid,
-                    "email": user.email ?? "",
-                    "source": "ios-driver",
-                    "status": "requested",
-                    "requestedAt": FieldValue.serverTimestamp(),
-                    "updatedAt": FieldValue.serverTimestamp()
-                ], merge: true)
+                guard RydrBackendService.isConfigured else { throw URLError(.badURL) }
+                try await RydrBackendService.requestAccountDeletion(request)
 
                 await MainActor.run {
                     self?.isRequestingAccountDeletion = false
@@ -769,33 +774,24 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func submitRiderRating(ride: DriverActiveRide, rating: Int?, feedback: String) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        var payload: [String: Any] = [
-            "rideId": ride.id,
-            "driverId": uid,
-            "riderId": ride.riderId,
-            "feedback": feedback.trimmingCharacters(in: .whitespacesAndNewlines),
-            "createdAt": FieldValue.serverTimestamp()
-        ]
-        if let rating {
-            payload["rating"] = rating
-        }
-
-        let batch = db.batch()
-        let ratingRef = db.collection("riderRatings").document()
-        batch.setData(payload, forDocument: ratingRef, merge: true)
-        batch.setData([
-            "driverRiderRating": payload,
-            "updatedAt": FieldValue.serverTimestamp()
-        ], forDocument: db.collection("rides").document(ride.id), merge: true)
-        batch.commit { [weak self] error in
-            DispatchQueue.main.async {
-                if let error {
-                    RydrCrashReporter.record(error, context: "submit_rider_rating")
-                    self?.statusMessage = "Could not save rider rating: \(error.localizedDescription)"
-                } else {
+        guard Auth.auth().currentUser != nil else { return }
+        let body = RydrBackendService.RideRatingRequest(
+            rating: rating,
+            feedback: feedback.trimmingCharacters(in: .whitespacesAndNewlines),
+            compliments: [],
+            favoriteDriver: false
+        )
+        Task { [weak self] in
+            do {
+                try await RydrBackendService.submitRideRating(rideId: ride.id, body: body)
+                await MainActor.run {
                     self?.completedRideForRating = nil
                     self?.resumeStandbyIfWaiting(statusMessage: "Thanks. Rider feedback saved.")
+                }
+            } catch {
+                RydrCrashReporter.record(error, context: "submit_rider_rating")
+                await MainActor.run {
+                    self?.statusMessage = "Could not save rider rating: \(error.localizedDescription)"
                 }
             }
         }
@@ -808,14 +804,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         let encrypted = try DriverRideChatCrypto.encrypt(trimmed, rideId: ride.id, riderId: ride.riderId, driverId: uid)
 
         let chatRef = db.collection("rideChats").document(ride.id)
-        try await chatRef.setData([
-            "rideId": ride.id,
-            "riderId": ride.riderId,
-            "driverId": uid,
-            "participants": [ride.riderId, uid].sorted(),
-            "status": "active",
-            "updatedAt": FieldValue.serverTimestamp()
-        ], merge: true)
         try await chatRef.collection("messages").addDocument(data: [
             "senderId": uid,
             "senderRole": "driver",
@@ -861,41 +849,27 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func promoteNextQueuedRideIfAvailable() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        db.collection("rides")
-            .whereField("driverId", isEqualTo: uid)
-            .whereField("driverQueueStatus", isEqualTo: "queued")
-            .limit(to: 1)
-            .getDocuments { [weak self] snapshot, error in
-                DispatchQueue.main.async {
-                    guard error == nil, let doc = snapshot?.documents.first else {
-                        self?.resumeStandbyIfWaiting()
-                        return
-                    }
-
-                    guard let self else { return }
-                    Task { [weak self] in
-                        do {
-                            _ = try await RydrBackendService.transitionRide(
-                                rideId: doc.documentID,
-                                action: "promote_queue"
-                            )
-                            await MainActor.run {
-                                guard let self else { return }
-                                var activeData = doc.data()
-                                activeData["driverQueueStatus"] = "active"
-                                self.setActiveRide(DriverActiveRide(id: doc.documentID, data: activeData))
-                                self.statusMessage = "Queued ride is now active. Head to pickup."
-                                self.updateDriverPresence(online: self.isOnline)
-                            }
-                        } catch {
-                            await MainActor.run {
-                                self?.statusMessage = "Could not start queued ride: \(error.localizedDescription)"
-                            }
-                        }
-                    }
+        guard Auth.auth().currentUser != nil else { return }
+        Task { [weak self] in
+            do {
+                let promotion = try await RydrBackendService.promoteNextQueuedRide()
+                guard promotion.promoted, let rideId = promotion.rideId else {
+                    await MainActor.run { self?.resumeStandbyIfWaiting() }
+                    return
+                }
+                let doc = try await self?.db.collection("rides").document(rideId).getDocument()
+                await MainActor.run {
+                    guard let self, let data = doc?.data() else { return }
+                    self.setActiveRide(DriverActiveRide(id: rideId, data: data))
+                    self.statusMessage = "Queued ride is now active. Head to pickup."
+                    self.updateDriverPresence(online: self.isOnline)
+                }
+            } catch {
+                await MainActor.run {
+                    self?.statusMessage = "Could not start queued ride: \(error.localizedDescription)"
                 }
             }
+        }
     }
 
     private func startPushingDriverPresence() {
@@ -934,7 +908,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 self.profilePhotoURL = data["profilePhotoURL"] as? String
                 self.pendingProfilePhotoURL = data["pendingProfilePhotoURL"] as? String
                 self.profilePhotoReviewStatus = data["profilePhotoReviewStatus"] as? String ?? (self.pendingProfilePhotoURL == nil ? "approved" : "pending")
-                self.publishPublicDriverProfile(uid: uid, displayName: self.driverDisplayName)
             }
         }
     }
@@ -1205,17 +1178,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
                     let liveRequests = snapshot?.documents
                         .map(DriverRideRequest.init(document:)) ?? []
-                    let demand = self.demandSnapshot(from: liveRequests)
-                    self.demandSnapshot = demand
-                    for rideType in DriverDashboardVM.availableRideTypes {
-                        let key = RydrRideTierCatalog.canonicalRideType(rideType)
-                        let tierRequests = liveRequests.filter {
-                            RydrRideTierCatalog.canonicalRideType($0.rideType) == key
-                        }
-                        self.demandByRideType[key] = self.demandSnapshot(from: tierRequests).level
-                    }
-                    self.applySuggestedRatesForCurrentDemand()
-                    self.applyDemandNotification(demand)
+                    self.refreshBackendDemand()
 
                     let visibleRequests = liveRequests
                         .filter { request in
@@ -1226,6 +1189,48 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             }
     }
 
+    private func refreshBackendDemand() {
+        let rideTypes = eligibleRideTypes.isEmpty
+            ? DriverDashboardVM.availableRideTypes
+            : eligibleRideTypes
+        let request = RydrBackendService.DriverDemandRequest(
+            rideTypes: rideTypes
+        )
+        Task { [weak self] in
+            do {
+                let response = try await RydrBackendService.fetchDriverDemand(request)
+                await MainActor.run {
+                    guard let self else { return }
+                    let overallLevel = DriverDemandLevel(rawValue: response.level) ?? .low
+                    let snapshot = DriverDemandSnapshot(
+                        level: overallLevel,
+                        paceText: response.paceText,
+                        nearbyRequestCount: response.nearbyRequestCount,
+                        radiusMiles: response.radiusMiles
+                    )
+                    self.demandSnapshot = snapshot
+                    var levels: [String: DriverDemandLevel] = [:]
+                    var suggestions: [String: DriverRateSetting] = [:]
+                    for (rideType, tier) in response.byRideType {
+                        let key = RydrRideTierCatalog.canonicalRideType(rideType)
+                        levels[key] = DriverDemandLevel(rawValue: tier.level) ?? .low
+                        suggestions[key] = DriverRateSetting(
+                            minimumFare: Double(tier.suggestedRates.minimumFareCents) / 100,
+                            perMile: Double(tier.suggestedRates.perMileCents) / 100,
+                            perMinute: Double(tier.suggestedRates.perMinuteCents) / 100,
+                            useSuggestedPricing: true
+                        )
+                    }
+                    self.demandByRideType = levels
+                    self.suggestedRatesByRideType = suggestions
+                    self.applyDemandNotification(snapshot)
+                }
+            } catch {
+                RydrCrashReporter.record(error, context: "driver_demand_snapshot")
+            }
+        }
+    }
+
     private func canShowRadarBlip(for request: DriverRideRequest) -> Bool {
         guard request.pickupCoordinate != nil else { return false }
         guard !isRadarBlipExpired(request) else { return false }
@@ -1234,46 +1239,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         guard eligible.isEmpty || eligible.contains(RydrRideTierCatalog.canonicalRideType(request.rideType)) else { return false }
 
         return true
-    }
-
-    private func demandSnapshot(from requests: [DriverRideRequest]) -> DriverDemandSnapshot {
-        let radiusMiles = 5.0
-        let driverCoordinate = lastLocation?.coordinate ?? mapRegion.center
-        let driverLocation = CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
-        let selected = Set(selectedRideTypes.map(RydrRideTierCatalog.canonicalRideType))
-        let eligible = Set(eligibleRideTypes.map(RydrRideTierCatalog.canonicalRideType))
-
-        let nearbyRequests = requests.filter { request in
-            guard let pickupCoordinate = request.pickupCoordinate else { return false }
-            let rideType = RydrRideTierCatalog.canonicalRideType(request.rideType)
-            guard eligible.contains(rideType) else { return false }
-            guard selected.isEmpty || selected.contains(rideType) else { return false }
-
-            let pickupLocation = CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)
-            let pickupMiles = driverLocation.distance(from: pickupLocation) / 1609.344
-            return pickupMiles <= radiusMiles
-        }
-
-        let level: DriverDemandLevel
-        let paceText: String
-        switch nearbyRequests.count {
-        case 3...:
-            level = .high
-            paceText = "1-3 min since last request"
-        case 1...2:
-            level = .moderate
-            paceText = "3-5 min since last request"
-        default:
-            level = .low
-            paceText = "5+ min since last request"
-        }
-
-        return DriverDemandSnapshot(
-            level: level,
-            paceText: paceText,
-            nearbyRequestCount: nearbyRequests.count,
-            radiusMiles: radiusMiles
-        )
     }
 
     private func isRadarBlipExpired(_ request: DriverRideRequest) -> Bool {
@@ -1345,6 +1310,8 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func canPresentAssignedRequest(_ request: DriverRideRequest) -> Bool {
+        guard request.dispatchStatus == "offered" || request.dispatchStatus == "rematching" else { return false }
+        if let offerExpiresAt = request.offerExpiresAt, offerExpiresAt <= Date() { return false }
         let eligible = Set(eligibleRideTypes.map(RydrRideTierCatalog.canonicalRideType))
         guard eligible.contains(RydrRideTierCatalog.canonicalRideType(request.rideType)) else { return false }
 
@@ -1580,23 +1547,15 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             "displayName": displayName,
             "email": user?.email ?? "",
             "standardDispatchEnabled": true,
-            "qualifiedRideTypes": eligibleRideTypes,
-            "supportedRideTypes": eligibleRideTypes,
             "selectedRideTypes": Array(selectedRideTypes).sorted(),
             "rideTypes": Array(selectedRideTypes).sorted(),
-            "tierRates": tierRatesPayload(),
             "updatedAt": FieldValue.serverTimestamp()
         ], merge: true)
-        publishPublicDriverProfile(uid: uid, displayName: displayName)
     }
 
     private func publishAutoAcceptPreference() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         db.collection("drivers").document(uid).setData([
-            "autoAcceptQueuedRides": autoAcceptQueuedRides,
-            "updatedAt": FieldValue.serverTimestamp()
-        ], merge: true)
-        db.collection("driver_status").document(uid).setData([
             "autoAcceptQueuedRides": autoAcceptQueuedRides,
             "updatedAt": FieldValue.serverTimestamp()
         ], merge: true)
@@ -1633,64 +1592,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 }
             }
         }
-    }
-
-    private func publishPublicDriverProfile(uid: String, displayName: String) {
-        let riderVisibleName = Self.firstNameOnly(displayName)
-        var payload: [String: Any] = [
-            "uid": uid,
-            "displayName": riderVisibleName,
-            "profilePhotoURL": profilePhotoURL ?? "",
-            "rating": driverRating,
-            "ratingCount": driverRatingCount,
-            "vehicleSummary": vehicleSummaryText ?? publicVehicleSummary(),
-            // Generic factory-style vehicle image (Vehicle Library System) —
-            // never a photo of the driver's actual car. Riders see this in
-            // place of a vehicle photo upload.
-            "vehicleImageURL": vehicleImageURL ?? "",
-            "vehicleColor": vehicleColor ?? "",
-            "eligibleRideTypes": Array(selectedRideTypes).sorted(),
-            "tierRates": tierRatesPayload(),
-            "rideFilters": rideFilterPayload(),
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-
-        if let loc = lastLocation {
-            payload["approximateLocation"] = [
-                "lat": roundedCoordinate(loc.coordinate.latitude),
-                "lng": roundedCoordinate(loc.coordinate.longitude),
-                "updatedAt": FieldValue.serverTimestamp()
-            ]
-        }
-
-        db.collection("publicDriverProfiles").document(uid).setData(payload, merge: true)
-    }
-
-    private func refreshDriverRatingSummary() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        db.collection("driverRatings")
-            .whereField("driverId", isEqualTo: uid)
-            .order(by: "createdAt", descending: true)
-            .limit(to: 100)
-            .getDocuments { [weak self] snapshot, error in
-                guard let self else { return }
-                DispatchQueue.main.async {
-                    if let error {
-                        print("⚠️ driver rating summary failed: \(error.localizedDescription)")
-                        self.publishPublicDriverProfile(uid: uid, displayName: self.resolvedDriverDisplayName())
-                        return
-                    }
-
-                    let ratings = snapshot?.documents.compactMap { document -> Double? in
-                        guard let rating = Self.doubleValue(document.data()["rating"]),
-                              (1.0...5.0).contains(rating) else { return nil }
-                        return rating
-                    } ?? []
-                    self.driverRatingCount = ratings.count
-                    self.driverRating = ratings.isEmpty ? 5.0 : ratings.reduce(0, +) / Double(ratings.count)
-                    self.publishPublicDriverProfile(uid: uid, displayName: self.resolvedDriverDisplayName())
-                }
-            }
     }
 
     private func resolvedDriverDisplayName(authUser: User? = Auth.auth().currentUser) -> String {
@@ -1867,25 +1768,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         }
     }
 
-    private func applySuggestedRatesForCurrentDemand() {
-        var changed = false
-        for rideType in eligibleRideTypes {
-            guard rate(for: rideType).useSuggestedPricing else { continue }
-            let suggested = RydrRideTierCatalog.pricing(for: rideType)
-                .suggestedRates(for: demandLevel(for: rideType))
-            let current = rate(for: rideType)
-            guard abs(current.minimumFare - suggested.minimumFare) > 0.001
-                    || abs(current.perMile - suggested.perMile) > 0.001
-                    || abs(current.perMinute - suggested.perMinute) > 0.001 else { continue }
-            tierRates[rideType] = suggested
-            changed = true
-        }
-        if changed {
-            publishDriverProfile()
-            if isOnline { updateDriverPresence(online: true) }
-        }
-    }
-
     private func tierRatesPayload() -> [String: Any] {
         var payload: [String: Any] = [:]
         for rideType in eligibleRideTypes {
@@ -1934,21 +1816,11 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     private func updateActiveRideLocation(_ location: CLLocation) {
         guard let ride = activeRide else { return }
-        db.collection("rides").document(ride.id).setData([
-            "driverLocation": [
-                "lat": location.coordinate.latitude,
-                "lng": location.coordinate.longitude,
-                "speed": location.speed,
-                "course": location.course,
-                "updatedAt": FieldValue.serverTimestamp()
-            ],
-            "updatedAt": FieldValue.serverTimestamp()
-        ], merge: true)
         recordTripTelemetryIfNeeded(ride: ride, location: location)
     }
 
     private func recordTripTelemetryIfNeeded(ride: DriverActiveRide, location: CLLocation) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard Auth.auth().currentUser != nil else { return }
 
         let now = Date()
         let movedMeters = lastTripTelemetryLocation?.distance(from: location) ?? .greatestFiniteMagnitude
@@ -1959,18 +1831,21 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         lastTripTelemetryAt = now
         lastTripTelemetryLocation = location
 
-        db.collection("rides").document(ride.id).collection("telemetry").addDocument(data: [
-            "rideId": ride.id,
-            "driverId": uid,
-            "riderId": ride.riderId,
-            "status": ride.status,
-            "lat": location.coordinate.latitude,
-            "lng": location.coordinate.longitude,
-            "speed": location.speed,
-            "course": location.course,
-            "horizontalAccuracy": location.horizontalAccuracy,
-            "recordedAt": FieldValue.serverTimestamp()
-        ])
+        let payload = RydrBackendService.RideTelemetryRequest(
+            eventId: UUID().uuidString,
+            lat: location.coordinate.latitude,
+            lng: location.coordinate.longitude,
+            speed: location.speed,
+            course: location.course,
+            horizontalAccuracy: location.horizontalAccuracy
+        )
+        Task {
+            do {
+                try await RydrBackendService.recordRideTelemetry(rideId: ride.id, body: payload)
+            } catch {
+                RydrCrashReporter.record(error, context: "record_trip_telemetry")
+            }
+        }
     }
 
     private static func driverMessage(for status: String) -> String {
@@ -2195,6 +2070,7 @@ struct DriverDashboardView: View {
                 hasSavedRate: vm.hasSavedRateSettings,
                 demandLevel: vm.demandLevel(for: rideType),
                 rate: vm.rate(for: rideType),
+                suggestedRates: vm.suggestedRate(for: rideType),
                 onToggle: { vm.toggleRideType(rideType) },
                 onSaveRate: { minimumFare, perMile, perMinute, useSuggestedPricing in
                     vm.saveRate(

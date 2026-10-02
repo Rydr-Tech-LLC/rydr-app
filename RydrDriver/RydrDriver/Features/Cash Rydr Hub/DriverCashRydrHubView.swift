@@ -22,7 +22,7 @@ private struct DriverCashRideRequest: Identifiable, Equatable {
     var passengers: Int
     var notes: String
     var budgetRange: String
-    var rideType: String
+    var tripFormat: String
     var status: String
     var driverQueueStatus: String
     var connectedDriverUid: String?
@@ -76,7 +76,6 @@ private func driverCashHubConversationId(requestId: String, driverUid: String) -
 private struct DriverCashOfferDraft {
     var amount = ""
     var availability = ""
-    var vehicleInfo = ""
     var message = ""
 }
 
@@ -97,15 +96,18 @@ private final class DriverCashRydrHubVM: ObservableObject {
     @Published var isCheckingTerms = true
     @Published var termsAccepted = false
     @Published var termsAcceptanceEnabled = false
+    @Published var accessPausedForBilling = false
     @Published var isSavingTerms = false
 
     private var cashHubTermsVersion = "legacy"
     private let db = Firestore.firestore()
     private var openRequestListener: ListenerRegistration?
+    private var favoriteRequestListener: ListenerRegistration?
     private var scheduledRequestListener: ListenerRegistration?
     private var responseListeners: [String: ListenerRegistration] = [:]
     private var blockedRiderListener: ListenerRegistration?
     private var publicOpenRequestBuffer: [DriverCashRideRequest] = []
+    private var favoriteOpenRequestBuffer: [DriverCashRideRequest] = []
     private var driverScheduledRequestBuffer: [DriverCashRideRequest] = []
     private var blockedRiderUIDs: Set<String> = []
 
@@ -137,10 +139,12 @@ private final class DriverCashRydrHubVM: ObservableObject {
 
                     let data = snapshot?.data() ?? [:]
                     let optedOut = data["cashHubOptedOut"] as? Bool ?? false
+                    let accessStatus = (data["cashHubAccessStatus"] as? String ?? "active").lowercased()
+                    self.accessPausedForBilling = ["past_due", "review_required", "suspended", "revoked"].contains(accessStatus)
                     let acceptedVersion = data["cashHubTermsVersion"] as? String
                     let acceptedCurrentTerms = acceptedVersion == self.cashHubTermsVersion || (acceptedVersion == nil && self.cashHubTermsVersion == "legacy")
                     self.termsAccepted = (data["cashHubTermsAccepted"] as? Bool ?? false) && acceptedCurrentTerms && !optedOut
-                    if self.termsAcceptanceEnabled && self.termsAccepted {
+                    if self.termsAcceptanceEnabled && self.termsAccepted && !self.accessPausedForBilling {
                         self.start()
                     } else {
                         self.isLoading = false
@@ -151,7 +155,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func acceptTerms() {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             errorMessage = "Sign in before continuing."
             return
         }
@@ -162,28 +166,20 @@ private final class DriverCashRydrHubVM: ObservableObject {
         }
 
         isSavingTerms = true
-        db.collection("drivers").document(uid).setData([
-            "cashHubTermsAccepted": true,
-            "cashHubTermsAcceptedAt": FieldValue.serverTimestamp(),
-            "cashHubTermsVersion": cashHubTermsVersion,
-            "cashHubOptedOut": false,
-            "cashHubOptedOutAt": FieldValue.delete(),
-            "cashHubAccessStatus": "active",
-            "cashHubDriverAccessFeeAcknowledged": true,
-            "cashHubDriverAccessFeeAcknowledgedAt": FieldValue.serverTimestamp(),
-            "cashHubDriverAccessFeeCents": DriverCashHubAccessFee.cents,
-            "cashHubDriverAccessFeeVersion": DriverCashHubAccessFee.termsVersion,
-            "cashHubRole": "driver"
-        ], merge: true) { error in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.isSavingTerms = false
-                if let error {
-                    self.errorMessage = error.localizedDescription
-                    return
+        Task { [weak self] in
+            do {
+                try await RydrBackendService.acceptCashHubTerms()
+                await MainActor.run {
+                    guard let self else { return }
+                    self.isSavingTerms = false
+                    self.termsAccepted = true
+                    self.start()
                 }
-                self.termsAccepted = true
-                self.start()
+            } catch {
+                await MainActor.run {
+                    self?.isSavingTerms = false
+                    self?.errorMessage = error.localizedDescription
+                }
             }
         }
     }
@@ -195,6 +191,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
             return
         }
         openRequestListener?.remove()
+        favoriteRequestListener?.remove()
         scheduledRequestListener?.remove()
         blockedRiderListener?.remove()
         isLoading = true
@@ -225,6 +222,24 @@ private final class DriverCashRydrHubVM: ObservableObject {
                 }
             }
 
+        favoriteRequestListener = db.collection("cashRydrRequests")
+            .whereField("allowedDriverUids", arrayContains: uid)
+            .addSnapshotListener { snapshot, error in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if let error {
+                        self.isLoading = false
+                        self.errorMessage = error.localizedDescription
+                        return
+                    }
+                    self.favoriteOpenRequestBuffer = (snapshot?.documents ?? [])
+                        .compactMap(Self.makeRequest)
+                        .filter { $0.status == "open" }
+                        .sorted { $0.scheduledTime < $1.scheduledTime }
+                    self.applyRequestBuffers()
+                }
+            }
+
         scheduledRequestListener = db.collection("cashRydrRequests")
             .whereField("connectedDriverUid", isEqualTo: uid)
             .addSnapshotListener { snapshot, error in
@@ -247,6 +262,8 @@ private final class DriverCashRydrHubVM: ObservableObject {
     func stop() {
         openRequestListener?.remove()
         openRequestListener = nil
+        favoriteRequestListener?.remove()
+        favoriteRequestListener = nil
         scheduledRequestListener?.remove()
         scheduledRequestListener = nil
         blockedRiderListener?.remove()
@@ -254,13 +271,14 @@ private final class DriverCashRydrHubVM: ObservableObject {
         responseListeners.values.forEach { $0.remove() }
         responseListeners.removeAll()
         publicOpenRequestBuffer = []
+        favoriteOpenRequestBuffer = []
         driverScheduledRequestBuffer = []
         blockedRiderUIDs = []
     }
 
     private func applyRequestBuffers() {
         var mergedById: [String: DriverCashRideRequest] = [:]
-        for request in publicOpenRequestBuffer + driverScheduledRequestBuffer {
+        for request in publicOpenRequestBuffer + favoriteOpenRequestBuffer + driverScheduledRequestBuffer {
             mergedById[request.id] = request
         }
         let requests = mergedById.values.sorted { $0.scheduledTime < $1.scheduledTime }
@@ -291,7 +309,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func sendOffer(to request: DriverCashRideRequest, draft: DriverCashOfferDraft, driverName: String) -> Bool {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             errorMessage = "Sign in before making an offer."
             return false
         }
@@ -301,62 +319,20 @@ private final class DriverCashRydrHubVM: ObservableObject {
         }
 
         let availability = draft.availability.trimmingCharacters(in: .whitespacesAndNewlines)
-        let vehicleInfo = draft.vehicleInfo.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !availability.isEmpty, !vehicleInfo.isEmpty else {
-            errorMessage = "Add your availability and vehicle information."
+        let message = draft.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !availability.isEmpty, !message.isEmpty else {
+            errorMessage = "Add your availability and a message."
             return false
         }
 
-        let driverName = displayName(driverName)
-        let conversationId = driverCashHubConversationId(requestId: request.id, driverUid: uid)
-        var conversationPayload: [String: Any] = [
-            "requestId": request.id,
-            "riderUid": request.riderUid,
-            "riderName": request.riderName,
-            "driverUid": uid,
-            "driverName": driverName,
-            "participants": [request.riderUid, uid].sorted(),
-            "status": "open",
-            "offerStatus": "pending",
+        var offerPayload: [String: Any] = [
             "availability": availability,
-            "vehicleInfo": vehicleInfo,
-            "lastMessage": draft.message.trimmingCharacters(in: .whitespacesAndNewlines),
-            "lastMessageAt": FieldValue.serverTimestamp(),
-            "cashHubOnly": true,
-            "managedByRydr": false,
-            "paymentHandledBy": "rider_driver_direct",
-            "updatedAt": FieldValue.serverTimestamp(),
-            "createdAt": FieldValue.serverTimestamp()
+            "message": message
         ]
         if let amount = cleanAmount(draft.amount) {
-            conversationPayload["offerAmount"] = amount
+            offerPayload["offerAmount"] = amount
         }
-        let conversationRef = db.collection("cashHubConversations").document(conversationId)
-        let messageRef = conversationRef.collection("messages").document()
-        var messagePayload: [String: Any] = [
-            "requestId": request.id,
-            "conversationId": conversationId,
-            "senderUid": uid,
-            "senderName": driverName,
-            "senderRole": "driver",
-            "kind": "offer",
-            "text": draft.message.trimmingCharacters(in: .whitespacesAndNewlines),
-            "availability": availability,
-            "vehicleInfo": vehicleInfo,
-            "auditVisibleToAdmin": true,
-            "createdAt": FieldValue.serverTimestamp()
-        ]
-        if let amount = conversationPayload["offerAmount"] {
-            messagePayload["offerAmount"] = amount
-        }
-        let batch = db.batch()
-        batch.setData(conversationPayload, forDocument: conversationRef, merge: true)
-        batch.setData(messagePayload, forDocument: messageRef)
-        batch.commit { [weak self] error in
-            Task { @MainActor [weak self] in
-                self?.errorMessage = error?.localizedDescription
-            }
-        }
+        Task { [weak self] in do { try await RydrBackendService.cashHubOffer(requestId:request.id,body:offerPayload) } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
         confirmationMessage = "Offer sent to \(request.riderName)."
         return true
     }
@@ -371,39 +347,8 @@ private final class DriverCashRydrHubVM: ObservableObject {
             return
         }
 
-        var payload: [String: Any] = [
-            "status": "connected",
-            "driverQueueStatus": "scheduled",
-            "connectedDriverUid": uid,
-            "connectedDriverName": displayName(driverName),
-            "acceptedByUid": uid,
-            "acceptedByName": displayName(driverName),
-            "connectedAt": FieldValue.serverTimestamp(),
-            "acceptedAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-        if let amount = cleanAmount(request.budgetRange) {
-            payload["agreedPrice"] = amount
-        }
         let authorName = displayName(driverName)
-
-        db.collection("cashRydrRequests").document(request.id).setData(payload, merge: true) { error in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if let error {
-                    self.errorMessage = error.localizedDescription
-                    return
-                }
-                self.confirmationMessage = "You are now connected with \(request.riderName)."
-                self.addConversationMessage(
-                    to: request,
-                    driverUid: uid,
-                    driverName: authorName,
-                    kind: "directMessage",
-                    text: "I connected on this Cash Hub listing. Please confirm any final pickup details before the requested time."
-                )
-            }
-        }
+        Task { [weak self] in do { try await RydrBackendService.cashHubCommand(requestId:request.id,action:"driver_connect",body:["driverName":authorName]);await MainActor.run{self?.confirmationMessage="You are now connected with \(request.riderName)."};try await RydrBackendService.cashHubMessage(conversationId:driverCashHubConversationId(requestId:request.id,driverUid:uid),text:"I connected on this Cash Hub listing. Please confirm any final pickup details before the requested time.",kind:"directMessage") } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func updateQueueStatus(_ request: DriverCashRideRequest, status: String) {
@@ -412,38 +357,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
             return
         }
 
-        var payload: [String: Any] = [
-            "driverQueueStatus": status,
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-        switch status {
-        case "confirmed":
-            payload["driverConfirmedAt"] = FieldValue.serverTimestamp()
-        case "arrived":
-            payload["driverArrivedAt"] = FieldValue.serverTimestamp()
-        case "started":
-            payload["cashRideStartedAt"] = FieldValue.serverTimestamp()
-        case "completed":
-            payload["cashCompletedAt"] = FieldValue.serverTimestamp()
-            // Rider-side history/activity filtering reads the top-level "status" field,
-            // not "driverQueueStatus" — both must flip to "completed" so the listing
-            // actually surfaces in the rider's Cash Hub history.
-            payload["status"] = "completed"
-        case "missed":
-            payload["driverMarkedMissedAt"] = FieldValue.serverTimestamp()
-        default:
-            break
-        }
-
-        db.collection("cashRydrRequests").document(request.id).setData(payload, merge: true) { error in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.errorMessage = error?.localizedDescription
-                if error == nil {
-                    self.confirmationMessage = "Listing marked \(status)."
-                }
-            }
-        }
+        Task { [weak self] in do { try await RydrBackendService.cashHubCommand(requestId:request.id,action:"driver_status",body:["status":status]);await MainActor.run{self?.confirmationMessage="Listing marked \(status)."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func releaseScheduledRide(_ request: DriverCashRideRequest, driverName: String) {
@@ -453,95 +367,21 @@ private final class DriverCashRydrHubVM: ObservableObject {
             return
         }
 
-        let isLateRelease = request.scheduledTime.timeIntervalSince(Date()) <= 3600
-        var payload: [String: Any] = [
-            "status": "open",
-            "driverQueueStatus": "released",
-            "releasedByUid": uid,
-            "releasedByName": displayName(driverName),
-            "releasedAt": FieldValue.serverTimestamp(),
-            "lateReleasePenalty": isLateRelease,
-            "connectedDriverUid": FieldValue.delete(),
-            "connectedDriverName": FieldValue.delete(),
-            "acceptedByUid": FieldValue.delete(),
-            "acceptedByName": FieldValue.delete(),
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-        if isLateRelease {
-            payload["lateReleasePenaltyReason"] = "Released within 1 hour of scheduled pickup."
-        }
-
-        let requestRef = db.collection("cashRydrRequests").document(request.id)
-        let batch = db.batch()
-        batch.setData(payload, forDocument: requestRef, merge: true)
-        if isLateRelease {
-            let markerRef = db.collection("cashHubLateReleaseMarkers").document("\(request.id)_\(uid)")
-            batch.setData([
-                "requestId": request.id,
-                "driverId": uid,
-                "driverName": displayName(driverName),
-                "riderId": request.riderUid,
-                "riderName": request.riderName,
-                "scheduledTime": Timestamp(date: request.scheduledTime),
-                "reason": "Released within 1 hour of scheduled pickup.",
-                "status": "open",
-                "createdAt": FieldValue.serverTimestamp()
-            ], forDocument: markerRef, merge: true)
-
-            let safetyReportRef = db.collection("safetyReports").document()
-            batch.setData([
-                "surface": "cashHub",
-                "reportType": "Cash Hub Late Release",
-                "cashHubRequestId": request.id,
-                "driverId": uid,
-                "driverName": displayName(driverName),
-                "riderId": request.riderUid,
-                "riderName": request.riderName,
-                "description": "Connected driver released this Cash Hub listing within 1 hour of scheduled pickup.",
-                "status": "open",
-                "createdAt": FieldValue.serverTimestamp()
-            ], forDocument: safetyReportRef)
-        }
-        batch.commit { error in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if let error {
-                    self.errorMessage = error.localizedDescription
-                    return
-                }
-
-                if isLateRelease {
-                    self.confirmationMessage = "Listing released. This release was flagged for admin review because it was within 1 hour of pickup."
-                } else {
-                    self.confirmationMessage = "Listing released back to Cash Hub."
-                }
-            }
-        }
+        let releasedByName = displayName(driverName)
+        Task { [weak self] in do { try await RydrBackendService.cashHubCommand(requestId:request.id,action:"release",body:["driverName":releasedByName]);await MainActor.run{self?.confirmationMessage="Listing released back to Cash Hub."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func reportRequest(_ request: DriverCashRideRequest) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             errorMessage = "Sign in before reporting a Cash Hub post."
             return
         }
-        db.collection("safetyReports").addDocument(data: [
+        let payload: [String: Any] = [
             "reportType": "Cash Hub post report",
-            "surface": "cashHub",
             "cashHubRequestId": request.id,
-            "driverId": uid,
-            "riderId": request.riderUid,
-            "riderName": request.riderName,
-            "description": "Driver reported a Cash Hub rider post for review.",
-            "status": "open",
-            "createdAt": FieldValue.serverTimestamp()
-        ]) { [weak self] error in
-            Task { @MainActor in
-                self?.errorMessage = error?.localizedDescription
-                if error == nil {
-                    self?.confirmationMessage = "Post reported to Rydr safety support."
-                }
-            }
-        }
+            "description": "Driver reported a Cash Hub rider post for review."
+        ]
+        Task { [weak self] in do { try await RydrBackendService.submitSafetyReport(payload);await MainActor.run{self?.confirmationMessage="Post reported to Rydr safety support."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func blockRider(_ request: DriverCashRideRequest) {
@@ -570,40 +410,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
 
     private func addConversationMessage(to request: DriverCashRideRequest, driverUid: String, driverName: String, kind: String, text: String) {
         let conversationId = driverCashHubConversationId(requestId: request.id, driverUid: driverUid)
-        let conversationRef = db.collection("cashHubConversations").document(conversationId)
-        let messageRef = conversationRef.collection("messages").document()
-        let batch = db.batch()
-        batch.setData([
-            "requestId": request.id,
-            "riderUid": request.riderUid,
-            "riderName": request.riderName,
-            "driverUid": driverUid,
-            "driverName": driverName,
-            "participants": [request.riderUid, driverUid].sorted(),
-            "status": kind == "directMessage" ? "connected" : (request.status == "open" ? "open" : "connected"),
-            "lastMessage": text,
-            "lastMessageAt": FieldValue.serverTimestamp(),
-            "cashHubOnly": true,
-            "managedByRydr": false,
-            "paymentHandledBy": "rider_driver_direct",
-            "updatedAt": FieldValue.serverTimestamp()
-        ], forDocument: conversationRef, merge: true)
-        batch.setData([
-            "requestId": request.id,
-            "conversationId": conversationId,
-            "senderUid": driverUid,
-            "senderName": driverName,
-            "senderRole": "driver",
-            "kind": kind,
-            "text": text,
-            "auditVisibleToAdmin": true,
-            "createdAt": FieldValue.serverTimestamp()
-        ], forDocument: messageRef)
-        batch.commit { error in
-            Task { @MainActor [weak self] in
-                self?.errorMessage = error?.localizedDescription
-            }
-        }
+        Task { [weak self] in do { try await RydrBackendService.cashHubMessage(conversationId:conversationId,text:text,kind:kind) } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     private func syncResponseListeners(for requests: [DriverCashRideRequest]) {
@@ -658,7 +465,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
             passengers: data["passengers"] as? Int ?? 1,
             notes: data["notes"] as? String ?? data["note"] as? String ?? "",
             budgetRange: budgetRange,
-            rideType: data["rideType"] as? String ?? "Scheduled",
+            tripFormat: data["tripFormat"] as? String ?? data["rideType"] as? String ?? "Scheduled",
             status: data["status"] as? String ?? "open",
             driverQueueStatus: data["driverQueueStatus"] as? String ?? "open",
             connectedDriverUid: data["connectedDriverUid"] as? String ?? data["acceptedByUid"] as? String,
@@ -745,6 +552,18 @@ struct DriverCashRydrHubView: View {
                 Spacer()
                 ProgressView("Loading Cash Hub...")
                 Spacer()
+            } else if vm.accessPausedForBilling {
+                VStack(spacing: 16) {
+                    Spacer()
+                    Image(systemName: "exclamationmark.lock.fill").font(.system(size: 42)).foregroundStyle(.orange)
+                    Text("CashRydr Hub access paused").font(.title3.bold())
+                    Text("Complete a standard Rydr Dispatch ride to collect the remaining monthly fee and automatically restore access. No card will be charged.")
+                        .multilineTextAlignment(.center).foregroundStyle(.secondary).padding(.horizontal, 28)
+                    Spacer()
+                }
+                .safeAreaInset(edge: .top) {
+                    DriverCashHubGrabber(onClose: { dismiss() }).padding(.horizontal, 16).padding(.top, 8)
+                }
             } else if !vm.termsAcceptanceEnabled || !vm.termsAccepted {
                 DriverCashHubTermsView(
                     isConfirmed: $acceptedTermsCheckbox,
@@ -1581,7 +1400,7 @@ private struct DriverCashRequestCard: View {
         let offerCount = responses.filter { $0.kind == "offer" }.count
         let offerText = "\(offerCount) Offer\(offerCount == 1 ? "" : "s")"
         let passengerText = "\(request.passengers) Passenger\(request.passengers == 1 ? "" : "s")"
-        return "\(offerText) -> No Luggage, \(request.rideType) -> \(passengerText)"
+        return "\(offerText) -> No Luggage, \(request.tripFormat) -> \(passengerText)"
     }
 
     private var offerButtonTitle: String {
@@ -2129,7 +1948,7 @@ private struct DriverCashRydrNavigationView: View {
                 label: isPickupStage ? "Cash pickup" : "Cash drop-off"
             )
 
-            DriverCashNavigationDetailRow(icon: "person.crop.circle.fill", title: request.riderName, subtitle: request.rideType)
+            DriverCashNavigationDetailRow(icon: "person.crop.circle.fill", title: request.riderName, subtitle: request.tripFormat)
             DriverCashNavigationDetailRow(icon: "banknote.fill", title: agreedPriceText, subtitle: "Cash Hub agreed price")
 
             if let errorMessage {
@@ -2638,8 +2457,9 @@ private struct DriverCashOfferSheet: View {
                             .textFieldStyle(.roundedBorder)
                         TextField("Availability", text: $draft.availability)
                             .textFieldStyle(.roundedBorder)
-                        TextField("Vehicle", text: $draft.vehicleInfo)
-                            .textFieldStyle(.roundedBorder)
+                        Label("Your current Driver profile vehicle will be included automatically.", systemImage: "car.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                         TextField("Message", text: $draft.message, axis: .vertical)
                             .lineLimit(3, reservesSpace: true)
                             .textFieldStyle(.roundedBorder)
@@ -2668,7 +2488,7 @@ private struct DriverCashOfferSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Send") { onSend(draft) }
-                        .disabled(draft.availability.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.vehicleInfo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(draft.availability.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }

@@ -89,20 +89,6 @@ struct RydrDriverTierPricing {
     let suggestedPerMinute: Double
     let suggestedMinimumFare: Double = 7.00
 
-    func suggestedRates(for demand: DriverDemandLevel) -> DriverRateSetting {
-        let adjustment: Double
-        switch demand {
-        case .low: adjustment = -0.10
-        case .moderate: adjustment = 0.10
-        case .high: adjustment = 0.20
-        }
-        return DriverRateSetting(
-            minimumFare: suggestedMinimumFare,
-            perMile: max(0, suggestedPerMile + adjustment),
-            perMinute: max(0, suggestedPerMinute + adjustment),
-            useSuggestedPricing: true
-        )
-    }
 }
 
 struct DriverRateSetting {

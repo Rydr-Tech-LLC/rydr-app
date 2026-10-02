@@ -37,6 +37,7 @@
 		68727367461BA89E6CDEF557 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D99FB1A4CEA99CB2FBD3FD66 /* ProfileView.swift */; };
 		68988803139FE311F018A213 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80DFFA0B31FD7C4AC0B88A0 /* AppDelegate.swift */; };
 		68B71E7A2E9A100100C0D3F1 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 68B71E792E9A100100C0D3F1 /* GoogleService-Info.plist */; };
+		8B9F00022F00000100C0DE01 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 8B9F00012F00000100C0DE01 /* PrivacyInfo.xcprivacy */; };
 		6A450C8076DC87897C6F6F00 /* HelpSupportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27D744BC0BE096DB8C00A73B /* HelpSupportView.swift */; };
 		6A9FE600DB0F709B0F10C5D0 /* TermsModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E0F1A6BDC25A2302FCD46A8 /* TermsModalView.swift */; };
 		6B7D35B5794BF6685E0224F7 /* FirestoreRideService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53FE95B67E113FB2FBC7AE64 /* FirestoreRideService.swift */; };
@@ -173,6 +174,7 @@
 		5F6BE46F6F6C5FE5CA4622A9 /* RydrRideProgressMapView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RydrRideProgressMapView.swift; sourceTree = "<group>"; };
 		61C1E1A68C2D4C2B91287131 /* RiderRidePreferences.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RiderRidePreferences.swift; sourceTree = "<group>"; };
 		68B71E792E9A100100C0D3F1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		8B9F00012F00000100C0DE01 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		69EB15B8CD81D6C4D18B4448 /* UploadBox.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = UploadBox.swift; sourceTree = "<group>"; };
 		6C2F41A7B8B64D0F8D4A6D99 /* RydrPlayground/Assets/Sounds/trip-transition-chime.mp3 */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.mp3; path = "RydrPlayground/Assets/Sounds/trip-transition-chime.mp3"; sourceTree = "<group>"; };
 		6C2F41A9B8B64D0F8D4A6D99 /* RydrPlayground/Assets/Sounds/ride-cancelled.mp3 */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = audio.mp3; path = "RydrPlayground/Assets/Sounds/ride-cancelled.mp3"; sourceTree = "<group>"; };
@@ -313,6 +315,7 @@
 				E568C2DF59088F0C336CD06C /* Assets.xcassets */,
 				68B71E792E9A100100C0D3F1 /* GoogleService-Info.plist */,
 				4434A644C09A9A53FE0A8D7E /* Info.plist */,
+				8B9F00012F00000100C0DE01 /* PrivacyInfo.xcprivacy */,
 				FDACAA1662B485F084C0140B /* RydrPlayground.entitlements */,
 			);
 			path = RydrPlayground;
@@ -645,6 +648,7 @@
 				62A9F73246DA56F16620ADF3 /* Assets.xcassets in Resources */,
 				666BC62A2B155A9F28FCB284 /* AnimatedLogo.mp4 in Resources */,
 				68B71E7A2E9A100100C0D3F1 /* GoogleService-Info.plist in Resources */,
+				8B9F00022F00000100C0DE01 /* PrivacyInfo.xcprivacy in Resources */,
 				6C2F41A8B8B64D0F8D4A6D99 /* RydrPlayground/Assets/Sounds/trip-transition-chime.mp3 in Resources */,
 				6C2F41AAB8B64D0F8D4A6D99 /* RydrPlayground/Assets/Sounds/ride-cancelled.mp3 in Resources */,
 			);
@@ -934,7 +938,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = RydrPlayground/RydrPlayground.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 9;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = DTD5H7A5FS;
 				ENABLE_PREVIEWS = YES;
@@ -984,7 +988,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = RydrPlayground/RydrPlayground.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 9;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = DTD5H7A5FS;
 				ENABLE_PREVIEWS = YES;

@@ -665,10 +665,9 @@ struct DriverLoginView: View {
     /// Self-heals accounts created before the driverPhoneIndex pointer existed, so future
     /// phone-based lookups for this driver don't need to fall back to a blocked query.
     private func backfillPhoneIndexIfNeeded(phone: String, uid: String) {
-        let index = Firestore.firestore().collection("driverPhoneIndex").document(phone)
-        index.getDocument { snapshot, _ in
-            guard snapshot?.exists != true else { return }
-            index.setData(["uid": uid, "createdAt": FieldValue.serverTimestamp()])
+        Task {
+            do { try await RydrBackendService.syncAccountIdentity() }
+            catch { print("⚠️ backend identity sync failed: \(error.localizedDescription)") }
         }
     }
 

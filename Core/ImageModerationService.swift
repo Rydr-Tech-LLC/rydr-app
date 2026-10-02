@@ -3,15 +3,13 @@
 //  RydrPlayground
 //
 //  Uploads a rider-chosen image to a pending Storage path, asks the
-//  rydr-backend /moderation/check-image route to run it through Google
-//  Cloud Vision SafeSearch, then either promotes it to a permanent path
-//  (approved) or deletes it (rejected / needs review).
+//  rydr-backend finalization route to run Google Cloud Vision SafeSearch.
+//  The backend then promotes approved bytes and owns the profile URL write.
 //
 
 import Foundation
 import UIKit
 import FirebaseAuth
-import FirebaseFirestore
 import FirebaseStorage
 
 enum ImageModerationVerdict: String {
@@ -74,11 +72,12 @@ enum ImageModerationError: LocalizedError {
     }
 }
 
-/// Decoded response from POST /moderation/check-image
+/// Decoded response from POST /moderation/profile-photo/finalize
 private struct ModerationCheckResponse: Decodable {
     let ok: Bool
     let verdict: String
     let flagged: [FlaggedCategory]?
+    let photoURL: String?
 
     struct FlaggedCategory: Decodable {
         let category: String
@@ -102,7 +101,7 @@ final class ImageModerationService {
     }
 
     /// Uploads `image` as the rider's profile photo, moderates it, and on
-    /// approval writes the final download URL to `riders/{uid}.photoURL`.
+    /// approval lets the backend write the final URL to `riders/{uid}.photoURL`.
     /// Returns the approved download URL.
     func submitProfilePhoto(_ image: UIImage) async throws -> URL {
         guard let user = Auth.auth().currentUser else {
@@ -130,16 +129,15 @@ final class ImageModerationService {
 
             switch ImageModerationVerdict(rawValue: verdictResult.verdict) {
             case .approved:
-                let finalURL = try await promoteToProfilePhoto(jpegData: jpegData, uid: uid)
-                try? await pendingRef.delete()
+                guard let value = verdictResult.photoURL, let finalURL = URL(string: value) else {
+                    throw ImageModerationError.invalidServerResponse(status: 200, body: nil)
+                }
                 return finalURL
 
             case .rejected:
-                try? await pendingRef.delete()
                 throw ImageModerationError.rejected(reason: verdictResult.flagged?.first?.category)
 
             case .needsReview, .none:
-                try? await pendingRef.delete()
                 throw ImageModerationError.needsReview
             }
         } catch let error as ImageModerationError {
@@ -154,7 +152,7 @@ final class ImageModerationService {
 
     private func checkImage(storagePath: String) async throws -> ModerationCheckResponse {
         let backendBase = try resolvedBackendBase()
-        var request = URLRequest(url: backendBase.appendingPathComponent("moderation/check-image"))
+        var request = URLRequest(url: backendBase.appendingPathComponent("moderation/profile-photo/finalize"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["storagePath": storagePath])
@@ -183,27 +181,6 @@ final class ImageModerationService {
         }
 
         return try JSONDecoder().decode(ModerationCheckResponse.self, from: data)
-    }
-
-    // MARK: - Finalizing an approved photo
-
-    private func promoteToProfilePhoto(jpegData: Data, uid: String) async throws -> URL {
-        let finalRef = Storage.storage().reference(withPath: "profilePhotos/\(uid).jpg")
-        let metadata = StorageMetadata()
-        metadata.contentType = "image/jpeg"
-
-        do {
-            _ = try await finalRef.putDataAsync(jpegData, metadata: metadata)
-            let url = try await finalRef.downloadURL()
-
-            try await Firestore.firestore()
-                .collection("riders").document(uid)
-                .setData(["photoURL": url.absoluteString], merge: true)
-
-            return url
-        } catch {
-            throw ImageModerationError.uploadFailed(error)
-        }
     }
 
     // MARK: - Helpers

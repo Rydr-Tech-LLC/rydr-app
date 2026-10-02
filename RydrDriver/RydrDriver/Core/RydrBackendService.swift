@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseAuth
+import FirebaseAppCheck
 
 enum RydrBackendService {
     private static let baseURLString = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String
@@ -21,10 +22,26 @@ enum RydrBackendService {
     }
 
     static func requestAccountDeletion(_ requestBody: AccountDeletionRequest) async throws {
-        guard let request = try await makeAuthenticatedRequest(path: "/driver/account-deletion-requests", method: "POST", body: requestBody) else {
+        guard let request = try await makeAuthenticatedRequest(path: "/account/deletion-requests", method: "POST", body: requestBody) else {
             throw URLError(.badURL)
         }
-        _ = try await URLSession.shared.data(for: request)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Account deletion request failed."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+
+    static func syncAccountIdentity() async throws {
+        let body = AccountIdentityRequest(role: "driver")
+        guard let request = try await makeAuthenticatedRequest(path: "/account/identity/sync", method: "POST", body: body) else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Account identity could not be synchronized."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
     }
 
     static func transitionRide(rideId: String, action: String, reason: String? = nil, queued: Bool = false) async throws -> RideTransitionResponse {
@@ -64,6 +81,131 @@ enum RydrBackendService {
         return try JSONDecoder().decode(DriverPresenceResponse.self, from: data)
     }
 
+    static func fetchDriverDemand(_ body: DriverDemandRequest) async throws -> DriverDemandResponse {
+        guard let request = try await makeAuthenticatedRequest(path: "/driver/demand", method: "POST", body: body) else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Backend demand lookup failed."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        return try JSONDecoder().decode(DriverDemandResponse.self, from: data)
+    }
+
+    static func recordRideTelemetry(rideId: String, body: RideTelemetryRequest) async throws {
+        guard let request = try await makeAuthenticatedRequest(path: "/rides/\(rideId)/telemetry", method: "POST", body: body) else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Trip telemetry was not accepted."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+
+    static func submitRideRating(rideId: String, body: RideRatingRequest) async throws {
+        guard let request = try await makeAuthenticatedRequest(path: "/rides/\(rideId)/rating", method: "POST", body: body) else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Rating could not be saved."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+
+    static func promoteNextQueuedRide() async throws -> QueuePromotionResponse {
+        let body = QueuePromotionRequest(requestId: UUID().uuidString)
+        guard let request = try await makeAuthenticatedRequest(path: "/driver/queue/promote-next", method: "POST", body: body) else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Queued ride could not be promoted."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        return try JSONDecoder().decode(QueuePromotionResponse.self, from: data)
+    }
+
+    static func recordBackgroundCheck(_ body: BackgroundCheckRequest, action: String) async throws {
+        guard let request = try await makeAuthenticatedRequest(path: "/driver/background-check/\(action)", method: "POST", body: body) else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Background-check status could not be saved."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+
+    static func updateRateCard(_ body: RateCardRequest) async throws {
+        guard let request = try await makeAuthenticatedRequest(path: "/driver/rate-card", method: "PUT", body: body) else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Rate card could not be saved."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+
+    static func cashHubCommand(requestId: String, action: String, body: [String: Any] = [:]) async throws {
+        var payload = body; payload["action"] = action; payload["idempotencyKey"] = UUID().uuidString
+        try await sendAuthenticatedJSON(path: "/cash-hub/requests/\(requestId)/command", body: payload)
+    }
+
+    static func acceptCashHubTerms() async throws {
+        try await sendAuthenticatedJSON(path: "/cash-hub/access/accept", body: ["role": "driver"])
+    }
+
+    static func optOutOfCashHub() async throws {
+        try await sendAuthenticatedJSON(path: "/cash-hub/access/opt-out", body: ["role": "driver"])
+    }
+
+    static func cashHubOffer(requestId: String, body: [String: Any]) async throws {
+        var payload = body; payload["idempotencyKey"] = UUID().uuidString
+        try await sendAuthenticatedJSON(path: "/cash-hub/requests/\(requestId)/offers", body: payload)
+    }
+
+    static func cashHubMessage(conversationId: String, text: String, kind: String) async throws {
+        try await sendAuthenticatedJSON(path: "/cash-hub/conversations/\(conversationId)/messages", body: ["message": text, "kind": kind, "idempotencyKey": UUID().uuidString])
+    }
+
+    static func submitSafetyReport(_ body: [String: Any]) async throws { try await sendAuthenticatedJSON(path: "/safety/reports", body: body) }
+    static func submitSafetyAppeal(_ body: [String: Any]) async throws { try await sendAuthenticatedJSON(path: "/safety/appeals", body: body) }
+
+    static func fetchDriverEarningsSummary() async throws -> EarningsSummaryResponse {
+        guard let baseURLString,let base=URL(string:baseURLString),let url=URL(string:"/driver/earnings-summary",relativeTo:base),let user=Auth.auth().currentUser else{throw URLError(.userAuthenticationRequired)}
+        var request=URLRequest(url:url);request.httpMethod="GET";request.setValue("Bearer \(try await user.getIDToken())",forHTTPHeaderField:"Authorization")
+        let(data,response)=try await URLSession.shared.data(for:request);guard let http=response as? HTTPURLResponse,(200..<300).contains(http.statusCode) else{throw URLError(.badServerResponse)}
+        return try JSONDecoder().decode(EarningsSummaryResponse.self,from:data)
+    }
+
+    private static func sendAuthenticatedJSON(path: String, body: [String: Any]) async throws {
+        guard let baseURLString, let baseURL = URL(string: baseURLString), let url = URL(string: path, relativeTo: baseURL), let user = Auth.auth().currentUser else { throw URLError(.userAuthenticationRequired) }
+        var request = URLRequest(url: url); request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
+        request.setValue(try await appCheckToken(), forHTTPHeaderField: "X-Firebase-AppCheck")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data,response)=try await URLSession.shared.data(for: request)
+        guard let http=response as? HTTPURLResponse,(200..<300).contains(http.statusCode) else {
+            let message=(try? JSONDecoder().decode(BackendError.self,from:data).error) ?? "Backend request failed."
+            throw NSError(domain:"RydrBackendService",code:(response as? HTTPURLResponse)?.statusCode ?? -1,userInfo:[NSLocalizedDescriptionKey:message])
+        }
+    }
+
+    private static func appCheckToken() async throws -> String {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            AppCheck.appCheck().token(forcingRefresh: false) { token, error in
+                if let error { continuation.resume(throwing: error) }
+                else if let token { continuation.resume(returning: token.token) }
+                else { continuation.resume(throwing: URLError(.userAuthenticationRequired)) }
+            }
+        }
+    }
+
     /// Every rydr-backend `/driver/*` route now requires a verified Firebase
     /// ID token (see rydr-backend/src/middleware/firebaseAuth.js) and checks
     /// that the body's uid/driverId matches the token — so every call from
@@ -99,12 +241,10 @@ enum RydrBackendService {
     }
 
     struct AccountDeletionRequest: Encodable {
-        let uid: String
-        let role: String
-        let email: String?
         let reason: String?
-        let requestedAt: String
     }
+
+    private struct AccountIdentityRequest: Encodable { let role: String }
 
     private struct RideTransitionRequest: Encodable {
         let action: String
@@ -136,6 +276,82 @@ enum RydrBackendService {
         let availabilityStatus: String
         let hasActiveRide: Bool
         let selectedRideTypes: [String]
+    }
+
+    struct DriverDemandRequest: Encodable {
+        let rideTypes: [String]
+    }
+
+    struct DriverDemandResponse: Decodable {
+        struct TierDemand: Decodable {
+            struct SuggestedRates: Decodable {
+                let minimumFareCents: Int
+                let perMileCents: Int
+                let perMinuteCents: Int
+            }
+
+            let level: String
+            let paceText: String
+            let nearbyRequestCount: Int
+            let radiusMiles: Double
+            let suggestedRates: SuggestedRates
+        }
+
+        let ok: Bool
+        let level: String
+        let paceText: String
+        let nearbyRequestCount: Int
+        let radiusMiles: Double
+        let byRideType: [String: TierDemand]
+    }
+
+    struct RideTelemetryRequest: Encodable {
+        let eventId: String
+        let lat: Double
+        let lng: Double
+        let speed: Double
+        let course: Double
+        let horizontalAccuracy: Double
+    }
+
+    struct RideRatingRequest: Encodable {
+        let rating: Int?
+        let feedback: String
+        let compliments: [String]
+        let favoriteDriver: Bool
+    }
+
+    private struct QueuePromotionRequest: Encodable { let requestId: String }
+
+    struct BackgroundCheckRequest: Encodable {
+        let firstName: String
+        let lastName: String
+        let email: String
+        let phone: String
+        let dob: String
+        let licenseLast4: String
+        let licenseState: String
+        let acknowledged: Bool
+    }
+
+    struct RateCardRequest: Encodable {
+        let rideType: String
+        let minimumFare: Double
+        let perMile: Double
+        let perMinute: Double
+        let useSuggestedPricing: Bool
+    }
+
+    struct EarningsSummaryResponse: Decodable {
+        struct Trip: Decodable { let id:String;let pickup:String;let dropoff:String;let fareCents:Int;let completedAt:String? }
+        let todayCents:Int;let weekCents:Int;let monthCents:Int;let acceptanceRate:Double?;let completionRate:Double?;let recentTrips:[Trip]
+    }
+
+    struct QueuePromotionResponse: Decodable {
+        let ok: Bool
+        let promoted: Bool
+        let rideId: String?
+        let status: String?
     }
 
     struct RideTransitionResponse: Decodable {

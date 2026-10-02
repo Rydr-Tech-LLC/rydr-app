@@ -57,17 +57,9 @@ final class RideChatService {
 
     func createOrInitializeChat(rideId: String, riderId: String, driverId: String) async throws {
         try requireParticipant(riderId: riderId, driverId: driverId)
-
-        let chatRef = db.collection("rideChats").document(rideId)
-        let data: [String: Any] = [
-            "rideId": rideId,
-            "riderId": riderId,
-            "driverId": driverId,
-            "participants": [riderId, driverId].sorted(),
-            "status": "active",
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-        try await setData(data, document: chatRef, merge: true)
+        let snapshot = try await getDocument(db.collection("rideChats").document(rideId))
+        guard snapshot.exists else { throw RideChatServiceError.missingChat }
+        _ = try validateChat(snapshot: snapshot, riderId: riderId, driverId: driverId)
     }
 
     func listenToMessages(
@@ -125,9 +117,6 @@ final class RideChatService {
             "isRead": false
         ], collection: chatRef.collection("messages"))
 
-        try await setData([
-            "updatedAt": FieldValue.serverTimestamp()
-        ], document: chatRef, merge: true)
     }
 
     func closeChat(rideId: String, riderId: String, driverId: String) async throws {
@@ -138,10 +127,7 @@ final class RideChatService {
         guard snapshot.exists else { return }
         _ = try validateChat(snapshot: snapshot, riderId: riderId, driverId: driverId)
 
-        try await setData([
-            "status": "closed",
-            "updatedAt": FieldValue.serverTimestamp()
-        ], document: chatRef, merge: true)
+        // The ride lifecycle backend closes the channel atomically with the ride.
     }
 
     @discardableResult

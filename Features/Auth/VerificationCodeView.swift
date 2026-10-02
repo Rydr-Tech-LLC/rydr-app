@@ -265,7 +265,9 @@ struct VerificationCodeView: View {
             .frame(height: 64)
             .padding(.horizontal, 24)
         }
-        .background(Styles.rydrGradient.opacity(verificationCode.count == 6 ? 1 : 0.45))
+        .background {
+            Styles.rydrGradient.opacity(verificationCode.count == 6 ? 1 : 0.45)
+        }
         .foregroundColor(.white)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: Color.red.opacity(verificationCode.count == 6 ? 0.22 : 0.04), radius: 18, x: 0, y: 12)

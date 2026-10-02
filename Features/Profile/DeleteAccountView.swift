@@ -5,16 +5,13 @@
 //  Rider-side entry point into the production account-deletion workflow
 //  (Part 12 of the beta hardening sprint):
 //
-//    Rider -> Deletion Request -> Firestore queue (`accountDeletionRequests`)
+//    Rider -> authenticated backend -> Firestore queue (`accountDeletionRequests`)
 //    -> Mission Control review -> backend deletion -> Stripe cleanup
 //    -> Firebase cleanup -> GDPR-safe anonymization
 //
-//  This screen only performs the first step: it writes a signed,
-//  self-attested request into the queue. Firestore rules
-//  (`accountDeletionRequests/{requestId}`) only allow a rider to create a
-//  request keyed by their own uid and only an admin (Mission Control, via
-//  the Admin SDK) to update/delete it — so the actual account/Stripe/Auth
-//  deletion can only ever happen server-side, never directly from the app.
+//  This screen only performs the first step: it asks the backend to create
+//  the request. The backend derives identity and account roles from the
+//  verified Firebase token; mobile clients cannot write this queue directly.
 //  This is intentional: it gives support a chance to catch fraud disputes,
 //  in-progress rides, or pending payouts before data is destroyed.
 //
@@ -24,7 +21,6 @@ import FirebaseAuth
 import FirebaseFirestore
 
 struct DeleteAccountView: View {
-    @EnvironmentObject var session: UserSessionManager
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
 
@@ -188,24 +184,30 @@ struct DeleteAccountView: View {
         isSubmitting = true
         submissionError = nil
 
-        let payload: [String: Any] = [
-            "uid": user.uid,
-            "userId": user.uid,
-            "role": "rider",
-            "email": user.email ?? session.userEmail,
-            "reason": reason.trimmingCharacters(in: .whitespacesAndNewlines),
-            "status": "requested",
-            "source": "ios_rider_app",
-            "clientRequestedAt": FieldValue.serverTimestamp(),
-            "createdAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
-        ]
-
         do {
-            try await Firestore.firestore()
-                .collection("accountDeletionRequests")
-                .document(user.uid)
-                .setData(payload, merge: true)
+            guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
+                  let base = URL(string: rawBase),
+                  let url = URL(string: "/account/deletion-requests", relativeTo: base) else {
+                throw URLError(.badURL)
+            }
+            let token = try await user.getIDToken()
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "reason": reason.trimmingCharacters(in: .whitespacesAndNewlines)
+            ])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                let message = payload?["error"] as? String ?? "Account deletion request failed."
+                throw NSError(
+                    domain: "RydrAccountDeletion",
+                    code: (response as? HTTPURLResponse)?.statusCode ?? -1,
+                    userInfo: [NSLocalizedDescriptionKey: message]
+                )
+            }
             existingRequestStatus = "requested"
         } catch {
             submissionError = "We couldn't submit your request: \(error.localizedDescription). Please try again or contact support."

@@ -494,45 +494,19 @@ struct DriverSignupCoordinator: View {
         registration: DriverDocumentUploadResult,
         insurance: DriverDocumentUploadResult
     ) {
-        let eligibility = DriverVehicleEligibility.evaluate(
-            make: decodedVehicle.make,
-            model: decodedVehicle.model,
-            year: decodedVehicle.year,
-            fuelType: decodedVehicle.fuelType.rawValue
-        )
-        let libraryRideTypes = RydrRideTierCatalog.normalizedRideTypes(vehicleImageInfo?.eligibleRideTypes ?? [])
-        let eligibleRideTypes = libraryRideTypes.isEmpty ? eligibility.eligibleRideTypes : libraryRideTypes
-        let vehicleClass = libraryRideTypes.isEmpty ? eligibility.vehicleClass : DriverVehicleEligibility.vehicleClass(for: eligibleRideTypes)
-        let requiresManualReview = libraryRideTypes.isEmpty ? eligibility.requiresManualReview : false
-        var tierRates: [String: Any] = [:]
-        for rideType in eligibleRideTypes {
-            let key = RydrRideTierCatalog.canonicalRideType(rideType)
-            tierRates[key] = DriverRateSetting.defaultValue(for: rideType).dictionary(for: rideType)
-        }
-
+        // Vehicle eligibility and default tier rates were resolved by the
+        // submitVehicleVin/submitVehicleManual Cloud Function. The app only
+        // attaches the uploaded documents and plate to that server record.
         upsertDriver([
             "vehicle": [
-                "class": vehicleClass,
                 "plate": plateNumber,
                 "registrationImageUrl": registration.downloadURL.absoluteString,
                 "insuranceImageUrl": insurance.downloadURL.absoluteString
-            ],
-            "vehicleEligibility": [
-                "rideTypes": eligibleRideTypes,
-                "requiresManualReview": requiresManualReview,
-                "vehicleClass": vehicleClass,
-                "source": libraryRideTypes.isEmpty ? "appRules" : "vehicleLibrary",
-                "evaluatedAt": FieldValue.serverTimestamp()
             ],
             "documents": [
                 "registration": pendingSingleDocumentPayload(registration),
                 "insurance": pendingSingleDocumentPayload(insurance)
             ],
-            "qualifiedRideTypes": eligibleRideTypes,
-            "supportedRideTypes": eligibleRideTypes,
-            "selectedRideTypes": eligibleRideTypes,
-            "rideTypes": eligibleRideTypes,
-            "tierRates": tierRates,
             "vehicleStepCompleted": true,
             "registrationDocumentSelected": true,
             "insuranceDocumentSelected": true
@@ -786,13 +760,13 @@ struct DriverSignupCoordinator: View {
     }
 
     private func driverExists(phoneE164: String, completion: @escaping (Bool) -> Void) {
-        // Pre-auth (no Firebase Auth user exists yet at this step), so we can't run any
-        // query against /drivers — that collection disallows `list` entirely to prevent
-        // phone-number enumeration. Instead check the dedicated phone->uid pointer doc,
-        // which is readable by anyone via `get` (it exposes nothing but a uid).
+        guard let uid = Auth.auth().currentUser?.uid else {
+            completion(false)
+            return
+        }
         Firestore.firestore()
-            .collection("driverPhoneIndex")
-            .document(phoneE164)
+            .collection("drivers")
+            .document(uid)
             .getDocument { snapshot, _ in
                 completion(snapshot?.exists == true)
             }
@@ -810,17 +784,10 @@ struct DriverSignupCoordinator: View {
     }
 
     private func writePhoneIndex(phoneE164: String, uid: String) {
-        Firestore.firestore()
-            .collection("driverPhoneIndex")
-            .document(phoneE164)
-            .setData([
-                "uid": uid,
-                "createdAt": FieldValue.serverTimestamp()
-            ]) { err in
-                if let err = err {
-                    print("⚠️ writePhoneIndex failed: \(err.localizedDescription)")
-                }
-            }
+        Task {
+            do { try await RydrBackendService.syncAccountIdentity() }
+            catch { print("⚠️ backend identity sync failed: \(error.localizedDescription)") }
+        }
     }
 
     private func recordDriverApprovalRequest(type: String) {

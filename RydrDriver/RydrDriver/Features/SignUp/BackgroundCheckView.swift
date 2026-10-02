@@ -191,25 +191,23 @@ struct BackgroundCheckView: View {
     }
 
     private func openCheckr() {
-        recordCheckrRedirect()
+        Task { try? await RydrBackendService.recordBackgroundCheck(backgroundCheckRequest, action: "redirect") }
         openURL(checkrURL)
     }
 
-    private func recordCheckrRedirect() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
-        Firestore.firestore().collection("drivers").document(uid).setData([
-            "backgroundCheckProvider": "checkr",
-            "backgroundCheckFlow": "external_redirect",
-            "backgroundCheckStatus": "manual_pending",
-            "backgroundCheckRedirectURL": checkrURL.absoluteString,
-            "backgroundCheckRedirectedAt": FieldValue.serverTimestamp(),
-            "backgroundCheckLegalFirstName": firstName,
-            "backgroundCheckLegalLastName": lastName,
-            "backgroundCheckEmail": email,
-            "backgroundCheckPhone": phone,
-            "backgroundCheckLicenseState": licenseState,
-            "backgroundCheckSource": "driver-ios-signup"
-        ], merge: true)
+    private var backgroundCheckRequest: RydrBackendService.BackgroundCheckRequest {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        return .init(
+            firstName: firstName,
+            lastName: lastName,
+            email: email,
+            phone: phone,
+            dob: formatter.string(from: dob),
+            licenseLast4: String(licenseNumber.suffix(4)),
+            licenseState: licenseState,
+            acknowledged: acknowledged
+        )
     }
 
     private func bullet(_ text: String) -> some View {
@@ -240,7 +238,7 @@ struct BackgroundCheckView: View {
 
     private func saveAcknowledgement() {
         guard acknowledged else { return }
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             message = "Your session expired. Please sign in again."
             messageIsError = true
             return
@@ -250,33 +248,17 @@ struct BackgroundCheckView: View {
         message = nil
         messageIsError = false
 
-        Firestore.firestore().collection("drivers").document(uid).setData([
-            "backgroundCheckAcknowledged": true,
-            "backgroundCheckAcknowledgedAt": FieldValue.serverTimestamp(),
-            "backgroundAcknowledgementVersion": 1,
-            "backgroundCheckProvider": "checkr",
-            "backgroundCheckFlow": "external_redirect",
-            "backgroundCheckStatus": "manual_pending",
-            "backgroundCheckManualReviewRequired": true,
-            "backgroundCheckLegalFirstName": firstName,
-            "backgroundCheckLegalLastName": lastName,
-            "backgroundCheckEmail": email,
-            "backgroundCheckPhone": phone,
-            "backgroundCheckDob": Timestamp(date: dob),
-            "backgroundCheckLicenseNumberLast4": String(licenseNumber.suffix(4)),
-            "backgroundCheckLicenseState": licenseState,
-            "backgroundCheckSource": "driver-ios-signup",
-            "backgroundCheckStepCompleted": true,
-            "betaAgreementAccepted": true,
-            "betaAgreementAcceptedAt": FieldValue.serverTimestamp()
-        ], merge: true) { error in
-            isSaving = false
-            if let error {
-                message = "We couldn't save your acknowledgement: \(error.localizedDescription)"
-                messageIsError = true
-                return
+        Task {
+            do {
+                try await RydrBackendService.recordBackgroundCheck(backgroundCheckRequest, action: "acknowledge")
+                await MainActor.run { isSaving = false; onNext() }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    message = "We couldn't save your acknowledgement: \(error.localizedDescription)"
+                    messageIsError = true
+                }
             }
-            onNext()
         }
     }
 }

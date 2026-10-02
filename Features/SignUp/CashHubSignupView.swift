@@ -26,6 +26,7 @@ struct CashHubSignupView: View {
     @State private var isPasswordConfirmationVisible = false
     @State private var acceptedTerms = false
     @State private var termsAcceptanceEnabled = false
+    @State private var cashHubTermsVersion = "legacy"
     @State private var isCheckingTermsGate = true
     @State private var isSaving = false
     @State private var errorMessage = ""
@@ -640,44 +641,20 @@ struct CashHubSignupView: View {
         errorMessage = ""
         isSaving = true
 
-        checkContactAvailability { errorMessage in
-            if let errorMessage {
-                Task { @MainActor in
-                    isSaving = false
-                    self.errorMessage = errorMessage
-                }
-                return
-            }
-            createFirebaseAccount()
-        }
+        createFirebaseAccount()
     }
 
     private func loadCashHubTermsGate() {
         Firestore.firestore().collection("platformConfig").document("cashRydrHub").getDocument { snapshot, _ in
             Task { @MainActor in
-                termsAcceptanceEnabled = snapshot?.data()?["termsAcceptanceEnabled"] as? Bool ?? false
+                let config = snapshot?.data() ?? [:]
+                termsAcceptanceEnabled = config["termsAcceptanceEnabled"] as? Bool ?? false
+                cashHubTermsVersion = config["cashHubTermsVersion"] as? String ?? "legacy"
                 isCheckingTermsGate = false
                 if !termsAcceptanceEnabled {
                     acceptedTerms = false
                 }
             }
-        }
-    }
-
-    private func checkContactAvailability(completion: @escaping (String?) -> Void) {
-        Firestore.firestore()
-            .collection("riderPhoneIndex")
-            .document(normalizedPhone)
-            .getDocument { snapshot, error in
-                if let error {
-                    completion("Unable to verify phone number availability: \(error.localizedDescription)")
-                    return
-                }
-                if snapshot?.exists == true {
-                    completion("That phone number is already in use.")
-                    return
-                }
-                completion(nil)
         }
     }
 
@@ -744,8 +721,6 @@ struct CashHubSignupView: View {
             "email": normalizedEmail,
             "phoneNumber": normalizedPhone,
             "phoneE164": normalizedPhone,
-            "cashHubTermsAccepted": true,
-            "cashHubTermsAcceptedAt": FieldValue.serverTimestamp(),
             "cashHubRole": CashHubRole.rider.rawValue,
             "hasRydrRiderAccess": false,
             "createdAt": FieldValue.serverTimestamp()
@@ -754,18 +729,25 @@ struct CashHubSignupView: View {
         func writeProfile() {
             Firestore.firestore().collection("riders").document(uid).setData(fields, merge: true) { error in
                 Task { @MainActor in
-                    isSaving = false
                     if let error {
+                        isSaving = false
                         errorMessage = error.localizedDescription
                         return
                     }
-                    writePhoneIndex(phoneE164: normalizedPhone, uid: uid)
-                    session.login(
-                        name: displayName,
-                        email: normalizedEmail,
-                        startingTab: .cashHub,
-                        access: .cashHubOnly
-                    )
+                    do {
+                        try await RiderCashHubBackend.acceptTerms()
+                        writePhoneIndex(phoneE164: normalizedPhone, uid: uid)
+                        isSaving = false
+                        session.login(
+                            name: displayName,
+                            email: normalizedEmail,
+                            startingTab: .cashHub,
+                            access: .cashHubOnly
+                        )
+                    } catch {
+                        isSaving = false
+                        errorMessage = error.localizedDescription
+                    }
                 }
             }
         }
@@ -807,17 +789,10 @@ struct CashHubSignupView: View {
     }
 
     private func writePhoneIndex(phoneE164: String, uid: String) {
-        Firestore.firestore()
-            .collection("riderPhoneIndex")
-            .document(phoneE164)
-            .setData([
-                "uid": uid,
-                "createdAt": FieldValue.serverTimestamp()
-            ]) { err in
-                if let err {
-                    print("⚠️ writePhoneIndex failed: \(err.localizedDescription)")
-                }
-            }
+        Task {
+            do { try await RiderBackendIdentityService.sync() }
+            catch { print("⚠️ backend identity sync failed: \(error.localizedDescription)") }
+        }
     }
 }
 

@@ -268,7 +268,7 @@ final class DriverSafetyCenterModel: ObservableObject {
         }
 
         do {
-            _ = try await db.collection("safetyReports").addDocument(data: payload)
+            try await RydrBackendService.submitSafetyReport(payload)
             message = "Incident report submitted."
         } catch {
             RydrCrashReporter.record(error, context: "driver_submit_safety_report")
@@ -300,7 +300,7 @@ final class DriverSafetyCenterModel: ObservableObject {
         if let riderReportId = penalty.riderReportId { payload["riderReportId"] = riderReportId }
 
         do {
-            _ = try await db.collection("driverSafetyPenaltyAppeals").addDocument(data: payload)
+            try await RydrBackendService.submitSafetyAppeal(payload)
             message = "Appeal submitted for Mission Control review."
         } catch {
             RydrCrashReporter.record(error, context: "driver_submit_safety_penalty_appeal")

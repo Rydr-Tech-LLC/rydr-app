@@ -41,6 +41,8 @@ struct DriverRideRequest: Identifiable, Equatable {
     let stopCoordinate: CLLocationCoordinate2D?
     let dropoffCoordinate: CLLocationCoordinate2D?
     let createdAt: Date?
+    let dispatchStatus: String?
+    let offerExpiresAt: Date?
     let ridePreferences: DriverVisibleRidePreferences?
 
     init(
@@ -62,6 +64,8 @@ struct DriverRideRequest: Identifiable, Equatable {
         stopCoordinate: CLLocationCoordinate2D? = nil,
         dropoffCoordinate: CLLocationCoordinate2D? = nil,
         createdAt: Date? = nil,
+        dispatchStatus: String? = nil,
+        offerExpiresAt: Date? = nil,
         ridePreferences: DriverVisibleRidePreferences? = nil
     ) {
         self.id = id
@@ -82,6 +86,8 @@ struct DriverRideRequest: Identifiable, Equatable {
         self.stopCoordinate = stopCoordinate
         self.dropoffCoordinate = dropoffCoordinate
         self.createdAt = createdAt
+        self.dispatchStatus = dispatchStatus
+        self.offerExpiresAt = offerExpiresAt
         self.ridePreferences = ridePreferences
     }
 
@@ -106,7 +112,10 @@ struct DriverRideRequest: Identifiable, Equatable {
         stop = data["stop"] as? String ?? data["addedStop"] as? String ?? data["stopAddress"] as? String
         stopCoordinate = Self.coordinate(from: data["stopCoordinate"] ?? data["addedStopCoordinate"] ?? data["stopLocation"] ?? data["stopGeoPoint"])
         dropoffCoordinate = Self.coordinate(from: data["dropoffCoordinate"] ?? data["dropoffLocation"] ?? data["dropoffGeoPoint"])
-        createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
+        createdAt = (data["offerCreatedAt"] as? Timestamp)?.dateValue()
+            ?? (data["createdAt"] as? Timestamp)?.dateValue()
+        dispatchStatus = data["dispatchStatus"] as? String
+        offerExpiresAt = (data["offerExpiresAt"] as? Timestamp)?.dateValue()
         ridePreferences = DriverVisibleRidePreferences(data: data["ridePreferences"])
     }
 
@@ -152,7 +161,7 @@ struct DriverRideRadarBlip: Identifiable, Equatable {
     }
 }
 
-enum DriverDemandLevel {
+enum DriverDemandLevel: String, Codable {
     case low
     case moderate
     case high

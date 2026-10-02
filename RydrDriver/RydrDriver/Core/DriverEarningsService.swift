@@ -43,87 +43,17 @@ final class DriverEarningsService {
     /// most recent ride requests, and derives every Fare Insights metric from
     /// that real data — no placeholder numbers.
     func fetchSummary(uid: String) async throws -> DriverEarningsSummary {
-        let db = Firestore.firestore()
-
-        async let ridesQuery = db.collection("rides")
-            .whereField("driverId", isEqualTo: uid)
-            .whereField("status", isEqualTo: "completed")
-            .order(by: "updatedAt", descending: true)
-            .limit(to: 200)
-            .getDocuments()
-
-        async let requestsQuery = db.collection("rideRequests")
-            .whereField("driverId", isEqualTo: uid)
-            .limit(to: 200)
-            .getDocuments()
-
-        let (ridesSnapshot, requestsSnapshot) = try await (ridesQuery, requestsQuery)
-
-        let calendar = Calendar.current
-        let now = Date()
-        let startOfToday = calendar.startOfDay(for: now)
-        let startOfWeek = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)) ?? startOfToday
-        let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: now)) ?? startOfToday
-
-        var summary = DriverEarningsSummary()
-        var trips: [DriverRecentTrip] = []
-
-        for document in ridesSnapshot.documents {
-            let data = document.data()
-            let fare: Decimal
-            if data["financialOutcomeStatus"] as? String == "finalized" {
-                // New rides use only the backend's authoritative payout.
-                fare = Self.dollarsFromCents(data["driverPayoutCents"]) ?? 0
-            } else {
-                // Read-only compatibility for rides created before backend
-                // financial outcomes existed.
-                fare = Self.decimal(data["fare"] ?? data["finalFare"] ?? data["estimatedFare"]) ?? 0
-            }
-            let completedAt = Self.date(data["completedAt"]) ?? Self.date(data["updatedAt"])
-
-            if let completedAt {
-                if completedAt >= startOfMonth { summary.monthEarnings += fare }
-                if completedAt >= startOfWeek { summary.weekEarnings += fare }
-                if completedAt >= startOfToday { summary.todayEarnings += fare }
-            }
-
-            trips.append(DriverRecentTrip(
-                id: document.documentID,
-                pickup: data["pickup"] as? String ?? "Pickup",
-                dropoff: data["dropoff"] as? String ?? "Drop-off",
-                fare: fare,
-                completedAt: completedAt
-            ))
-        }
-
-        summary.recentTrips = Array(trips.prefix(5))
-
-        var accepted = 0
-        var declinedOrMissed = 0
-        for document in requestsSnapshot.documents {
-            let status = (document.data()["status"] as? String ?? "").lowercased()
-            switch status {
-            case "accepted":
-                accepted += 1
-            case "declined", "missed":
-                declinedOrMissed += 1
-            default:
-                break
-            }
-        }
-
-        let decided = accepted + declinedOrMissed
-        if decided > 0 {
-            summary.acceptanceRate = Double(accepted) / Double(decided)
-        }
-        if accepted > 0 {
-            // Completed-ride count is the real-data proxy for "of the rides you
-            // accepted, how many did you actually finish" since rideRequests
-            // never transitions to "completed" itself (only the rides doc does).
-            summary.completionRate = min(1, Double(ridesSnapshot.documents.count) / Double(accepted))
-        }
-
-        return summary
+        _ = uid
+        let value = try await RydrBackendService.fetchDriverEarningsSummary()
+        let formatter = ISO8601DateFormatter()
+        return DriverEarningsSummary(
+            todayEarnings: Decimal(value.todayCents) / 100,
+            weekEarnings: Decimal(value.weekCents) / 100,
+            monthEarnings: Decimal(value.monthCents) / 100,
+            acceptanceRate: value.acceptanceRate,
+            completionRate: value.completionRate,
+            recentTrips: value.recentTrips.map { .init(id:$0.id,pickup:$0.pickup,dropoff:$0.dropoff,fare:Decimal($0.fareCents)/100,completedAt:$0.completedAt.flatMap(formatter.date)) }
+        )
     }
 
     private static func decimal(_ value: Any?) -> Decimal? {

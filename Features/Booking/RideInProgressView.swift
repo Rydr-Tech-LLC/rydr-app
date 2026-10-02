@@ -1080,30 +1080,12 @@ private final class IncidentReportService {
             throw IncidentReportError.emptyDescription
         }
 
-        let reportRef = db.collection("safetyReports").document()
-        let reportId = reportRef.documentID
         let payload: [String: Any] = [
-            "id": reportId,
             "reportType": draft.reportType,
             "description": description,
-            "status": "open",
-            "source": "ios_rider_app",
-            "submittedByRole": "rider",
-            "rideId": context.rideId,
-            "riderId": user.uid,
-            "riderName": normalized(user.displayName) ?? "Rydr rider",
-            "riderEmail": user.email ?? "",
-            "driverId": ride.driver.id,
-            "driverName": ride.driver.name,
-            "rideStatus": ride.status.rawValue,
-            "rideType": ride.rideType,
-            "pickup": ride.pickup,
-            "dropoff": ride.dropoff,
-            "createdAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
+            "rideId": context.rideId
         ]
-
-        try await reportRef.setData(payload)
+        try await RiderSafetyBackend.submit(payload)
     }
 
     private func normalized(_ value: String?) -> String? {

@@ -67,7 +67,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         rydrBankCode: String?,
         replacementForRideId: String?,
         riderPreferences: RiderRidePreferences?,
-        riderVerified: Bool
+        riderVerified: Bool,
+        candidateDriverIds: [String]
     ) async throws -> String {
         guard let user = Auth.auth().currentUser else {
             throw RideDispatchError.notSignedIn
@@ -136,10 +137,14 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                     "lng": pickupCoordinate.longitude
                 ],
                 "pickupGeoPoint": GeoPoint(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude),
-                "createdAt": FieldValue.serverTimestamp(),
-                "expiresAt": Timestamp(date: Date().addingTimeInterval(90))
+                "createdAt": FieldValue.serverTimestamp()
             ])
         }
+        try await initializeBackendDispatch(
+            rideId: id,
+            candidateDriverIds: candidateDriverIds,
+            user: user
+        )
         try? await requestBackendRouteEstimate(rideId: id, user: user)
         return id
     }
@@ -153,12 +158,13 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                         return
                     }
 
-                    let status = (snapshot?.data()?["status"] as? String ?? "").lowercased()
+                    let data = snapshot?.data() ?? [:]
+                    let status = (data["status"] as? String ?? "").lowercased()
                     switch status {
                     case "accepted":
-                        continuation.yield(.accepted)
+                        continuation.yield(.accepted(driverId: data["driverId"] as? String))
                         continuation.finish()
-                    case "declined", "drivercancelled", "cancelled":
+                    case "declined", "drivercancelled", "cancelled", "nodriversavailable":
                         continuation.yield(.declined)
                         continuation.finish()
                     default:
@@ -175,6 +181,36 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             return decision
         }
         throw CancellationError()
+    }
+
+    func refreshRideDispatch(rideId: String) async throws -> RideDispatchRefresh {
+        guard let user = Auth.auth().currentUser else { throw RideDispatchError.notSignedIn }
+        guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
+              let base = URL(string: rawBase),
+              let url = URL(string: "/rides/\(rideId)/dispatch/refresh", relativeTo: base) else {
+            throw URLError(.badURL)
+        }
+        let token = try await user.getIDToken()
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["requestId": UUID().uuidString])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw NSError(
+                domain: "RydrRideBackend",
+                code: (response as? HTTPURLResponse)?.statusCode ?? -1,
+                userInfo: [NSLocalizedDescriptionKey: payload?["error"] as? String ?? "Dispatch refresh failed."]
+            )
+        }
+        return RideDispatchRefresh(
+            status: payload["status"] as? String ?? "pending",
+            dispatchStatus: payload["dispatchStatus"] as? String,
+            driverId: payload["driverId"] as? String
+        )
     }
 
     func driverLocationStream(rideId: String) -> AsyncStream<CLLocationCoordinate2D> {
@@ -298,6 +334,36 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                 domain: "RydrRideBackend",
                 code: (response as? HTTPURLResponse)?.statusCode ?? -1,
                 userInfo: [NSLocalizedDescriptionKey: payload?["error"] as? String ?? "Route estimate failed."]
+            )
+        }
+    }
+
+    private func initializeBackendDispatch(
+        rideId: String,
+        candidateDriverIds: [String],
+        user: User
+    ) async throws {
+        guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
+              let base = URL(string: rawBase),
+              let url = URL(string: "/rides/\(rideId)/dispatch/initialize", relativeTo: base) else {
+            throw URLError(.badURL)
+        }
+        let token = try await user.getIDToken()
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "candidateIds": candidateDriverIds,
+            "requestId": UUID().uuidString
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw NSError(
+                domain: "RydrRideBackend",
+                code: (response as? HTTPURLResponse)?.statusCode ?? -1,
+                userInfo: [NSLocalizedDescriptionKey: payload?["error"] as? String ?? "Could not start driver dispatch."]
             )
         }
     }
@@ -529,14 +595,26 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         let canonical = canonicalRideType(rideType)
         let rawRate = tierRates?[canonical] as? [String: Any]
             ?? tierRates?[pricing.title] as? [String: Any]
-        let rawMinimumFare = Self.doubleValue(rawRate?["minimumFare"]) ?? pricing.suggestedMinimumFare
-        let rawPerMile = Self.doubleValue(rawRate?["perMile"]) ?? Self.doubleValue(data["perMile"]) ?? pricing.suggestedPerMile
-        let rawPerMinute = Self.doubleValue(rawRate?["perMinute"]) ?? Self.doubleValue(data["perMinute"]) ?? pricing.suggestedPerMinute
+        let usesSuggestedPricing = rawRate?["useSuggestedPricing"] as? Bool ?? false
+        let resolvedRates = data["resolvedSuggestedRates"] as? [String: Any]
+        let resolvedRate = resolvedRates?[canonical] as? [String: Any]
+        let resolvedMinimumFare = Self.doubleValue(resolvedRate?["minimumFareCents"]).map { $0 / 100 }
+        let resolvedPerMile = Self.doubleValue(resolvedRate?["perMileCents"]).map { $0 / 100 }
+        let resolvedPerMinute = Self.doubleValue(resolvedRate?["perMinuteCents"]).map { $0 / 100 }
+        let rawMinimumFare = usesSuggestedPricing
+            ? resolvedMinimumFare ?? pricing.suggestedMinimumFare
+            : Self.doubleValue(rawRate?["minimumFare"]) ?? pricing.suggestedMinimumFare
+        let rawPerMile = usesSuggestedPricing
+            ? resolvedPerMile ?? pricing.suggestedPerMile
+            : Self.doubleValue(rawRate?["perMile"]) ?? Self.doubleValue(data["perMile"]) ?? pricing.suggestedPerMile
+        let rawPerMinute = usesSuggestedPricing
+            ? resolvedPerMinute ?? pricing.suggestedPerMinute
+            : Self.doubleValue(rawRate?["perMinute"]) ?? Self.doubleValue(data["perMinute"]) ?? pricing.suggestedPerMinute
         return (
             minimumFare: max(0, rawMinimumFare),
             perMile: max(0, rawPerMile),
             perMinute: max(0, rawPerMinute),
-            usesSuggestedPricing: rawRate?["useSuggestedPricing"] as? Bool ?? false
+            usesSuggestedPricing: usesSuggestedPricing
         )
     }
 

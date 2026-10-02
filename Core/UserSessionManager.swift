@@ -218,17 +218,24 @@ class UserSessionManager: ObservableObject {
         zip: String,
         completion: @escaping (Error?) -> Void
     ) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let user = Auth.auth().currentUser else {
             completion(NSError(domain: "NoUser", code: 0))
             return
         }
-        let e164Phone = normalizedE164Phone(phone)
+        let requestedPhone = normalizedE164Phone(phone)
+        let verifiedPhone = user.phoneNumber.map(normalizedE164Phone)
+        guard requestedPhone == verifiedPhone else {
+            completion(NSError(
+                domain: "RydrIdentity",
+                code: 409,
+                userInfo: [NSLocalizedDescriptionKey: "Verify the new phone number before changing it on your account."]
+            ))
+            return
+        }
 
         let payload: [String: Any] = [
             "preferredName": preferredName,
             "email": email,
-            "phoneNumber": e164Phone,
-            "phoneE164": e164Phone,
             "address": [
                 "street": street,
                 "line2": line2,
@@ -244,32 +251,18 @@ class UserSessionManager: ObservableObject {
             self.userEmail = email
         }
 
-        let riderRef = Firestore.firestore().collection("riders").document(uid)
-        riderRef.getDocument { snapshot, _ in
-            let existingPhone = snapshot?.data()?["phoneE164"] as? String
-                ?? snapshot?.data()?["phoneNumber"] as? String
-
-            riderRef.setData(payload, merge: true) { err in
-                if err == nil {
-                    Firestore.firestore().collection("riderPhoneIndex")
-                        .document(e164Phone)
-                        .setData([
-                            "uid": uid,
-                            "createdAt": FieldValue.serverTimestamp()
-                        ], merge: true)
-
-                    if let existingPhone,
-                       !existingPhone.isEmpty,
-                       existingPhone != e164Phone {
-                        Firestore.firestore().collection("riderPhoneIndex")
-                            .document(existingPhone)
-                            .getDocument { indexSnapshot, _ in
-                                guard indexSnapshot?.data()?["uid"] as? String == uid else { return }
-                                indexSnapshot?.reference.delete()
-                            }
-                    }
+        Firestore.firestore().collection("riders").document(user.uid).setData(payload, merge: true) { error in
+            if let error {
+                completion(error)
+                return
+            }
+            Task { @MainActor in
+                do {
+                    try await RiderBackendIdentityService.sync()
+                    completion(nil)
+                } catch {
+                    completion(error)
                 }
-                completion(err)
             }
         }
     }
