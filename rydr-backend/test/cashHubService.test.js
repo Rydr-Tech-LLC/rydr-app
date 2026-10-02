@@ -10,6 +10,7 @@ const {
   hasCurrentTerms,
   canTransitionDriverQueue,
   cashHubRemovalUpdate,
+  cashHubReleaseVisibilityUpdate,
   cashHubAccessAllowed,
   PUBLIC_VISIBILITY,
   FAVORITES_VISIBILITY
@@ -88,6 +89,15 @@ test("removing an accepted or completed Cash Hub post preserves its lifecycle", 
     riderHiddenFromMyPosts: true,
     riderRemovedAt: now
   });
+});
+
+test("a driver release restores a hidden post when the listing can reopen", () => {
+  const now = { marker: "now" };
+  assert.deepEqual(cashHubReleaseVisibilityUpdate(true, now), {
+    riderHiddenFromMyPosts: false,
+    riderRestoredToMyPostsAt: now
+  });
+  assert.deepEqual(cashHubReleaseVisibilityUpdate(false, now), {});
 });
 
 test("Cash Hub driver access rejects opt-outs, billing suspension, and safety holds", () => {

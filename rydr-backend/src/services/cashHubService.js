@@ -105,6 +105,13 @@ function cashHubRemovalUpdate(request, now) {
   }
   return update;
 }
+function cashHubReleaseVisibilityUpdate(canReopen, now) {
+  if (!canReopen) return {};
+  return {
+    riderHiddenFromMyPosts: false,
+    riderRestoredToMyPostsAt: now
+  };
+}
 function cashHubAccessAllowed(profile, config, role) {
   if (!hasCurrentTerms(profile, config)) return false;
   const accountStatus = text(profile.accountStatus, 40).toLowerCase();
@@ -391,7 +398,7 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
       const late = scheduledMillis - nowMillis <= 3600000;
       const conversationId = request.selectedOfferId || `${requestId}_${uid}`;
       const canReopen = scheduledMillis > nowMillis;
-      update = { ...update, status: canReopen ? "open" : "expired", expiresAt: canReopen ? request.scheduledTime : now, driverQueueStatus: admin.firestore.FieldValue.delete(), releasedByUid: uid, releasedByName: request.connectedDriverName || "Cash Hub Driver", releasedAt: now, lateReleasePenalty: late, connectedDriverUid: admin.firestore.FieldValue.delete(), connectedDriverName: admin.firestore.FieldValue.delete(), connectedVehicleInfo: admin.firestore.FieldValue.delete(), acceptedByUid: admin.firestore.FieldValue.delete(), acceptedByName: admin.firestore.FieldValue.delete(), selectedOfferId: admin.firestore.FieldValue.delete(), agreedPrice: admin.firestore.FieldValue.delete(), connectedAt: admin.firestore.FieldValue.delete(), acceptedAt: admin.firestore.FieldValue.delete() };
+      update = { ...update, status: canReopen ? "open" : "expired", expiresAt: canReopen ? request.scheduledTime : now, ...cashHubReleaseVisibilityUpdate(canReopen, now), driverQueueStatus: admin.firestore.FieldValue.delete(), releasedByUid: uid, releasedByName: request.connectedDriverName || "Cash Hub Driver", releasedAt: now, lateReleasePenalty: late, connectedDriverUid: admin.firestore.FieldValue.delete(), connectedDriverName: admin.firestore.FieldValue.delete(), connectedVehicleInfo: admin.firestore.FieldValue.delete(), acceptedByUid: admin.firestore.FieldValue.delete(), acceptedByName: admin.firestore.FieldValue.delete(), selectedOfferId: admin.firestore.FieldValue.delete(), agreedPrice: admin.firestore.FieldValue.delete(), connectedAt: admin.firestore.FieldValue.delete(), acceptedAt: admin.firestore.FieldValue.delete() };
       tx.set(db.collection("cashHubConversations").doc(conversationId), { status: "released", offerStatus: "released", closedAt: now, updatedAt: now }, { merge: true });
       if (late) {
         update.lateReleasePenaltyReason = "Released within 1 hour of scheduled pickup.";
@@ -453,6 +460,6 @@ async function sendCashHubMessage({ uid, conversationId, payload, db = getFirest
 
 module.exports = {
   acceptCashHubTerms, optOutCashHub, createCashHubRequest, commandCashHubRequest, createCashHubOffer, sendCashHubMessage,
-  normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, cashHubRemovalUpdate, cashHubAccessAllowed,
+  normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, cashHubRemovalUpdate, cashHubReleaseVisibilityUpdate, cashHubAccessAllowed,
   PUBLIC_VISIBILITY, FAVORITES_VISIBILITY, MINIMUM_LEAD_TIME_MS
 };
