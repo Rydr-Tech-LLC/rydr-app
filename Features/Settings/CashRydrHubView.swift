@@ -165,8 +165,6 @@ private struct CashHubRequestDraft {
 
 private struct CashHubOfferDraft {
     var offerAmount = ""
-    var availability = ""
-    var vehicleInfo = ""
     var message = ""
 }
 
@@ -636,7 +634,7 @@ private final class CashRydrHubVM: ObservableObject {
             "visibility": draft.visibility
         ]
         Task { [weak self] in
-            do { try await RiderCashHubBackend.create(data); await MainActor.run { self?.isSaving=false;self?.confirmationMessage="Your request has been posted. Drivers may respond with availability, questions, or offers." } }
+            do { try await RiderCashHubBackend.create(data); await MainActor.run { self?.isSaving=false;self?.confirmationMessage="Your request has been posted. Drivers may respond with price offers and messages." } }
             catch { await MainActor.run { self?.isSaving=false;self?.errorMessage=error.localizedDescription } }
         }
         return true
@@ -687,21 +685,17 @@ private final class CashRydrHubVM: ObservableObject {
             return false
         }
 
-        let availability = draft.availability.trimmingCharacters(in: .whitespacesAndNewlines)
-        let vehicleInfo = draft.vehicleInfo.trimmingCharacters(in: .whitespacesAndNewlines)
         let message = draft.message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !availability.isEmpty, !vehicleInfo.isEmpty, !message.isEmpty else {
-            errorMessage = "Add your availability, vehicle information, and a message."
+        guard let offerAmount = cleanAmount(draft.offerAmount) else {
+            errorMessage = "Enter a valid offer amount."
             return false
         }
 
         var offerData: [String: Any] = [
-            "availability": availability,
-            "vehicleInfo": vehicleInfo,
-            "message": message
+            "offerAmount": offerAmount
         ]
-        if let amount = cleanAmount(draft.offerAmount) {
-            offerData["offerAmount"] = amount
+        if !message.isEmpty {
+            offerData["message"] = message
         }
         Task { [weak self] in do { try await RiderCashHubBackend.offer(requestId:request.id,body:offerData) } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
         return true
@@ -3188,7 +3182,6 @@ private struct CashHubOfferCard: View {
                     badge(String(format: "%.1f star", rating))
                 }
             }
-            Text("Available: \(offer.availability)").font(.subheadline)
             if !offer.message.isEmpty {
                 Text(offer.message).font(.footnote).foregroundStyle(.secondary)
             }
@@ -3436,6 +3429,15 @@ private struct CashHubOfferForm: View {
     @Environment(\.dismiss) private var dismiss
     @State private var draft = CashHubOfferDraft()
 
+    private var hasValidAmount: Bool {
+        let cleaned = draft.offerAmount
+            .replacingOccurrences(of: "$", with: "")
+            .replacingOccurrences(of: ",", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let amount = Double(cleaned) else { return false }
+        return amount > 0
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -3444,10 +3446,8 @@ private struct CashHubOfferForm: View {
                     LabeledContent("Destination", value: request.destination)
                 }
                 Section("Your Offer") {
-                    TextField("Offer amount (optional)", text: $draft.offerAmount).keyboardType(.decimalPad)
-                    TextField("Estimated availability", text: $draft.availability)
-                    TextField("Vehicle information", text: $draft.vehicleInfo)
-                    TextField("Message", text: $draft.message, axis: .vertical)
+                    TextField("Proposed price", text: $draft.offerAmount).keyboardType(.decimalPad)
+                    TextField("Message (optional)", text: $draft.message, axis: .vertical)
                         .lineLimit(3, reservesSpace: true)
                 }
                 Section {
@@ -3462,6 +3462,7 @@ private struct CashHubOfferForm: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Send Offer") { onSend(draft) }
+                        .disabled(!hasValidAmount)
                 }
             }
         }

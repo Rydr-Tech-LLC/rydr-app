@@ -11,6 +11,7 @@ const {
   canTransitionDriverQueue,
   cashHubRemovalUpdate,
   cashHubReleaseVisibilityUpdate,
+  normalizeCashHubOffer,
   cashHubAccessAllowed,
   PUBLIC_VISIBILITY,
   FAVORITES_VISIBILITY
@@ -98,6 +99,18 @@ test("a driver release restores a hidden post when the listing can reopen", () =
     riderRestoredToMyPostsAt: now
   });
   assert.deepEqual(cashHubReleaseVisibilityUpdate(false, now), {});
+});
+
+test("Cash Hub offers negotiate price without client-entered vehicle or availability", () => {
+  assert.deepEqual(normalizeCashHubOffer({ offerAmount: "24.50", message: "Would this work?" }), {
+    offerAmount: 24.5,
+    message: "Would this work?"
+  });
+  assert.deepEqual(normalizeCashHubOffer({ offerAmount: 25 }), {
+    offerAmount: 25,
+    message: ""
+  });
+  assert.throws(() => normalizeCashHubOffer({ availability: "Any time", vehicleInfo: "Blue car" }), /valid offer amount/);
 });
 
 test("Cash Hub driver access rejects opt-outs, billing suspension, and safety holds", () => {

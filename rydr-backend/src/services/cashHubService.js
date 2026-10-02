@@ -112,6 +112,14 @@ function cashHubReleaseVisibilityUpdate(canReopen, now) {
     riderRestoredToMyPostsAt: now
   };
 }
+function normalizeCashHubOffer(payload) {
+  const offerAmount = amount(payload?.offerAmount);
+  if (offerAmount === null) throw error("Enter a valid offer amount", 400);
+  return {
+    offerAmount,
+    message: text(payload?.message, 2000)
+  };
+}
 function cashHubAccessAllowed(profile, config, role) {
   if (!hasCurrentTerms(profile, config)) return false;
   const accountStatus = text(profile.accountStatus, 40).toLowerCase();
@@ -418,11 +426,8 @@ async function createCashHubOffer({ uid, requestId, payload, db = getFirestore()
   const messageRef = conversationRef.collection("messages").doc();
   const driverName = text(driver.displayName ?? `${driver.firstName ?? ""} ${driver.lastName ?? ""}`, 80) || "Cash Hub Driver";
   const vehicleInfo = driverVehicleSummary(driver);
-  const availability = text(payload?.availability, 300); const message = text(payload?.message, 2000);
+  const { offerAmount, message } = normalizeCashHubOffer(payload);
   if (!vehicleInfo) throw error("Add your current vehicle to the Driver app before making a CashRydr Hub offer", 409);
-  if (!availability || !message) throw error("Availability and a message are required", 400);
-  const offerAmount = payload?.offerAmount == null ? null : amount(payload.offerAmount);
-  if (payload?.offerAmount != null && offerAmount === null) throw error("Offer amount must be greater than zero", 400);
   return db.runTransaction(async (tx) => {
     const requestSnap = await tx.get(requestRef);
     if (!requestSnap.exists || requestSnap.data().status !== "open") throw error("Request is no longer accepting offers", 409);
@@ -434,9 +439,20 @@ async function createCashHubOffer({ uid, requestId, payload, db = getFirestore()
       tx.get(conversationRef), tx.get(riderBlockRef), tx.get(driverBlockRef)
     ]);
     if (riderBlock.exists || driverBlock.exists) throw error("Cash Rydr Hub contact is blocked", 403);
-    if (existingConversation.exists && ["pending", "accepted"].includes(existingConversation.data().offerStatus)) return { conversationId };
-    tx.set(conversationRef, { requestId, riderUid: request.riderUid, riderName: request.riderName, driverUid: uid, driverName, participants:[request.riderUid,uid].sort(), status:"open", offerStatus:"pending", availability, vehicleInfo, ...(offerAmount!==null?{offerAmount}:{}), lastMessage:message, lastMessageAt:now, cashHubRating:Number(driver.cashHubRating ?? driver.rating ?? 5), isIdentityVerified:driver.identityVerified===true||driver.stripeIdentityStatus==="verified", isLicenseVerified:driver.isLicenseVerified===true||driver.driverLicenseStatus==="approved", isRydrVerifiedDriver:true, cashHubOnly:true, managedByRydr:false, paymentHandledBy:"rider_driver_direct", channelOwner:"rydr_backend", createdAt:now, updatedAt:now }, {merge:true});
-    tx.create(messageRef, { requestId, conversationId, senderUid:uid, senderName:driverName, senderRole:"driver", kind:"offer", text:message, availability, vehicleInfo, ...(offerAmount!==null?{offerAmount}:{}), auditVisibleToAdmin:true, createdAt:now });
+    if (existingConversation.exists) {
+      const existing = existingConversation.data();
+      if (existing.offerStatus !== "pending" || existing.status !== "open") throw error("This offer conversation is no longer open", 409);
+      tx.set(conversationRef, {
+        offerAmount,
+        lastMessage: message || `Proposed ${offerAmount.toLocaleString("en-US", { style: "currency", currency: "USD" })}`,
+        lastMessageAt: now,
+        updatedAt: now
+      }, { merge: true });
+      tx.create(messageRef, { requestId, conversationId, senderUid:uid, senderName:driverName, senderRole:"driver", kind:"offer", text:message, offerAmount, auditVisibleToAdmin:true, createdAt:now });
+      return { conversationId, revised: true };
+    }
+    tx.set(conversationRef, { requestId, riderUid:request.riderUid, riderName:request.riderName, driverUid:uid, driverName, participants:[request.riderUid,uid].sort(), status:"open", offerStatus:"pending", vehicleInfo, offerAmount, lastMessage:message || `Proposed ${offerAmount.toLocaleString("en-US", { style: "currency", currency: "USD" })}`, lastMessageAt:now, cashHubRating:Number(driver.cashHubRating ?? driver.rating ?? 5), isIdentityVerified:driver.identityVerified===true||driver.stripeIdentityStatus==="verified", isLicenseVerified:driver.isLicenseVerified===true||driver.driverLicenseStatus==="approved", isRydrVerifiedDriver:true, cashHubOnly:true, managedByRydr:false, paymentHandledBy:"rider_driver_direct", channelOwner:"rydr_backend", createdAt:now, updatedAt:now }, {merge:true});
+    tx.create(messageRef, { requestId, conversationId, senderUid:uid, senderName:driverName, senderRole:"driver", kind:"offer", text:message, offerAmount, auditVisibleToAdmin:true, createdAt:now });
     return { conversationId };
   });
 }
@@ -460,6 +476,6 @@ async function sendCashHubMessage({ uid, conversationId, payload, db = getFirest
 
 module.exports = {
   acceptCashHubTerms, optOutCashHub, createCashHubRequest, commandCashHubRequest, createCashHubOffer, sendCashHubMessage,
-  normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, cashHubRemovalUpdate, cashHubReleaseVisibilityUpdate, cashHubAccessAllowed,
+  normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, cashHubRemovalUpdate, cashHubReleaseVisibilityUpdate, normalizeCashHubOffer, cashHubAccessAllowed,
   PUBLIC_VISIBILITY, FAVORITES_VISIBILITY, MINIMUM_LEAD_TIME_MS
 };

@@ -75,7 +75,6 @@ private func driverCashHubConversationId(requestId: String, driverUid: String) -
 
 private struct DriverCashOfferDraft {
     var amount = ""
-    var availability = ""
     var message = ""
 }
 
@@ -327,7 +326,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
         return true
     }
 
-    func sendOffer(to request: DriverCashRideRequest, draft: DriverCashOfferDraft, driverName: String) -> Bool {
+    func sendOffer(to request: DriverCashRideRequest, draft: DriverCashOfferDraft) -> Bool {
         guard Auth.auth().currentUser != nil else {
             errorMessage = "Sign in before making an offer."
             return false
@@ -337,22 +336,19 @@ private final class DriverCashRydrHubVM: ObservableObject {
             return false
         }
 
-        let availability = draft.availability.trimmingCharacters(in: .whitespacesAndNewlines)
         let message = draft.message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !availability.isEmpty, !message.isEmpty else {
-            errorMessage = "Add your availability and a message."
+        guard let offerAmount = cleanAmount(draft.amount) else {
+            errorMessage = "Enter a valid offer amount."
             return false
         }
 
         var offerPayload: [String: Any] = [
-            "availability": availability,
-            "message": message
+            "offerAmount": offerAmount
         ]
-        if let amount = cleanAmount(draft.amount) {
-            offerPayload["offerAmount"] = amount
+        if !message.isEmpty {
+            offerPayload["message"] = message
         }
         Task { [weak self] in do { try await RydrBackendService.cashHubOffer(requestId:request.id,body:offerPayload) } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
-        confirmationMessage = "Offer sent to \(request.riderName)."
         return true
     }
 
@@ -671,12 +667,10 @@ struct DriverCashRydrHubView: View {
         .sheet(item: $offeringRequest) { request in
             DriverCashOfferSheet(
                 request: request,
-                messages: vm.responsesByRequest[request.id] ?? []
-            ) { draft in
-                if vm.sendOffer(to: request, draft: draft, driverName: session.driverName) {
-                    offeringRequest = nil
-                }
-            }
+                messages: vm.responsesByRequest[request.id] ?? [],
+                onSendOffer: { draft in vm.sendOffer(to: request, draft: draft) },
+                onSendMessage: { text in vm.sendMessage(to: request, text: text, driverName: session.driverName) }
+            )
         }
         .fullScreenCover(item: $activeRideRequest) { request in
             DriverCashRydrNavigationView(
@@ -1435,7 +1429,7 @@ private struct DriverCashRequestCard: View {
     }
 
     private var offerButtonTitle: String {
-        responses.contains { $0.isDriverAuthored && $0.kind == "offer" } ? "View Offer" : "Make Offer"
+        responses.contains { $0.isDriverAuthored && $0.kind == "offer" } ? "Open Price Chat" : "Make Offer"
     }
 }
 
@@ -2441,12 +2435,26 @@ private struct DriverCashMessageSheet: View {
 private struct DriverCashOfferSheet: View {
     let request: DriverCashRideRequest
     let messages: [DriverCashHubResponse]
-    var onSend: (DriverCashOfferDraft) -> Void
+    var onSendOffer: (DriverCashOfferDraft) -> Bool
+    var onSendMessage: (String) -> Bool
     @Environment(\.dismiss) private var dismiss
     @State private var draft = DriverCashOfferDraft()
 
+    private var hasExistingOffer: Bool {
+        messages.contains { $0.isDriverAuthored && $0.kind == "offer" }
+    }
+
     private var title: String {
-        messages.contains { $0.isDriverAuthored && $0.kind == "offer" } ? "View Offer" : "Make Offer"
+        hasExistingOffer ? "Price Chat" : "Make Offer"
+    }
+
+    private var hasValidAmount: Bool {
+        let cleaned = draft.amount
+            .replacingOccurrences(of: "$", with: "")
+            .replacingOccurrences(of: ",", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let amount = Double(cleaned) else { return false }
+        return amount > 0
     }
 
     var body: some View {
@@ -2467,10 +2475,10 @@ private struct DriverCashOfferSheet: View {
                     .background(RoundedRectangle(cornerRadius: 18).fill(Color(.secondarySystemGroupedBackground)))
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Thread")
+                        Text("Price Conversation")
                             .font(.headline.weight(.black))
                         if messages.isEmpty {
-                            Text("Start the offer conversation with your price, availability, and pickup details.")
+                            Text("Propose a price to open the conversation. You and the rider can discuss the amount here before they accept.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         } else {
@@ -2481,32 +2489,39 @@ private struct DriverCashOfferSheet: View {
                     }
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Your Offer")
+                        Text(hasExistingOffer ? "Update Your Price" : "Your Price")
                             .font(.headline.weight(.black))
-                        TextField("Your price", text: $draft.amount)
+                        TextField("Proposed price", text: $draft.amount)
                             .keyboardType(.decimalPad)
                             .textFieldStyle(.roundedBorder)
-                        TextField("Availability", text: $draft.availability)
-                            .textFieldStyle(.roundedBorder)
-                        Label("Your current Driver profile vehicle will be included automatically.", systemImage: "car.fill")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        TextField("Message", text: $draft.message, axis: .vertical)
+                        TextField("Add a message (optional)", text: $draft.message, axis: .vertical)
                             .lineLimit(3, reservesSpace: true)
                             .textFieldStyle(.roundedBorder)
 
-                        HStack {
-                            Button("I can do that") { draft.message = "I can do that." }
-                            Button("On my way") { draft.message = "On my way." }
-                            Button("Meet outside?") { draft.message = "Can you meet outside?" }
+                        Button(hasExistingOffer ? "Update Price" : "Send Price Offer") {
+                            if onSendOffer(draft) {
+                                draft.message = ""
+                            }
                         }
-                        .font(.caption.weight(.semibold))
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        .disabled(!hasValidAmount)
+
+                        if hasExistingOffer {
+                            Button("Send Message Only") {
+                                let message = draft.message.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if onSendMessage(message) {
+                                    draft.message = ""
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(draft.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
                     }
                     .padding(16)
                     .background(RoundedRectangle(cornerRadius: 18).fill(Color(.secondarySystemGroupedBackground)))
 
-                    Text("Cash Hub prices and pickup coordination are handled directly between you and the rider.")
+                    Text("Your vehicle comes from your approved Driver profile. Making an offer confirms you are available for the requested time.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -2518,9 +2533,16 @@ private struct DriverCashOfferSheet: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Send") { onSend(draft) }
-                        .disabled(draft.availability.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Done") { dismiss() }
                 }
+            }
+            .onAppear {
+                guard draft.amount.isEmpty,
+                      let latestAmount = messages
+                        .filter({ $0.isDriverAuthored && $0.kind == "offer" })
+                        .sorted(by: messageSort)
+                        .last?.offerAmount else { return }
+                draft.amount = String(format: "%.2f", latestAmount)
             }
         }
     }
