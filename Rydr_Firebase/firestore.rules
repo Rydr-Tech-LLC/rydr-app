@@ -563,6 +563,16 @@ service cloud.firestore {
       );
     }
 
+    // Backend-owned audience membership is the field used by the driver's
+    // collection query. Keeping this predicate aligned with that query lets
+    // Firestore prove every returned open request is authorized.
+    function cashHubEligibleOpenRequest(data) {
+      return cashHubAuthorizedDriverAccess()
+        && data.status == "open"
+        && data.eligibleDriverUids is list
+        && request.auth.uid in data.eligibleDriverUids;
+    }
+
     function cashHubPublicOpenRequest(data) {
       return cashHubAuthorizedDriverAccess()
         && data.status == "open"
@@ -592,6 +602,7 @@ service cloud.firestore {
     function cashHubRequestReadable(data) {
       return cashHubRequestOwner(data)
         || cashHubConnectedDriver(data)
+        || cashHubEligibleOpenRequest(data)
         || cashHubPublicOpenRequest(data)
         || cashHubFavoriteOpenRequest(data)
         || isAdmin();
