@@ -90,7 +90,6 @@ private struct CashHubFavoriteDriver: Identifiable, Equatable {
     var isIdentityVerified: Bool
     var isLicenseVerified: Bool
     var isRydrVerifiedDriver: Bool
-    var isOnline: Bool
     var addedAt: Date?
 }
 
@@ -332,7 +331,6 @@ private final class CashRydrHubVM: ObservableObject {
     @Published var isCheckingTerms = true
     @Published var termsAccepted = false
     @Published var termsAcceptanceEnabled = false
-    @Published var onlineDriverCount = 0
 
     private var cashHubTermsVersion = "legacy"
     private let favoriteDriverLimit = 10
@@ -444,19 +442,6 @@ private final class CashRydrHubVM: ObservableObject {
                         .sorted { $0.scheduledTime < $1.scheduledTime }
                     self.requests = mapped
                     self.syncResponseListeners(for: mapped)
-                }
-            }
-        refreshOnlineDriverCount()
-    }
-
-    func refreshOnlineDriverCount() {
-        db.collection("cashHubDriverProfiles")
-            .whereField("isOnline", isEqualTo: true)
-            .count
-            .getAggregation(source: .server) { [weak self] snapshot, error in
-                Task { @MainActor in
-                    guard let self, let snapshot, error == nil else { return }
-                    self.onlineDriverCount = Int(truncating: snapshot.count)
                 }
             }
     }
@@ -953,7 +938,6 @@ private final class CashRydrHubVM: ObservableObject {
             isIdentityVerified: data["isIdentityVerified"] as? Bool ?? false,
             isLicenseVerified: data["isLicenseVerified"] as? Bool ?? false,
             isRydrVerifiedDriver: data["isRydrVerifiedDriver"] as? Bool ?? false,
-            isOnline: data["isOnline"] as? Bool ?? false,
             addedAt: (data["addedAt"] as? Timestamp)?.dateValue()
         )
     }
@@ -967,7 +951,6 @@ private final class CashRydrHubVM: ObservableObject {
         merged.isIdentityVerified = data["isIdentityVerified"] as? Bool ?? merged.isIdentityVerified
         merged.isLicenseVerified = data["isLicenseVerified"] as? Bool ?? merged.isLicenseVerified
         merged.isRydrVerifiedDriver = data["isRydrVerifiedDriver"] as? Bool ?? merged.isRydrVerifiedDriver
-        merged.isOnline = data["isOnline"] as? Bool ?? merged.isOnline
         return merged
     }
 
@@ -1016,12 +999,12 @@ struct CashRydrHubView: View {
     private var cashHubFeedEvents: [CashHubFeedEvent] {
         var events: [CashHubFeedEvent] = []
 
-        for driver in vm.favoriteDrivers where driver.isOnline {
+        for driver in vm.favoriteDrivers {
             events.append(.init(
-                id: "online-\(driver.driverUid)",
-                title: "\(driver.name) is online",
-                detail: "Your favorite driver is online",
-                cta: "Tap to start a chat or send a request",
+                id: "cash-hub-active-\(driver.driverUid)",
+                title: "\(driver.name) is in your favorites",
+                detail: "Saved as a favorite Cash Hub driver",
+                cta: "Post a trip to request offers",
                 systemImage: "bolt.fill",
                 date: driver.addedAt ?? Date(),
                 tint: .green,
@@ -1316,9 +1299,8 @@ struct CashRydrHubView: View {
                 VStack(spacing: 18) {
                     switch selectedHomeTab {
                     case .feed:
-                        CashHubDriversOnlineBanner(
-                            onlineCount: vm.onlineDriverCount,
-                            previewDrivers: vm.favoriteDrivers.filter(\.isOnline),
+                        CashHubDriversAvailableBanner(
+                            previewDrivers: vm.favoriteDrivers,
                             onTap: { riderPanel = .favorites }
                         )
                         CashHubQuickPostCard(onPost: { showPostRequest = true })
@@ -1828,8 +1810,7 @@ private struct CashHubQuickPostCard: View {
     }
 }
 
-private struct CashHubDriversOnlineBanner: View {
-    let onlineCount: Int
+private struct CashHubDriversAvailableBanner: View {
     let previewDrivers: [CashHubFavoriteDriver]
     let onTap: () -> Void
 
@@ -1838,7 +1819,7 @@ private struct CashHubDriversOnlineBanner: View {
             HStack(spacing: 14) {
                 HStack(spacing: -10) {
                     if previewDrivers.isEmpty {
-                        ForEach(0..<min(3, max(onlineCount, 1)), id: \.self) { _ in
+                        ForEach(0..<3, id: \.self) { _ in
                             Circle()
                                 .fill(Styles.rydrGradient)
                                 .frame(width: 38, height: 38)
@@ -1854,13 +1835,10 @@ private struct CashHubDriversOnlineBanner: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
-                        Text("\(onlineCount) drivers online now")
+                        Text("Cash Hub drivers respond anytime")
                             .font(.subheadline.weight(.bold))
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 7, height: 7)
                     }
-                    Text("Find a Cash Hub listing today")
+                    Text("Post a trip to receive driver offers")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -2747,7 +2725,7 @@ private struct CashHubFavoriteDriversCard: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(driver.name)
                                 .font(.subheadline.weight(.semibold))
-                            CashHubOnlineStatusLabel(isOnline: driver.isOnline)
+                            CashHubAccessStatusLabel()
                         }
 
                         Spacer()
@@ -2797,7 +2775,7 @@ private struct CashHubFavoriteDriverProfileView: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(driver.name)
                                 .font(.headline)
-                            CashHubOnlineStatusLabel(isOnline: driver.isOnline)
+                            CashHubAccessStatusLabel()
                         }
                     }
                 }
@@ -2836,7 +2814,6 @@ private struct CashHubFavoriteDriverProfileView: View {
 private struct CashHubDriverAvatar: View {
     let driver: CashHubFavoriteDriver
     var size: CGFloat = 38
-    var showOnlineDot: Bool = false
 
     var body: some View {
         Group {
@@ -2852,14 +2829,6 @@ private struct CashHubDriverAvatar: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .overlay(alignment: .bottomTrailing) {
-            if showOnlineDot && driver.isOnline {
-                Circle()
-                    .fill(Color.green)
-                    .frame(width: size * 0.32, height: size * 0.32)
-                    .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
-            }
-        }
     }
 
     private var avatarPlaceholder: some View {
@@ -2884,34 +2853,16 @@ private struct CashHubRatingLabel: View {
     }
 }
 
-private struct CashHubOnlineStatusLabel: View {
-    let isOnline: Bool
-
+private struct CashHubAccessStatusLabel: View {
     var body: some View {
         HStack(spacing: 5) {
-            statusIcon
-            Text(isOnline ? "Online" : "Offline")
-        }
-        .font(.caption)
-        .foregroundStyle(isOnline ? .green : .secondary)
-    }
-
-    @ViewBuilder
-    private var statusIcon: some View {
-        if isOnline {
             Circle()
                 .fill(Color.green)
                 .frame(width: 8, height: 8)
-        } else {
-            ZStack {
-                Circle()
-                    .stroke(Styles.rydrGradient, lineWidth: 1.6)
-                Image(systemName: "xmark")
-                    .font(.system(size: 6, weight: .bold))
-                    .foregroundStyle(Styles.rydrGradient)
-            }
-            .frame(width: 10, height: 10)
+            Text("Cash Hub favorite")
         }
+        .font(.caption)
+        .foregroundStyle(.green)
     }
 }
 
