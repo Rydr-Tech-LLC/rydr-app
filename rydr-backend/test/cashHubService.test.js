@@ -17,6 +17,7 @@ const {
   normalizeCashHubOffer,
   cashHubOfferOpeningMessage,
   cashHubAccessAllowed,
+  eligibleDriverAudience,
   distanceMilesBetween,
   suggestedContribution,
   validateLifecycleEvidence,
@@ -62,6 +63,40 @@ test("Cash Hub computes its server-owned route suggestion from the fixed marketp
 test("Cash Hub audience distance is calculated in miles", () => {
   const miles = distanceMilesBetween({ latitude: 33.749, longitude: -84.388 }, { latitude: 33.6407, longitude: -84.4277 });
   assert.ok(miles > 7 && miles < 9);
+});
+
+test("Cash Hub audience includes active approved drivers without requiring dispatch-online status", async () => {
+  const driverDocuments = [
+    {
+      id: "offline-driver",
+      data: () => ({
+        ...approvedDriver,
+        isOnline: false,
+        location: { lat: 33.75, lng: -84.39 }
+      })
+    },
+    {
+      id: "opted-out-driver",
+      data: () => ({
+        ...approvedDriver,
+        cashHubOptedOut: true,
+        location: { lat: 33.75, lng: -84.39 }
+      })
+    }
+  ];
+  const db = {
+    collection(name) {
+      if (name === "drivers") return { limit: () => ({ get: async () => ({ docs: driverDocuments }) }) };
+      if (name === "platformConfig") return { doc: () => ({ get: async () => ({ exists: true, data: () => enabledConfig }) }) };
+      throw new Error(`Unexpected collection: ${name}`);
+    }
+  };
+  const audience = await eligibleDriverAudience(
+    db,
+    { latitude: 33.749, longitude: -84.388 },
+    PUBLIC_VISIBILITY
+  );
+  assert.deepEqual(audience, ["offline-driver"]);
 });
 
 test("Cash Hub lifecycle requires recent canonical driver presence", () => {

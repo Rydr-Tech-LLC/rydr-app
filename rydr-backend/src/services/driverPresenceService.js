@@ -10,11 +10,6 @@ const ACTIVE_RIDE_STATUSES = new Set([
   "arrivedAtStop",
   "navigatingToDropoff"
 ]);
-const CASH_HUB_PUBLIC_VISIBILITY = "Public CashRydr Hub Community";
-const CASH_HUB_FAVORITES_VISIBILITY = "Favorite Drivers";
-const CASH_HUB_PUBLIC_RADIUS_MILES = 50;
-const CASH_HUB_AUDIENCE_LIMIT = 100;
-const CASH_HUB_AUDIENCE_PROJECTION_VERSION = 1;
 
 function error(message, statusCode) {
   const err = new Error(message);
@@ -51,40 +46,6 @@ function normalizedLocation(value) {
   return location;
 }
 
-function coordinate(value) {
-  if (!value || typeof value !== "object") return null;
-  const latitude = Number(value.latitude ?? value.lat);
-  const longitude = Number(value.longitude ?? value.lng);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
-  return { latitude, longitude };
-}
-
-function distanceMilesBetween(a, b) {
-  const first = coordinate(a);
-  const second = coordinate(b);
-  if (!first || !second) return null;
-  const radians = (degrees) => degrees * Math.PI / 180;
-  const dLat = radians(second.latitude - first.latitude);
-  const dLng = radians(second.longitude - first.longitude);
-  const lat1 = radians(first.latitude);
-  const lat2 = radians(second.latitude);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 3958.7613 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
-function cashHubRequestShouldIncludeDriver(request, uid, driverLocation) {
-  if (!request || request.status !== "open") return false;
-  if (request.visibility === CASH_HUB_FAVORITES_VISIBILITY) {
-    return Array.isArray(request.allowedDriverUids) && request.allowedDriverUids.includes(uid);
-  }
-  if (!["public", CASH_HUB_PUBLIC_VISIBILITY].includes(request.visibility)) return false;
-  const pickup = coordinate(request.pickupCoordinate);
-  const driver = coordinate(driverLocation);
-  if (!pickup || !driver) return true;
-  const miles = distanceMilesBetween(pickup, driver);
-  return miles !== null && miles <= CASH_HUB_PUBLIC_RADIUS_MILES;
-}
-
 async function activeRideForDriver(db, uid) {
   const snapshot = await db.collection("rides").where("driverId", "==", uid).limit(50).get();
   return snapshot.docs.find((doc) => {
@@ -101,10 +62,9 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   const publicRef = db.collection("publicDriverProfiles").doc(uid);
   const cashHubRef = db.collection("cashHubDriverProfiles").doc(uid);
   const cashHubEligibilityRef = db.collection("cashHubDriverEligibility").doc(uid);
-  const [driverSnap, cashHubConfigSnap, previousCashHubEligibilitySnap] = await Promise.all([
+  const [driverSnap, cashHubConfigSnap] = await Promise.all([
     driverRef.get(),
-    db.collection("platformConfig").doc("cashRydrHub").get(),
-    cashHubEligibilityRef.get()
+    db.collection("platformConfig").doc("cashRydrHub").get()
   ]);
   if (!driverSnap.exists) throw error("Driver profile not found", 404);
 
@@ -179,8 +139,9 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
     isIdentityVerified: driver.identityVerified === true || driver.stripeIdentityStatus === "verified",
     isLicenseVerified: driver.isLicenseVerified === true || driver.driverLicenseStatus === "approved",
     isRydrVerifiedDriver: isApprovedDriver(driver),
-    isOnline: online && cashHubAccessActive,
-    availabilityStatus: online && cashHubAccessActive ? availabilityStatus : "offline",
+    cashHubAccessActive: cashHubAccessActive && isApprovedDriver(driver),
+    isOnline: online,
+    availabilityStatus,
     projectionOwner: "rydr_backend",
     updatedAt: now
   };
@@ -193,31 +154,16 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   }
   const cashHubEligibility = {
     driverUid: uid,
-    isOnline: cashHubPresence.isOnline,
-    availabilityStatus: cashHubPresence.availabilityStatus,
+    cashHubAccessActive: cashHubAccessActive && isApprovedDriver(driver),
+    isOnline: online,
+    availabilityStatus,
     approximateLocation: publicPresence.approximateLocation || null,
     updatedAt: now,
-    projectionOwner: "rydr_backend",
-    audienceProjectionVersion: CASH_HUB_AUDIENCE_PROJECTION_VERSION
+    projectionOwner: "rydr_backend"
   };
 
   const previousStatusSnap = await statusRef.get();
   const previousOnline = previousStatusSnap.exists ? previousStatusSnap.data().isOnline === true : null;
-  const previousCashHubEligibility = previousCashHubEligibilitySnap.exists ? previousCashHubEligibilitySnap.data() : {};
-  const audienceMovementMiles = cleanLocation
-    ? distanceMilesBetween(previousCashHubEligibility.audienceReconciledLocation, cleanLocation)
-    : null;
-  const shouldRefreshCashHubAudience = previousCashHubEligibility.isOnline !== cashHubPresence.isOnline
-    || previousCashHubEligibility.availabilityStatus !== cashHubPresence.availabilityStatus
-    || previousCashHubEligibility.audienceProjectionVersion !== CASH_HUB_AUDIENCE_PROJECTION_VERSION
-    || (cleanLocation && !coordinate(previousCashHubEligibility.audienceReconciledLocation))
-    || (audienceMovementMiles !== null && audienceMovementMiles >= 5);
-  if (shouldRefreshCashHubAudience && cleanLocation) {
-    cashHubEligibility.audienceReconciledLocation = { lat: cleanLocation.lat, lng: cleanLocation.lng };
-  }
-  const openCashHubRequests = shouldRefreshCashHubAudience
-    ? await db.collection("cashRydrRequests").where("status", "==", "open").limit(200).get()
-    : null;
   const batch = db.batch();
   batch.set(statusRef, privatePresence, { merge: true });
   batch.set(driverRef, { ...common, location: privatePresence.location || driver.location || null }, { merge: true });
@@ -235,27 +181,9 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
       recordedBy: "rydr-backend"
     });
   }
-  for (const requestDoc of openCashHubRequests?.docs || []) {
-    const request = requestDoc.data();
-    const currentAudience = Array.isArray(request.eligibleDriverUids) ? request.eligibleDriverUids : [];
-    const shouldInclude = cashHubPresence.isOnline
-      && cashHubPresence.availabilityStatus === "available"
-      && cashHubRequestShouldIncludeDriver(request, uid, cleanLocation);
-    if (shouldInclude && !currentAudience.includes(uid) && currentAudience.length < CASH_HUB_AUDIENCE_LIMIT) {
-      batch.set(requestDoc.ref, {
-        eligibleDriverUids: admin.firestore.FieldValue.arrayUnion(uid),
-        updatedAt: now
-      }, { merge: true });
-    } else if (!shouldInclude && currentAudience.includes(uid)) {
-      batch.set(requestDoc.ref, {
-        eligibleDriverUids: admin.firestore.FieldValue.arrayRemove(uid),
-        updatedAt: now
-      }, { merge: true });
-    }
-  }
   await batch.commit();
 
   return { online, availabilityStatus, hasActiveRide, selectedRideTypes: effectiveRideTypes };
 }
 
-module.exports = { updateDriverPresence, isApprovedDriver, normalizedLocation, normalizedRideTypes, cashHubRequestShouldIncludeDriver };
+module.exports = { updateDriverPresence, isApprovedDriver, normalizedLocation, normalizedRideTypes };

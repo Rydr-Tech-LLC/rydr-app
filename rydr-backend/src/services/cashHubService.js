@@ -93,16 +93,17 @@ function driverCanAccessRequest(request, driverUid) {
 }
 
 async function eligibleDriverAudience(db, pickupCoordinate, visibility, favoriteUids = []) {
-  if (visibility === FAVORITES_VISIBILITY) return favoriteUids.slice(0, CASH_HUB_AUDIENCE_LIMIT);
-  const [publicProfiles, privateEligibility] = await Promise.all([
-    db.collection("cashHubDriverProfiles").where("isOnline", "==", true).limit(200).get(),
-    db.collection("cashHubDriverEligibility").where("isOnline", "==", true).limit(200).get()
+  const [drivers, configSnap] = await Promise.all([
+    db.collection("drivers").limit(500).get(),
+    db.collection("platformConfig").doc("cashRydrHub").get()
   ]);
-  const eligibilityByUid = new Map(privateEligibility.docs.map((doc) => [doc.id, doc.data()]));
-  return publicProfiles.docs.filter((doc) => {
-    const profile = eligibilityByUid.get(doc.id) || doc.data();
-    if (profile.availabilityStatus && profile.availabilityStatus !== "available") return false;
-    const driverCoordinate = coordinate(profile.approximateLocation);
+  const config = configSnap.exists ? configSnap.data() : {};
+  const favoriteSet = new Set(favoriteUids);
+  return drivers.docs.filter((doc) => {
+    const profile = doc.data();
+    if (!cashHubAccessAllowed(profile, config, "driver")) return false;
+    if (visibility === FAVORITES_VISIBILITY && !favoriteSet.has(doc.id)) return false;
+    const driverCoordinate = coordinate(profile.location);
     if (!pickupCoordinate || !driverCoordinate) return true;
     const miles = distanceMilesBetween(pickupCoordinate, driverCoordinate);
     return miles !== null && miles <= CASH_HUB_PUBLIC_RADIUS_MILES;
@@ -863,6 +864,6 @@ async function commandCashHubConversation({ uid, conversationId, action, payload
 module.exports = {
   acceptCashHubTerms, optOutCashHub, createCashHubRequest, commandCashHubRequest, createCashHubOffer, sendCashHubMessage, commandCashHubConversation, updateCashHubRelationship,
   normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, isCashHubConnectedStatus, cashHubRemovalUpdate, cashHubReleaseVisibilityUpdate, cashHubRiderCancellationUpdate, cashHubActionRequiresActiveAccess, normalizeCashHubOffer, cashHubOfferOpeningMessage, cashHubAccessAllowed,
-  coordinate, distanceMilesBetween, suggestedContribution, validateLifecycleEvidence,
+  coordinate, distanceMilesBetween, suggestedContribution, validateLifecycleEvidence, eligibleDriverAudience,
   PUBLIC_VISIBILITY, FAVORITES_VISIBILITY, MINIMUM_LEAD_TIME_MS
 };

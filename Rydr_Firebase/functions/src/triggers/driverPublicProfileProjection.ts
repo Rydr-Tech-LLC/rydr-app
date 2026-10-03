@@ -68,8 +68,9 @@ export const onDriverPublicProfileProjection = onDocumentWritten("drivers/{uid}"
     isIdentityVerified: driver.identityVerified === true || driver.stripeIdentityStatus === "verified",
     isLicenseVerified: driver.isLicenseVerified === true || driver.driverLicenseStatus === "approved",
     isRydrVerifiedDriver: approved && safe,
-    isOnline: driver.isOnline === true && accessActive && approved && safe,
-    availabilityStatus: driver.isOnline === true && accessActive && approved && safe
+    cashHubAccessActive: accessActive && approved && safe,
+    isOnline: driver.isOnline === true,
+    availabilityStatus: driver.isOnline === true
       ? String(driver.availabilityStatus ?? "available")
       : "offline",
     projectionOwner: "firebase_function",
@@ -77,8 +78,9 @@ export const onDriverPublicProfileProjection = onDocumentWritten("drivers/{uid}"
   }, { merge: true });
   await cashHubEligibilityRef.set({
     driverUid: uid,
-    isOnline: driver.isOnline === true && accessActive && approved && safe,
-    availabilityStatus: driver.isOnline === true && accessActive && approved && safe
+    cashHubAccessActive: accessActive && approved && safe,
+    isOnline: driver.isOnline === true,
+    availabilityStatus: driver.isOnline === true
       ? String(driver.availabilityStatus ?? "available")
       : "offline",
     approximateLocation: approximateLocation ?? null,

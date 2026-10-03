@@ -42,7 +42,7 @@ export const onCashHubRequestCreated = onDocumentCreated("cashRydrRequests/{requ
     driverIds = Array.isArray(request.allowedDriverUids) ? request.allowedDriverUids.slice(0, 10) : [];
   } else {
     // Legacy posts created before backend-owned audience selection.
-    const drivers = await db.collection("cashHubDriverProfiles").where("isOnline", "==", true).limit(100).get();
+    const drivers = await db.collection("cashHubDriverProfiles").where("cashHubAccessActive", "==", true).limit(100).get();
     driverIds = drivers.docs.map((doc) => doc.id);
   }
   await Promise.all(driverIds.map((uid) => sendPushToUser({
