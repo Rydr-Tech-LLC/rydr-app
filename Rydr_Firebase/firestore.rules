@@ -569,8 +569,7 @@ service cloud.firestore {
     function cashHubEligibleOpenRequest(data) {
       return cashHubAuthorizedDriverAccess()
         && data.status == "open"
-        && data.eligibleDriverUids is list
-        && request.auth.uid in data.eligibleDriverUids;
+        && data.eligibleDriverUids.hasAny([request.auth.uid]);
     }
 
     function cashHubPublicOpenRequest(data) {
