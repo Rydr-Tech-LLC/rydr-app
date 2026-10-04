@@ -118,9 +118,13 @@ private enum CashHubVisibility: String, CaseIterable, Identifiable {
 
 private enum CashHubScheduling {
     static let minimumLeadTime: TimeInterval = 2 * 60 * 60
+    static let submissionBuffer: TimeInterval = 5 * 60
 
     static func earliestRequestTime(from date: Date = Date()) -> Date {
-        let minimum = date.addingTimeInterval(minimumLeadTime)
+        // Give the rider enough time to finish and submit the form without a
+        // value that was valid when the sheet opened falling below the
+        // backend's two-hour minimum while the request is in flight.
+        let minimum = date.addingTimeInterval(minimumLeadTime + submissionBuffer)
         let minuteStart = Calendar.current.dateInterval(of: .minute, for: minimum)?.start ?? minimum
         return minuteStart.addingTimeInterval(60)
     }
@@ -316,6 +320,7 @@ private struct CashHubFeedEvent: Identifiable {
     let date: Date
     let tint: Color
     let category: CashHubFeedCategory
+    var requestId: String? = nil
     var accessory: CashHubFeedAccessory = .none
     var timestampOverride: String? = nil
 }
@@ -538,12 +543,16 @@ private final class CashRydrHubVM: ObservableObject {
         Task { [weak self] in do { try await RiderCashHubBackend.relationship(action:"add_favorite_driver",targetUid:offer.authorUid);await MainActor.run{self?.confirmationMessage="\(offer.authorName) was added to your favorite drivers."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
-    func createRequest(from draft: CashHubRequestDraft, riderName: String) -> Bool {
+    func createRequest(from draft: CashHubRequestDraft, riderName: String, completion: @escaping (Bool) -> Void) {
         guard Auth.auth().currentUser != nil else {
             errorMessage = "Please log in to post a request."
-            return false
+            completion(false)
+            return
         }
-        guard validate(draft) else { return false }
+        guard validate(draft) else {
+            completion(false)
+            return
+        }
 
         isSaving = true
         let data: [String: Any] = [
@@ -558,14 +567,16 @@ private final class CashRydrHubVM: ObservableObject {
             "visibility": draft.visibility
         ].merging(draft.coordinatePayload) { _, new in new }
         Task { [weak self] in
-            do { try await RiderCashHubBackend.create(data); await MainActor.run { self?.isSaving=false;self?.confirmationMessage="Your request has been posted. Drivers may respond with price offers and messages." } }
-            catch { await MainActor.run { self?.isSaving=false;self?.errorMessage=error.localizedDescription } }
+            do { try await RiderCashHubBackend.create(data); await MainActor.run { self?.isSaving=false;self?.confirmationMessage="Your request has been posted. Drivers may respond with price offers and messages."; completion(true) } }
+            catch { await MainActor.run { self?.isSaving=false;self?.errorMessage=error.localizedDescription; completion(false) } }
         }
-        return true
     }
 
-    func updateRequest(_ request: CashRydrRequest, from draft: CashHubRequestDraft) -> Bool {
-        guard validate(draft) else { return false }
+    func updateRequest(_ request: CashRydrRequest, from draft: CashHubRequestDraft, completion: @escaping (Bool) -> Void) {
+        guard validate(draft) else {
+            completion(false)
+            return
+        }
 
         isSaving = true
         let data: [String: Any] = [
@@ -578,8 +589,7 @@ private final class CashRydrHubVM: ObservableObject {
             "tripFormat": draft.tripFormat,
             "visibility": draft.visibility
         ].merging(draft.coordinatePayload) { _, new in new }
-        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"edit",body:data);await MainActor.run{self?.isSaving=false} } catch { await MainActor.run{self?.isSaving=false;self?.errorMessage=error.localizedDescription} } }
-        return true
+        Task { [weak self] in do { try await RiderCashHubBackend.command(requestId:request.id,action:"edit",body:data);await MainActor.run{self?.isSaving=false;completion(true)} } catch { await MainActor.run{self?.isSaving=false;self?.errorMessage=error.localizedDescription;completion(false)} } }
     }
 
     func updateVisibility(for request: CashRydrRequest, to visibility: String) {
@@ -988,6 +998,8 @@ struct CashRydrHubView: View {
     }
     @State private var selectedFeedCategory: CashHubFeedCategory = .all
     @State private var activityRange: CashHubActivityRange = .days30
+    @AppStorage("cashHubDismissedFeedEventIDs") private var dismissedFeedEventIDsStorage = ""
+    @State private var pendingNotificationRoute: [AnyHashable: Any]?
 
     private var currentUID: String { Auth.auth().currentUser?.uid ?? "" }
     private var riderRequests: [CashRydrRequest] { vm.requests.filter { $0.riderUid == currentUID } }
@@ -1040,6 +1052,7 @@ struct CashRydrHubView: View {
                     date: offer.createdAt ?? request.createdAt ?? request.scheduledTime,
                     tint: .purple,
                     category: .offers,
+                    requestId: request.id,
                     accessory: .badge(offer.offerAmount.map { $0.formatted(.currency(code: "USD")) } ?? "Offer", .purple)
                 ))
             }
@@ -1056,6 +1069,7 @@ struct CashRydrHubView: View {
                     date: message.createdAt ?? request.createdAt ?? request.scheduledTime,
                     tint: .orange,
                     category: .messages,
+                    requestId: request.id,
                     accessory: .avatarInitial(message.authorName)
                 ))
             }
@@ -1070,6 +1084,7 @@ struct CashRydrHubView: View {
                     date: request.createdAt ?? request.scheduledTime,
                     tint: .green,
                     category: .trips,
+                    requestId: request.id,
                     accessory: .badge("Closed", .green)
                 ))
             } else if request.isConnected {
@@ -1082,6 +1097,7 @@ struct CashRydrHubView: View {
                     date: request.createdAt ?? request.scheduledTime,
                     tint: .green,
                     category: .trips,
+                    requestId: request.id,
                     accessory: .badge("Connected", .green)
                 ))
             } else {
@@ -1093,7 +1109,8 @@ struct CashRydrHubView: View {
                     systemImage: "paperplane.fill",
                     date: request.createdAt ?? request.scheduledTime,
                     tint: .red,
-                    category: .posts
+                    category: .posts,
+                    requestId: request.id
                 ))
             }
         }
@@ -1142,19 +1159,38 @@ struct CashRydrHubView: View {
         }
         .navigationTitle("Cash Rydr Hub")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink(destination: NotificationView()) {
+                    Image(systemName: "bell.fill")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.red)
+                        .frame(width: 40, height: 40)
+                        .background(Color.red.opacity(0.10), in: Circle())
+                }
+                .accessibilityLabel("Notifications")
+            }
+        }
         .task { vm.loadAccess() }
+        .onReceive(NotificationCenter.default.publisher(for: .riderNotificationRouteRequested)) { notification in
+            guard (notification.userInfo?["target"] as? String) == "cashHub" else { return }
+            pendingNotificationRoute = notification.userInfo
+            openPendingNotificationRoute()
+        }
+        .onChange(of: vm.requests.count) { _, _ in openPendingNotificationRoute() }
+        .onChange(of: vm.responsesByRequest.count) { _, _ in openPendingNotificationRoute() }
         .onDisappear { vm.stop() }
         .sheet(isPresented: $showPostRequest) {
             CashHubRequestForm(title: "Post Ride Request") { draft in
-                if vm.createRequest(from: draft, riderName: session.userName) {
-                    showPostRequest = false
+                vm.createRequest(from: draft, riderName: session.userName) { didSave in
+                    if didSave { showPostRequest = false }
                 }
             }
         }
         .sheet(item: $editingRequest) { request in
             CashHubRequestForm(title: "Edit Ride Request", initialDraft: CashHubRequestDraft(request: request)) { draft in
-                if vm.updateRequest(request, from: draft) {
-                    editingRequest = nil
+                vm.updateRequest(request, from: draft) { didSave in
+                    if didSave { editingRequest = nil }
                 }
             }
         }
@@ -1192,11 +1228,22 @@ struct CashRydrHubView: View {
                 requests: myRequests,
                 responses: vm.responsesByRequest,
                 favoriteDrivers: vm.favoriteDrivers,
-                onEdit: { editingRequest = $0 },
+                onEdit: { request in
+                    riderPanel = nil
+                    DispatchQueue.main.async { editingRequest = request }
+                },
                 onDelete: { vm.removeRequest($0) },
                 onVisibilityChange: { request, visibility in vm.updateVisibility(for: request, to: visibility) },
-                onOpenConnection: { viewingConnection = $0 },
-                onMessage: { request, mode, offer in messagingContext = CashHubMessageContext(request: request, mode: mode, offer: offer) },
+                onOpenConnection: { request in
+                    riderPanel = nil
+                    DispatchQueue.main.async { viewingConnection = request }
+                },
+                onMessage: { request, mode, offer in
+                    riderPanel = nil
+                    DispatchQueue.main.async {
+                        messagingContext = CashHubMessageContext(request: request, mode: mode, offer: offer)
+                    }
+                },
                 onFavorite: { vm.addFavoriteDriver(from: $0) },
                 onViewFavoriteDriver: { viewingFavoriteDriver = $0 },
                 onRemoveFavoriteDriver: { vm.removeFavoriteDriver($0) },
@@ -1305,8 +1352,10 @@ struct CashRydrHubView: View {
                         )
                         CashHubQuickPostCard(onPost: { showPostRequest = true })
                         CashHubFeedTimelineCard(
-                            events: cashHubFeedEvents,
-                            selectedCategory: $selectedFeedCategory
+                            events: cashHubFeedEvents.filter { !dismissedFeedEventIDs.contains($0.id) },
+                            selectedCategory: $selectedFeedCategory,
+                            onSelect: openFeedEvent,
+                            onDelete: dismissFeedEvent
                         )
                     case .myPosts:
                         CashHubMyPostsHeader(
@@ -1390,6 +1439,62 @@ struct CashRydrHubView: View {
     private func cashHubTripSummary(for request: CashRydrRequest) -> String {
         let price = request.agreedPrice.map { " • \($0.formatted(.currency(code: "USD")))" } ?? ""
         return "\(request.pickup) to \(request.destination)\(price)"
+    }
+
+    private func openFeedEvent(_ event: CashHubFeedEvent) {
+        switch event.category {
+        case .favorites:
+            riderPanel = .favorites
+        case .offers:
+            riderPanel = .offers
+        case .messages:
+            guard let request = riderRequests.first(where: { $0.id == event.requestId }) else { return }
+            let offer = vm.responsesByRequest[request.id]?.first
+            messagingContext = CashHubMessageContext(
+                request: request,
+                mode: request.isConnected ? .directConnection : .requestThread,
+                offer: offer
+            )
+        case .posts:
+            selectedHomeTab = .myPosts
+        case .trips:
+            selectedHomeTab = .activity
+        case .all:
+            break
+        }
+    }
+
+    private var dismissedFeedEventIDs: Set<String> {
+        Set(dismissedFeedEventIDsStorage.split(separator: "|").map(String.init))
+    }
+
+    private func dismissFeedEvent(_ event: CashHubFeedEvent) {
+        var ids = dismissedFeedEventIDs
+        ids.insert(event.id)
+        dismissedFeedEventIDsStorage = ids.sorted().joined(separator: "|")
+    }
+
+    private func openPendingNotificationRoute() {
+        guard let route = pendingNotificationRoute,
+              let requestId = route["requestId"] as? String,
+              let request = riderRequests.first(where: { $0.id == requestId }) else { return }
+        let type = route["type"] as? String ?? "cashHubUpdate"
+        switch type {
+        case "cashHubOffer":
+            riderPanel = .offers
+        case "cashHubMessage":
+            let chatId = route["chatId"] as? String
+            let offer = vm.responsesByRequest[request.id]?.first(where: { chatId == nil || $0.id == chatId })
+            guard offer != nil || request.isConnected else { return }
+            messagingContext = CashHubMessageContext(
+                request: request,
+                mode: request.isConnected ? .directConnection : .requestThread,
+                offer: offer
+            )
+        default:
+            selectedHomeTab = request.isConnected ? .myPosts : .feed
+        }
+        pendingNotificationRoute = nil
     }
 
     private func recentActivitySort(_ lhs: CashRydrRequest, _ rhs: CashRydrRequest) -> Bool {
@@ -1863,6 +1968,8 @@ private func cashHubRelativeTime(_ date: Date) -> String {
 private struct CashHubFeedTimelineCard: View {
     let events: [CashHubFeedEvent]
     @Binding var selectedCategory: CashHubFeedCategory
+    let onSelect: (CashHubFeedEvent) -> Void
+    let onDelete: (CashHubFeedEvent) -> Void
 
     private var filteredEvents: [CashHubFeedEvent] {
         guard selectedCategory != .all else { return events }
@@ -1904,7 +2011,7 @@ private struct CashHubFeedTimelineCard: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(Array(filteredEvents.prefix(12))) { event in
-                    CashHubFeedRow(event: event)
+                    CashHubFeedRow(event: event, onSelect: { onSelect(event) }, onDelete: { onDelete(event) })
                     if event.id != filteredEvents.prefix(12).last?.id {
                         Divider()
                     }
@@ -1917,9 +2024,23 @@ private struct CashHubFeedTimelineCard: View {
 
 private struct CashHubFeedRow: View {
     let event: CashHubFeedEvent
+    let onSelect: () -> Void
+    let onDelete: () -> Void
+    @State private var horizontalOffset: CGFloat = 0
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        ZStack(alignment: .trailing) {
+            Button(role: .destructive, action: onDelete) {
+                Label("Clear", systemImage: "trash.fill")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 82)
+                    .frame(maxHeight: .infinity)
+                    .background(Color.red, in: RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+
+            HStack(alignment: .top, spacing: 12) {
             Image(systemName: event.systemImage)
                 .font(.subheadline.weight(.black))
                 .foregroundStyle(event.tint)
@@ -1953,8 +2074,29 @@ private struct CashHubFeedRow: View {
                         .foregroundStyle(.tertiary)
                 }
             }
+            }
+            .padding(.vertical, 2)
+            .padding(.horizontal, 2)
+            .background(Color(.systemBackground))
+            .offset(x: horizontalOffset)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if horizontalOffset == 0 { onSelect() }
+                else { withAnimation { horizontalOffset = 0 } }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 18)
+                    .onChanged { value in
+                        horizontalOffset = min(0, max(-82, value.translation.width))
+                    }
+                    .onEnded { value in
+                        withAnimation(.snappy) {
+                            horizontalOffset = value.translation.width < -42 ? -82 : 0
+                        }
+                    }
+            )
         }
-        .padding(.vertical, 2)
+        .frame(minHeight: 58)
     }
 
     @ViewBuilder
@@ -3254,6 +3396,7 @@ private struct CashHubRequestForm: View {
     @State private var pickupMapItem: MKMapItem?
     @State private var destinationMapItem: MKMapItem?
     @State private var route: MKRoute?
+    @State private var returnRoute: MKRoute?
     @State private var mapPosition: MapCameraPosition = .automatic
     @State private var isResolvingRoute = false
     @State private var routeMessage: String?
@@ -3311,6 +3454,9 @@ private struct CashHubRequestForm: View {
             .onChange(of: locationManager.lastLocation?.coordinate.latitude) { _, _ in
                 guard pickupMapItem == nil, let location = locationManager.lastLocation else { return }
                 Task { await useLocationAsPickup(location) }
+            }
+            .onChange(of: draft.tripFormat) { _, _ in
+                Task { await calculateRoute() }
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -3439,7 +3585,9 @@ private struct CashHubRequestForm: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             } else {
-                Text("Calculated from the live route at \(SuggestedPricing.perMile.formatted(.currency(code: "USD"))) per mile plus \(SuggestedPricing.perMinute.formatted(.currency(code: "USD"))) per minute.")
+                Text(draft.tripFormat == "Round trip"
+                     ? "Includes Point A → Point B → Point A at \(SuggestedPricing.perMile.formatted(.currency(code: "USD"))) per mile plus \(SuggestedPricing.perMinute.formatted(.currency(code: "USD"))) per minute."
+                     : "Calculated from the live route at \(SuggestedPricing.perMile.formatted(.currency(code: "USD"))) per mile plus \(SuggestedPricing.perMinute.formatted(.currency(code: "USD"))) per minute.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -3476,6 +3624,8 @@ private struct CashHubRequestForm: View {
                 HStack(spacing: 18) {
                     Button { draft.passengers = max(1, draft.passengers - 1) } label: {
                         Image(systemName: "minus")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .disabled(draft.passengers == 1)
                     Text("\(draft.passengers)")
@@ -3483,6 +3633,8 @@ private struct CashHubRequestForm: View {
                         .frame(minWidth: 22)
                     Button { draft.passengers = min(12, draft.passengers + 1) } label: {
                         Image(systemName: "plus")
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .disabled(draft.passengers == 12)
                 }
@@ -3576,13 +3728,13 @@ private struct CashHubRequestForm: View {
     }
 
     private var distanceText: String {
-        guard let route else { return "—" }
-        return String(format: "%.1f mi", route.distance / 1609.344)
+        guard route != nil else { return "—" }
+        return String(format: "%.1f mi", totalRouteDistance / 1609.344)
     }
 
     private var durationText: String {
-        guard let route else { return "—" }
-        return "\(Int((route.expectedTravelTime / 60).rounded())) min"
+        guard route != nil else { return "—" }
+        return "\(Int((totalRouteDuration / 60).rounded())) min"
     }
 
     private var suggestedPriceText: String {
@@ -3591,10 +3743,18 @@ private struct CashHubRequestForm: View {
     }
 
     private var suggestedAmount: Double? {
-        guard let route else { return nil }
-        let miles = route.distance / 1609.344
-        let minutes = route.expectedTravelTime / 60
+        guard route != nil else { return nil }
+        let miles = totalRouteDistance / 1609.344
+        let minutes = totalRouteDuration / 60
         return ((miles * SuggestedPricing.perMile + minutes * SuggestedPricing.perMinute) * 100).rounded() / 100
+    }
+
+    private var totalRouteDistance: CLLocationDistance {
+        (route?.distance ?? 0) + (draft.tripFormat == "Round trip" ? returnRoute?.distance ?? 0 : 0)
+    }
+
+    private var totalRouteDuration: TimeInterval {
+        (route?.expectedTravelTime ?? 0) + (draft.tripFormat == "Round trip" ? returnRoute?.expectedTravelTime ?? 0 : 0)
     }
 
     private var visibilityShortLabel: String {
@@ -3752,10 +3912,23 @@ private struct CashHubRequestForm: View {
                 return
             }
             route = resolvedRoute
+            if draft.tripFormat == "Round trip" {
+                let returnRequest = MKDirections.Request()
+                returnRequest.source = destinationMapItem
+                returnRequest.destination = pickupMapItem
+                returnRequest.transportType = .automobile
+                guard let resolvedReturnRoute = try await MKDirections(request: returnRequest).calculate().routes.first else {
+                    throw CashHubRoutePreviewError.returnRouteUnavailable
+                }
+                returnRoute = resolvedReturnRoute
+            } else {
+                returnRoute = nil
+            }
             mapPosition = .rect(resolvedRoute.polyline.boundingMapRect)
             applySuggestedContribution()
         } catch {
             route = nil
+            returnRoute = nil
             routeMessage = "A driving route could not be calculated right now."
         }
         isResolvingRoute = false
@@ -3772,6 +3945,7 @@ private struct CashHubRequestForm: View {
 
     private func invalidateRouteSuggestion() {
         route = nil
+        returnRoute = nil
         if draft.budgetRange == lastSuggestedBudget {
             draft.budgetRange = ""
         }
@@ -3795,6 +3969,10 @@ private struct CashHubRequestForm: View {
             routeMessage = "Your current pickup location could not be resolved."
         }
     }
+}
+
+private enum CashHubRoutePreviewError: Error {
+    case returnRouteUnavailable
 }
 
 private struct CashHubOfferForm: View {

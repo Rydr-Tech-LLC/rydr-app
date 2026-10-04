@@ -336,18 +336,42 @@ private final class DriverCashRydrHubVM: ObservableObject {
         return true
     }
 
-    func accept(_ request: DriverCashRideRequest, driverName: String) {
+    func accept(_ request: DriverCashRideRequest, driverName: String, completion: @escaping (DriverCashRideRequest?) -> Void) {
         guard let uid = Auth.auth().currentUser?.uid else {
             errorMessage = "Sign in before connecting with a rider."
+            completion(nil)
             return
         }
         guard request.isOpenForCurrentDriver else {
             errorMessage = "This request is already connected."
+            completion(nil)
             return
         }
 
         let authorName = displayName(driverName)
-        Task { [weak self] in do { try await RydrBackendService.cashHubCommand(requestId:request.id,action:"driver_connect",body:["driverName":authorName]);await MainActor.run{self?.confirmationMessage="You are now connected with \(request.riderName)."};try await RydrBackendService.cashHubMessage(conversationId:driverCashHubConversationId(requestId:request.id,driverUid:uid),text:"I connected on this Cash Hub listing. Please confirm any final pickup details before the requested time.",kind:"directMessage") } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+        Task { [weak self] in
+            do {
+                try await RydrBackendService.cashHubCommand(requestId:request.id,action:"driver_connect",body:["driverName":authorName])
+                var connectedRequest = request
+                connectedRequest.status = "connected"
+                connectedRequest.driverQueueStatus = "scheduled"
+                connectedRequest.connectedDriverUid = uid
+                connectedRequest.connectedDriverName = authorName
+                if let price = Double(request.budgetRange.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")) {
+                    connectedRequest.agreedPrice = price
+                }
+                await MainActor.run {
+                    self?.confirmationMessage = nil
+                    completion(connectedRequest)
+                }
+                try await RydrBackendService.cashHubMessage(conversationId:driverCashHubConversationId(requestId:request.id,driverUid:uid),text:"I connected on this Cash Hub listing. Please confirm any final pickup details before the requested time.",kind:"directMessage")
+            } catch {
+                await MainActor.run {
+                    self?.errorMessage = error.localizedDescription
+                    completion(nil)
+                }
+            }
+        }
     }
 
     func updateQueueStatus(_ request: DriverCashRideRequest, status: String) {
@@ -749,11 +773,13 @@ struct DriverCashRydrHubView: View {
         ) {
             Button("Connect with Rider") {
                 if let acceptingRequest {
-                    vm.accept(acceptingRequest, driverName: session.driverName)
-                    acceptedRideRequest = acceptingRequest
+                    vm.accept(acceptingRequest, driverName: session.driverName) { connectedRequest in
+                        guard let connectedRequest else { return }
+                        acceptedRideRequest = connectedRequest
+                        selectedTab = .scheduled
+                    }
                 }
                 acceptingRequest = nil
-                selectedTab = .scheduled
             }
             Button("Cancel", role: .cancel) { acceptingRequest = nil }
         } message: {
@@ -848,6 +874,8 @@ struct DriverCashRydrHubView: View {
                     request: request,
                     responses: vm.responsesByRequest[request.id] ?? [],
                     onViewDetails: { selectedScheduledRide = request },
+                    onMessage: { messagingRequest = request },
+                    onNavigate: { activeRideRequest = request },
                     onRelease: { releasingRequest = request }
                 )
             }
@@ -1459,6 +1487,8 @@ private struct DriverCashScheduledCard: View {
     let request: DriverCashRideRequest
     let responses: [DriverCashHubResponse]
     let onViewDetails: () -> Void
+    let onMessage: () -> Void
+    let onNavigate: () -> Void
     let onRelease: () -> Void
 
     var body: some View {
@@ -1473,6 +1503,12 @@ private struct DriverCashScheduledCard: View {
                 Button("View Details", action: onViewDetails)
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
+                Button("Trip Chat", action: onMessage)
+                    .buttonStyle(.bordered)
+            }
+            HStack {
+                Button("Rydr Map", action: onNavigate)
+                    .buttonStyle(.bordered)
                 Button("Release", role: .destructive, action: onRelease)
                     .buttonStyle(.bordered)
             }

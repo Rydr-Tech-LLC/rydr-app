@@ -40,6 +40,10 @@ struct MainTabView: View {
                 showRecoveredRide = false
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .riderNotificationRouteRequested)) { notification in
+            guard (notification.userInfo?["target"] as? String) == "cashHub" else { return }
+            session.selectedTab = .cashHub
+        }
         .fullScreenCover(isPresented: $showRecoveredRide, onDismiss: {
             rideManager.hasRecoveredActiveRide = false
         }) {

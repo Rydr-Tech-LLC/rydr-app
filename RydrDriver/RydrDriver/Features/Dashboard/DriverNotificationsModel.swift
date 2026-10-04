@@ -30,6 +30,7 @@ struct DriverNotificationItem: Identifiable, Equatable {
     let source: DriverNotificationSource
     let priority: DriverNotificationPriority
     let relatedId: String?
+    let target: String?
 
     init(
         id: String,
@@ -40,7 +41,8 @@ struct DriverNotificationItem: Identifiable, Equatable {
         isRead: Bool,
         source: DriverNotificationSource,
         priority: DriverNotificationPriority = .normal,
-        relatedId: String? = nil
+        relatedId: String? = nil,
+        target: String? = nil
     ) {
         self.id = id
         self.type = type
@@ -51,6 +53,7 @@ struct DriverNotificationItem: Identifiable, Equatable {
         self.source = source
         self.priority = priority
         self.relatedId = relatedId
+        self.target = target
     }
 
     nonisolated init(document: QueryDocumentSnapshot) {
@@ -69,6 +72,7 @@ struct DriverNotificationItem: Identifiable, Equatable {
             ?? data["requestId"] as? String
             ?? data["penaltyId"] as? String
             ?? data["appealId"] as? String
+        target = data["target"] as? String
     }
 
     var icon: String {

@@ -272,6 +272,7 @@ private extension RiderNotificationItem {
 struct NotificationView: View {
     @StateObject private var vm = RiderNotificationInboxViewModel()
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -423,6 +424,14 @@ struct NotificationView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             vm.markRead(item)
+            guard item.target == "cashHub" else { return }
+            var route: [AnyHashable: Any] = ["type": item.type, "target": item.target]
+            if let requestId = item.requestId { route["requestId"] = requestId }
+            if let chatId = item.chatId { route["chatId"] = chatId }
+            dismiss()
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .riderNotificationRouteRequested, object: nil, userInfo: route)
+            }
         }
     }
 

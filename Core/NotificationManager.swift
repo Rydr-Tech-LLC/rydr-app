@@ -10,6 +10,10 @@ import FirebaseMessaging
 import UIKit
 import UserNotifications
 
+extension Notification.Name {
+    static let riderNotificationRouteRequested = Notification.Name("rydr.rider.notificationRouteRequested")
+}
+
 final class NotificationManager {
     static let shared = NotificationManager()
 
@@ -100,7 +104,9 @@ final class NotificationManager {
     func handleNotificationTap(_ userInfo: [AnyHashable: Any]) {
         let route = NotificationRoute(userInfo: userInfo)
         Self.log("notification_tap", route.logFields)
-        // Routing hook: future navigation can observe this parsed route and open the target screen.
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .riderNotificationRouteRequested, object: nil, userInfo: route.userInfo)
+        }
     }
 
     private func saveTokenIfAuthenticated(_ token: String) async {
@@ -272,6 +278,8 @@ struct NotificationRoute {
         if let chatId { fields["chatId"] = chatId }
         return fields
     }
+
+    var userInfo: [AnyHashable: Any] { logFields }
 
     private static func stringValue(_ value: Any?) -> String {
         optionalStringValue(value) ?? "unknown"

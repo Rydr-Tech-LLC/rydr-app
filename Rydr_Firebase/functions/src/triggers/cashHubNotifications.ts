@@ -88,7 +88,6 @@ export const onCashHubMessageCreated = onDocumentCreated("cashHubConversations/{
     return;
   }
   if (message.kind === "priceAccepted") return;
-  if (["cancelled", "completed", "declined", "released", "removed", "ended", "expired", "unavailable"].includes(conversation.status ?? "")) return;
 
   if ((message.kind === "offerDeclined" || message.kind === "chatEnded") && message.recipientUid) {
     const audience = message.recipientUid === conversation.driverUid ? "driver" : "rider";
@@ -101,6 +100,7 @@ export const onCashHubMessageCreated = onDocumentCreated("cashHubConversations/{
     });
     return;
   }
+  if (["cancelled", "completed", "declined", "released", "removed", "ended", "expired", "unavailable"].includes(conversation.status ?? "")) return;
 
   const senderIsRider = message.senderUid === conversation.riderUid || message.senderRole === "rider";
   await conversationSnap.ref.set({ updatedAt: FieldValue.serverTimestamp() }, { merge: true });

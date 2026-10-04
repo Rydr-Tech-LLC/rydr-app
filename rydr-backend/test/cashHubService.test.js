@@ -20,6 +20,7 @@ const {
   eligibleDriverAudience,
   distanceMilesBetween,
   suggestedContribution,
+  combinedRouteTotals,
   validateLifecycleEvidence,
   PUBLIC_VISIBILITY,
   FAVORITES_VISIBILITY
@@ -58,6 +59,16 @@ test("favorite-only Cash Hub requests reject drivers outside the backend-owned a
 test("Cash Hub computes its server-owned route suggestion from the fixed marketplace rates", () => {
   assert.equal(suggestedContribution(2.3, 8), 4.31);
   assert.equal(suggestedContribution(-1, 8), null);
+});
+
+test("Cash Hub round trips include both route legs", () => {
+  assert.deepEqual(
+    combinedRouteTotals(
+      { distanceMiles: 3.1, durationMinutes: 12 },
+      { distanceMiles: 3.4, durationMinutes: 14 }
+    ),
+    { distanceMiles: 6.5, durationMinutes: 26 }
+  );
 });
 
 test("Cash Hub audience distance is calculated in miles", () => {

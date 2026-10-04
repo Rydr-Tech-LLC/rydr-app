@@ -1984,6 +1984,10 @@ struct DriverDashboardView: View {
             vm.startDashboard()
         }
         .sheet(item: $activeSheet, content: sheetContent(_:))
+        .onReceive(NotificationCenter.default.publisher(for: .driverNotificationRouteRequested)) { notification in
+            guard (notification.userInfo?["target"] as? String) == "cashHub" else { return }
+            activeSheet = .menu(.cashRydrHub)
+        }
         .fullScreenCover(isPresented: Binding(
             get: { vm.activeRide != nil },
             set: { _ in }

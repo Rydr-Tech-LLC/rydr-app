@@ -54,6 +54,13 @@ function suggestedContribution(distanceMiles, durationMinutes) {
   if (!Number.isFinite(miles) || miles < 0 || !Number.isFinite(minutes) || minutes < 0) return null;
   return Math.round((miles * CASH_HUB_SUGGESTED_PER_MILE + minutes * CASH_HUB_SUGGESTED_PER_MINUTE) * 100) / 100;
 }
+function combinedRouteTotals(outboundRoute, returnRoute = null) {
+  const routes = [outboundRoute, returnRoute].filter(Boolean);
+  return routes.reduce((totals, route) => ({
+    distanceMiles: totals.distanceMiles + Number(route.distanceMiles || 0),
+    durationMinutes: totals.durationMinutes + Number(route.durationMinutes || 0)
+  }), { distanceMiles: 0, durationMinutes: 0 });
+}
 function date(value) { const d = new Date(value); return Number.isFinite(d.getTime()) ? admin.firestore.Timestamp.fromDate(d) : null; }
 function timestampMillis(value) {
   if (!value) return null;
@@ -110,7 +117,7 @@ async function eligibleDriverAudience(db, pickupCoordinate, visibility, favorite
   }).map((doc) => doc.id).slice(0, CASH_HUB_AUDIENCE_LIMIT);
 }
 
-async function routeEvidence(payload, scheduledTime) {
+async function routeEvidence(payload, scheduledTime, tripFormat = "One-way") {
   const pickupCoordinate = coordinate(payload?.pickupCoordinate);
   const destinationCoordinate = coordinate(payload?.destinationCoordinate);
   if (!pickupCoordinate || !destinationCoordinate) return {};
@@ -120,14 +127,26 @@ async function routeEvidence(payload, scheduledTime) {
     departureDate: scheduledTime.toDate().toISOString()
   });
   const route = result.route;
+  let returnRoute = null;
+  let returnRouteProvider = null;
+  if (tripFormat === "Round trip") {
+    const returnResult = await getDirections({
+      origin: destinationCoordinate,
+      destination: pickupCoordinate,
+      departureDate: new Date(scheduledTime.toDate().getTime() + route.durationMinutes * 60 * 1000).toISOString()
+    });
+    returnRoute = returnResult.route;
+    returnRouteProvider = returnResult.provider;
+  }
+  const { distanceMiles, durationMinutes } = combinedRouteTotals(route, returnRoute);
   return {
     pickupCoordinate,
     destinationCoordinate,
-    routeDistanceMiles: Math.round(route.distanceMiles * 100) / 100,
-    routeDurationMinutes: Math.round(route.durationMinutes * 10) / 10,
-    suggestedContribution: suggestedContribution(route.distanceMiles, route.durationMinutes),
+    routeDistanceMiles: Math.round(distanceMiles * 100) / 100,
+    routeDurationMinutes: Math.round(durationMinutes * 10) / 10,
+    suggestedContribution: suggestedContribution(distanceMiles, durationMinutes),
     suggestedPricing: { perMile: CASH_HUB_SUGGESTED_PER_MILE, perMinute: CASH_HUB_SUGGESTED_PER_MINUTE },
-    routeProvider: result.provider,
+    routeProvider: returnRouteProvider ? `${result.provider}+${returnRouteProvider}` : result.provider,
     routeCalculatedAt: admin.firestore.Timestamp.now()
   };
 }
@@ -504,7 +523,7 @@ async function createCashHubRequest({ uid, payload, db = getFirestore(), nowMill
   const fields = requestFields(payload, nowMillis);
   const allowedDriverUids = fields.visibility === FAVORITES_VISIBILITY ? await favoriteDriverUids(db, uid) : [];
   if (fields.visibility === FAVORITES_VISIBILITY && allowedDriverUids.length === 0) throw error("Add at least one favorite driver before using favorite-only visibility", 409);
-  const evidence = await routeEvidence(payload, fields.scheduledTime);
+  const evidence = await routeEvidence(payload, fields.scheduledTime, fields.tripFormat);
   const eligibleDriverUids = await eligibleDriverAudience(db, evidence.pickupCoordinate, fields.visibility, allowedDriverUids);
   const ref = db.collection("cashRydrRequests").doc();
   const now = admin.firestore.Timestamp.fromMillis(nowMillis);
@@ -549,7 +568,7 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
   let preparedVisibility = null;
   if (action === "edit") {
     const fields = requestFields(payload, nowMillis);
-    const evidence = await routeEvidence(payload, fields.scheduledTime);
+    const evidence = await routeEvidence(payload, fields.scheduledTime, fields.tripFormat);
     preparedEdit = {
       ...fields,
       ...evidence,
@@ -630,7 +649,7 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
       await closeCompetingCashHubNegotiations({ tx, db, requestId, selectedConversationId, riderUid:request.riderUid, selectedDriverUid:uid, now });
       update = { ...update, status: "connected", driverQueueStatus: "scheduled", connectedDriverUid: uid, connectedDriverName: driverName, connectedVehicleInfo: vehicleInfo, acceptedByUid: uid, acceptedByName: driverName, connectedAt: now, acceptedAt: now, expiresAt: admin.firestore.Timestamp.fromMillis((timestampMillis(request.scheduledTime) || nowMillis) + 24 * 60 * 60 * 1000) };
       const agreed = amount(request.budgetRange); if (agreed !== null) update.agreedPrice = agreed;
-      tx.set(db.collection("cashHubConversations").doc(`${requestId}_${uid}`), { requestId, riderUid: request.riderUid, riderName: request.riderName, driverUid: uid, driverName, vehicleInfo, participants: [request.riderUid, uid].sort(), status: "connected", offerStatus: "accepted", cashHubOnly: true, managedByRydr: false, paymentHandledBy: "rider_driver_direct", channelOwner: "rydr_backend", createdAt: now, updatedAt: now }, { merge: true });
+      tx.set(db.collection("cashHubConversations").doc(`${requestId}_${uid}`), { requestId, riderUid: request.riderUid, riderName: request.riderName, driverUid: uid, driverName, vehicleInfo, participants: [request.riderUid, uid].sort(), status: "connected", offerStatus: "accepted", chatStatus: "active", cashHubOnly: true, managedByRydr: false, paymentHandledBy: "rider_driver_direct", channelOwner: "rydr_backend", createdAt: now, updatedAt: now }, { merge: true });
     } else if (action === "accept_offer") {
       if (request.status !== "open") throw error("Request is already connected", 409);
       const offerId = text(payload?.offerId, 160);
@@ -644,7 +663,7 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
       await closeCompetingCashHubNegotiations({ tx, db, requestId, selectedConversationId:offerId, riderUid:request.riderUid, selectedDriverUid:offer.driverUid, now });
       update = { ...update, status: "connected", driverQueueStatus: "scheduled", connectedDriverUid: offer.driverUid, connectedDriverName: offer.driverName, connectedVehicleInfo: offer.vehicleInfo, acceptedByUid: offer.driverUid, acceptedByName: offer.driverName, selectedOfferId: offerId, connectedAt: now, acceptedAt: now, expiresAt: admin.firestore.Timestamp.fromMillis((timestampMillis(request.scheduledTime) || nowMillis) + 24 * 60 * 60 * 1000) };
       if (amount(offer.offerAmount) !== null) update.agreedPrice = amount(offer.offerAmount);
-      tx.set(conversationRef, { status: "connected", offerStatus: "accepted", connectedAt: now, updatedAt: now }, { merge: true });
+      tx.set(conversationRef, { status: "connected", offerStatus: "accepted", chatStatus: "active", connectedAt: now, updatedAt: now }, { merge: true });
     } else if (action === "decline_offer") {
       const offerId = text(payload?.offerId, 160);
       if (!offerId) throw error("Offer ID is required", 400);
@@ -864,6 +883,6 @@ async function commandCashHubConversation({ uid, conversationId, action, payload
 module.exports = {
   acceptCashHubTerms, optOutCashHub, createCashHubRequest, commandCashHubRequest, createCashHubOffer, sendCashHubMessage, commandCashHubConversation, updateCashHubRelationship,
   normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, isCashHubConnectedStatus, cashHubRemovalUpdate, cashHubReleaseVisibilityUpdate, cashHubRiderCancellationUpdate, cashHubActionRequiresActiveAccess, normalizeCashHubOffer, cashHubOfferOpeningMessage, cashHubAccessAllowed,
-  coordinate, distanceMilesBetween, suggestedContribution, validateLifecycleEvidence, eligibleDriverAudience,
+  coordinate, distanceMilesBetween, suggestedContribution, combinedRouteTotals, validateLifecycleEvidence, eligibleDriverAudience,
   PUBLIC_VISIBILITY, FAVORITES_VISIBILITY, MINIMUM_LEAD_TIME_MS
 };

@@ -1750,6 +1750,11 @@ struct DriverNotificationsView: View {
                         ForEach(vm.driverNotifications) { notification in
                             DriverNotificationRow(notification: notification) {
                                 vm.markNotificationRead(notification)
+                                if notification.target == "cashHub" {
+                                    var route: [AnyHashable: Any] = ["type": notification.type, "target": "cashHub"]
+                                    if let requestId = notification.relatedId { route["requestId"] = requestId }
+                                    NotificationCenter.default.post(name: .driverNotificationRouteRequested, object: nil, userInfo: route)
+                                }
                             } onDismiss: {
                                 vm.dismissNotification(notification)
                             }
