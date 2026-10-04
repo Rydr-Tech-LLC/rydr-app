@@ -527,6 +527,19 @@ private final class CashRydrHubVM: ObservableObject {
         Task { [weak self] in do { try await RiderSafetyBackend.submit(payload);await MainActor.run{self?.confirmationMessage="Driver reported to Rydr safety support."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
+    func reportConnectedListingProblem(_ request: CashRydrRequest) {
+        guard Auth.auth().currentUser != nil else {
+            errorMessage = "Please log in to report a problem."
+            return
+        }
+        let payload: [String: Any] = [
+            "reportType": "Cash Hub connected listing problem",
+            "cashHubRequestId": request.id,
+            "description": "Rider reported a problem with a connected Cash Hub listing."
+        ]
+        Task { [weak self] in do { try await RiderSafetyBackend.submit(payload);await MainActor.run{self?.confirmationMessage="Problem reported to Rydr safety support."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+    }
+
     func addFavoriteDriver(from offer: CashHubResponse) {
         guard Auth.auth().currentUser != nil else {
             errorMessage = "Please log in to save favorite drivers."
@@ -1214,11 +1227,19 @@ struct CashRydrHubView: View {
                 offer: vm.selectedOffer(for: request),
                 onMessage: {
                     viewingConnection = nil
-                    messagingContext = CashHubMessageContext(request: request, mode: .directConnection, offer: vm.selectedOffer(for: request))
+                    DispatchQueue.main.async {
+                        messagingContext = CashHubMessageContext(request: request, mode: .directConnection, offer: vm.selectedOffer(for: request))
+                    }
                 },
                 onCancel: {
                     viewingConnection = nil
                     requestPendingCancellation = request
+                },
+                onReportProblem: { vm.reportConnectedListingProblem(request) },
+                onReportDriver: {
+                    if let offer = vm.selectedOffer(for: request) {
+                        vm.reportDriver(offer, for: request)
+                    }
                 }
             )
         }
@@ -3336,44 +3357,216 @@ private struct CashHubAcceptedRequestView: View {
     let offer: CashHubResponse?
     let onMessage: () -> Void
     let onCancel: () -> Void
+    let onReportProblem: () -> Void
+    let onReportDriver: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Driver") {
-                    LabeledContent("Name", value: request.connectedDriverName ?? "Connected driver")
-                    if let vehicleInfo = offer?.vehicleInfo {
-                        LabeledContent("Vehicle", value: vehicleInfo)
+            ScrollView {
+                VStack(spacing: 18) {
+                    connectionHero
+                    driverCard
+                    tripCard
+                    connectionNotice
+
+                    Button {
+                        onMessage()
+                    } label: {
+                        Label("Open trip chat", systemImage: "bubble.left.fill")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                            .background(Capsule().fill(Styles.rydrGradient))
                     }
+                    .buttonStyle(.plain)
                 }
-                Section("Request") {
-                    LabeledContent("Pickup", value: request.pickup)
-                    LabeledContent("Destination", value: request.destination)
-                    LabeledContent("Requested time", value: request.scheduledTime.formatted(date: .abbreviated, time: .shortened))
-                    if let driverQueueStatus = request.driverQueueStatus, !driverQueueStatus.isEmpty {
-                        LabeledContent("Driver status", value: driverQueueStatus.capitalized)
-                    }
-                    if let amount = request.agreedPrice {
-                        LabeledContent("Agreed price", value: amount.formatted(.currency(code: "USD")))
-                    }
-                }
-                Section {
-                    Text("This is a Cash Rydr Hub connection, not a Rydr-dispatched ride. Please confirm all details directly with the driver.")
-                        .font(.footnote)
-                }
-                Section {
-                    Button("Open Trip Chat", action: onMessage)
-                    Button("Cancel Listing", role: .destructive, action: onCancel)
-                }
+                .padding(18)
             }
-            .navigationTitle("Connected Request")
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Connection confirmed")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left").font(.headline.weight(.bold))
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button(role: .destructive, action: onCancel) {
+                            Label("Cancel Listing", systemImage: "xmark.circle")
+                        }
+                        Button(action: onReportProblem) {
+                            Label("Report a Problem", systemImage: "exclamationmark.bubble")
+                        }
+                        Button(role: .destructive, action: onReportDriver) {
+                            Label("Report Driver", systemImage: "person.crop.circle.badge.exclamationmark")
+                        }
+                        .disabled(offer == nil)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.title2.weight(.black))
+                            .frame(width: 44, height: 44)
+                    }
                 }
             }
         }
+    }
+
+    private var connectionHero: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle().fill(Color.green.opacity(0.16)).frame(width: 92, height: 92)
+                Circle().fill(Color.green).frame(width: 68, height: 68)
+                Image(systemName: "checkmark").font(.system(size: 34, weight: .black)).foregroundStyle(.white)
+            }
+            Text("You’re Connected")
+                .font(.largeTitle.weight(.black))
+            Text("\(driverName) accepted your CashRydr Trip Post.")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Label("SCHEDULED", systemImage: "calendar")
+                .font(.caption.weight(.black))
+                .foregroundStyle(.red)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(Color.red.opacity(0.10)))
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var driverCard: some View {
+        HStack(spacing: 14) {
+            Circle()
+                .fill(Styles.rydrGradient)
+                .frame(width: 72, height: 72)
+                .overlay(Text(initials).font(.title2.weight(.black)).foregroundStyle(.white))
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text(driverName).font(.title3.weight(.black))
+                    if offer?.isRydrVerifiedDriver == true {
+                        Image(systemName: "checkmark.seal.fill").foregroundStyle(.blue)
+                    }
+                }
+                if let rating = offer?.cashHubRating {
+                    Label(String(format: "%.1f Cash Hub rating", rating), systemImage: "star.fill")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                if let vehicle = offer?.vehicleInfo, !vehicle.isEmpty {
+                    Label(vehicle, systemImage: "car.side.fill")
+                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer()
+            Button(action: onMessage) {
+                VStack(spacing: 5) {
+                    Image(systemName: "bubble.left.fill").font(.title3)
+                        .frame(width: 48, height: 48).background(Circle().fill(Color.red.opacity(0.09)))
+                    Text("Chat").font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(.red)
+            }
+            .buttonStyle(.plain)
+        }
+        .cashHubPremiumCard()
+    }
+
+    private var tripCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Your trip").font(.title2.weight(.black))
+            CashHubConnectedRoutePreview(pickup: request.pickup, destination: request.destination)
+            connectedAddress(request.pickup, icon: "mappin.circle.fill", color: .green)
+            connectedAddress(request.destination, icon: "mappin.circle.fill", color: .red)
+            HStack(spacing: 8) {
+                connectedPill(request.scheduledTime.formatted(date: .abbreviated, time: .shortened), icon: "calendar")
+                connectedPill("\(request.passengers) rider\(request.passengers == 1 ? "" : "s")", icon: "person.2.fill")
+            }
+            Divider()
+            HStack {
+                Label("Agreed contribution", systemImage: "dollarsign.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(agreedPriceText).font(.title2.weight(.black))
+            }
+        }
+        .cashHubPremiumCard()
+    }
+
+    private var connectionNotice: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "shield.lefthalf.filled").font(.title).foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("CashRydr Hub connection").font(.headline.weight(.bold))
+                Text("This is a direct connection, not a Rydr-dispatched ride. Confirm pickup, payment, and trip details with \(driverName) in chat.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 20).fill(Color.blue.opacity(0.09)))
+    }
+
+    private func connectedAddress(_ value: String, icon: String, color: Color) -> some View {
+        Label(value, systemImage: icon).font(.headline).foregroundStyle(.primary)
+            .symbolRenderingMode(.palette).foregroundStyle(color, color.opacity(0.15))
+    }
+
+    private func connectedPill(_ value: String, icon: String) -> some View {
+        Label(value, systemImage: icon)
+            .font(.caption.weight(.bold)).lineLimit(1).minimumScaleFactor(0.75)
+            .padding(.horizontal, 10).padding(.vertical, 9)
+            .background(RoundedRectangle(cornerRadius: 11).fill(Color(.secondarySystemGroupedBackground)))
+    }
+
+    private var driverName: String { request.connectedDriverName ?? offer?.authorName ?? "Your driver" }
+    private var initials: String {
+        driverName.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
+    }
+    private var agreedPriceText: String {
+        if let price = request.agreedPrice { return price.formatted(.currency(code: "USD")) }
+        return request.budgetRange.isEmpty ? "Cash" : request.budgetRange
+    }
+}
+
+private struct CashHubConnectedRoutePreview: View {
+    let pickup: String
+    let destination: String
+    @State private var position: MapCameraPosition = .automatic
+    @State private var start: CLLocationCoordinate2D?
+    @State private var end: CLLocationCoordinate2D?
+    @State private var route: MKRoute?
+
+    var body: some View {
+        Map(position: $position, interactionModes: []) {
+            if let start { Marker("Pickup", coordinate: start).tint(.green) }
+            if let end { Marker("Drop-off", coordinate: end).tint(.red) }
+            if let route { MapPolyline(route.polyline).stroke(Styles.rydrGradient, lineWidth: 5) }
+        }
+        .frame(height: 180)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .task(id: pickup + destination) { await resolveRoute() }
+    }
+
+    private func resolveRoute() async {
+        guard let startItem = try? await MKLocalSearch(request: searchRequest(pickup)).start().mapItems.first,
+              let endItem = try? await MKLocalSearch(request: searchRequest(destination)).start().mapItems.first else { return }
+        let request = MKDirections.Request()
+        request.source = startItem
+        request.destination = endItem
+        request.transportType = .automobile
+        guard let response = try? await MKDirections(request: request).calculate(), let resolved = response.routes.first else { return }
+        start = startItem.placemark.coordinate
+        end = endItem.placemark.coordinate
+        route = resolved
+        position = .rect(resolved.polyline.boundingMapRect.insetBy(dx: -resolved.polyline.boundingMapRect.width * 0.12, dy: -resolved.polyline.boundingMapRect.height * 0.25))
+    }
+
+    private func searchRequest(_ query: String) -> MKLocalSearch.Request {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        return request
     }
 }
 

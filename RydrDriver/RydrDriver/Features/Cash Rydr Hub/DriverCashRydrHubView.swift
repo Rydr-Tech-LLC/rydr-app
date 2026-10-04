@@ -407,6 +407,20 @@ private final class DriverCashRydrHubVM: ObservableObject {
         Task { [weak self] in do { try await RydrBackendService.submitSafetyReport(payload);await MainActor.run{self?.confirmationMessage="Post reported to Rydr safety support."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
+    func reportRider(_ request: DriverCashRideRequest) {
+        guard Auth.auth().currentUser != nil else {
+            errorMessage = "Sign in before reporting a rider."
+            return
+        }
+        let payload: [String: Any] = [
+            "reportType": "Cash Hub rider report",
+            "cashHubRequestId": request.id,
+            "reportedUserUid": request.riderUid,
+            "description": "Driver reported the rider on a connected Cash Hub listing."
+        ]
+        Task { [weak self] in do { try await RydrBackendService.submitSafetyReport(payload);await MainActor.run{self?.confirmationMessage="Rider reported to Rydr safety support."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
+    }
+
     func endChat(_ request: DriverCashRideRequest) {
         guard let uid = Auth.auth().currentUser?.uid else {
             errorMessage = "Sign in before ending a chat."
@@ -747,7 +761,10 @@ struct DriverCashRydrHubView: View {
             DriverCashScheduledDetailView(
                 request: request,
                 onBack: { selectedScheduledRide = nil },
-                onMessage: { messagingRequest = request },
+                onMessage: {
+                    selectedScheduledRide = nil
+                    DispatchQueue.main.async { messagingRequest = request }
+                },
                 onStartRide: {
                     selectedScheduledRide = nil
                     activeRideRequest = request
@@ -760,7 +777,9 @@ struct DriverCashRydrHubView: View {
                 onCancel: {
                     selectedScheduledRide = nil
                     releasingRequest = request
-                }
+                },
+                onReportProblem: { vm.reportRequest(request) },
+                onReportRider: { vm.reportRider(request) }
             )
         }
         .confirmationDialog(
@@ -1612,9 +1631,9 @@ private struct DriverCashAcceptedRideView: View {
                 .animation(.spring(response: 0.45, dampingFraction: 0.72), value: animate)
 
                 VStack(spacing: 8) {
-                    Text("Connected")
+                    Text("You’re Connected")
                         .font(.largeTitle.weight(.black))
-                    Text("You and \(request.riderName) are connected on this listing.")
+                    Text("You’re connected to this CashRydr Trip Post.")
                         .font(.headline)
                         .foregroundStyle(.secondary)
                 }
@@ -1683,30 +1702,52 @@ private struct DriverCashScheduledDetailView: View {
     var onArrived: () -> Void
     var onComplete: () -> Void
     var onCancel: () -> Void
+    var onReportProblem: () -> Void
+    var onReportRider: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State private var displayedStatus: String
+
+    init(
+        request: DriverCashRideRequest,
+        onBack: @escaping () -> Void,
+        onMessage: @escaping () -> Void,
+        onStartRide: @escaping () -> Void,
+        onArrived: @escaping () -> Void,
+        onComplete: @escaping () -> Void,
+        onCancel: @escaping () -> Void,
+        onReportProblem: @escaping () -> Void,
+        onReportRider: @escaping () -> Void
+    ) {
+        self.request = request
+        self.onBack = onBack
+        self.onMessage = onMessage
+        self.onStartRide = onStartRide
+        self.onArrived = onArrived
+        self.onComplete = onComplete
+        self.onCancel = onCancel
+        self.onReportProblem = onReportProblem
+        self.onReportRider = onReportRider
+        _displayedStatus = State(initialValue: request.driverQueueStatus)
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
+                    connectionHero
                     riderHeader
                     routeCard
                     actionCard
-
-                    Button("Release Listing", role: .destructive) {
-                        onCancel()
-                        dismiss()
-                    }
-                    .font(.headline.weight(.bold))
-                    .padding(.top, 4)
+                    connectionNotice
                 }
-                .padding()
+                .padding(18)
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Connected Listing")
+            .navigationTitle("Connection confirmed")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button {
                         onBack()
                         dismiss()
@@ -1715,24 +1756,73 @@ private struct DriverCashScheduledDetailView: View {
                             .font(.headline.weight(.bold))
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            displayedStatus = "completed"
+                            onComplete()
+                            dismiss()
+                        } label: {
+                            Label("Close Listing", systemImage: "checkered.flag")
+                        }
+                        Button(action: onReportProblem) {
+                            Label("Report a Problem", systemImage: "exclamationmark.bubble")
+                        }
+                        Button(role: .destructive) {
+                            onCancel()
+                            dismiss()
+                        } label: {
+                            Label("Release Connection", systemImage: "person.crop.circle.badge.minus")
+                        }
+                        Button(role: .destructive, action: onReportRider) {
+                            Label("Report Rider", systemImage: "person.crop.circle.badge.exclamationmark")
+                        }
+                        Button(action: openOwnNavigation) {
+                            Label("Use Own Navigation", systemImage: "arrow.triangle.turn.up.right.diamond")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.title2.weight(.black))
+                            .frame(width: 44, height: 44)
+                    }
+                }
             }
         }
+    }
+
+    private var connectionHero: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle().fill(Color.green.opacity(0.16)).frame(width: 92, height: 92)
+                Circle().fill(Color.green).frame(width: 68, height: 68)
+                Image(systemName: "checkmark").font(.system(size: 34, weight: .black)).foregroundStyle(.white)
+            }
+            Text("You’re Connected")
+                .font(.largeTitle.weight(.black))
+            Text("You’re connected to this CashRydr Trip Post.")
+                .font(.headline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Label("SCHEDULED", systemImage: "calendar")
+                .font(.caption.weight(.black)).foregroundStyle(.red)
+                .padding(.horizontal, 18).padding(.vertical, 10)
+                .background(Capsule().fill(Color.red.opacity(0.10)))
+        }
+        .padding(.vertical, 6)
     }
 
     private var riderHeader: some View {
         HStack(spacing: 12) {
             Circle()
                 .fill(Styles.rydrGradient)
-                .frame(width: 54, height: 54)
+                .frame(width: 72, height: 72)
                 .overlay(
                     Text(initials)
-                        .font(.headline.weight(.black))
+                        .font(.title2.weight(.black))
                         .foregroundStyle(.white)
                 )
             VStack(alignment: .leading, spacing: 3) {
                 Text(request.riderName)
                     .font(.title3.weight(.black))
-                Text("Connected listing • \(request.scheduledTime.formatted(date: .abbreviated, time: .shortened))")
+                Text("\(request.passengers) rider\(request.passengers == 1 ? "" : "s")")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -1752,6 +1842,8 @@ private struct DriverCashScheduledDetailView: View {
 
     private var routeCard: some View {
         VStack(alignment: .leading, spacing: 16) {
+            Text("Connected trip").font(.title2.weight(.black))
+            DriverCashConnectedRoutePreview(request: request)
             DriverCashNavigationSummaryRow(
                 title: "Pickup",
                 address: request.pickup,
@@ -1764,6 +1856,10 @@ private struct DriverCashScheduledDetailView: View {
                 systemImage: "flag.checkered.circle.fill",
                 label: "Drop-off"
             )
+            HStack(spacing: 8) {
+                DriverCashConnectedPill(value: request.scheduledTime.formatted(date: .abbreviated, time: .shortened), icon: "calendar")
+                DriverCashConnectedPill(value: request.tripFormat, icon: "arrow.triangle.2.circlepath")
+            }
             if !request.notes.isEmpty {
                 Divider()
                 VStack(alignment: .leading, spacing: 4) {
@@ -1789,12 +1885,19 @@ private struct DriverCashScheduledDetailView: View {
     }
 
     private var actionCard: some View {
-        VStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Connection status").font(.title3.weight(.black))
+            DriverCashConnectionProgress(status: displayedStatus)
+
+            Text(statusGuidance)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
             Button {
                 onStartRide()
                 dismiss()
             } label: {
-                Text("Begin Route")
+                Label("Navigate to pickup", systemImage: "location.north.fill")
                     .font(.headline.weight(.bold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -1803,28 +1906,54 @@ private struct DriverCashScheduledDetailView: View {
             .tint(.red)
 
             Button {
+                displayedStatus = "arrived"
                 onArrived()
             } label: {
-                Text("I've Arrived")
+                Label("Mark as arrived", systemImage: "mappin.and.ellipse")
                     .font(.headline.weight(.bold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
             .buttonStyle(.bordered)
 
-            Button {
-                onComplete()
-                dismiss()
-            } label: {
-                Text("Mark Listing Closed")
+            Button(action: onMessage) {
+                Label("Open trip chat", systemImage: "bubble.left.and.bubble.right.fill")
                     .font(.headline.weight(.bold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
             .buttonStyle(.bordered)
-            .tint(.black)
         }
         .driverCashPremiumCard()
+    }
+
+    private var connectionNotice: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "shield.lefthalf.filled").font(.title).foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("CashRydr Hub connection").font(.headline.weight(.bold))
+                Text("This is a direct connection, not a Rydr-dispatched ride. Coordinate the trip and payment directly with \(request.riderName).")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 20).fill(Color.blue.opacity(0.09)))
+    }
+
+    private var statusGuidance: String {
+        switch displayedStatus.lowercased() {
+        case "arrived": return "You’re at the pickup. Confirm the rider and final trip details in chat."
+        case "started", "navigating": return "Navigation is active. Mark your arrival when you reach the pickup."
+        case "completed", "closed": return "This Cash Hub listing is closed."
+        default: return "Confirm final pickup and payment details with \(request.riderName) before leaving."
+        }
+    }
+
+    private func openOwnNavigation() {
+        let destination = request.pickup.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        if let url = URL(string: "http://maps.apple.com/?daddr=\(destination)&dirflg=d") {
+            openURL(url)
+        }
     }
 
     private var initials: String {
@@ -1843,6 +1972,91 @@ private struct DriverCashScheduledDetailView: View {
         }
         guard !request.budgetRange.isEmpty else { return "Cash" }
         return request.budgetRange.hasPrefix("$") ? request.budgetRange : "$\(request.budgetRange)"
+    }
+}
+
+private struct DriverCashConnectedPill: View {
+    let value: String
+    let icon: String
+    var body: some View {
+        Label(value, systemImage: icon)
+            .font(.caption.weight(.bold)).lineLimit(1).minimumScaleFactor(0.72)
+            .padding(.horizontal, 10).padding(.vertical, 9)
+            .background(RoundedRectangle(cornerRadius: 11).fill(Color(.secondarySystemGroupedBackground)))
+    }
+}
+
+private struct DriverCashConnectionProgress: View {
+    let status: String
+    private let stages = [("Connected", "checkmark"), ("Navigating", "location.north.fill"), ("Arrived", "mappin"), ("Closed", "flag.fill")]
+
+    private var activeIndex: Int {
+        switch status.lowercased() {
+        case "started", "navigating": return 1
+        case "arrived": return 2
+        case "completed", "closed": return 3
+        default: return 0
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(stages.enumerated()), id: \.offset) { index, stage in
+                VStack(spacing: 6) {
+                    Image(systemName: stage.1)
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(index <= activeIndex ? .white : .secondary)
+                        .frame(width: 38, height: 38)
+                        .background(Circle().fill(index <= activeIndex ? Color.green : Color(.systemGray5)))
+                    Text(stage.0).font(.caption2).foregroundStyle(index <= activeIndex ? .primary : .secondary)
+                }
+                if index < stages.count - 1 {
+                    Rectangle().fill(index < activeIndex ? Color.green : Color(.systemGray4)).frame(height: 2)
+                }
+            }
+        }
+    }
+}
+
+private struct DriverCashConnectedRoutePreview: View {
+    let request: DriverCashRideRequest
+    @State private var position: MapCameraPosition = .automatic
+    @State private var start: CLLocationCoordinate2D?
+    @State private var end: CLLocationCoordinate2D?
+    @State private var route: MKRoute?
+
+    var body: some View {
+        Map(position: $position, interactionModes: []) {
+            if let start { Marker("Pickup", coordinate: start).tint(.green) }
+            if let end { Marker("Drop-off", coordinate: end).tint(.red) }
+            if let route { MapPolyline(route.polyline).stroke(Styles.rydrGradient, lineWidth: 5) }
+        }
+        .frame(height: 180)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .task(id: request.id) { await resolveRoute() }
+    }
+
+    private func resolveRoute() async {
+        let startItem = await mapItem(coordinate: request.pickupCoordinate, query: request.pickup)
+        let endItem = await mapItem(coordinate: request.destinationCoordinate, query: request.destination)
+        guard let startItem, let endItem else { return }
+        let directionsRequest = MKDirections.Request()
+        directionsRequest.source = startItem
+        directionsRequest.destination = endItem
+        directionsRequest.transportType = .automobile
+        guard let response = try? await MKDirections(request: directionsRequest).calculate(), let resolved = response.routes.first else { return }
+        start = startItem.placemark.coordinate
+        end = endItem.placemark.coordinate
+        route = resolved
+        let rect = resolved.polyline.boundingMapRect
+        position = .rect(rect.insetBy(dx: -rect.width * 0.12, dy: -rect.height * 0.25))
+    }
+
+    private func mapItem(coordinate: CLLocationCoordinate2D?, query: String) async -> MKMapItem? {
+        if let coordinate { return MKMapItem(placemark: MKPlacemark(coordinate: coordinate)) }
+        let search = MKLocalSearch.Request()
+        search.naturalLanguageQuery = query
+        return try? await MKLocalSearch(request: search).start().mapItems.first
     }
 }
 
