@@ -1985,8 +1985,11 @@ struct DriverDashboardView: View {
         }
         .sheet(item: $activeSheet, content: sheetContent(_:))
         .onReceive(NotificationCenter.default.publisher(for: .driverNotificationRouteRequested)) { notification in
-            guard (notification.userInfo?["target"] as? String) == "cashHub" else { return }
-            activeSheet = .menu(.cashRydrHub)
+            switch notification.userInfo?["target"] as? String {
+            case "cashHub": activeSheet = .menu(.cashRydrHub)
+            case "scheduledRides": activeSheet = .menu(.scheduledRides)
+            default: break
+            }
         }
         .fullScreenCover(isPresented: Binding(
             get: { vm.activeRide != nil },

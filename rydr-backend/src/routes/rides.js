@@ -1,13 +1,34 @@
 const express = require("express");
 const { requireFirebaseAuth } = require("../middleware/firebaseAuth");
+const { requireFirebaseAppCheck } = require("../middleware/appCheck");
 const { transitionRide } = require("../services/rideLifecycleService");
 const { calculateAndStoreRideRouteEstimate } = require("../services/rideRouteService");
 const { initializeRideDispatch, refreshRideDispatch } = require("../services/rideDispatchService");
 const { recordRideTelemetry } = require("../services/rideTelemetryService");
 const { submitRideRating } = require("../services/rideRatingService");
+const { createRideRequest } = require("../services/rideRequestService");
+const { createRideMatchSession } = require("../services/rideMatchService");
 
 const router = express.Router();
 router.use(requireFirebaseAuth);
+router.use(requireFirebaseAppCheck);
+router.post("/match-session", async (req, res, next) => {
+  try {
+    res.status(201).json({ ok: true, ...(await createRideMatchSession({ riderId: req.firebaseUid, payload: req.body })) });
+  } catch (err) { next(err); }
+});
+router.post("/request", async (req, res, next) => {
+  try {
+    const result = await createRideRequest({
+      riderId: req.firebaseUid,
+      authorization: req.header("authorization"),
+      payload: req.body
+    });
+    res.status(result.duplicate ? 200 : 201).json({ ok: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
 router.post("/:rideId/telemetry", async (req, res, next) => {
   try {
     const result = await recordRideTelemetry({

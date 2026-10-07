@@ -23,6 +23,8 @@ export { onRydrBankCodeCreated, onRydrBankSummaryUpdated } from "./triggers/rydr
 export { onDocumentUploadedForReview } from "./triggers/documentReview";
 export { onPaymentJobCreated } from "./triggers/paymentJobs";
 export { onDriverPublicProfileProjection } from "./triggers/driverPublicProfileProjection";
+export { maintainScheduledRides } from "./triggers/scheduledRideJobs";
+export { onScheduledRideOpportunityCreated, onScheduledRideUpdated } from "./triggers/scheduledRideNotifications";
 
 const VEHICLE_BODY_STYLES: readonly VehicleBodyStyle[] = [
   "sedan",

@@ -14,6 +14,7 @@ const rideRoutes = require("./routes/rides");
 const cashHubRoutes = require("./routes/cashHub");
 const safetyRoutes = require("./routes/safety");
 const supportRoutes = require("./routes/support");
+const scheduledRideRoutes = require("./routes/scheduledRides");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -36,6 +37,7 @@ app.use("/rides", rideRoutes);
 app.use("/cash-hub", cashHubRoutes);
 app.use("/safety", safetyRoutes);
 app.use("/support", supportRoutes);
+app.use("/scheduled-rides", scheduledRideRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

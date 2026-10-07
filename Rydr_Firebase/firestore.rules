@@ -278,6 +278,13 @@ service cloud.firestore {
       );
     }
 
+    function scheduledRideParticipant(data) {
+      return signedIn() && (
+        data.riderId == request.auth.uid ||
+        (("assignedDriverId" in data) && data.assignedDriverId == request.auth.uid)
+      );
+    }
+
     function isUnclaimedRideRequest(data) {
       return signedIn()
         && data.status in ["pending", "available"]
@@ -925,6 +932,11 @@ service cloud.firestore {
         allow create, update, delete: if isAdmin();
       }
 
+      match /scheduledRideLocks/{requestId} {
+        allow read: if isSelf(uid) || isAdmin();
+        allow create, update, delete: if isAdmin();
+      }
+
       match /documentReviews/{reviewId} {
         allow read: if isSelf(uid) || isAdmin();
         allow write: if false;
@@ -1003,35 +1015,58 @@ service cloud.firestore {
 
     match /rideRequests/{rideId} {
       allow read: if rideParticipant(resource.data) || isUnclaimedRideRequest(resource.data) || isAdmin();
-      allow create: if validRiderRideCreate();
+      // Authoritative requests are created by rydr-backend after payment,
+      // route, pricing, and selected-driver validation.
+      allow create: if isAdmin();
       allow update: if validRideParticipantMetadataUpdate() || validRiderLocationUpdate() || isAdmin();
       allow delete: if isAdmin();
     }
 
     match /rideRequestSignals/{signalId} {
       allow read: if signedIn();
-      allow create: if signedIn()
-        && request.resource.data.riderId == request.auth.uid
-        && request.resource.data.status == "pending"
-        && request.resource.data.source == "standardRydr"
-        && request.resource.data.keys().hasOnly([
-          "createdAt",
-          "id",
-          "pickupCoordinate",
-          "pickupGeoPoint",
-          "riderId",
-          "rideType",
-          "source",
-          "status"
-        ]);
+      allow create: if isAdmin();
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
+    match /rideRequestIdempotency/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /rideMatchSessions/{documentId} {
+      allow read, write: if false;
+    }
+
+    match /scheduledRideRequests/{requestId} {
+      allow read: if scheduledRideParticipant(resource.data) || isAdmin();
+      // Creation, pricing, selection, check-in, cancellation, replacement,
+      // expiration, and activation are all backend-owned.
+      allow create, update, delete: if isAdmin();
+
+      match /opportunities/{driverId} {
+        allow read: if signedIn() && (
+          resource.data.driverId == request.auth.uid ||
+          get(/databases/$(database)/documents/scheduledRideRequests/$(requestId)).data.riderId == request.auth.uid
+        ) || isAdmin();
+        allow write: if isAdmin();
+      }
+
+      match /offers/{driverId} {
+        allow read: if signedIn() && (
+          resource.data.driverId == request.auth.uid ||
+          get(/databases/$(database)/documents/scheduledRideRequests/$(requestId)).data.riderId == request.auth.uid
+        ) || isAdmin();
+        allow write: if isAdmin();
+      }
+    }
+
+    match /scheduledRideIdempotency/{documentId} {
+      allow read, write: if false;
+    }
+
     match /rides/{rideId} {
       allow read: if rideParticipant(resource.data) || isAdmin();
-      allow create: if validRiderRideCreate()
-        || isAdmin();
+      allow create: if isAdmin();
       allow update: if validRideParticipantMetadataUpdate() || validRiderLocationUpdate() || isAdmin();
       allow delete: if isAdmin();
 

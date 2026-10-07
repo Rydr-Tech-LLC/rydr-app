@@ -2165,6 +2165,8 @@ struct DrawerDestinationView: View {
                 VehicleRydrHubView(vm: vm)
             } else if item == .cashRydrHub {
                 DriverCashRydrHubView()
+            } else if item == .scheduledRides {
+                DriverScheduledRidesView(currentLocation: vm.lastLocation)
             } else if item == .community {
                 DriverCommunityHubView()
             } else if item == .walletPayouts {
@@ -2217,6 +2219,7 @@ struct DrawerDestinationView: View {
         case .fareInsights: return "Track completed-ride earnings, recent trip totals, and performance health."
         case .walletPayouts: return "Manage payout methods, instant pay, and payout history."
         case .cashRydrHub: return "Review open Cash Hub rider posts and manage accepted cash rides."
+        case .scheduledRides: return "Review future ride opportunities, confirmed pickups, and check-in requirements."
         case .documents: return "Keep required driver documents current."
         case .community: return "Find live event demand, venue hotspots, and upcoming Atlanta events."
         case .safety: return "Emergency contacts, incident reports, SafeRydr settings, and Safety Center."
@@ -2234,6 +2237,7 @@ struct DrawerDestinationView: View {
         case .fareInsights: return ["Today", "This Week", "This Month", "Recent Trips"]
         case .walletPayouts: return ["Bank Account", "Debit Card", "Instant Pay", "Payout History"]
         case .cashRydrHub: return ["Open Requests", "Accepted Cash Rides", "Cash Hub Terms"]
+        case .scheduledRides: return ["Available Opportunities", "Confirmed Pickups", "Check In"]
         case .documents: return ["Driver License", "Insurance", "Registration", "Background Check Status"]
         case .community: return ["Live Hotspots", "Upcoming Events", "Venue Demand"]
         case .safety: return ["Emergency Contacts", "Incident Reports", "SafeRydr Settings", "Safety Center"]

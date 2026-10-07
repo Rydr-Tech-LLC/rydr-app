@@ -19,6 +19,11 @@ struct BookingView: View {
     @EnvironmentObject private var session: UserSessionManager
     @State private var showDriverSheet = false
     @State private var showInProgress = false
+    @StateObject private var scheduledRideManager = ScheduledRideManager()
+    @State private var showScheduleTime = false
+    @State private var showScheduledReview = false
+    @State private var showScheduledStatus = false
+    @State private var showScheduledList = false
 
     // Map / region
     @State private var region = RydrMapDefaults.atlantaRegion
@@ -208,6 +213,47 @@ struct BookingView: View {
                 }
             )
         }
+        .sheet(isPresented: $showScheduleTime) {
+            ScheduleTimeSelectionView(
+                manager: scheduledRideManager,
+                onCancel: { showScheduleTime = false },
+                onContinue: {
+                    showScheduleTime = false
+                    showScheduledReview = true
+                }
+            )
+        }
+        .sheet(isPresented: $showScheduledReview) {
+            ScheduledRideReviewView(
+                manager: scheduledRideManager,
+                pickup: pickupText,
+                dropoff: dropoffText,
+                pickupCoordinate: pickupCoordinate,
+                dropoffCoordinate: dropoffCoordinate,
+                rideType: rideType,
+                onClose: { showScheduledReview = false },
+                onCreated: { _ in
+                    showScheduledReview = false
+                    showScheduledStatus = true
+                }
+            )
+        }
+        .sheet(isPresented: $showScheduledStatus) {
+            ScheduledRideStatusView(
+                manager: scheduledRideManager,
+                onClose: { showScheduledStatus = false }
+            )
+        }
+        .sheet(isPresented: $showScheduledList) {
+            ScheduledRideListView(
+                manager: scheduledRideManager,
+                onSelect: { _ in
+                    showScheduledList = false
+                    showScheduledStatus = true
+                },
+                onClose: { showScheduledList = false }
+            )
+        }
         // 🔹 Present in-progress view
         .fullScreenCover(isPresented: $showInProgress, onDismiss: {
             appliedRydrBankCode = UserDefaults.standard.string(forKey: "appliedRydrBankCode") ?? ""
@@ -231,6 +277,13 @@ struct BookingView: View {
             if rideId == nil && rideManager.state != .completed {
                 syncRidePresentation(with: rideManager.state)
             }
+        }
+        .onAppear { scheduledRideManager.startScheduleListener() }
+        .onReceive(NotificationCenter.default.publisher(for: .riderNotificationRouteRequested)) { notification in
+            guard (notification.userInfo?["target"] as? String) == "scheduledRides",
+                  let requestId = notification.userInfo?["requestId"] as? String else { return }
+            scheduledRideManager.listen(requestId: requestId)
+            showScheduledStatus = true
         }
         .sheet(isPresented: $showRoutePreview) {
             RoutePreviewSheet(
@@ -1082,6 +1135,31 @@ struct BookingView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(BookingGradientButtonStyle())
+            .disabled(!canRequestRide)
+            .opacity(canRequestRide ? 1 : 0.45)
+
+            Button {
+                showScheduledList = true
+            } label: {
+                Label("View scheduled rides", systemImage: "list.bullet.rectangle")
+                    .font(.footnote.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+
+            Button {
+                showScheduleTime = true
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "calendar.badge.clock")
+                    Text("Schedule for later")
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Styles.rydrGradient)
             .disabled(!canRequestRide)
             .opacity(canRequestRide ? 1 : 0.45)
 

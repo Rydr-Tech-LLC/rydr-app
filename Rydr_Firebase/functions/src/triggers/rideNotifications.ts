@@ -44,6 +44,7 @@ interface RideDoc {
   pickupCoordinate?: CoordinateLike;
   pickupGeoPoint?: CoordinateLike;
   pickupEtaTwoMinuteNotifiedAt?: unknown;
+  scheduledRideId?: string;
 }
 
 interface CoordinateLike {
@@ -109,6 +110,32 @@ export const onRideUpdated = onDocumentUpdated("rides/{rideId}", async (event) =
   const afterStatus = normalizeStatus(after.status);
   const beforePayment = before.paymentStatus ?? "pending";
   const afterPayment = after.paymentStatus ?? "pending";
+
+  if (beforeStatus !== afterStatus && after.scheduledRideId) {
+    const scheduledRef = db.collection("scheduledRideRequests").doc(after.scheduledRideId);
+    const lockRef = driverId
+      ? db.collection("drivers").doc(driverId).collection("scheduledRideLocks").doc(after.scheduledRideId)
+      : null;
+    if (afterStatus === "completed") {
+      const batch = db.batch();
+      batch.set(scheduledRef, {
+        status: "completed",
+        completedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+      if (lockRef) batch.set(lockRef, { status: "completed", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      await batch.commit();
+    } else if (CANCELLED_STATUSES.has(afterStatus)) {
+      const batch = db.batch();
+      batch.set(scheduledRef, {
+        status: "cancelled",
+        terminalReason: "active_ride_cancelled",
+        updatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+      if (lockRef) batch.set(lockRef, { status: "cancelled", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      await batch.commit();
+    }
+  }
 
   // --- Ride lifecycle transitions (rider-facing) ---
   if (beforeStatus !== afterStatus && riderId) {

@@ -30,6 +30,7 @@ export type NotificationType =
   | "cashHubOffer"
   | "cashHubMessage"
   | "cashHubUpdate"
+  | "scheduledRideUpdate"
   | "supportReply"
   | "driverApprovalDecision"
   | "rydrBankCode"

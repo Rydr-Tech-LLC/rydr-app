@@ -183,6 +183,27 @@ enum RydrBackendService {
         try await sendAuthenticatedJSON(path: "/cash-hub/relationships/command", body: payload)
     }
 
+    static func respondToScheduledRide(requestId: String, response: String) async throws {
+        try await sendAuthenticatedJSON(
+            path: "/scheduled-rides/\(requestId)/respond",
+            body: ["response": response]
+        )
+    }
+
+    static func checkInScheduledRide(requestId: String, etaSeconds: Int) async throws {
+        try await sendAuthenticatedJSON(
+            path: "/scheduled-rides/\(requestId)/check-in",
+            body: ["etaSeconds": etaSeconds]
+        )
+    }
+
+    static func releaseScheduledRide(requestId: String, reason: String) async throws {
+        try await sendAuthenticatedJSON(
+            path: "/scheduled-rides/\(requestId)/cancel",
+            body: ["reason": reason]
+        )
+    }
+
     static func submitSafetyReport(_ body: [String: Any]) async throws { try await sendAuthenticatedJSON(path: "/safety/reports", body: body) }
     static func submitSafetyAppeal(_ body: [String: Any]) async throws { try await sendAuthenticatedJSON(path: "/safety/appeals", body: body) }
 

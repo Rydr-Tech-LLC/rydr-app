@@ -179,6 +179,8 @@ Integration variables:
 - `APPLE_MAPS_TEAM_ID`
 - `APPLE_MAPS_KEY_ID`
 - `APPLE_MAPS_PRIVATE_KEY` — paste the complete `.p8` contents as a secret; never commit or log it
+- `RYDR_STRIPE_BACKEND_URL` — used to verify that a rider still has a real payment method before an on-demand or scheduled request is created
+- `RYDR_INTERNAL_SERVICE_TOKEN` — the same secret used by Firebase Functions; authorizes the one-minute scheduled-ride lifecycle sweep
 
 ## Apple Maps Server API
 
@@ -192,7 +194,7 @@ The downloaded `.p8` file is ignored by Git. Keep it outside this repository and
 2. Set the Firebase secret with `firebase functions:secrets:set RYDR_INTERNAL_SERVICE_TOKEN`. Set `RYDR_STRIPE_BACKEND_URL` if the Stripe service is not at the default Render URL, then deploy Firebase Functions. The payment worker must exist before the main backend can create payment jobs.
 3. Deploy `rydr-bank-service`, configure `/health`, `CORS_ORIGINS`, and `RYDR_WEB_BOOKING_SECRET`, and verify its authoritative completed-ride checks.
 4. Deploy `rydr-backend` with the Apple Maps environment variables and `REQUIRE_FIREBASE_APP_CHECK=true`. Use a non-sleeping instance for dispatch and lifecycle traffic.
-5. Verify authenticated identity sync, profile-photo finalization, screening, rate-card, telemetry, rating, Cash Hub, safety, support, queue-promotion, ride-transition, earnings-summary, route-estimate, payment-job, and Rydr Bank calls.
+5. Verify authenticated identity sync, backend match sessions, ride-request creation, scheduled-ride preview/creation/response/selection/check-in/activation, profile-photo finalization, screening, rate-card, telemetry, rating, Cash Hub, safety, support, queue-promotion, ride-transition, earnings-summary, route-estimate, payment-job, and Rydr Bank calls.
 6. Release the Rider and Driver builds that call the new backend-owned endpoints.
 7. Deploy the updated Firestore and Storage rules, which reject direct client writes to authoritative lifecycle, queue, telemetry, ratings/reputation, screening, rate-card projection, Cash Hub, chat metadata, safety/support intake, permanent profile photos, phone indexes/account links, vehicle eligibility, financial, driver-presence, and request-signal state.
 8. Enforce Firebase API App Check only after every active app that accesses those APIs is registered. Custom-backend App Check is independently enforced by `rydr-backend`.

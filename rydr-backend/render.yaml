@@ -31,3 +31,7 @@ services:
         sync: false
       - key: APPLE_MAPS_PRIVATE_KEY
         sync: false
+      - key: RYDR_STRIPE_BACKEND_URL
+        value: https://rydr-stripe-backend.onrender.com
+      - key: RYDR_INTERNAL_SERVICE_TOKEN
+        sync: false

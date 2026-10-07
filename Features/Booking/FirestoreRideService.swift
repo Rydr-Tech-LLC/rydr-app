@@ -9,10 +9,13 @@ import Foundation
 import CoreLocation
 import CoreGraphics
 import FirebaseAuth
+import FirebaseAppCheck
 import FirebaseFirestore
 
 final class FirestoreRideService: RideService, @unchecked Sendable {
     private let db = Firestore.firestore()
+    private var activeMatchSessionId: String?
+    private var activeQuoteFingerprints: [String: String] = [:]
 
     func fetchNearbyDrivers(
         pickup: String,
@@ -52,7 +55,16 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             .filter { $0.preferenceMatch == .fallback }
             .sorted(by: sortDriverCandidates)
 
-        return Array((strictMatches + fallbackMatches).prefix(3)).map(\.driver)
+        let displayedDrivers = Array((strictMatches + fallbackMatches).prefix(3)).map(\.driver)
+        let match = try await createBackendMatchSession(
+            rideType: rideType,
+            pickupCoordinate: pickupCoordinate ?? center,
+            dropoffCoordinate: dropoffCoordinate,
+            riderPreferences: riderPreferences
+        )
+        activeMatchSessionId = match.sessionId
+        activeQuoteFingerprints = match.quoteFingerprints
+        return displayedDrivers.filter { match.quoteFingerprints[$0.id] != nil }
     }
 
     func requestRide(
@@ -73,45 +85,48 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         guard let user = Auth.auth().currentUser else {
             throw RideDispatchError.notSignedIn
         }
+        guard let matchSessionId = activeMatchSessionId,
+              let quoteFingerprint = activeQuoteFingerprints[driverId] else {
+            throw NSError(
+                domain: "RydrRideBackend",
+                code: 409,
+                userInfo: [NSLocalizedDescriptionKey: "Driver availability expired. Refresh nearby drivers and try again."]
+            )
+        }
+        guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
+              let base = URL(string: rawBase),
+              let url = URL(string: "/rides/request", relativeTo: base) else {
+            throw URLError(.badURL)
+        }
 
-        let id = UUID().uuidString
-        let riderName = user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let idempotencyKey = "match_\(matchSessionId)"
         var payload: [String: Any] = [
-            "id": id,
-            "driverId": driverId,
-            "riderId": user.uid,
-            "riderName": riderName?.isEmpty == false ? riderName! : "Rydr rider",
-            "riderPhotoURL": user.photoURL?.absoluteString ?? "",
-            "riderVerified": riderVerified,
-            "verifiedRider": riderVerified,
+            "idempotencyKey": idempotencyKey,
+            "matchSessionId": matchSessionId,
+            "quoteFingerprint": quoteFingerprint,
+            "selectedCandidateId": driverId,
+            "candidateDriverIds": candidateDriverIds,
             "pickup": pickup,
             "dropoff": dropoff,
             "rideType": rideType,
-            "status": "pending",
-            "source": "standardRydr",
-            "createdAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
+            "source": "standardRydr"
         ]
         if let pickupCoordinate {
             payload["pickupCoordinate"] = [
                 "lat": pickupCoordinate.latitude,
                 "lng": pickupCoordinate.longitude
             ]
-            payload["pickupGeoPoint"] = GeoPoint(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)
         }
         if let dropoffCoordinate {
             payload["dropoffCoordinate"] = [
                 "lat": dropoffCoordinate.latitude,
                 "lng": dropoffCoordinate.longitude
             ]
-            payload["dropoffGeoPoint"] = GeoPoint(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)
         }
         if let estimate {
-            payload["estimatedDistanceMiles"] = estimate.distanceMiles
-            payload["estimatedDurationMinutes"] = estimate.durationMinutes
+            payload["displayEstimatedDistanceMiles"] = estimate.distanceMiles
+            payload["displayEstimatedDurationMinutes"] = estimate.durationMinutes
         }
-        // Display-only estimates are explicitly namespaced. They are never
-        // consumed by backend finalization or Stripe as trusted money.
         payload["displayEstimatedRiderTotalCents"] = pricingSnapshot.estimatedRiderTotalCents
         payload["displayEstimatedDriverPayoutCents"] = pricingSnapshot.estimatedDriverPayoutCents
         if let rydrBankCode, !rydrBankCode.isEmpty {
@@ -124,29 +139,82 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             payload["ridePreferences"] = preferencePayload
         }
 
-        try await db.collection("rideRequests").document(id).setData(payload)
-        if let pickupCoordinate {
-            try? await db.collection("rideRequestSignals").document(id).setData([
-                "id": id,
-                "riderId": user.uid,
-                "rideType": rideType,
-                "status": "pending",
-                "source": "standardRydr",
-                "pickupCoordinate": [
-                    "lat": pickupCoordinate.latitude,
-                    "lng": pickupCoordinate.longitude
-                ],
-                "pickupGeoPoint": GeoPoint(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude),
-                "createdAt": FieldValue.serverTimestamp()
-            ])
+        let token = try await user.getIDToken()
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(try await appCheckToken(), forHTTPHeaderField: "X-Firebase-AppCheck")
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rideId = result["rideId"] as? String, !rideId.isEmpty else {
+            let result = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw NSError(
+                domain: "RydrRideBackend",
+                code: (response as? HTTPURLResponse)?.statusCode ?? -1,
+                userInfo: [NSLocalizedDescriptionKey: result?["error"] as? String ?? result?["message"] as? String ?? "Could not create the ride request."]
+            )
         }
-        try await initializeBackendDispatch(
-            rideId: id,
-            candidateDriverIds: candidateDriverIds,
-            user: user
-        )
-        try? await requestBackendRouteEstimate(rideId: id, user: user)
-        return id
+        return rideId
+    }
+
+    private struct BackendMatchSession {
+        let sessionId: String
+        let quoteFingerprints: [String: String]
+    }
+
+    private func createBackendMatchSession(
+        rideType: String,
+        pickupCoordinate: CLLocationCoordinate2D,
+        dropoffCoordinate: CLLocationCoordinate2D?,
+        riderPreferences: RiderRidePreferences?
+    ) async throws -> BackendMatchSession {
+        guard let dropoffCoordinate else { throw RideRequestError.routeEstimateRequired }
+        guard let user = Auth.auth().currentUser else { throw RideDispatchError.notSignedIn }
+        guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
+              let base = URL(string: rawBase),
+              let url = URL(string: "/rides/match-session", relativeTo: base) else { throw URLError(.badURL) }
+        var body: [String: Any] = [
+            "rideType": rideType,
+            "pickupCoordinate": ["lat": pickupCoordinate.latitude, "lng": pickupCoordinate.longitude],
+            "dropoffCoordinate": ["lat": dropoffCoordinate.latitude, "lng": dropoffCoordinate.longitude]
+        ]
+        if let preferences = riderPreferences?.rideRequestPayload { body["riderPreferences"] = preferences }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
+        request.setValue(try await appCheckToken(), forHTTPHeaderField: "X-Firebase-AppCheck")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let sessionId = payload["matchSessionId"] as? String,
+              let candidates = payload["candidates"] as? [[String: Any]] else {
+            throw NSError(
+                domain: "RydrRideBackend",
+                code: (response as? HTTPURLResponse)?.statusCode ?? -1,
+                userInfo: [NSLocalizedDescriptionKey: payload["error"] as? String ?? "Could not validate nearby drivers."]
+            )
+        }
+        let fingerprints = Dictionary(uniqueKeysWithValues: candidates.compactMap { candidate -> (String, String)? in
+            guard let driverId = candidate["driverId"] as? String,
+                  let fingerprint = candidate["quoteFingerprint"] as? String else { return nil }
+            return (driverId, fingerprint)
+        })
+        return BackendMatchSession(sessionId: sessionId, quoteFingerprints: fingerprints)
+    }
+
+    private func appCheckToken() async throws -> String {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            AppCheck.appCheck().token(forcingRefresh: false) { token, error in
+                if let error { continuation.resume(throwing: error) }
+                else if let token { continuation.resume(returning: token.token) }
+                else { continuation.resume(throwing: URLError(.userAuthenticationRequired)) }
+            }
+        }
     }
 
     func awaitDriverDecision(rideId: String) async throws -> DriverDecision {
@@ -311,61 +379,6 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
 
     private struct RideTransitionPayload: Decodable {
         let outcome: BackendRideFinancialOutcome?
-    }
-
-    private func requestBackendRouteEstimate(rideId: String, user: User) async throws {
-        guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
-              let base = URL(string: rawBase),
-              let url = URL(string: "/rides/\(rideId)/route-estimate", relativeTo: base) else {
-            throw URLError(.badURL)
-        }
-        let token = try await user.getIDToken()
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "departureDate": ISO8601DateFormatter().string(from: Date())
-        ])
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            throw NSError(
-                domain: "RydrRideBackend",
-                code: (response as? HTTPURLResponse)?.statusCode ?? -1,
-                userInfo: [NSLocalizedDescriptionKey: payload?["error"] as? String ?? "Route estimate failed."]
-            )
-        }
-    }
-
-    private func initializeBackendDispatch(
-        rideId: String,
-        candidateDriverIds: [String],
-        user: User
-    ) async throws {
-        guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
-              let base = URL(string: rawBase),
-              let url = URL(string: "/rides/\(rideId)/dispatch/initialize", relativeTo: base) else {
-            throw URLError(.badURL)
-        }
-        let token = try await user.getIDToken()
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "candidateIds": candidateDriverIds,
-            "requestId": UUID().uuidString
-        ])
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            throw NSError(
-                domain: "RydrRideBackend",
-                code: (response as? HTTPURLResponse)?.statusCode ?? -1,
-                userInfo: [NSLocalizedDescriptionKey: payload?["error"] as? String ?? "Could not start driver dispatch."]
-            )
-        }
     }
 
     private func driverCandidate(
