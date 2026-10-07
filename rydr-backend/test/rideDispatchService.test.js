@@ -77,7 +77,8 @@ test("decline advances to the next backend-validated candidate and records the a
       availabilityStatus: "available",
       eligibleRideTypes: ["Rydr Go"],
       rating: 5
-    }
+    },
+    "drivers/driver-2": { isApproved: true, accountStatus: "active" }
   });
   const result = await advanceRideDispatch({
     rideId: "ride-1",

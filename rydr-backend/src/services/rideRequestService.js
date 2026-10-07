@@ -13,6 +13,7 @@ const {
   normalizedCandidateIds,
   isEligibleCandidate
 } = require("./rideDispatchService");
+const { isApprovedDriver } = require("./driverPresenceService");
 
 function error(message, statusCode, details) {
   const err = new Error(message);
@@ -192,14 +193,20 @@ async function createRideRequest({
   }
 
   const riderRef = db.collection("riders").doc(riderId);
-  const driverRef = db.collection("publicDriverProfiles").doc(selectedCandidateId);
-  const [riderSnap, driverSnap] = await Promise.all([riderRef.get(), driverRef.get()]);
+  const publicDriverRef = db.collection("publicDriverProfiles").doc(selectedCandidateId);
+  const canonicalDriverRef = db.collection("drivers").doc(selectedCandidateId);
+  const [riderSnap, publicDriverSnap, canonicalDriverSnap] = await Promise.all([
+    riderRef.get(),
+    publicDriverRef.get(),
+    canonicalDriverRef.get()
+  ]);
   if (!riderSnap.exists) throw error("Rider profile not found", 403);
   const rider = riderSnap.data();
   if (["deletion_requested", "removed", "suspended"].includes(String(rider.accountStatus || ""))) {
     throw error("This rider account cannot request rides", 403);
   }
-  if (!driverSnap.exists || !isEligibleCandidate(driverSnap.data(), rideType)) {
+  if (!publicDriverSnap.exists || !isEligibleCandidate(publicDriverSnap.data(), rideType)
+      || !canonicalDriverSnap.exists || !isApprovedDriver(canonicalDriverSnap.data())) {
     throw error("The selected driver is no longer available", 409);
   }
 
@@ -216,7 +223,7 @@ async function createRideRequest({
     throw error("A backend route could not be calculated", 422);
   }
 
-  const rates = authoritativeRateOverride ?? rateObject(driverSnap.data(), rideType);
+  const rates = authoritativeRateOverride ?? rateObject(canonicalDriverSnap.data(), rideType);
   const distanceMiles = Number(route.distanceMeters) / 1609.344;
   const durationMinutes = Number(route.durationSeconds) / 60;
   const estimate = calculateOutcome({

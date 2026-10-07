@@ -7,7 +7,6 @@
 
 import Foundation
 import CoreLocation
-import CoreGraphics
 import FirebaseAuth
 import FirebaseAppCheck
 import FirebaseFirestore
@@ -33,29 +32,6 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             .whereField("isOnline", isEqualTo: true)
             .getDocuments()
 
-        let candidates = snapshot.documents
-            .compactMap { document in
-                driverCandidate(
-                    from: document,
-                    rideType: rideType,
-                    near: center,
-                    pickupCoordinate: pickupCoordinate,
-                    dropoffCoordinate: dropoffCoordinate,
-                    estimatedDistanceMiles: estimatedDistanceMiles,
-                    riderPreferences: riderPreferences
-                )
-            }
-            .filter { $0.driver.score > 0 }
-
-        let strictMatches = candidates
-            .filter { $0.preferenceMatch == .strict }
-            .sorted(by: sortDriverCandidates)
-
-        let fallbackMatches = candidates
-            .filter { $0.preferenceMatch == .fallback }
-            .sorted(by: sortDriverCandidates)
-
-        let displayedDrivers = Array((strictMatches + fallbackMatches).prefix(3)).map(\.driver)
         let match = try await createBackendMatchSession(
             rideType: rideType,
             pickupCoordinate: pickupCoordinate ?? center,
@@ -64,7 +40,16 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         )
         activeMatchSessionId = match.sessionId
         activeQuoteFingerprints = match.quoteFingerprints
-        return displayedDrivers.filter { match.quoteFingerprints[$0.id] != nil }
+        let documentsByID = Dictionary(uniqueKeysWithValues: snapshot.documents.map { ($0.documentID, $0) })
+        return match.rankedCandidateIds.prefix(3).compactMap { driverID in
+            guard let document = documentsByID[driverID] else { return nil }
+            return displayDriver(
+                from: document,
+                rideType: rideType,
+                score: match.matchScores[driverID] ?? 1,
+                backendRate: match.rates[driverID]
+            )
+        }
     }
 
     func requestRide(
@@ -80,7 +65,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         replacementForRideId: String?,
         riderPreferences: RiderRidePreferences?,
         riderVerified: Bool,
-        candidateDriverIds: [String]
+        candidateDriverIds _: [String]
     ) async throws -> String {
         guard let user = Auth.auth().currentUser else {
             throw RideDispatchError.notSignedIn
@@ -105,7 +90,6 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             "matchSessionId": matchSessionId,
             "quoteFingerprint": quoteFingerprint,
             "selectedCandidateId": driverId,
-            "candidateDriverIds": candidateDriverIds,
             "pickup": pickup,
             "dropoff": dropoff,
             "rideType": rideType,
@@ -161,8 +145,18 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
     }
 
     private struct BackendMatchSession {
+        struct Rate {
+            let minimumFare: Double
+            let perMile: Double
+            let perMinute: Double
+            let usesSuggestedPricing: Bool
+        }
+
         let sessionId: String
         let quoteFingerprints: [String: String]
+        let rankedCandidateIds: [String]
+        let matchScores: [String: Int]
+        let rates: [String: Rate]
     }
 
     private func createBackendMatchSession(
@@ -204,7 +198,32 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                   let fingerprint = candidate["quoteFingerprint"] as? String else { return nil }
             return (driverId, fingerprint)
         })
-        return BackendMatchSession(sessionId: sessionId, quoteFingerprints: fingerprints)
+        let rankedCandidateIds = candidates.compactMap { $0["driverId"] as? String }
+        let matchScores = Dictionary(uniqueKeysWithValues: candidates.compactMap { candidate -> (String, Int)? in
+            guard let driverId = candidate["driverId"] as? String else { return nil }
+            let score = Self.intValue(candidate["matchScore"]) ?? 1
+            return (driverId, score)
+        })
+        let rates = Dictionary(uniqueKeysWithValues: candidates.compactMap { candidate -> (String, BackendMatchSession.Rate)? in
+            guard let driverId = candidate["driverId"] as? String,
+                  let rawRate = candidate["rates"] as? [String: Any],
+                  let minimumFareCents = Self.doubleValue(rawRate["minimumFareCents"]),
+                  let perMileCents = Self.doubleValue(rawRate["perMileCents"]),
+                  let perMinuteCents = Self.doubleValue(rawRate["perMinuteCents"]) else { return nil }
+            return (driverId, BackendMatchSession.Rate(
+                minimumFare: minimumFareCents / 100,
+                perMile: perMileCents / 100,
+                perMinute: perMinuteCents / 100,
+                usesSuggestedPricing: rawRate["usesSuggestedPricing"] as? Bool ?? false
+            ))
+        })
+        return BackendMatchSession(
+            sessionId: sessionId,
+            quoteFingerprints: fingerprints,
+            rankedCandidateIds: rankedCandidateIds,
+            matchScores: matchScores,
+            rates: rates
+        )
     }
 
     private func appCheckToken() async throws -> String {
@@ -381,81 +400,46 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         let outcome: BackendRideFinancialOutcome?
     }
 
-    private func driverCandidate(
+    private func displayDriver(
         from document: QueryDocumentSnapshot,
         rideType: String,
-        near center: CLLocationCoordinate2D,
-        pickupCoordinate: CLLocationCoordinate2D?,
-        dropoffCoordinate: CLLocationCoordinate2D?,
-        estimatedDistanceMiles: Double?,
-        riderPreferences: RiderRidePreferences?
-    ) -> DriverCandidate? {
+        score: Int,
+        backendRate: BackendMatchSession.Rate?
+    ) -> Driver? {
         let data = document.data()
-        let enabled = data["standardDispatchEnabled"] as? Bool ?? true
-        guard enabled else { return nil }
-        guard !isRideTypeTemporarilyDisabled(rideType, data: data) else { return nil }
-
-        let supportedRideTypes = data["eligibleRideTypes"] as? [String]
-            ?? data["selectedRideTypes"] as? [String]
-            ?? data["rideTypes"] as? [String]
-            ?? data["supportedRideTypes"] as? [String]
-            ?? []
-        if !supportedRideTypes.isEmpty, !supportedRideTypes.contains(where: { matches($0, rideType) }) {
-            return nil
-        }
-
         guard let coordinate = coordinate(from: data) else { return nil }
-        let distance = CLLocation(latitude: center.latitude, longitude: center.longitude)
-            .distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)) / 1609.344
-        guard distance <= 30 else { return nil }
-        let preferenceMatch = matchesDriverRideFilters(
-            data["rideFilters"] as? [String: Any],
-            driverCoordinate: coordinate,
-            pickupCoordinate: pickupCoordinate ?? center,
-            dropoffCoordinate: dropoffCoordinate,
-            estimatedDistanceMiles: estimatedDistanceMiles
-        )
-        guard preferenceMatch != .rejected else { return nil }
-
         let rating = Self.doubleValue(data["rating"]) ?? 5.0
-        let ratingCount = Self.intValue(data["ratingCount"]) ?? 0
-        let completedRideCount = Self.intValue(data["completedRideCount"] ?? data["lifetimeRideCount"])
-        let acceptanceRate = Self.intValue(data["acceptanceRate"])
-        let pricing = RydrPricing.config(for: rideType)
-        let rate = driverRate(from: data, rideType: rideType, pricing: pricing)
-        let gender = driverGender(from: data)
-        let score = max(1, min(100, Int(100 - (distance * 6) + ((rating - 4.5) * 18) + genderPreferenceBoost(driverGender: gender, riderPreferences: riderPreferences))))
-
-        return DriverCandidate(
-            driver: Driver(
-                id: document.documentID,
-                name: driverName(from: data),
-                profileImage: nonEmptyString(data["profilePhotoURL"]) ?? nonEmptyString(data["profileImage"]),
-                // "vehicleImageURL" is written by the Vehicle Library System
-                // (RydrDriver's DriverDashboardVM.publishPublicDriverProfile) —
-                // the generic factory-style image matched from the driver's
-                // decoded VIN + chosen color, never a photo of their actual car.
-                // "carImage" is kept for backward compatibility with any older
-                // writer of this field.
-                carImage: nonEmptyString(data["vehicleImageURL"]) ?? nonEmptyString(data["carImage"]),
-                carMakeModel: vehicleName(from: data),
-                rating: rating,
-                compliments: data["compliments"] as? [String] ?? [],
-                perMinute: rate.perMinute,
-                perMile: rate.perMile,
-                minimumFare: rate.minimumFare,
-                usesSuggestedPricing: rate.usesSuggestedPricing,
-                coordinate: coordinate,
-                score: score,
-                ratingCount: ratingCount,
-                completedRideCount: completedRideCount,
-                acceptanceRate: acceptanceRate,
-                stripeAccountId: data["stripeAccountId"] as? String,
-                stripeChargesEnabled: data["stripeChargesEnabled"] as? Bool ?? false,
-                gender: gender
-            ),
-            distanceMiles: distance,
-            preferenceMatch: preferenceMatch
+        let rate = backendRate ?? {
+            let local = driverRate(from: data, rideType: rideType, pricing: RydrPricing.config(for: rideType))
+            return BackendMatchSession.Rate(
+                minimumFare: local.minimumFare,
+                perMile: local.perMile,
+                perMinute: local.perMinute,
+                usesSuggestedPricing: local.usesSuggestedPricing
+            )
+        }()
+        return Driver(
+            id: document.documentID,
+            name: driverName(from: data),
+            profileImage: nonEmptyString(data["profilePhotoURL"]) ?? nonEmptyString(data["profileImage"]),
+            // This is the generic catalog image selected from the verified VIN,
+            // not a photograph of the driver's personal vehicle.
+            carImage: nonEmptyString(data["vehicleImageURL"]) ?? nonEmptyString(data["carImage"]),
+            carMakeModel: vehicleName(from: data),
+            rating: rating,
+            compliments: data["compliments"] as? [String] ?? [],
+            perMinute: rate.perMinute,
+            perMile: rate.perMile,
+            minimumFare: rate.minimumFare,
+            usesSuggestedPricing: rate.usesSuggestedPricing,
+            coordinate: coordinate,
+            score: max(1, min(100, score)),
+            ratingCount: Self.intValue(data["ratingCount"]) ?? 0,
+            completedRideCount: Self.intValue(data["completedRideCount"] ?? data["lifetimeRideCount"]),
+            acceptanceRate: Self.intValue(data["acceptanceRate"]),
+            stripeAccountId: data["stripeAccountId"] as? String,
+            stripeChargesEnabled: data["stripeChargesEnabled"] as? Bool ?? false,
+            gender: driverGender(from: data)
         )
     }
 
@@ -542,63 +526,6 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         return nil
     }
 
-    private func matchesDriverRideFilters(
-        _ filters: [String: Any]?,
-        driverCoordinate: CLLocationCoordinate2D,
-        pickupCoordinate: CLLocationCoordinate2D,
-        dropoffCoordinate: CLLocationCoordinate2D?,
-        estimatedDistanceMiles: Double?
-    ) -> DriverPreferenceMatch {
-        guard let filters else { return .strict }
-
-        if (filters["workZoneEnabled"] as? Bool) == true {
-            let radiusMiles = Self.doubleValue(filters["workZoneRadiusMiles"]) ?? 0
-            guard radiusMiles > 0 else { return .rejected }
-            let driverLocation = CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
-            let pickupMiles = driverLocation
-                .distance(from: CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)) / 1609.344
-            guard pickupMiles <= radiusMiles else { return .rejected }
-            guard let dropoffCoordinate else { return .rejected }
-            let dropoffMiles = driverLocation
-                .distance(from: CLLocation(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)) / 1609.344
-            guard dropoffMiles <= radiusMiles else { return .rejected }
-        }
-
-        let tripMiles = estimatedDistanceMiles ?? estimatedTripMiles(pickupCoordinate: pickupCoordinate, dropoffCoordinate: dropoffCoordinate)
-        let wantsLong = filters["prioritizeLongerRides"] as? Bool ?? false
-        let wantsShort = filters["prioritizeShorterRides"] as? Bool ?? filters["avoidShortPickups"] as? Bool ?? false
-        var preferenceMatch: DriverPreferenceMatch = .strict
-        if wantsLong && !wantsShort, let tripMiles, tripMiles < 15 {
-            return .rejected
-        }
-        if wantsShort && !wantsLong, let tripMiles {
-            if tripMiles >= 15 { return .rejected }
-            if tripMiles >= 11 { preferenceMatch = .fallback }
-        }
-
-        guard (filters["destinationModeEnabled"] as? Bool) == true,
-              let destinationCoordinate = coordinate(from: filters["destinationCoordinate"] ?? filters["destinationGeoPoint"]) else {
-            return preferenceMatch
-        }
-
-        guard let dropoffCoordinate else { return .rejected }
-        let progress = projectedRouteProgress(point: dropoffCoordinate, start: driverCoordinate, end: destinationCoordinate)
-        guard progress >= 0, progress <= 1 else { return .rejected }
-
-        let pickupLocation = CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)
-        let dropoffLocation = CLLocation(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)
-        let destinationLocation = CLLocation(latitude: destinationCoordinate.latitude, longitude: destinationCoordinate.longitude)
-        let pickupToDestinationMiles = pickupLocation.distance(from: destinationLocation) / 1609.344
-        let dropoffToDestinationMiles = dropoffLocation.distance(from: destinationLocation) / 1609.344
-        let corridorMiles = distanceFromPointToSegmentMiles(point: dropoffCoordinate, start: driverCoordinate, end: destinationCoordinate)
-        let allowedCorridorMiles = Self.doubleValue(filters["destinationCorridorMiles"]) ?? 5
-
-        return dropoffToDestinationMiles <= pickupToDestinationMiles
-            && corridorMiles <= allowedCorridorMiles
-            ? preferenceMatch
-            : .rejected
-    }
-
     private func driverRate(
         from data: [String: Any],
         rideType: String,
@@ -652,63 +579,6 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         return nil
     }
 
-    private func coordinate(from value: Any?) -> CLLocationCoordinate2D? {
-        if let point = value as? GeoPoint {
-            return CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude)
-        }
-        guard let data = value as? [String: Any] else { return nil }
-        let lat = Self.doubleValue(data["lat"] ?? data["latitude"])
-        let lng = Self.doubleValue(data["lng"] ?? data["longitude"])
-        guard let lat, let lng else { return nil }
-        return CLLocationCoordinate2D(latitude: lat, longitude: lng)
-    }
-
-    private func projectedRouteProgress(
-        point: CLLocationCoordinate2D,
-        start: CLLocationCoordinate2D,
-        end: CLLocationCoordinate2D
-    ) -> Double {
-        let centerLatitude = start.latitude * .pi / 180
-        func xy(_ coordinate: CLLocationCoordinate2D) -> CGPoint {
-            CGPoint(
-                x: coordinate.longitude * 69.0 * cos(centerLatitude),
-                y: coordinate.latitude * 69.0
-            )
-        }
-
-        let p = xy(point)
-        let a = xy(start)
-        let b = xy(end)
-        let dx = b.x - a.x
-        let dy = b.y - a.y
-        guard dx != 0 || dy != 0 else { return 0 }
-        return ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)
-    }
-
-    private func distanceFromPointToSegmentMiles(
-        point: CLLocationCoordinate2D,
-        start: CLLocationCoordinate2D,
-        end: CLLocationCoordinate2D
-    ) -> Double {
-        let progress = max(0, min(1, projectedRouteProgress(point: point, start: start, end: end)))
-        let centerLatitude = start.latitude * .pi / 180
-        func xy(_ coordinate: CLLocationCoordinate2D) -> CGPoint {
-            CGPoint(
-                x: coordinate.longitude * 69.0 * cos(centerLatitude),
-                y: coordinate.latitude * 69.0
-            )
-        }
-
-        let p = xy(point)
-        let a = xy(start)
-        let b = xy(end)
-        let projected = CGPoint(
-            x: a.x + (b.x - a.x) * progress,
-            y: a.y + (b.y - a.y) * progress
-        )
-        return hypot(p.x - projected.x, p.y - projected.y)
-    }
-
     private func driverName(from data: [String: Any]) -> String {
         if let displayName = data["displayName"] as? String, !displayName.isEmpty {
             return firstNameOnly(displayName)
@@ -752,45 +622,10 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         return nil
     }
 
-    private func genderPreferenceBoost(driverGender: String?, riderPreferences: RiderRidePreferences?) -> Double {
-        guard let preference = riderPreferences?.genderPreference,
-              preference != RiderRidePreferences.defaultValue.genderPreference,
-              let driverGender else {
-            return 0
-        }
-        return driverGender.caseInsensitiveCompare(preference) == .orderedSame ? 28 : 0
-    }
-
-    private func matches(_ supported: String, _ requested: String) -> Bool {
-        canonicalRideType(supported) == canonicalRideType(requested)
-    }
-
-    private func sortDriverCandidates(_ lhs: DriverCandidate, _ rhs: DriverCandidate) -> Bool {
-        let leftDistance = (lhs.distanceMiles * 10).rounded() / 10
-        let rightDistance = (rhs.distanceMiles * 10).rounded() / 10
-        if leftDistance != rightDistance { return leftDistance < rightDistance }
-        if lhs.driver.score != rhs.driver.score { return lhs.driver.score > rhs.driver.score }
-        return lhs.driver.rating > rhs.driver.rating
-    }
-
-    private func isRideTypeTemporarilyDisabled(_ rideType: String, data: [String: Any]) -> Bool {
-        let disabledRideTypes = data["temporarilyDisabledRideTypes"] as? [String] ?? []
-        return disabledRideTypes.contains { canonicalRideType($0) == canonicalRideType(rideType) }
-    }
-
     private func rideTypeAvailableForBeta(_ rideType: String) async throws -> Bool {
         guard canonicalRideType(rideType) == "executive" else { return true }
         let snap = try await db.collection("platformConfig").document("rydrExecutive").getDocument()
         return snap.data()?["enabled"] as? Bool == true
-    }
-
-    private func estimatedTripMiles(
-        pickupCoordinate: CLLocationCoordinate2D,
-        dropoffCoordinate: CLLocationCoordinate2D?
-    ) -> Double? {
-        guard let dropoffCoordinate else { return nil }
-        return CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)
-            .distance(from: CLLocation(latitude: dropoffCoordinate.latitude, longitude: dropoffCoordinate.longitude)) / 1609.344
     }
 
     private func canonicalRideType(_ rideType: String) -> String {
@@ -809,18 +644,6 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         if let number = value as? NSNumber { return number.doubleValue }
         return nil
     }
-}
-
-private struct DriverCandidate {
-    let driver: Driver
-    let distanceMiles: Double
-    let preferenceMatch: DriverPreferenceMatch
-}
-
-private enum DriverPreferenceMatch {
-    case strict
-    case fallback
-    case rejected
 }
 
 private enum RideDispatchError: LocalizedError {

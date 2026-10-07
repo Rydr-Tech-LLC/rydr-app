@@ -2,6 +2,7 @@ const { admin, getFirestore } = require("../config/firebase");
 const { getDirections } = require("./appleMapsService");
 const { calculateOutcome, tierFor, PRICING_VERSION } = require("./rideFinancialService");
 const { rateObject, verifyPaymentReadiness, createRideRequest } = require("./rideRequestService");
+const { findBestDrivers } = require("./driverMatchingService");
 
 const MINIMUM_LEAD_TIME_MS = 2 * 60 * 60 * 1000;
 const MAXIMUM_LEAD_TIME_MS = 30 * 24 * 60 * 60 * 1000;
@@ -52,29 +53,6 @@ function coordinate(value, name) {
     throw error(`${name} is invalid`, 422);
   }
   return { latitude, longitude };
-}
-
-function distanceMiles(a, b) {
-  const radius = 3958.7613;
-  const radians = (degrees) => degrees * Math.PI / 180;
-  const dLat = radians(b.latitude - a.latitude);
-  const dLng = radians(b.longitude - a.longitude);
-  const h = Math.sin(dLat / 2) ** 2
-    + Math.cos(radians(a.latitude)) * Math.cos(radians(b.latitude)) * Math.sin(dLng / 2) ** 2;
-  return radius * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
-function profileCoordinate(profile) {
-  for (const value of [profile?.approximateLocation, profile?.location, profile]) {
-    const latitude = Number(value?.latitude ?? value?.lat);
-    const longitude = Number(value?.longitude ?? value?.lng);
-    if (Number.isFinite(latitude) && Number.isFinite(longitude)) return { latitude, longitude };
-  }
-  const point = profile?.geoPoint;
-  if (Number.isFinite(point?.latitude) && Number.isFinite(point?.longitude)) {
-    return { latitude: point.latitude, longitude: point.longitude };
-  }
-  return null;
 }
 
 function scheduledCandidateEligible(profile, rideType) {
@@ -134,7 +112,17 @@ async function candidateSnapshots(db) {
   return snapshot.docs ?? [];
 }
 
-async function eligibleCandidates({ db, rideType, pickup, scheduledRideId, scheduledPickupMillis, durationMinutes, excludedDriverIds = [] }) {
+async function eligibleCandidates({
+  db,
+  rideType,
+  pickup,
+  dropoff,
+  routeDistanceMiles,
+  scheduledRideId,
+  scheduledPickupMillis,
+  durationMinutes,
+  excludedDriverIds = []
+}) {
   const excluded = new Set(excludedDriverIds);
   const candidates = [];
   const publicSnapshots = await candidateSnapshots(db);
@@ -144,12 +132,17 @@ async function eligibleCandidates({ db, rideType, pickup, scheduledRideId, sched
   const canonicalById = new Map(canonicalSnapshots.filter((snapshot) => snapshot.exists).map((snapshot) => [snapshot.id, snapshot.data()]));
   for (const snapshot of publicSnapshots) {
     if (excluded.has(snapshot.id)) continue;
-    const profile = snapshot.data();
-    if (!scheduledCandidateEligible(canonicalById.get(snapshot.id), rideType)) continue;
-    const location = profileCoordinate(profile);
-    if (!location) continue;
-    const miles = distanceMiles(pickup, location);
-    if (miles > 30) continue;
+    const canonical = canonicalById.get(snapshot.id);
+    if (!scheduledCandidateEligible(canonical, rideType)) continue;
+    const presence = snapshot.data();
+    const profile = {
+      ...presence,
+      ...canonical,
+      isOnline: presence.isOnline,
+      availabilityStatus: presence.availabilityStatus,
+      approximateLocation: presence.approximateLocation,
+      eligibleRideTypes: presence.eligibleRideTypes ?? canonical.eligibleRideTypes
+    };
     const locks = await db.collection("drivers").doc(snapshot.id).collection("scheduledRideLocks")
       .where("status", "==", "active").limit(25).get();
     const requestedStart = scheduledPickupMillis - 30 * 60 * 1000;
@@ -163,11 +156,17 @@ async function eligibleCandidates({ db, rideType, pickup, scheduledRideId, sched
       return requestedStart < end && requestedEnd > start - 30 * 60 * 1000;
     });
     if (conflicts) continue;
-    candidates.push({ id: snapshot.id, profile, distanceToPickupMiles: miles });
+    candidates.push({ id: snapshot.id, profile });
   }
-  return candidates
-    .sort((a, b) => a.distanceToPickupMiles - b.distanceToPickupMiles || Number(b.profile.rating || 0) - Number(a.profile.rating || 0))
-    .slice(0, OPPORTUNITY_LIMIT);
+  return findBestDrivers({
+    rideType,
+    pickupCoordinate: pickup,
+    dropoffCoordinate: dropoff,
+    routeDistanceMiles,
+    candidates,
+    requireOnline: false,
+    maxResults: OPPORTUNITY_LIMIT
+  });
 }
 
 async function verifyRiderCanSchedule(db, riderId) {
@@ -193,11 +192,13 @@ async function routeForPayload(payload, routeProvider) {
   return { pickup, dropoff, route: result.route };
 }
 
-async function buildCandidateQuotes({ db, rideType, pickup, route, scheduledRideId, scheduledPickupMillis, excludedDriverIds }) {
+async function buildCandidateQuotes({ db, rideType, pickup, dropoff, route, scheduledRideId, scheduledPickupMillis, excludedDriverIds }) {
   const candidates = await eligibleCandidates({
     db,
     rideType,
     pickup,
+    dropoff,
+    routeDistanceMiles: route.distanceMeters / 1609.344,
     scheduledRideId,
     scheduledPickupMillis,
     durationMinutes: route.durationSeconds / 60,
@@ -214,6 +215,9 @@ async function buildCandidateQuotes({ db, rideType, pickup, route, scheduledRide
       rating: Number(candidate.profile.rating || 0),
       ratingCount: Number(candidate.profile.ratingCount || 0),
       distanceToPickupMiles: Math.round(candidate.distanceToPickupMiles * 10) / 10,
+      matchScore: candidate.matchScore,
+      matchReasons: candidate.matchReasons,
+      preferenceMatch: candidate.preferenceMatch,
       rates,
       quote: quoteFor({ rideType, route, rates })
     };
@@ -227,11 +231,12 @@ async function previewScheduledRide({ riderId, authorization, payload, db = getF
   if (!rideType || !["quickSchedule", "chooseMyDriver"].includes(mode)) throw error("A valid rideType and mode are required", 422);
   await verifyRiderCanSchedule(db, riderId);
   await paymentVerifier({ riderId, authorization });
-  const { pickup, route } = await routeForPayload(payload, routeProvider);
+  const { pickup, dropoff, route } = await routeForPayload(payload, routeProvider);
   const candidates = await buildCandidateQuotes({
     db,
     rideType,
     pickup,
+    dropoff,
     route,
     scheduledRideId: "preview",
     scheduledPickupMillis: timestampMillis(payload.scheduledPickupAt)
@@ -278,7 +283,7 @@ async function createScheduledRide({ riderId, authorization, payload, db = getFi
 
   const requestRef = db.collection("scheduledRideRequests").doc();
   const { pickup, dropoff, route } = await routeForPayload(payload, routeProvider);
-  const candidates = await buildCandidateQuotes({ db, rideType, pickup, route, scheduledRideId: requestRef.id, scheduledPickupMillis: pickupMillis });
+  const candidates = await buildCandidateQuotes({ db, rideType, pickup, dropoff, route, scheduledRideId: requestRef.id, scheduledPickupMillis: pickupMillis });
   if (candidates.length === 0) throw error("No eligible scheduled drivers are available for this trip", 409);
   const riderApprovedMaxCents = Math.round(Number(payload.riderApprovedMaxCents));
   if (mode === "quickSchedule" && (!Number.isFinite(riderApprovedMaxCents) || riderApprovedMaxCents <= 0)) {
@@ -542,11 +547,13 @@ async function cancelScheduledRide({ uid, requestId, reason, db = getFirestore()
   await db.collection("drivers").doc(uid).collection("scheduledRideLocks").doc(requestId)
     .set({ status: "released", updatedAt: now }, { merge: true });
   const pickup = coordinate(request.pickupCoordinate, "pickupCoordinate");
+  const dropoff = coordinate(request.dropoffCoordinate, "dropoffCoordinate");
   const route = { distanceMeters: request.backendDistanceMeters, durationSeconds: request.backendDurationSeconds };
   const candidates = await buildCandidateQuotes({
     db,
     rideType: request.rideType,
     pickup,
+    dropoff,
     route,
     scheduledRideId: requestId,
     scheduledPickupMillis: timestampMillis(request.scheduledPickupAt),

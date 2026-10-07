@@ -78,11 +78,16 @@ function createPayload(overrides = {}) {
 function readyDb() {
   return new FakeDb({
     "riders/rider-1": { accountStatus: "active", verifiedRider: true },
+    "drivers/driver-1": {
+      isApproved: true,
+      accountStatus: "active",
+      tierRates: { go: { minimumFare: 8, perMile: 1, perMinute: 0.28 } }
+    },
     "publicDriverProfiles/driver-1": {
       isOnline: true,
       availabilityStatus: "available",
       eligibleRideTypes: ["Rydr Go"],
-      tierRates: { go: { minimumFare: 8, perMile: 1, perMinute: 0.28 } }
+      tierRates: { go: { minimumFare: 99, perMile: 99, perMinute: 99 } }
     }
   });
 }
@@ -158,6 +163,28 @@ test("backend rejects an offline selected driver before writing", async () => {
   assert.equal([...db.values.keys()].some((key) => key.startsWith("rideRequests/")), false);
 });
 
+test("backend rejects a selected driver whose canonical account is suspended", async () => {
+  const db = readyDb();
+  db.values.set("drivers/driver-1", {
+    isApproved: true,
+    accountStatus: "suspended",
+    tierRates: { go: { minimumFare: 8, perMile: 1, perMinute: 0.28 } }
+  });
+  await assert.rejects(
+    createRideRequest({
+      riderId: "rider-1",
+      authorization: "Bearer token",
+      payload: createPayload(),
+      db,
+      routeProvider,
+      paymentVerifier: async () => true,
+      authUserProvider: async () => ({}),
+      trustedScheduledActivation: true
+    }),
+    (err) => err.statusCode === 409
+  );
+});
+
 test("an idempotent retry returns the original ride without another payment or route call", async () => {
   const db = readyDb();
   let validations = 0;
@@ -183,7 +210,7 @@ test("standard ride creation requires and consumes the backend match-session fin
   const pickup = { latitude: 33.75, longitude: -84.39 };
   const dropoff = { latitude: 33.8, longitude: -84.3 };
   const route = (await routeProvider()).route;
-  const rates = rateObject(db.values.get("publicDriverProfiles/driver-1"), "Rydr Go");
+  const rates = rateObject(db.values.get("drivers/driver-1"), "Rydr Go");
   const fingerprint = quoteFingerprint({ riderId: "rider-1", driverId: "driver-1", rideType: "Rydr Go", pickup, dropoff, route, rates });
   const now = admin.firestore.Timestamp.fromMillis(Date.UTC(2026, 9, 7, 12));
   db.values.set("rideMatchSessions/session-1", {

@@ -1,5 +1,6 @@
 const { admin, getFirestore } = require("../config/firebase");
 const { tierFor } = require("./rideFinancialService");
+const { isApprovedDriver } = require("./driverPresenceService");
 
 const OFFER_TTL_SECONDS = 18;
 const MAX_CANDIDATE_HINTS = 20;
@@ -42,57 +43,32 @@ function isEligibleCandidate(profile, rideType) {
   const availability = String(profile.availabilityStatus || "available");
   if (!["available", "onCurrentRide"].includes(availability)) return false;
   const types = canonicalRideTypes(profile);
-  return types.size === 0 || types.has(tierFor(rideType));
-}
-
-function coordinate(value) {
-  if (!value || typeof value !== "object") return null;
-  const lat = Number(value.lat ?? value.latitude);
-  const lng = Number(value.lng ?? value.longitude);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return { lat, lng };
-}
-
-function distanceMiles(a, b) {
-  if (!a || !b) return Number.POSITIVE_INFINITY;
-  const radiusMiles = 3958.7613;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const aLat = (a.lat * Math.PI) / 180;
-  const bLat = (b.lat * Math.PI) / 180;
-  const h = Math.sin(dLat / 2) ** 2
-    + Math.cos(aLat) * Math.cos(bLat) * Math.sin(dLng / 2) ** 2;
-  return radiusMiles * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
-function candidateSortValue(profile, pickup) {
-  const location = coordinate(profile?.approximateLocation) || coordinate(profile?.location);
-  const distance = distanceMiles(location, pickup);
-  const rating = Number(profile?.rating) || 0;
-  return { distance, rating };
+  const disabled = Array.isArray(profile.temporarilyDisabledRideTypes) ? profile.temporarilyDisabledRideTypes : [];
+  return (types.size === 0 || types.has(tierFor(rideType)))
+    && !disabled.some((value) => tierFor(value) === tierFor(rideType));
 }
 
 async function selectNextCandidate({ db, request, attemptedDriverIds }) {
-  // Deja's matching service owns how this backend-created candidate pool is
-  // produced. Until that integration lands, these hints come from the current
-  // rider discovery response; every candidate is still revalidated here and
-  // the phone cannot force an offline or ride-type-ineligible assignment.
+  // Match sessions store this pool in ranked backend order. Rematching keeps
+  // that order while revalidating current availability before each offer.
   const hintedIds = normalizedCandidateIds(request.dispatchCandidateIds ?? request.dispatchCandidateHints)
     .filter((id) => !attemptedDriverIds.includes(id));
   if (hintedIds.length === 0) return null;
 
   const refs = hintedIds.map((id) => db.collection("publicDriverProfiles").doc(id));
-  const snapshots = await db.getAll(...refs);
-  const pickup = coordinate(request.pickupCoordinate) || coordinate(request.pickupGeoPoint);
+  const canonicalRefs = hintedIds.map((id) => db.collection("drivers").doc(id));
+  const [snapshots, canonicalSnapshots] = await Promise.all([
+    db.getAll(...refs),
+    db.getAll(...canonicalRefs)
+  ]);
+  const approvedIds = new Set(canonicalSnapshots
+    .filter((snapshot) => snapshot.exists && isApprovedDriver(snapshot.data()))
+    .map((snapshot) => snapshot.id));
   const candidates = snapshots
-    .filter((snapshot) => snapshot.exists && isEligibleCandidate(snapshot.data(), request.rideType))
-    .map((snapshot) => ({ id: snapshot.id, profile: snapshot.data() }))
-    .sort((left, right) => {
-      const a = candidateSortValue(left.profile, pickup);
-      const b = candidateSortValue(right.profile, pickup);
-      if (a.distance !== b.distance) return a.distance - b.distance;
-      return b.rating - a.rating;
-    });
+    .filter((snapshot) => approvedIds.has(snapshot.id)
+      && snapshot.exists
+      && isEligibleCandidate(snapshot.data(), request.rideType))
+    .map((snapshot) => ({ id: snapshot.id, profile: snapshot.data() }));
   return candidates[0] || null;
 }
 
@@ -110,9 +86,14 @@ async function initializeRideDispatch({ rideId, uid, candidateIds, requestId, db
   if (request.riderId !== uid) throw error("Only the rider may initialize dispatch", 403);
   if (typeof request.driverId !== "string" || !request.driverId) throw error("Selected driver is required", 400);
 
-  const hints = normalizedCandidateIds([request.driverId, ...(Array.isArray(candidateIds) ? candidateIds : [])]);
-  const initialCandidateSnap = await db.collection("publicDriverProfiles").doc(request.driverId).get();
-  if (!initialCandidateSnap.exists || !isEligibleCandidate(initialCandidateSnap.data(), request.rideType)) {
+  const hints = normalizedCandidateIds(request.dispatchCandidateIds);
+  if (hints.length === 0) hints.push(request.driverId);
+  const [initialCandidateSnap, canonicalCandidateSnap] = await Promise.all([
+    db.collection("publicDriverProfiles").doc(request.driverId).get(),
+    db.collection("drivers").doc(request.driverId).get()
+  ]);
+  if (!initialCandidateSnap.exists || !isEligibleCandidate(initialCandidateSnap.data(), request.rideType)
+      || !canonicalCandidateSnap.exists || !isApprovedDriver(canonicalCandidateSnap.data())) {
     throw error("The selected driver is no longer eligible", 409);
   }
 
