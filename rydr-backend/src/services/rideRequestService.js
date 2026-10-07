@@ -47,16 +47,22 @@ function nonnegativeNumber(value) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
+function tierEntry(values, tier, requestedRideType) {
+  if (!values || typeof values !== "object") return {};
+  return values[tier]
+    ?? values[String(requestedRideType || "")]
+    ?? values[String(requestedRideType || "").trim()]
+    ?? Object.entries(values).find(([key]) => tierFor(key) === tier)?.[1]
+    ?? {};
+}
+
 function rateObject(profile, rideType) {
   const tier = canonicalRateKey(rideType);
   const config = TIERS[tier];
   const rawRates = profile?.tierRates && typeof profile.tierRates === "object" ? profile.tierRates : {};
-  const raw = rawRates[tier]
-    ?? rawRates[String(rideType || "")]
-    ?? rawRates[String(rideType || "").trim()]
-    ?? {};
+  const raw = tierEntry(rawRates, tier, rideType);
   const usesSuggestedPricing = raw.useSuggestedPricing === true;
-  const suggested = profile?.resolvedSuggestedRates?.[tier] ?? {};
+  const suggested = tierEntry(profile?.resolvedSuggestedRates, tier, rideType);
   const centsOrNull = (value) => {
     const number = nonnegativeNumber(value);
     return number == null ? null : Math.round(number);
@@ -359,5 +365,6 @@ module.exports = {
   verifyPaymentReadiness,
   deterministicRideId,
   quoteFingerprint,
-  rateObject
+  rateObject,
+  tierEntry
 };

@@ -1,4 +1,5 @@
 const { admin, getFirestore } = require("../config/firebase");
+const { tierFor } = require("./rideFinancialService");
 
 function error(message, statusCode) {
   const err = new Error(message);
@@ -21,8 +22,14 @@ function validRate(value, field) {
   return Math.round(number * 100) / 100;
 }
 
+function normalizeTierRates(value) {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(Object.entries(value).map(([key, rate]) => [tierFor(key), rate]));
+}
+
 async function updateDriverRateCard({ uid, payload, db = getFirestore() }) {
   const rideType = canonical(payload?.rideType);
+  const rateKey = tierFor(rideType);
   if (!rideType) throw error("rideType is required", 400);
   const driverRef = db.collection("drivers").doc(uid);
   const statusRef = db.collection("driver_status").doc(uid);
@@ -34,8 +41,8 @@ async function updateDriverRateCard({ uid, payload, db = getFirestore() }) {
     if (driver.isOnline === true || driver.online === true || statusSnap.data()?.isOnline === true) {
       throw error("Rates may only be changed while offline", 409);
     }
-    const qualified = (driver.qualifiedRideTypes ?? driver.supportedRideTypes ?? driver.eligibleRideTypes ?? []).map(canonical);
-    if (!qualified.includes(rideType)) throw error("Driver is not eligible for this ride type", 403);
+    const qualified = (driver.qualifiedRideTypes ?? driver.supportedRideTypes ?? driver.eligibleRideTypes ?? []).map(tierFor);
+    if (!qualified.includes(rateKey)) throw error("Driver is not eligible for this ride type", 403);
     const rate = {
       rideType,
       minimumFare: validRate(payload?.minimumFare, "minimumFare"),
@@ -45,7 +52,7 @@ async function updateDriverRateCard({ uid, payload, db = getFirestore() }) {
       pricingOwner: "rydr_backend",
       updatedAt: admin.firestore.Timestamp.now()
     };
-    const tierRates = { ...(driver.tierRates || {}), [rideType]: rate };
+    const tierRates = { ...normalizeTierRates(driver.tierRates), [rateKey]: rate };
     const now = admin.firestore.Timestamp.now();
     tx.set(driverRef, { tierRates, rateCardUpdatedAt: now, updatedAt: now }, { merge: true });
     tx.set(publicRef, { tierRates, rateCardUpdatedAt: now, updatedAt: now }, { merge: true });
@@ -53,4 +60,4 @@ async function updateDriverRateCard({ uid, payload, db = getFirestore() }) {
   });
 }
 
-module.exports = { updateDriverRateCard, canonical, validRate };
+module.exports = { updateDriverRateCard, canonical, validRate, normalizeTierRates };

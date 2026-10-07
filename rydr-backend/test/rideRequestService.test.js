@@ -112,6 +112,15 @@ test("driver rate snapshot is uncapped and includes the driver's minimum fare", 
   assert.equal(rate.perMinuteCents, 325);
 });
 
+test("driver rate lookup accepts legacy display-name keys without falling back to defaults", () => {
+  const rate = rateObject({
+    tierRates: { "Rydr Go": { minimumFare: 12, perMile: 2.75, perMinute: 0.61 } }
+  }, "Rydr");
+  assert.equal(rate.minimumFareCents, 1200);
+  assert.equal(rate.perMileCents, 275);
+  assert.equal(rate.perMinuteCents, 61);
+});
+
 test("backend creates the authoritative request, signal, route, quote, and dispatch offer", async () => {
   const db = readyDb();
   const result = await createRideRequest({
