@@ -1139,6 +1139,15 @@ service cloud.firestore {
       }
     }
 
+    // Collection-group queries are authorized using the same driverId field
+    // the client filters on. Firestore can prove that constraint before reading.
+    match /{path=**}/opportunities/{driverId} {
+      allow read: if isAdmin() || (
+        signedIn() && resource.data.driverId == request.auth.uid
+      );
+      allow write: if false;
+    }
+
     match /scheduledRideIdempotency/{documentId} {
       allow read, write: if false;
     }

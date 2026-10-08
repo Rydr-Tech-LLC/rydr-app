@@ -28,7 +28,7 @@ struct RideTypeConfigurationView: View {
     let hasSavedRate: Bool
     let demandLevel: DriverDemandLevel
     let rate: DriverRateSetting
-    let suggestedRates: DriverRateSetting
+    let suggestedRates: DriverRateSetting?
     let onToggle: () -> Void
     let onSaveRate: (Double, Double, Double, Bool) -> Void
 
@@ -40,8 +40,8 @@ struct RideTypeConfigurationView: View {
     @State private var perMileText: String = ""
     @State private var perMinuteText: String = ""
 
-    private var pricing: RydrDriverTierPricing {
-        RydrRideTierCatalog.pricing(for: rideType)
+    private var metadata: RydrRideTierMetadata {
+        RydrRideTierCatalog.metadata(for: rideType)
     }
 
     private var currentPerMile: Double {
@@ -134,10 +134,10 @@ struct RideTypeConfigurationView: View {
             .frame(width: 66, height: 66)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(pricing.title)
+                Text(metadata.title)
                     .font(.title.weight(.heavy))
                     .foregroundStyle(.primary)
-                Text(pricing.purpose)
+                Text(metadata.purpose)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -242,7 +242,7 @@ struct RideTypeConfigurationView: View {
                 }
             }
             .tint(.red)
-            .disabled(isOnline || !isEligible)
+            .disabled(isOnline || !isEligible || suggestedRates == nil)
 
             rateRow(
                 title: "Minimum Fare",
@@ -251,10 +251,10 @@ struct RideTypeConfigurationView: View {
                 value: currentMinimumFare,
                 text: $minimumFareText,
                 isInputValid: isMinimumFareInputValid,
-                suggested: suggestedRates.minimumFare,
+                suggested: suggestedRates?.minimumFare,
                 suggestedSuffix: " minimum",
                 onTextChange: { updateRateText($0, field: .minimumFare) },
-                onApplySuggested: { setRate(field: .minimumFare, value: suggestedRates.minimumFare) },
+                onApplySuggested: { if let suggestedRates { setRate(field: .minimumFare, value: suggestedRates.minimumFare) } },
                 onStep: { stepRate(field: .minimumFare, delta: $0) }
             )
 
@@ -267,10 +267,10 @@ struct RideTypeConfigurationView: View {
                 value: currentPerMile,
                 text: $perMileText,
                 isInputValid: isPerMileInputValid,
-                suggested: suggestedRates.perMile,
+                suggested: suggestedRates?.perMile,
                 suggestedSuffix: "/mi",
                 onTextChange: { updateRateText($0, field: .perMile) },
-                onApplySuggested: { setRate(field: .perMile, value: suggestedRates.perMile) },
+                onApplySuggested: { if let suggestedRates { setRate(field: .perMile, value: suggestedRates.perMile) } },
                 onStep: { stepRate(field: .perMile, delta: $0) }
             )
 
@@ -284,10 +284,10 @@ struct RideTypeConfigurationView: View {
                 value: currentPerMinute,
                 text: $perMinuteText,
                 isInputValid: isPerMinuteInputValid,
-                suggested: suggestedRates.perMinute,
+                suggested: suggestedRates?.perMinute,
                 suggestedSuffix: "/min",
                 onTextChange: { updateRateText($0, field: .perMinute) },
-                onApplySuggested: { setRate(field: .perMinute, value: suggestedRates.perMinute) },
+                onApplySuggested: { if let suggestedRates { setRate(field: .perMinute, value: suggestedRates.perMinute) } },
                 onStep: { stepRate(field: .perMinute, delta: $0) }
             )
 
@@ -407,7 +407,7 @@ struct RideTypeConfigurationView: View {
         value: Double,
         text: Binding<String>,
         isInputValid: Bool,
-        suggested: Double,
+        suggested: Double?,
         suggestedSuffix: String,
         onTextChange: @escaping (String) -> Void,
         onApplySuggested: @escaping () -> Void,
@@ -494,12 +494,18 @@ struct RideTypeConfigurationView: View {
                 }
             }
 
-            suggestionSignalRow(
-                value: value,
-                suggested: suggested,
-                suffix: suggestedSuffix,
-                onApplySuggested: onApplySuggested
-            )
+            if let suggested {
+                suggestionSignalRow(
+                    value: value,
+                    suggested: suggested,
+                    suffix: suggestedSuffix,
+                    onApplySuggested: onApplySuggested
+                )
+            } else {
+                Label("Waiting for backend demand and suggested rates", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -643,6 +649,7 @@ struct RideTypeConfigurationView: View {
     }
 
     private func applyAllSuggestedRates() {
+        guard let suggestedRates else { return }
         setRate(field: .minimumFare, value: suggestedRates.minimumFare)
         setRate(field: .perMile, value: suggestedRates.perMile)
         setRate(field: .perMinute, value: suggestedRates.perMinute)

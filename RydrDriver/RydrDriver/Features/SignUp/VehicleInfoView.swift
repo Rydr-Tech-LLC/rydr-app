@@ -49,16 +49,6 @@ struct VehicleInfoView: View {
     @State private var manualTrim = ""
     @State private var manualFuelType: DriverVehicleFuelType = .gas
 
-    private var eligibility: DriverVehicleEligibility? {
-        guard let decoded else { return nil }
-        return DriverVehicleEligibility.evaluate(
-            make: decoded.make,
-            model: decoded.model,
-            year: decoded.year,
-            fuelType: decoded.fuelType.rawValue
-        )
-    }
-
     private var isValid: Bool {
         decoded != nil
         && selectedColor != nil
@@ -129,9 +119,6 @@ struct VehicleInfoView: View {
                     colorPickerSection
                     imagePreviewSection
 
-                    if let eligibility {
-                        eligibilityBanner(eligibility)
-                    }
 
                     HStack {
                         Image(systemName: "number").foregroundColor(.gray)
@@ -446,34 +433,6 @@ struct VehicleInfoView: View {
             .foregroundStyle(.secondary)
     }
 
-    private func eligibilityBanner(_ eligibility: DriverVehicleEligibility) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.seal.fill").foregroundStyle(Styles.rydrGradient)
-                Text("Eligible ride types").font(.headline)
-            }
-            if eligibility.eligibleRideTypes.isEmpty {
-                Text("Manual review required before this vehicle can receive standard Rydr requests.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                HStack {
-                    ForEach(eligibility.eligibleRideTypes, id: \.self) { rideType in
-                        Text(rideType)
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Capsule().fill(Color.red.opacity(0.14)))
-                            .foregroundStyle(.red)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
-    }
-
     // MARK: - Actions
 
     private func decodeVin() {
@@ -606,8 +565,8 @@ struct VehicleInfoView: View {
 }
 
 /// Backs the manual-entry Make/Model dropdowns. Covers the makes/models
-/// `DriverVehicleEligibility` already recognizes (so a manually-entered
-/// vehicle's eligibility matches what a decoded one would get) plus an
+/// Common makes used to simplify manual entry. The backend remains the
+/// authority for the submitted vehicle's ride-type eligibility, plus an
 /// "Other" escape hatch for anything not listed.
 private enum ManualVehicleCatalog {
     static let otherOption = "Other"

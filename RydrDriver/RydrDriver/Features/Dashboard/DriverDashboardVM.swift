@@ -196,13 +196,15 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     var isReadyToGoOnline: Bool {
-        canGoOnline && hasSavedRateSettings && !selectedRideTypes.isEmpty
+        canGoOnline && hasSavedRateSettings && !selectedRideTypes.isEmpty && hasReceivedDriverLocation
     }
 
     var goOnlineBlockReason: String? {
         if !canGoOnline { return "Driver approval is still pending." }
         if !hasSavedRateSettings { return "Save your rate before going online." }
         if selectedRideTypes.isEmpty { return "Select at least one approved ride type." }
+        if locationPermissionDenied { return "Allow location access before going online." }
+        if !hasReceivedDriverLocation { return "Waiting for your current location." }
         return nil
     }
 
@@ -355,15 +357,15 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func rate(for rideType: String) -> DriverRateSetting {
-        tierRates[rideType] ?? .defaultValue(for: rideType)
+        tierRates[rideType] ?? .empty
     }
 
     func demandLevel(for rideType: String) -> DriverDemandLevel {
         demandByRideType[RydrRideTierCatalog.canonicalRideType(rideType)] ?? .low
     }
 
-    func suggestedRate(for rideType: String) -> DriverRateSetting {
-        suggestedRatesByRideType[RydrRideTierCatalog.canonicalRideType(rideType)] ?? rate(for: rideType)
+    func suggestedRate(for rideType: String) -> DriverRateSetting? {
+        suggestedRatesByRideType[RydrRideTierCatalog.canonicalRideType(rideType)]
     }
 
     func saveRate(
@@ -377,7 +379,12 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             statusMessage = "Rates may only be adjusted while offline."
             return
         }
-        var setting = useSuggestedPricing ? suggestedRate(for: rideType) : rate(for: rideType)
+        let backendSuggestion = suggestedRate(for: rideType)
+        if useSuggestedPricing, backendSuggestion == nil {
+            statusMessage = "Suggested rates are still loading from the backend. Try again in a moment."
+            return
+        }
+        var setting = useSuggestedPricing ? (backendSuggestion ?? .empty) : rate(for: rideType)
         if !useSuggestedPricing {
             setting.minimumFare = max(0, minimumFare)
             setting.perMile = max(0, perMile)
@@ -415,6 +422,13 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         }
         guard !selectedRideTypes.isEmpty else {
             statusMessage = "Select at least one approved ride type before going online."
+            return
+        }
+        guard hasReceivedDriverLocation else {
+            requestLocationAuth()
+            statusMessage = locationPermissionDenied
+                ? "Allow location access before going online."
+                : "Waiting for your current location. Try again in a moment."
             return
         }
 
@@ -606,7 +620,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         guard let ride = activeRide else { return }
         performRideAction("arrive_pickup", successMessage: "Arrived at pickup")
         recordWaitTimeEvent(ride: ride, waitStage: "pickup_grace_started")
-        // TODO: trigger rider push notification when notification service is available.
     }
 
     func markPickupPaidWaitActive() {
@@ -619,7 +632,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         guard let ride = activeRide else { return }
         performRideAction("start_ride", successMessage: ride.hasAddedStop ? "Heading to the stop" : "Ride started")
         recordWaitTimeEvent(ride: ride, waitStage: "wait_ended")
-        // TODO: trigger rider push notification when notification service is available.
     }
 
     func markArrivedAtStop() {
@@ -1540,14 +1552,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     private func publishDriverProfile() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        let user = Auth.auth().currentUser
-        let displayName = resolvedDriverDisplayName(authUser: user)
         db.collection("drivers").document(uid).setData([
-            "displayName": displayName,
-            "email": user?.email ?? "",
             "standardDispatchEnabled": true,
             "selectedRideTypes": Array(selectedRideTypes).sorted(),
-            "rideTypes": Array(selectedRideTypes).sorted(),
             "updatedAt": FieldValue.serverTimestamp()
         ], merge: true)
     }
@@ -1682,47 +1689,14 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         insuranceStatus = data["insuranceStatus"] as? String ?? "missing"
         registrationStatus = data["registrationStatus"] as? String ?? "missing"
 
-        let vehicleEligibility = vehicle.map {
-            DriverVehicleEligibility.evaluate(
-                make: $0["make"] as? String ?? "",
-                model: $0["model"] as? String ?? "",
-                year: Self.vehicleYearString($0["year"]),
-                fuelType: $0["fuelType"] as? String ?? DriverVehicleFuelType.gas.rawValue
-            )
-        }
-        let manuallyApprovedRideTypes = normalizeRideTypes(data["approvedRideTypes"] as? [String] ?? [])
         let storedQualifiedRideTypes = data["qualifiedRideTypes"] as? [String]
             ?? data["supportedRideTypes"] as? [String]
             ?? (data["vehicleEligibility"] as? [String: Any])?["rideTypes"] as? [String]
-        let legacyRideTypes = data["rideTypes"] as? [String]
-
-        let baseRideTypes: [String]
-        if let storedQualifiedRideTypes, !storedQualifiedRideTypes.isEmpty {
-            baseRideTypes = RydrRideTierCatalog.expandedRideTypes(
-                for: storedQualifiedRideTypes + manuallyApprovedRideTypes,
-                hasXLVehicle: normalizeRideTypes(storedQualifiedRideTypes).contains("Rydr XL")
-            )
-        } else if let vehicleEligibility {
-            baseRideTypes = vehicleEligibility.expandedEligibleRideTypes(with: manuallyApprovedRideTypes)
-        } else if let legacyRideTypes, !legacyRideTypes.isEmpty {
-            baseRideTypes = normalizeRideTypes(legacyRideTypes)
-        } else if let vehicle = data["vehicle"] as? [String: Any] {
-            let eligibility = DriverVehicleEligibility.evaluate(
-                make: vehicle["make"] as? String ?? "",
-                model: vehicle["model"] as? String ?? "",
-                year: Self.vehicleYearString(vehicle["year"]),
-                fuelType: vehicle["fuelType"] as? String ?? DriverVehicleFuelType.gas.rawValue
-            )
-            baseRideTypes = eligibility.eligibleRideTypes.isEmpty ? ["Rydr Go"] : eligibility.eligibleRideTypes
-        } else {
-            baseRideTypes = ["Rydr Go"]
-        }
-
-        let computedRideTypes = baseRideTypes.isEmpty ? ["Rydr Go"] : baseRideTypes
+        let computedRideTypes = normalizeRideTypes(storedQualifiedRideTypes ?? [])
         eligibleRideTypes = computedRideTypes
         applyStoredRates(data["tierRates"] as? [String: Any])
 
-        let storedSelectedRideTypes = normalizeRideTypes(data["selectedRideTypes"] as? [String] ?? data["rideTypes"] as? [String] ?? [])
+        let storedSelectedRideTypes = normalizeRideTypes(data["selectedRideTypes"] as? [String] ?? [])
         if selectedRideTypes.isEmpty, !storedSelectedRideTypes.isEmpty {
             selectedRideTypes = Set(storedSelectedRideTypes).intersection(Set(computedRideTypes))
         } else {
@@ -1747,11 +1721,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             let raw = rawRates[rideType] as? [String: Any] ?? rawRates[key] as? [String: Any]
             guard let raw else { continue }
             didLoadStoredRate = true
-            let defaults = DriverRateSetting.defaultValue(for: rideType)
             nextRates[rideType] = DriverRateSetting(
-                minimumFare: max(0, Self.doubleValue(raw["minimumFare"]) ?? defaults.minimumFare),
-                perMile: max(0, Self.doubleValue(raw["perMile"]) ?? defaults.perMile),
-                perMinute: max(0, Self.doubleValue(raw["perMinute"]) ?? defaults.perMinute),
+                minimumFare: max(0, Self.doubleValue(raw["minimumFare"]) ?? 0),
+                perMile: max(0, Self.doubleValue(raw["perMile"]) ?? 0),
+                perMinute: max(0, Self.doubleValue(raw["perMinute"]) ?? 0),
                 useSuggestedPricing: raw["useSuggestedPricing"] as? Bool ?? false
             )
         }
@@ -1763,7 +1736,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     private func ensureDefaultRates(for rideTypes: [String]) {
         for rideType in rideTypes where tierRates[rideType] == nil {
-            tierRates[rideType] = .defaultValue(for: rideType)
+            tierRates[rideType] = .empty
         }
     }
 

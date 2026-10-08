@@ -123,6 +123,7 @@ struct Rydr_DriverApp: App {
         DriverRootView()
       }
       .environmentObject(session)
+      .hideKeyboardOnTap()
       .onOpenURL { url in
         _ = GIDSignIn.sharedInstance.handle(url) || Auth.auth().canHandle(url)
       }

@@ -758,12 +758,78 @@ struct DriverLoginView: View {
 // MARK: - Small tap-to-dismiss keyboard helper
 extension View {
     func hideKeyboardOnTap() -> some View {
-        self.simultaneousGesture(
-            TapGesture().onEnded {
-                #if canImport(UIKit)
-                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                #endif
-            }, including: .gesture
-        )
+        background(DriverKeyboardDismissInstallerView().frame(width: 0, height: 0))
+    }
+}
+
+private struct DriverKeyboardDismissInstallerView: UIViewRepresentable {
+    func makeUIView(context: Context) -> DriverKeyboardDismissInstallationView {
+        DriverKeyboardDismissInstallationView()
+    }
+
+    func updateUIView(_ uiView: DriverKeyboardDismissInstallationView, context: Context) {}
+}
+
+private final class DriverKeyboardDismissInstallationView: UIView {
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if let window {
+            DriverKeyboardDismissGestureHandler.install(on: window)
+        }
+    }
+}
+
+private final class DriverKeyboardDismissGestureHandler: NSObject, UIGestureRecognizerDelegate {
+    static let shared = DriverKeyboardDismissGestureHandler()
+    private static let tapName = "com.rydr.driver.keyboard-dismiss-tap"
+    private static let swipeName = "com.rydr.driver.keyboard-dismiss-swipe"
+
+    static func install(on window: UIWindow) {
+        guard window.gestureRecognizers?.contains(where: {
+            $0.name == tapName || $0.name == swipeName
+        }) != true else { return }
+
+        let tap = UITapGestureRecognizer(target: shared, action: #selector(dismissKeyboard))
+        tap.name = tapName
+        tap.cancelsTouchesInView = false
+        tap.delegate = shared
+
+        let swipe = UIPanGestureRecognizer(target: shared, action: #selector(handleSwipe(_:)))
+        swipe.name = swipeName
+        swipe.cancelsTouchesInView = false
+        swipe.delegate = shared
+
+        window.addGestureRecognizer(tap)
+        window.addGestureRecognizer(swipe)
+    }
+
+    @objc private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    @objc private func handleSwipe(_ gesture: UIPanGestureRecognizer) {
+        guard gesture.state == .ended else { return }
+        let translation = gesture.translation(in: gesture.view)
+        guard translation.y > 24, abs(translation.y) > abs(translation.x) else { return }
+        dismissKeyboard()
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard gestureRecognizer.name == Self.tapName else { return true }
+        var view = touch.view
+        while let current = view {
+            if current is UITextField || current is UITextView {
+                return false
+            }
+            view = current.superview
+        }
+        return true
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        true
     }
 }

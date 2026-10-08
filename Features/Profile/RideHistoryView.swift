@@ -7,8 +7,6 @@
 
 
 import SwiftUI
-import MapKit
-import UIKit
 
 struct RideHistoryView: View {
     @EnvironmentObject var rideManager: RideManager
@@ -104,7 +102,6 @@ struct RideHistoryView: View {
         .padding(.horizontal)
     }
 }
-
 // MARK: - Stat tile
 private struct RideHistoryStatTile: View {
     let icon: String
@@ -130,135 +127,17 @@ private struct RideHistoryStatTile: View {
     }
 }
 
-// MARK: - Static map snapshot thumbnail
-private final class RideHistorySnapshotCache {
-    static let shared = RideHistorySnapshotCache()
-    private let cache = NSCache<NSString, UIImage>()
-
-    func image(for key: String) -> UIImage? { cache.object(forKey: key as NSString) }
-    func store(_ image: UIImage, for key: String) { cache.setObject(image, forKey: key as NSString) }
-}
-
-private struct RideHistoryMapThumbnail: View {
-    let pickup: CLLocationCoordinate2D
-    let dropoff: CLLocationCoordinate2D
-    let cacheKey: String
-
-    @State private var snapshotImage: UIImage?
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
-
-            if let snapshotImage {
-                Image(uiImage: snapshotImage)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ProgressView()
-                    .controlSize(.mini)
-            }
-        }
-        .frame(width: 84, height: 100)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .task(id: cacheKey) {
-            await loadSnapshot()
-        }
-    }
-
-    private var fitRegion: MKCoordinateRegion {
-        let minLat = min(pickup.latitude, dropoff.latitude)
-        let maxLat = max(pickup.latitude, dropoff.latitude)
-        let minLon = min(pickup.longitude, dropoff.longitude)
-        let maxLon = max(pickup.longitude, dropoff.longitude)
-
-        let center = CLLocationCoordinate2D(
-            latitude: (minLat + maxLat) / 2,
-            longitude: (minLon + maxLon) / 2
-        )
-        let span = MKCoordinateSpan(
-            latitudeDelta: max(0.015, (maxLat - minLat) * 1.8),
-            longitudeDelta: max(0.015, (maxLon - minLon) * 1.8)
-        )
-        return MKCoordinateRegion(center: center, span: span)
-    }
-
-    @MainActor
-    private func loadSnapshot() async {
-        if let cached = RideHistorySnapshotCache.shared.image(for: cacheKey) {
-            snapshotImage = cached
-            return
-        }
-
-        let options = MKMapSnapshotter.Options()
-        options.region = fitRegion
-        options.size = CGSize(width: 168, height: 200)
-        options.scale = UIScreen.main.scale
-        options.showsBuildings = false
-        options.pointOfInterestFilter = .excludingAll
-        options.mapType = .mutedStandard
-
-        guard let snapshot = try? await MKMapSnapshotter(options: options).start() else { return }
-
-        let rendered = drawRoute(on: snapshot)
-        RideHistorySnapshotCache.shared.store(rendered, for: cacheKey)
-        snapshotImage = rendered
-    }
-
-    private func drawRoute(on snapshot: MKMapSnapshotter.Snapshot) -> UIImage {
-        let image = snapshot.image
-        let renderer = UIGraphicsImageRenderer(size: image.size)
-
-        return renderer.image { ctx in
-            image.draw(at: .zero)
-
-            let pickupPoint = snapshot.point(for: pickup)
-            let dropoffPoint = snapshot.point(for: dropoff)
-            let midPoint = CGPoint(
-                x: (pickupPoint.x + dropoffPoint.x) / 2,
-                y: min(pickupPoint.y, dropoffPoint.y) - 14
-            )
-
-            let path = UIBezierPath()
-            path.move(to: pickupPoint)
-            path.addQuadCurve(to: dropoffPoint, controlPoint: midPoint)
-
-            UIColor.white.withAlphaComponent(0.9).setStroke()
-            path.lineWidth = 6
-            path.lineCapStyle = .round
-            path.lineJoinStyle = .round
-            path.stroke()
-
-            UIColor.systemRed.setStroke()
-            path.lineWidth = 3.5
-            path.stroke()
-
-            let dotRadius: CGFloat = 5
-            ctx.cgContext.setFillColor(UIColor.white.cgColor)
-            ctx.cgContext.fillEllipse(in: CGRect(x: pickupPoint.x - dotRadius - 1.5, y: pickupPoint.y - dotRadius - 1.5, width: (dotRadius + 1.5) * 2, height: (dotRadius + 1.5) * 2))
-            ctx.cgContext.fillEllipse(in: CGRect(x: dropoffPoint.x - dotRadius - 1.5, y: dropoffPoint.y - dotRadius - 1.5, width: (dotRadius + 1.5) * 2, height: (dotRadius + 1.5) * 2))
-
-            ctx.cgContext.setFillColor(UIColor.systemRed.cgColor)
-            ctx.cgContext.fillEllipse(in: CGRect(x: pickupPoint.x - dotRadius, y: pickupPoint.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
-
-            ctx.cgContext.setFillColor(UIColor.systemGreen.cgColor)
-            ctx.cgContext.fillEllipse(in: CGRect(x: dropoffPoint.x - dotRadius, y: dropoffPoint.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
-        }
-    }
-}
-
 // MARK: - Ride card
 private struct RideHistoryCard: View {
     let receipt: Receipt
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            RideHistoryMapThumbnail(
-                pickup: pseudoCoord(from: receipt.pickup),
-                dropoff: pseudoCoord(from: receipt.dropoff),
-                cacheKey: receipt.rideId.uuidString
-            )
+            Image(systemName: "point.bottomleft.forward.to.point.topright.scurvepath.fill")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(Styles.rydrGradient)
+                .frame(width: 84, height: 100)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -353,11 +232,14 @@ struct RideReceiptDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                RydrReceiptRouteMap(pickup: pseudoCoord(from: receipt.pickup),
-                                    dropoff: pseudoCoord(from: receipt.dropoff))
-                    .frame(height: 220)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(receipt.pickup, systemImage: "circle.circle.fill")
+                    Label(receipt.dropoff, systemImage: "mappin.circle.fill")
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(18)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
 
                 // Summary card
                 VStack(alignment: .leading, spacing: 10) {
@@ -428,118 +310,4 @@ struct RideReceiptDetailView: View {
         let sign = amount < 0 ? "-$" : "$"
         return sign + String(format: "%.2f", abs(amount))
     }
-}
-
-// MARK: - Rydr receipt route map
-private struct RydrReceiptRouteMap: View {
-    let pickup: CLLocationCoordinate2D
-    let dropoff: CLLocationCoordinate2D
-
-    var body: some View {
-        Map(initialPosition: .region(fitRegion)) {
-            MapPolyline(coordinates: [pickup, dropoff])
-                .stroke(Color.black.opacity(0.14), style: StrokeStyle(lineWidth: 10, lineCap: .round, lineJoin: .round))
-
-            MapPolyline(coordinates: [pickup, dropoff])
-                .stroke(Styles.rydrGradient, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
-
-            Annotation("Pickup", coordinate: pickup, anchor: .bottom) {
-                RydrReceiptRoutePin(kind: .pickup)
-            }
-
-            Annotation("Drop-off", coordinate: dropoff, anchor: .bottom) {
-                RydrReceiptRoutePin(kind: .dropoff)
-            }
-        }
-        .mapStyle(.standard(elevation: .realistic, pointsOfInterest: .excludingAll))
-        .mapControlVisibility(.hidden)
-        .allowsHitTesting(false)
-        .overlay(alignment: .topLeading) {
-            Label("Rydr Map", systemImage: "location.north.line.fill")
-                .font(.caption2.weight(.black))
-                .foregroundStyle(Styles.rydrGradient)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(.ultraThinMaterial, in: Capsule())
-                .padding(10)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.55), lineWidth: 1)
-        }
-    }
-
-    private var fitRegion: MKCoordinateRegion {
-        let minLat = min(pickup.latitude, dropoff.latitude)
-        let maxLat = max(pickup.latitude, dropoff.latitude)
-        let minLon = min(pickup.longitude, dropoff.longitude)
-        let maxLon = max(pickup.longitude, dropoff.longitude)
-
-        let center = CLLocationCoordinate2D(
-            latitude: (minLat + maxLat) / 2,
-            longitude: (minLon + maxLon) / 2
-        )
-        let span = MKCoordinateSpan(
-            latitudeDelta: max(0.02, (maxLat - minLat) * 1.6),
-            longitudeDelta: max(0.02, (maxLon - minLon) * 1.6)
-        )
-        return MKCoordinateRegion(center: center, span: span)
-    }
-}
-
-private enum RydrReceiptRoutePinKind {
-    case pickup
-    case dropoff
-
-    var title: String {
-        switch self {
-        case .pickup: return "Pickup"
-        case .dropoff: return "Drop-off"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .pickup: return "figure.wave"
-        case .dropoff: return "flag.checkered"
-        }
-    }
-}
-
-private struct RydrReceiptRoutePin: View {
-    let kind: RydrReceiptRoutePinKind
-
-    var body: some View {
-        VStack(spacing: 3) {
-            ZStack {
-                Circle()
-                    .fill(kind == .pickup ? AnyShapeStyle(Color(.systemBackground)) : AnyShapeStyle(Styles.rydrGradient))
-                    .frame(width: 34, height: 34)
-                    .overlay(Circle().stroke(Color.white, lineWidth: 3))
-                    .shadow(color: Color.black.opacity(0.16), radius: 8, y: 4)
-
-                Image(systemName: kind.icon)
-                    .font(.system(size: 14, weight: .black))
-                    .foregroundStyle(kind == .pickup ? Color.red : Color.white)
-            }
-
-            Text(kind.title)
-                .font(.caption2.weight(.black))
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 4)
-                .background(.ultraThinMaterial, in: Capsule())
-        }
-        .accessibilityLabel(kind.title)
-    }
-}
-
-// MARK: - Minimal coordinate fallback (keeps things working without geocoding)
-private func pseudoCoord(from text: String) -> CLLocationCoordinate2D {
-    // Base around Atlanta; jitter deterministically from the string
-    let base = CLLocationCoordinate2D(latitude: 33.7490, longitude: -84.3880)
-    let h = abs(text.hashValue)
-    let lat = base.latitude  + Double(h % 200 - 100) / 10000.0
-    let lon = base.longitude + Double((h / 200) % 200 - 100) / 10000.0
-    return CLLocationCoordinate2D(latitude: lat, longitude: lon)
 }

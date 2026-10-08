@@ -28,10 +28,6 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
     ) async throws -> [Driver] {
         guard try await rideTypeAvailableForBeta(rideType) else { return [] }
 
-        let snapshot = try await db.collection("publicDriverProfiles")
-            .whereField("isOnline", isEqualTo: true)
-            .getDocuments()
-
         let match = try await createBackendMatchSession(
             rideType: rideType,
             pickupCoordinate: pickupCoordinate ?? center,
@@ -40,16 +36,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         )
         activeMatchSessionId = match.sessionId
         activeQuoteFingerprints = match.quoteFingerprints
-        let documentsByID = Dictionary(uniqueKeysWithValues: snapshot.documents.map { ($0.documentID, $0) })
-        return match.rankedCandidateIds.prefix(3).compactMap { driverID in
-            guard let document = documentsByID[driverID] else { return nil }
-            return displayDriver(
-                from: document,
-                rideType: rideType,
-                score: match.matchScores[driverID] ?? 1,
-                backendRate: match.rates[driverID]
-            )
-        }
+        return Array(match.drivers.prefix(3))
     }
 
     func requestRide(
@@ -60,7 +47,6 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
-        pricingSnapshot: RidePriceEstimateSnapshot,
         rydrBankCode: String?,
         replacementForRideId: String?,
         riderPreferences: RiderRidePreferences?,
@@ -111,8 +97,6 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             payload["displayEstimatedDistanceMiles"] = estimate.distanceMiles
             payload["displayEstimatedDurationMinutes"] = estimate.durationMinutes
         }
-        payload["displayEstimatedRiderTotalCents"] = pricingSnapshot.estimatedRiderTotalCents
-        payload["displayEstimatedDriverPayoutCents"] = pricingSnapshot.estimatedDriverPayoutCents
         if let rydrBankCode, !rydrBankCode.isEmpty {
             payload["rydrBankCode"] = rydrBankCode
         }
@@ -150,13 +134,13 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             let perMile: Double
             let perMinute: Double
             let usesSuggestedPricing: Bool
+            let estimatedRiderTotalCents: Int
+            let estimatedDriverPayoutCents: Int
         }
 
         let sessionId: String
         let quoteFingerprints: [String: String]
-        let rankedCandidateIds: [String]
-        let matchScores: [String: Int]
-        let rates: [String: Rate]
+        let drivers: [Driver]
     }
 
     private func createBackendMatchSession(
@@ -198,31 +182,31 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                   let fingerprint = candidate["quoteFingerprint"] as? String else { return nil }
             return (driverId, fingerprint)
         })
-        let rankedCandidateIds = candidates.compactMap { $0["driverId"] as? String }
-        let matchScores = Dictionary(uniqueKeysWithValues: candidates.compactMap { candidate -> (String, Int)? in
-            guard let driverId = candidate["driverId"] as? String else { return nil }
-            let score = Self.intValue(candidate["matchScore"]) ?? 1
-            return (driverId, score)
-        })
         let rates = Dictionary(uniqueKeysWithValues: candidates.compactMap { candidate -> (String, BackendMatchSession.Rate)? in
             guard let driverId = candidate["driverId"] as? String,
                   let rawRate = candidate["rates"] as? [String: Any],
                   let minimumFareCents = Self.doubleValue(rawRate["minimumFareCents"]),
                   let perMileCents = Self.doubleValue(rawRate["perMileCents"]),
-                  let perMinuteCents = Self.doubleValue(rawRate["perMinuteCents"]) else { return nil }
+                  let perMinuteCents = Self.doubleValue(rawRate["perMinuteCents"]),
+                  let estimatedRiderTotalCents = Self.intValue(candidate["estimatedRiderTotalCents"]),
+                  let estimatedDriverPayoutCents = Self.intValue(candidate["estimatedDriverPayoutCents"]) else { return nil }
             return (driverId, BackendMatchSession.Rate(
                 minimumFare: minimumFareCents / 100,
                 perMile: perMileCents / 100,
                 perMinute: perMinuteCents / 100,
-                usesSuggestedPricing: rawRate["usesSuggestedPricing"] as? Bool ?? false
+                usesSuggestedPricing: rawRate["usesSuggestedPricing"] as? Bool ?? false,
+                estimatedRiderTotalCents: estimatedRiderTotalCents,
+                estimatedDriverPayoutCents: estimatedDriverPayoutCents
             ))
         })
+        let drivers = candidates.compactMap { candidate -> Driver? in
+            guard let driverId = candidate["driverId"] as? String else { return nil }
+            return displayDriver(from: candidate, backendRate: rates[driverId])
+        }
         return BackendMatchSession(
             sessionId: sessionId,
             quoteFingerprints: fingerprints,
-            rankedCandidateIds: rankedCandidateIds,
-            matchScores: matchScores,
-            rates: rates
+            drivers: drivers
         )
     }
 
@@ -401,25 +385,15 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
     }
 
     private func displayDriver(
-        from document: QueryDocumentSnapshot,
-        rideType: String,
-        score: Int,
+        from candidate: [String: Any],
         backendRate: BackendMatchSession.Rate?
     ) -> Driver? {
-        let data = document.data()
-        guard let coordinate = coordinate(from: data) else { return nil }
+        guard let driverId = candidate["driverId"] as? String,
+              let data = candidate["driver"] as? [String: Any] else { return nil }
+        guard let coordinate = coordinate(from: data), let rate = backendRate else { return nil }
         let rating = Self.doubleValue(data["rating"]) ?? 5.0
-        let rate = backendRate ?? {
-            let local = driverRate(from: data, rideType: rideType, pricing: RydrPricing.config(for: rideType))
-            return BackendMatchSession.Rate(
-                minimumFare: local.minimumFare,
-                perMile: local.perMile,
-                perMinute: local.perMinute,
-                usesSuggestedPricing: local.usesSuggestedPricing
-            )
-        }()
         return Driver(
-            id: document.documentID,
+            id: driverId,
             name: driverName(from: data),
             profileImage: nonEmptyString(data["profilePhotoURL"]) ?? nonEmptyString(data["profileImage"]),
             // This is the generic catalog image selected from the verified VIN,
@@ -433,13 +407,13 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             minimumFare: rate.minimumFare,
             usesSuggestedPricing: rate.usesSuggestedPricing,
             coordinate: coordinate,
-            score: max(1, min(100, score)),
+            score: max(1, min(100, Self.intValue(candidate["matchScore"]) ?? 1)),
             ratingCount: Self.intValue(data["ratingCount"]) ?? 0,
             completedRideCount: Self.intValue(data["completedRideCount"] ?? data["lifetimeRideCount"]),
             acceptanceRate: Self.intValue(data["acceptanceRate"]),
-            stripeAccountId: data["stripeAccountId"] as? String,
-            stripeChargesEnabled: data["stripeChargesEnabled"] as? Bool ?? false,
-            gender: driverGender(from: data)
+            gender: driverGender(from: data),
+            quotedRiderTotalCents: rate.estimatedRiderTotalCents,
+            quotedDriverPayoutCents: rate.estimatedDriverPayoutCents
         )
     }
 
@@ -524,38 +498,6 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         if let value = raw as? Double { return Int(value) }
         if let value = raw as? String { return Int(value) }
         return nil
-    }
-
-    private func driverRate(
-        from data: [String: Any],
-        rideType: String,
-        pricing: RideTierPricing
-    ) -> (minimumFare: Double, perMile: Double, perMinute: Double, usesSuggestedPricing: Bool) {
-        let tierRates = data["tierRates"] as? [String: Any]
-        let canonical = canonicalRideType(rideType)
-        let rawRate = tierRates?[canonical] as? [String: Any]
-            ?? tierRates?[pricing.title] as? [String: Any]
-        let usesSuggestedPricing = rawRate?["useSuggestedPricing"] as? Bool ?? false
-        let resolvedRates = data["resolvedSuggestedRates"] as? [String: Any]
-        let resolvedRate = resolvedRates?[canonical] as? [String: Any]
-        let resolvedMinimumFare = Self.doubleValue(resolvedRate?["minimumFareCents"]).map { $0 / 100 }
-        let resolvedPerMile = Self.doubleValue(resolvedRate?["perMileCents"]).map { $0 / 100 }
-        let resolvedPerMinute = Self.doubleValue(resolvedRate?["perMinuteCents"]).map { $0 / 100 }
-        let rawMinimumFare = usesSuggestedPricing
-            ? resolvedMinimumFare ?? pricing.suggestedMinimumFare
-            : Self.doubleValue(rawRate?["minimumFare"]) ?? pricing.suggestedMinimumFare
-        let rawPerMile = usesSuggestedPricing
-            ? resolvedPerMile ?? pricing.suggestedPerMile
-            : Self.doubleValue(rawRate?["perMile"]) ?? Self.doubleValue(data["perMile"]) ?? pricing.suggestedPerMile
-        let rawPerMinute = usesSuggestedPricing
-            ? resolvedPerMinute ?? pricing.suggestedPerMinute
-            : Self.doubleValue(rawRate?["perMinute"]) ?? Self.doubleValue(data["perMinute"]) ?? pricing.suggestedPerMinute
-        return (
-            minimumFare: max(0, rawMinimumFare),
-            perMile: max(0, rawPerMile),
-            perMinute: max(0, rawPerMinute),
-            usesSuggestedPricing: usesSuggestedPricing
-        )
     }
 
     private func coordinate(from data: [String: Any]) -> CLLocationCoordinate2D? {

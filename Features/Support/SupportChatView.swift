@@ -2,7 +2,7 @@
 //  SupportChatView.swift
 //  RydrPlayground
 //
-//  Ticket-based support chat. Support replies can be added manually in Firestore for now.
+//  Ticket-based support chat backed by the authenticated support API.
 //
 
 import SwiftUI

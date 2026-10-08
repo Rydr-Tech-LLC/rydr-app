@@ -22,7 +22,7 @@ struct Driver: Identifiable, Equatable {
     let compliments: [String]
     let perMinute: Double
     let perMile: Double
-    var minimumFare: Double = 7.00
+    var minimumFare: Double = 0
     var usesSuggestedPricing: Bool = false
     var coordinate: CLLocationCoordinate2D
     var score: Int                 // proximity/quality score
@@ -32,6 +32,8 @@ struct Driver: Identifiable, Equatable {
     var stripeAccountId: String? = nil       // Stripe Connect account, for destination-charge payouts
     var stripeChargesEnabled: Bool = false   // Connect account has completed onboarding
     var gender: String? = nil
+    var quotedRiderTotalCents: Int? = nil
+    var quotedDriverPayoutCents: Int? = nil
 
     static func == (lhs: Driver, rhs: Driver) -> Bool { lhs.id == rhs.id }
 }
@@ -39,148 +41,6 @@ struct Driver: Identifiable, Equatable {
 struct RideEstimate: Equatable, Codable {
     var distanceMiles: Double
     var durationMinutes: Double
-}
-
-/// Display-only estimate produced by iOS before a ride is created. It is
-/// never accepted as a charge authorization; the backend recalculates the
-/// final outcome from trusted route, lifecycle, rate, and promotion data.
-struct RidePriceEstimateSnapshot: Equatable, Codable {
-    static let currentVersion = 2
-    static let estimateSource = "apple_mapkit"
-
-    let pricingVersion: Int
-    let estimateSource: String
-    let estimatedRiderTotalCents: Int
-    let estimatedDriverPayoutCents: Int
-}
-
-enum RydrRideTier {
-    case eco
-    case go
-    case xl
-    case prestine
-    case executive
-}
-
-struct RideTierPricing {
-    let tier: RydrRideTier
-    let title: String
-    let purpose: String
-    let serviceLevel: String
-    let vehicleExpectations: String
-    let suggestedMinimumFare: Double
-    let bookingFeeUnderFiveMiles: Double
-    let bookingFeeFiveMilesOrMore: Double
-    let suggestedPerMile: Double
-    let suggestedPerMinute: Double
-
-    func bookingFee(for distanceMiles: Double) -> Double {
-        distanceMiles < 5 ? bookingFeeUnderFiveMiles : bookingFeeFiveMilesOrMore
-    }
-
-}
-
-enum RydrPricing {
-    static let driverPayoutShare = 0.90
-
-    static func config(for rideType: String) -> RideTierPricing {
-        switch tier(for: rideType) {
-        case .eco:
-            return .init(
-                tier: .eco,
-                title: "Rydr Eco",
-                purpose: "Electric and environmentally conscious transportation.",
-                serviceLevel: "Practical, efficient, and lower-impact.",
-                vehicleExpectations: "Electric vehicles approved for Rydr Eco.",
-                suggestedMinimumFare: 7.00,
-                bookingFeeUnderFiveMiles: 3.00,
-                bookingFeeFiveMilesOrMore: 5.00,
-                suggestedPerMile: 1.10,
-                suggestedPerMinute: 0.25
-            )
-        case .go:
-            return .init(
-                tier: .go,
-                title: "Rydr Go",
-                purpose: "Affordable everyday transportation.",
-                serviceLevel: "Accessible standard rides for daily trips.",
-                vehicleExpectations: "Compact, mid-size, and full-size sedans or mid-size SUVs in good condition.",
-                suggestedMinimumFare: 7.00,
-                bookingFeeUnderFiveMiles: 3.00,
-                bookingFeeFiveMilesOrMore: 6.00,
-                suggestedPerMile: 1.00,
-                suggestedPerMinute: 0.25
-            )
-        case .xl:
-            return .init(
-                tier: .xl,
-                title: "Rydr XL",
-                purpose: "Groups, larger parties, and luggage.",
-                serviceLevel: "More room while staying practical.",
-                vehicleExpectations: "Large SUVs or qualifying high-capacity vehicles.",
-                suggestedMinimumFare: 7.00,
-                bookingFeeUnderFiveMiles: 4.00,
-                bookingFeeFiveMilesOrMore: 8.00,
-                suggestedPerMile: 1.25,
-                suggestedPerMinute: 0.25
-            )
-        case .prestine:
-            return .init(
-                tier: .prestine,
-                title: "Rydr Prestine",
-                purpose: "Premium transportation with elevated vehicle standards.",
-                serviceLevel: "Premium, clean, well-maintained, and highly rated.",
-                vehicleExpectations: "Vehicle less than 7 years old with clean interior, clean exterior, no visible damage, and well-maintained condition.",
-                suggestedMinimumFare: 7.00,
-                bookingFeeUnderFiveMiles: 5.00,
-                bookingFeeFiveMilesOrMore: 10.00,
-                suggestedPerMile: 1.50,
-                suggestedPerMinute: 0.35
-            )
-        case .executive:
-            return .init(
-                tier: .executive,
-                title: "Rydr Executive",
-                purpose: "Exclusive executive transportation experience.",
-                serviceLevel: "More Than A Ride. An Arrival.",
-                vehicleExpectations: "Luxury sedan or luxury SUV less than 5 years old with leather interior, premium appearance, exceptional cleanliness, and premium amenities.",
-                suggestedMinimumFare: 7.00,
-                bookingFeeUnderFiveMiles: 8.00,
-                bookingFeeFiveMilesOrMore: 15.00,
-                suggestedPerMile: 2.00,
-                suggestedPerMinute: 0.50
-            )
-        }
-    }
-
-    private static func tier(for rideType: String) -> RydrRideTier {
-        let key = rideType.lowercased()
-        if key.contains("eco") { return .eco }
-        if key.contains("xl") { return .xl }
-        if key.contains("prestine") || key.contains("pristine") { return .prestine }
-        if key.contains("executive") { return .executive }
-        return .go
-    }
-}
-
-private extension Double {
-    var formattedRate: String {
-        String(format: "%.2f", self)
-    }
-}
-
-/// A clearly labeled pre-ride estimate for display. Do not use this model for
-/// receipts, charges, payouts, cancellations, or persisted financial state.
-struct RideFareEstimateBreakdown: Equatable {
-    let distanceCost: Double
-    let timeCost: Double
-    let calculatedSubtotal: Double
-    let minimumFareAdjustment: Double
-    let rideSubtotal: Double
-    let bookingFee: Double
-    let finalRiderTotal: Double
-    let driverPayout: Double
-    let platformShare: Double
 }
 
 struct PaymentCard: Identifiable, Equatable {
@@ -484,7 +344,6 @@ protocol RideService: AnyObject, Sendable {
         pickupCoordinate: CLLocationCoordinate2D?,
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
-        pricingSnapshot: RidePriceEstimateSnapshot,
         rydrBankCode: String?,
         replacementForRideId: String?,
         riderPreferences: RiderRidePreferences?,
@@ -773,6 +632,11 @@ final class RideManager: ObservableObject {
             rideRequestErrorMessage = "Add a payment method before requesting a ride."
             return
         }
+        guard driver.quotedRiderTotalCents != nil,
+              driver.quotedDriverPayoutCents != nil else {
+            rideRequestErrorMessage = "The backend quote expired. Refresh nearby drivers and try again."
+            return
+        }
 
         selectedDriver = driver
         rideRequestErrorMessage = nil
@@ -784,7 +648,6 @@ final class RideManager: ObservableObject {
             do {
                 let code = self.normalizedSavedPromoCode()
                 self.currentAppliedRydrBankCode = code.isEmpty ? nil : code
-                let pricingSnapshot = self.priceEstimateSnapshot(estimate: self.cachedEstimate, with: driver, rideType: self.cachedRideType)
                 let rideId = try await rideService.requestRide(
                     driverId: driver.id,
                     pickup: cachedPickup,
@@ -793,7 +656,6 @@ final class RideManager: ObservableObject {
                     pickupCoordinate: cachedPickupCoordinate,
                     dropoffCoordinate: cachedDropoffCoordinate,
                     estimate: cachedEstimate,
-                    pricingSnapshot: pricingSnapshot,
                     rydrBankCode: self.currentAppliedRydrBankCode,
                     replacementForRideId: self.replacementForRideId,
                     riderPreferences: cachedRidePreferences,
@@ -817,12 +679,14 @@ final class RideManager: ObservableObject {
         pendingRideWasRestored = false
         replacementForRideId = nil
 
-        // Display the same uncapped driver rates and driver-selected minimum fare
-        // that the backend snapshots when the driver accepts.
-        let fareBeforePromo = rawFare(estimate: cachedEstimate, with: driver, rideType: cachedRideType)
+        guard let quotedRiderTotalCents = driver.quotedRiderTotalCents else {
+            handleDecline(message: "The backend quote expired. Refresh nearby drivers and try again.")
+            return
+        }
+        let fareBeforePromo = Double(quotedRiderTotalCents) / 100
         let fareAfterPromo = currentAppliedRydrBankCode == nil ? applyPromo(to: fareBeforePromo) : 0
         currentBaseFare = fareAfterPromo
-        currentWaitChargePerMinute = cappedWaitRate(for: driver, rideType: cachedRideType)
+        currentWaitChargePerMinute = displayWaitRate(for: driver)
         hasPlayedTripStartedSoundForCurrentRide = false
 
         let start  = driver.coordinate
@@ -1037,63 +901,6 @@ final class RideManager: ObservableObject {
         clearActiveRideSnapshot()
         state = .cancelled
         closeRideChatIfNeeded(chatContext)
-    }
-
-    // MARK: - Estimation / Pricing
-
-    static func pricingConfig(for rideType: String) -> RideTierPricing {
-        RydrPricing.config(for: rideType)
-    }
-
-    static func fareEstimateBreakdown(estimate: RideEstimate, with driver: Driver, rideType: String) -> RideFareEstimateBreakdown {
-        let pricing = RydrPricing.config(for: rideType)
-        let perMile = max(0, driver.perMile)
-        let perMinute = max(0, driver.perMinute)
-        let distanceCost = estimate.distanceMiles * perMile
-        let timeCost = estimate.durationMinutes * perMinute
-        let calculatedSubtotal = distanceCost + timeCost
-
-        // The driver owns the minimum fare. The backend snapshots this value on
-        // acceptance and remains authoritative for the final charge and payout.
-        let minimumFareAdjustment = max(0, max(0, driver.minimumFare) - calculatedSubtotal)
-        let rideSubtotal = calculatedSubtotal + minimumFareAdjustment
-        let bookingFee = pricing.bookingFee(for: estimate.distanceMiles)
-        let driverPayout = rideSubtotal * RydrPricing.driverPayoutShare
-        let platformShare = (rideSubtotal - driverPayout) + bookingFee
-        let finalRiderTotal = rideSubtotal + bookingFee
-
-        return RideFareEstimateBreakdown(
-            distanceCost: (distanceCost * 100).rounded() / 100,
-            timeCost: (timeCost * 100).rounded() / 100,
-            calculatedSubtotal: (calculatedSubtotal * 100).rounded() / 100,
-            minimumFareAdjustment: (minimumFareAdjustment * 100).rounded() / 100,
-            rideSubtotal: (rideSubtotal * 100).rounded() / 100,
-            bookingFee: bookingFee,
-            finalRiderTotal: (finalRiderTotal * 100).rounded() / 100,
-            driverPayout: (driverPayout * 100).rounded() / 100,
-            platformShare: (platformShare * 100).rounded() / 100
-        )
-    }
-
-    /// Raw fare BEFORE promo discounts (adjusted ride subtotal + booking fee).
-    private func rawFare(estimate: RideEstimate, with driver: Driver, rideType: String) -> Double {
-        Self.fareEstimateBreakdown(estimate: estimate, with: driver, rideType: rideType).finalRiderTotal
-    }
-
-    private static func cents(_ value: Double) -> Int {
-        Int((value * 100).rounded())
-    }
-
-    private func priceEstimateSnapshot(estimate: RideEstimate, with driver: Driver, rideType: String) -> RidePriceEstimateSnapshot {
-        let breakdown = Self.fareEstimateBreakdown(estimate: estimate, with: driver, rideType: rideType)
-        let promoDiscount = currentAppliedRydrBankCode == nil ? 0 : breakdown.finalRiderTotal
-
-        return RidePriceEstimateSnapshot(
-            pricingVersion: RidePriceEstimateSnapshot.currentVersion,
-            estimateSource: RidePriceEstimateSnapshot.estimateSource,
-            estimatedRiderTotalCents: Self.cents(max(0, breakdown.finalRiderTotal - promoDiscount)),
-            estimatedDriverPayoutCents: Self.cents(breakdown.driverPayout)
-        )
     }
 
     private func estimatedPickupEtaSeconds(
@@ -1381,7 +1188,7 @@ final class RideManager: ObservableObject {
         }
     }
 
-    private func cappedWaitRate(for driver: Driver, rideType: String) -> Double {
+    private func displayWaitRate(for driver: Driver) -> Double {
         max(0, driver.perMinute)
     }
 
@@ -1504,6 +1311,8 @@ final class RideManager: ObservableObject {
         let ratingCount: Int?
         let completedRideCount: Int?
         let acceptanceRate: Int?
+        let quotedRiderTotalCents: Int?
+        let quotedDriverPayoutCents: Int?
 
         init(_ driver: Driver) {
             id = driver.id
@@ -1520,6 +1329,8 @@ final class RideManager: ObservableObject {
             ratingCount = driver.ratingCount
             completedRideCount = driver.completedRideCount
             acceptanceRate = driver.acceptanceRate
+            quotedRiderTotalCents = driver.quotedRiderTotalCents
+            quotedDriverPayoutCents = driver.quotedDriverPayoutCents
         }
 
         var driver: Driver {
@@ -1533,13 +1344,15 @@ final class RideManager: ObservableObject {
                 compliments: compliments,
                 perMinute: perMinute,
                 perMile: perMile,
-                minimumFare: minimumFare ?? 7.00,
+                minimumFare: minimumFare ?? 0,
                 usesSuggestedPricing: usesSuggestedPricing ?? false,
                 coordinate: coordinate.coordinate,
                 score: score,
                 ratingCount: ratingCount ?? 0,
                 completedRideCount: completedRideCount,
-                acceptanceRate: acceptanceRate
+                acceptanceRate: acceptanceRate,
+                quotedRiderTotalCents: quotedRiderTotalCents,
+                quotedDriverPayoutCents: quotedDriverPayoutCents
             )
         }
     }
@@ -1716,7 +1529,7 @@ final class RideManager: ObservableObject {
         hasRecoveredActiveRide = true
     }
 
-    // MARK: - Stripe (real wallet + ride charge with driver 70/30 destination split)
+    // MARK: - Stripe wallet and backend-owned ride charges
 
     private func currentIDToken() async -> String? {
         guard let user = Auth.auth().currentUser else { return nil }

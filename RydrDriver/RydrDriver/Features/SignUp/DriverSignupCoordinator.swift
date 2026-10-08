@@ -448,7 +448,7 @@ struct DriverSignupCoordinator: View {
 
     @MainActor
     private func uploadVehicleDocumentsAndContinue(decodedVehicle: DecodedVehicleInfo?) async {
-        guard let decodedVehicle else {
+        guard decodedVehicle != nil else {
             flowAlertText = "Complete the vehicle details before continuing."
             isSubmittingDocuments = false
             return

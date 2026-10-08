@@ -20,6 +20,37 @@ function coordinate(value, name) {
   return { latitude, longitude };
 }
 
+function firstName(value) {
+  const name = String(value || "").trim();
+  return name ? name.split(/\s+/)[0] : "Rydr Driver";
+}
+
+function publicDriverProjection(profile, location) {
+  const vehicle = profile?.vehicle && typeof profile.vehicle === "object" ? profile.vehicle : {};
+  const vehicleSummary = String(profile?.vehicleSummary || profile?.carMakeModel || [
+    vehicle.color,
+    vehicle.year,
+    vehicle.make,
+    vehicle.model
+  ].filter(Boolean).join(" ") || "Verified Rydr vehicle").trim();
+  const rawGender = String(profile?.gender || profile?.driverGender || profile?.genderIdentity || "").toLowerCase();
+  return {
+    displayName: firstName(profile?.displayName || profile?.firstName || profile?.name),
+    profilePhotoURL: profile?.profilePhotoURL || profile?.profileImage || null,
+    vehicleImageURL: profile?.vehicleImageURL || profile?.carImage || vehicle.imageURL || null,
+    vehicleSummary,
+    rating: Number.isFinite(Number(profile?.rating ?? profile?.driverRating))
+      ? Number(profile.rating ?? profile.driverRating)
+      : 5,
+    ratingCount: Math.max(0, Number(profile?.ratingCount) || 0),
+    completedRideCount: Math.max(0, Number(profile?.completedRideCount ?? profile?.lifetimeRideCount) || 0),
+    acceptanceRate: Number.isFinite(Number(profile?.acceptanceRate)) ? Number(profile.acceptanceRate) : null,
+    compliments: Array.isArray(profile?.compliments) ? profile.compliments.map(String).slice(0, 12) : [],
+    gender: rawGender === "male" ? "Male" : rawGender === "female" ? "Female" : null,
+    approximateLocation: { lat: location.latitude, lng: location.longitude }
+  };
+}
+
 async function createRideMatchSession({ riderId, payload, db = getFirestore(), routeProvider = getDirections, now = admin.firestore.Timestamp.now() }) {
   const pickup = coordinate(payload?.pickupCoordinate, "pickupCoordinate");
   const dropoff = coordinate(payload?.dropoffCoordinate, "dropoffCoordinate");
@@ -78,6 +109,7 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
       matchReasons: candidate.matchReasons,
       preferenceMatch: candidate.preferenceMatch,
       distanceToPickupMiles: Math.round(candidate.distanceToPickupMiles * 10) / 10,
+      driver: publicDriverProjection(candidate.profile, candidate.location),
       quoteFingerprint: quoteFingerprint({ riderId, driverId: candidate.id, rideType, pickup, dropoff, route, rates }),
       rates,
       estimatedRiderTotalCents: outcome.finalRiderChargeCents,
@@ -114,4 +146,4 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
   };
 }
 
-module.exports = { createRideMatchSession, MATCH_SESSION_TTL_MS };
+module.exports = { createRideMatchSession, MATCH_SESSION_TTL_MS, publicDriverProjection };

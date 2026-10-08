@@ -242,30 +242,6 @@ final class SupportTicketService {
         }
     }
 
-    private func setData(_ data: [String: Any], document: DocumentReference, merge: Bool) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            document.setData(data, merge: merge) { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: ())
-                }
-            }
-        }
-    }
-
-    private func addData(_ data: [String: Any], collection: CollectionReference) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            collection.addDocument(data: data) { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: ())
-                }
-            }
-        }
-    }
-
     private func backend(path: String, body: [String: Any]) async throws -> [String: Any] {
         guard let raw=Bundle.main.object(forInfoDictionaryKey:"RYDR_BACKEND_BASE_URL") as? String,let base=URL(string:raw),let url=URL(string:path,relativeTo:base),let user=Auth.auth().currentUser else{throw SupportTicketServiceError.notSignedIn}
         var request=URLRequest(url:url);request.httpMethod="POST";request.setValue("application/json",forHTTPHeaderField:"Content-Type");request.setValue("Bearer \(try await user.getIDToken())",forHTTPHeaderField:"Authorization");request.httpBody=try JSONSerialization.data(withJSONObject:body)

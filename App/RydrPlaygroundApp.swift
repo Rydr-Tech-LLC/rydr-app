@@ -30,8 +30,8 @@ struct RydrApp: App {
                 }
             }
             .preferredColorScheme(RydrAppAppearance(rawValue: appAppearance)?.colorScheme)
+            .hideKeyboardOnTap()
         }
     }
 }
-
 

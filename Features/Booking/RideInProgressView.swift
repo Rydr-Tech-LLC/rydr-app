@@ -1063,14 +1063,12 @@ private enum IncidentReportError: LocalizedError {
 }
 
 private final class IncidentReportService {
-    private let db = Firestore.firestore()
-
     @MainActor
     func submit(draft: IncidentReportDraft, rideManager: RideManager) async throws {
-        guard let user = Auth.auth().currentUser else {
+        guard Auth.auth().currentUser != nil else {
             throw IncidentReportError.notSignedIn
         }
-        guard let ride = rideManager.currentRide,
+        guard rideManager.currentRide != nil,
               let context = rideManager.activeRideChatContext else {
             throw IncidentReportError.missingRide
         }

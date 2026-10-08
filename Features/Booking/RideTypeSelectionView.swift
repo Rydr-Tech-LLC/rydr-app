@@ -82,8 +82,7 @@ struct RideTypeSelectionView: View {
                                 }
                                 .buttonStyle(.plain)
                             } else {
-                                let pricing = RideManager.pricingConfig(for: option.title)
-                                NavigationLink(destination: BookingView(rideType: pricing.title, userName: userName)) {
+                                NavigationLink(destination: BookingView(rideType: option.title, userName: userName)) {
                                     RideOptionCard(option: option)
                                 }
                                 .buttonStyle(.plain)

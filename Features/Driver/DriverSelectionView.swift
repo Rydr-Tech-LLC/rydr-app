@@ -308,12 +308,8 @@ private struct DriverCard: View {
 
     @State private var isFavorite = false
 
-    private var fareBreakdown: RideFareEstimateBreakdown {
-        RideManager.fareEstimateBreakdown(estimate: estimate, with: driver, rideType: rideType)
-    }
-
     private var baseFare: Double {
-        fareBreakdown.finalRiderTotal
+        Double(driver.quotedRiderTotalCents ?? 0) / 100
     }
 
     private var distanceText: String {
@@ -390,17 +386,6 @@ private struct DriverCard: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-
-            if fareBreakdown.minimumFareAdjustment > 0 {
-                HStack {
-                    Text("Minimum fare adjustment")
-                    Spacer()
-                    Text("$\(fareBreakdown.minimumFareAdjustment, specifier: "%.2f")")
-                        .monospacedDigit()
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
 
             Button(action: onConfirm) {
                 Text("Confirm \(rideTypeDisplay) with \(driver.name)")

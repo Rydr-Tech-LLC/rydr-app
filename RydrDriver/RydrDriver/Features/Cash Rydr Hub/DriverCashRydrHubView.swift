@@ -200,7 +200,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
         conversationListener = db.collection("cashHubConversations")
             .whereField("driverUid", isEqualTo: uid)
             .addSnapshotListener { [weak self] snapshot, error in
-                Task { @MainActor [weak self] in
+                Task { @MainActor in
                     guard let self else { return }
                     if let error {
                         self.errorMessage = error.localizedDescription
@@ -212,8 +212,8 @@ private final class DriverCashRydrHubVM: ObservableObject {
             }
         blockedRiderListener = db.collection("drivers").document(uid)
             .collection("cashHubBlockedRiders")
-            .addSnapshotListener { snapshot, _ in
-                Task { @MainActor [weak self] in
+            .addSnapshotListener { [weak self] snapshot, _ in
+                Task { @MainActor in
                     self?.blockedRiderUIDs = Set((snapshot?.documents ?? []).map(\.documentID))
                     self?.applyRequestBuffers()
                 }
@@ -221,8 +221,8 @@ private final class DriverCashRydrHubVM: ObservableObject {
         openRequestListener = db.collection("cashRydrRequests")
             .whereField("status", isEqualTo: "open")
             .whereField("eligibleDriverUids", arrayContains: uid)
-            .addSnapshotListener { snapshot, error in
-                Task { @MainActor [weak self] in
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor in
                     guard let self else { return }
                     if let error {
                         self.isLoading = false
@@ -241,8 +241,8 @@ private final class DriverCashRydrHubVM: ObservableObject {
 
         scheduledRequestListener = db.collection("cashRydrRequests")
             .whereField("connectedDriverUid", isEqualTo: uid)
-            .addSnapshotListener { snapshot, error in
-                Task { @MainActor [weak self] in
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor in
                     guard let self else { return }
                     if let error {
                         self.isLoading = false
@@ -506,8 +506,8 @@ private final class DriverCashRydrHubVM: ObservableObject {
                 .document(conversationId)
                 .collection("messages")
                 .order(by: "createdAt", descending: false)
-                .addSnapshotListener { snapshot, error in
-                    Task { @MainActor [weak self] in
+                .addSnapshotListener { [weak self] snapshot, error in
+                    Task { @MainActor in
                         guard let self else { return }
                         if let error {
                             // A conversation may close or be removed between the

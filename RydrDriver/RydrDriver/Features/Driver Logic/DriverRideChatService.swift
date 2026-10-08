@@ -221,18 +221,6 @@ final class DriverRideChatService {
         }
     }
 
-    private func setData(_ data: [String: Any], document: DocumentReference, merge: Bool) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            document.setData(data, merge: merge) { error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: ())
-                }
-            }
-        }
-    }
-
     private func addData(_ data: [String: Any], collection: CollectionReference) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             collection.addDocument(data: data) { error in

@@ -151,7 +151,13 @@ struct ScheduledRideStatusView: View {
                         if request.status == .awaitingRiderSelection || request.status == .replacementApprovalRequired {
                             ForEach(manager.offers) { offer in
                                 Button {
-                                    Task { try? await manager.select(offer) }
+                                    Task {
+                                        do {
+                                            try await manager.select(offer)
+                                        } catch {
+                                            manager.errorMessage = error.localizedDescription
+                                        }
+                                    }
                                 } label: {
                                     HStack {
                                         VStack(alignment: .leading) {
@@ -165,7 +171,15 @@ struct ScheduledRideStatusView: View {
                             }
                         }
                         if ![ScheduledRideStatus.active, .completed, .cancelled, .expired].contains(request.status) {
-                            Button("Cancel scheduled ride", role: .destructive) { Task { try? await manager.cancel() } }
+                            Button("Cancel scheduled ride", role: .destructive) {
+                                Task {
+                                    do {
+                                        try await manager.cancel()
+                                    } catch {
+                                        manager.errorMessage = error.localizedDescription
+                                    }
+                                }
+                            }
                         }
                     } else {
                         ProgressView("Loading scheduled ride…")

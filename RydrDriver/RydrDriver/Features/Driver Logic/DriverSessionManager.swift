@@ -16,12 +16,11 @@ enum DriverApprovalPolicy {
             ?? (data["approvalStatus"] as? String)?.lowercased()
             ?? "pending"
         let approvedByMissionControl = status == "approved"
-        let legacyApproved = (data["isApproved"] as? Bool) ?? false
         let accountStatus = (data["accountStatus"] as? String)?.lowercased()
         let safetyReviewStatus = (data["safetyReviewStatus"] as? String)?.lowercased()
         let hasSafetyHold = (data["safetyHold"] as? Bool) ?? false
         let isSafetySuspended = accountStatus == "suspended" || safetyReviewStatus == "suspended" || hasSafetyHold
-        return (approvedByMissionControl || legacyApproved) && !isSafetySuspended
+        return approvedByMissionControl && !isSafetySuspended
     }
 }
 

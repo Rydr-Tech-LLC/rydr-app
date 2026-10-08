@@ -252,8 +252,8 @@ private struct VehicleRydrRideTypeRow: View {
     @ObservedObject var vm: DriverDashboardVM
     let status: VehicleRydrRideStatus
 
-    private var pricing: RydrDriverTierPricing {
-        RydrRideTierCatalog.pricing(for: rideType)
+    private var metadata: RydrRideTierMetadata {
+        RydrRideTierCatalog.metadata(for: rideType)
     }
 
     var body: some View {
@@ -266,16 +266,22 @@ private struct VehicleRydrRideTypeRow: View {
                 vehicleThumb
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(pricing.title)
+                    Text(metadata.title)
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(.primary)
-                    Text(pricing.purpose)
+                    Text(metadata.purpose)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    Text("Suggested \(pricing.suggestedPerMile, format: .currency(code: "USD"))/mi · \(pricing.suggestedPerMinute, format: .currency(code: "USD"))/min · \(pricing.suggestedMinimumFare, format: .currency(code: "USD")) minimum")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    if let suggestion = vm.suggestedRate(for: rideType) {
+                        Text("Suggested \(suggestion.perMile, format: .currency(code: "USD"))/mi · \(suggestion.perMinute, format: .currency(code: "USD"))/min · \(suggestion.minimumFare, format: .currency(code: "USD")) minimum")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Suggested rates load from backend demand")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Spacer()

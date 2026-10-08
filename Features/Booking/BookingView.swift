@@ -81,16 +81,16 @@ struct BookingView: View {
     @State private var promoStatus: PromoStatus = .idle
     private var isApplyingPromo: Bool { if case .applying = promoStatus { return true } else { return false } }
     private var isPromoApplied: Bool { !appliedRydrBankCode.isEmpty }
-    private var currentEstimate: RideEstimate {
-        if let routeEstimate { return routeEstimate }
-        return fallbackEstimate
-    }
     private var hasRequiredAddressText: Bool {
         !pickupText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         && !dropoffText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     private var canRequestRide: Bool {
-        hasRequiredAddressText && !isResolvingLocations
+        hasRequiredAddressText
+        && pickupCoordinate != nil
+        && dropoffCoordinate != nil
+        && routeEstimate != nil
+        && !isResolvingLocations
     }
     private var hasBookingDraft: Bool {
         pickupCoordinate != nil
@@ -104,15 +104,6 @@ struct BookingView: View {
         && editingShortcutID == nil
         && sliderOffset > sliderMaxY * 0.42
     }
-    private var fallbackEstimate: RideEstimate {
-        let base: Double = 5.0
-        let pm = abs(pickupText.hashValue % 7)
-        let dm = abs(dropoffText.hashValue % 9)
-        let miles = base + Double(pm + dm) * 0.7
-        let minutes = miles * 3.0
-        return .init(distanceMiles: (miles * 10).rounded()/10, durationMinutes: round(minutes))
-    }
-
     // Shortcuts (Work / Home / Add)
     struct Shortcut: Identifiable {
         let id = UUID()
@@ -196,22 +187,24 @@ struct BookingView: View {
         }
         // 🔹 Present driver selection (RideManager-powered)
         .sheet(isPresented: $showDriverSheet) {
-            DriverSelectionView(
-                rideManager: rideManager,
-                rideType: rideType,
-                pickup: pickupText,
-                dropoff: dropoffText,
-                region: region,
-                estimate: currentEstimate,
-                onAccepted: {
-                    showDriverSheet = false
-                    showInProgress = true
-                },
-                onClose: {
-                    showDriverSheet = false
-                    releaseAppliedRydrBankCodeIfNeeded()
-                }
-            )
+            if let routeEstimate {
+                DriverSelectionView(
+                    rideManager: rideManager,
+                    rideType: rideType,
+                    pickup: pickupText,
+                    dropoff: dropoffText,
+                    region: region,
+                    estimate: routeEstimate,
+                    onAccepted: {
+                        showDriverSheet = false
+                        showInProgress = true
+                    },
+                    onClose: {
+                        showDriverSheet = false
+                        releaseAppliedRydrBankCodeIfNeeded()
+                    }
+                )
+            }
         }
         .sheet(isPresented: $showScheduleTime) {
             ScheduleTimeSelectionView(
@@ -286,33 +279,35 @@ struct BookingView: View {
             showScheduledStatus = true
         }
         .sheet(isPresented: $showRoutePreview) {
-            RoutePreviewSheet(
-                rideType: rideType,
-                pickup: pickupText,
-                stop: stopText,
-                dropoff: dropoffText,
-                estimate: currentEstimate,
-                routePolyline: routePolyline,
-                riderName: userName,
-                isVerifiedRider: session.verifiedBadge,
-                pickupCoordinate: pickupCoordinate,
-                dropoffCoordinate: dropoffCoordinate,
-                showsUserLocation: locationManager.authorization == .authorizedWhenInUse || locationManager.authorization == .authorizedAlways,
-                canRequestRide: canRequestRide,
-                isResolving: isResolvingLocations,
-                onAddStop: {
-                    showRoutePreview = false
-                    withAnimation(.spring()) {
-                        showStopField = true
-                        sliderOffset = sliderMinY
+            if let routeEstimate {
+                RoutePreviewSheet(
+                    rideType: rideType,
+                    pickup: pickupText,
+                    stop: stopText,
+                    dropoff: dropoffText,
+                    estimate: routeEstimate,
+                    routePolyline: routePolyline,
+                    riderName: userName,
+                    isVerifiedRider: session.verifiedBadge,
+                    pickupCoordinate: pickupCoordinate,
+                    dropoffCoordinate: dropoffCoordinate,
+                    showsUserLocation: locationManager.authorization == .authorizedWhenInUse || locationManager.authorization == .authorizedAlways,
+                    canRequestRide: canRequestRide,
+                    isResolving: isResolvingLocations,
+                    onAddStop: {
+                        showRoutePreview = false
+                        withAnimation(.spring()) {
+                            showStopField = true
+                            sliderOffset = sliderMinY
+                        }
+                        focusedField = .stop
+                    },
+                    onRequest: {
+                        Task { await requestRide() }
                     }
-                    focusedField = .stop
-                },
-                onRequest: {
-                    Task { await requestRide() }
-                }
-            )
-            .presentationDetents([.large])
+                )
+                .presentationDetents([.large])
+            }
         }
         .sheet(isPresented: $showAllRecents) {
             RecentAddressesSheet(
@@ -1189,7 +1184,10 @@ struct BookingView: View {
             return
         }
 
-        let estimate = currentEstimate
+        guard let estimate = routeEstimate else {
+            showStatus(.failure("We could not calculate that route. Please choose the pickup and drop-off again."))
+            return
+        }
         guard estimate.distanceMiles <= 15 else {
             showStatus(.failure("RydrBank codes can only be applied to rides up to 15 miles."))
             return
@@ -1331,7 +1329,11 @@ struct BookingView: View {
             return
         }
 
-        if isPromoApplied && currentEstimate.distanceMiles > 15 {
+        guard let routeEstimate else {
+            requestValidationMessage = "We could not calculate that route. Please choose the pickup and drop-off again."
+            return
+        }
+        if isPromoApplied && routeEstimate.distanceMiles > 15 {
             showStatus(.failure("RydrBank codes can only be applied to rides up to 15 miles."))
             return
         }
@@ -1345,7 +1347,7 @@ struct BookingView: View {
             near: pickupCoordinate ?? region.center,
             pickupCoordinate: pickupCoordinate,
             dropoffCoordinate: dropoffCoordinate,
-            estimate: currentEstimate,
+            estimate: routeEstimate,
             riderVerified: session.verifiedBadge
         )
         showDriverSheet = true
