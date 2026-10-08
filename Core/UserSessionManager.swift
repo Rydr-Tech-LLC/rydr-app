@@ -164,7 +164,6 @@ class UserSessionManager: ObservableObject {
                 let last  = data["lastName"] as? String ?? ""
                 let preferred = data["preferredName"] as? String ?? ""
                 let emailFromDb = data["email"] as? String
-                let completedRiderTerms = data["agreedToTerms"] as? Bool ?? false
                 let explicitRiderAccess = data["hasRydrRiderAccess"] as? Bool ?? false
                 let identityStatus = (data["identityStatus"] as? String ?? "").lowercased()
                 let hasVerifiedBadge =
@@ -176,11 +175,7 @@ class UserSessionManager: ObservableObject {
                 let studentAmbassador = badges["studentAmbassador"] as? [String: Any] ?? [:]
                 let hasStudentAmbassadorBadge =
                     (studentAmbassador["active"] as? Bool) ?? ((data["betaRole"] as? String) == "studentAmbassador")
-                let address = data["address"] as? [String: Any] ?? [:]
-                let hasRiderAddress = ["street", "city", "state", "zip"].contains { key in
-                    !(address[key] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                }
-                let hasRiderAccess = explicitRiderAccess || completedRiderTerms || hasRiderAddress
+                let hasRiderAccess = explicitRiderAccess
 
                 let legal = [first, last]
                     .joined(separator: " ")

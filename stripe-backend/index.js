@@ -4,11 +4,24 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const admin = require("firebase-admin");
+const { applicationDefault, cert, getApp, getApps, initializeApp } = require("firebase-admin/app");
+const { FieldValue, getFirestore } = require("firebase-admin/firestore");
+const { getAuth } = require("firebase-admin/auth");
 const Stripe = require("stripe");
 const { randomInt, timingSafeEqual } = require("crypto");
 const { rideWithFinancialOutcome } = require("./financialOutcome");
 const { reserveCashHubFee, finalizeCashHubFee, releaseCashHubFee, applyCashHubWithholding } = require("./cashHubBilling");
+
+function firestoreFor(appInstance) { return getFirestore(appInstance); }
+firestoreFor.FieldValue = FieldValue;
+const admin = {
+  credential: { applicationDefault, cert },
+  get apps() { return getApps(); },
+  app: getApp,
+  initializeApp,
+  firestore: firestoreFor,
+  auth: (appInstance) => getAuth(appInstance)
+};
 
 dotenv.config();
 
@@ -270,6 +283,21 @@ function missionControlConnectStatus(account) {
   return account.charges_enabled && account.payouts_enabled ? "completed" : "pending";
 }
 
+function driverConnectStatusUpdate(account) {
+  const update = {
+    stripeAccountId: account.id,
+    stripeConnectStatus: missionControlConnectStatus(account),
+    stripeChargesEnabled: !!account.charges_enabled,
+    stripePayoutsEnabled: !!account.payouts_enabled,
+    stripeRequirementsDue: account.requirements?.currently_due || [],
+  };
+  if (account.payouts_enabled) {
+    update.payoutsStepCompleted = true;
+    update.payoutsStepCompletedAt = admin.firestore.FieldValue.serverTimestamp();
+  }
+  return update;
+}
+
 async function driverData(uid) {
   if (!uid) return null;
   initializeFirebase();
@@ -312,6 +340,8 @@ async function updateIdentityStatus(session, status) {
         ...base,
         identityVerified: true,
         identityVerifiedAt: timestamp,
+        identityVerificationStepCompleted: true,
+        identityVerificationStepCompletedAt: timestamp,
       });
     } else {
       await updateDriver(uid, {
@@ -1089,13 +1119,7 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
           charges_enabled: acct.charges_enabled,
           payouts_enabled: acct.payouts_enabled,
         });
-        await updateDriver(acct.metadata?.uid, {
-          stripeAccountId: acct.id,
-          stripeConnectStatus: missionControlConnectStatus(acct),
-          stripeChargesEnabled: acct.charges_enabled,
-          stripePayoutsEnabled: acct.payouts_enabled,
-          stripeRequirementsDue: acct.requirements?.currently_due || [],
-        });
+        await updateDriver(acct.metadata?.uid, driverConnectStatusUpdate(acct));
         await updatePublicDriverConnectStatus(acct.metadata?.uid, {
           stripeAccountId: acct.id,
           stripeChargesEnabled: acct.charges_enabled,
@@ -2104,13 +2128,7 @@ app.post("/connect/accounts", async (req, res) => {
       try {
         const existing = await stripe.accounts.retrieve(existingAccountId);
         if (!existing.deleted) {
-          await updateDriver(driverUid, {
-            stripeAccountId: existing.id,
-            stripeConnectStatus: missionControlConnectStatus(existing),
-            stripeChargesEnabled: !!existing.charges_enabled,
-            stripePayoutsEnabled: !!existing.payouts_enabled,
-            stripeRequirementsDue: existing.requirements?.currently_due || [],
-          });
+          await updateDriver(driverUid, driverConnectStatusUpdate(existing));
           await updatePublicDriverConnectStatus(driverUid, {
             stripeAccountId: existing.id,
             stripeChargesEnabled: existing.charges_enabled,
@@ -2149,13 +2167,7 @@ app.post("/connect/accounts", async (req, res) => {
       { idempotencyKey: `connect_account_create_${driverUid}` }
     );
 
-    await updateDriver(driverUid, {
-      stripeAccountId: account.id,
-      stripeConnectStatus: missionControlConnectStatus(account),
-      stripeChargesEnabled: !!account.charges_enabled,
-      stripePayoutsEnabled: !!account.payouts_enabled,
-      stripeRequirementsDue: account.requirements?.currently_due || [],
-    });
+    await updateDriver(driverUid, driverConnectStatusUpdate(account));
     await updatePublicDriverConnectStatus(driverUid, {
       stripeAccountId: account.id,
       stripeChargesEnabled: account.charges_enabled,
@@ -2223,6 +2235,11 @@ app.get("/connect/status", async (req, res) => {
     if (!owned) return;
 
     const acct = await stripe.accounts.retrieve(owned.accountId);
+    await updateDriver(owned.uid, driverConnectStatusUpdate(acct));
+    await updatePublicDriverConnectStatus(owned.uid, {
+      stripeAccountId: acct.id,
+      stripeChargesEnabled: acct.charges_enabled,
+    });
     res.json({
       charges_enabled: acct.charges_enabled,
       payouts_enabled: acct.payouts_enabled,

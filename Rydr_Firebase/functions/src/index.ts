@@ -129,6 +129,7 @@ export const submitVehicleVin = onCall(async (request) => {
   const auth = requireAuth(request.auth);
   const vin = request.data?.vin;
   const color = request.data?.color;
+  const plate = typeof request.data?.plate === "string" ? request.data.plate.trim().toUpperCase().slice(0, 20) : "";
 
   if (typeof vin !== "string" || vin.trim().length === 0) {
     throw new HttpsError("invalid-argument", "A `vin` string is required.");
@@ -136,6 +137,7 @@ export const submitVehicleVin = onCall(async (request) => {
   if (!isValidColor(color)) {
     throw new HttpsError("invalid-argument", `A valid \`color\` is required (one of: ${VEHICLE_COLORS.join(", ")}).`);
   }
+  if (!plate) throw new HttpsError("invalid-argument", "A valid vehicle plate is required.");
 
   const driverRef = db.collection("drivers").doc(auth.uid);
 
@@ -200,7 +202,7 @@ export const submitVehicleVin = onCall(async (request) => {
 
   await driverRef.set(
     {
-      vehicle: { ...vehicleFields, class: eligibility.vehicleClass },
+      vehicle: { ...vehicleFields, plate, class: eligibility.vehicleClass },
       vehicleEligibility: {
         ...eligibility,
         matchedVehicleId: lookup.result?.matchedVehicleId ?? null,
@@ -218,7 +220,7 @@ export const submitVehicleVin = onCall(async (request) => {
     { merge: true }
   );
 
-  return { vehicle: { ...vehicleFields, class: eligibility.vehicleClass }, eligibleRideTypes: eligibility.rideTypes, vinDecodeStatus: "decoded", vehicleImageStatus: lookup.status };
+  return { vehicle: { ...vehicleFields, plate, class: eligibility.vehicleClass }, eligibleRideTypes: eligibility.rideTypes, vinDecodeStatus: "decoded", vehicleImageStatus: lookup.status };
 });
 
 /**
@@ -241,6 +243,7 @@ export const submitVehicleManual = onCall(async (request) => {
   const model = typeof data.model === "string" ? data.model.trim() : "";
   const yearNum = Number(data.year);
   const color = data.color;
+  const plate = typeof data.plate === "string" ? data.plate.trim().toUpperCase().slice(0, 20) : "";
 
   if (!make || !model || !Number.isFinite(yearNum) || yearNum < 1980) {
     throw new HttpsError("invalid-argument", "Valid `make`, `model`, and `year` are required.");
@@ -248,6 +251,7 @@ export const submitVehicleManual = onCall(async (request) => {
   if (!isValidColor(color)) {
     throw new HttpsError("invalid-argument", `A valid \`color\` is required (one of: ${VEHICLE_COLORS.join(", ")}).`);
   }
+  if (!plate) throw new HttpsError("invalid-argument", "A valid vehicle plate is required.");
 
   const trim = typeof data.trim === "string" && data.trim.trim().length > 0 ? data.trim.trim() : null;
   const bodyStyle = asBodyStyle(data.bodyStyle);
@@ -295,7 +299,7 @@ export const submitVehicleManual = onCall(async (request) => {
 
   await driverRef.set(
     {
-      vehicle: { ...vehicleFields, class: eligibility.vehicleClass },
+      vehicle: { ...vehicleFields, plate, class: eligibility.vehicleClass },
       vehicleEligibility: {
         ...eligibility,
         matchedVehicleId: lookup.result?.matchedVehicleId ?? null,
@@ -313,5 +317,5 @@ export const submitVehicleManual = onCall(async (request) => {
     { merge: true }
   );
 
-  return { vehicle: { ...vehicleFields, class: eligibility.vehicleClass }, eligibleRideTypes: eligibility.rideTypes, vinDecodeStatus: "manual", vehicleImageStatus: lookup.status };
+  return { vehicle: { ...vehicleFields, plate, class: eligibility.vehicleClass }, eligibleRideTypes: eligibility.rideTypes, vinDecodeStatus: "manual", vehicleImageStatus: lookup.status };
 });

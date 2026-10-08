@@ -582,13 +582,21 @@ final class RideManager: ObservableObject {
     private let tripTransitionSoundPlayer = RiderTripTransitionSoundPlayer()
     private let cancellationSoundPlayer = RiderCancellationSoundPlayer()
     private let activeRideSnapshotKey = "rydr.activeRideSnapshot.v1"
+    private let pendingRideSnapshotKey = "rydr.pendingRideSnapshot.v1"
     private let driverDecisionTimeoutSeconds: UInt64 = 18
+    private var pendingRideWasRestored = false
 
     init(rideService: RideService = FirestoreRideService()) {
         self.rideService = rideService
         restoreActiveRideIfNeeded()
         if state == .inProgress {
+            clearPendingRideSnapshot()
             observeActiveRideLifecycleIfNeeded()
+        } else {
+            restorePendingRideIfNeeded()
+            if state == .awaitingDriver {
+                reconcilePendingRideIfNeeded()
+            }
         }
         Task { await loadRealPaymentMethods() }
     }
@@ -793,17 +801,8 @@ final class RideManager: ObservableObject {
                     candidateDriverIds: availableDrivers.map(\.id)
                 )
                 self.currentServiceRideId = rideId
-
-                let decision = try await self.awaitDriverDecisionWithTimeout(rideId: rideId)
-                switch decision {
-                case .accepted(let driverId):
-                    if let driverId, let acceptedDriver = self.availableDrivers.first(where: { $0.id == driverId }) {
-                        self.selectedDriver = acceptedDriver
-                    }
-                    self.handleAccept()
-                case .declined:
-                    self.handleDecline(message: "That driver declined the ride. Pick another nearby driver.")
-                }
+                self.persistPendingRideSnapshot()
+                self.startDecisionMonitoring(rideId: rideId, reconcileFirst: false)
             } catch {
                 guard !Task.isCancelled else { return }
                 self.handleDecline(message: error.localizedDescription)
@@ -813,7 +812,9 @@ final class RideManager: ObservableObject {
 
     /// Driver accepted – seed the ride from the request and observe backend lifecycle updates.
     func handleAccept() {
-        guard let driver = selectedDriver else { return }
+        guard state == .awaitingDriver, let driver = selectedDriver else { return }
+        let shouldPresentRecoveredRide = pendingRideWasRestored
+        pendingRideWasRestored = false
         replacementForRideId = nil
 
         // Display the same uncapped driver rates and driver-selected minimum fare
@@ -847,11 +848,19 @@ final class RideManager: ObservableObject {
         pickupWaitCharge = 0
         state = .inProgress
         persistActiveRideSnapshot()
+        clearPendingRideSnapshot()
+        if shouldPresentRecoveredRide {
+            hasRecoveredActiveRide = true
+        }
         observeActiveRideLifecycleIfNeeded()
     }
 
     /// If driver declines, take user back to selection (remove that driver).
     func handleDecline(message: String? = nil) {
+        guard state == .awaitingDriver else { return }
+        clearPendingRideSnapshot()
+        pendingRideWasRestored = false
+        currentServiceRideId = nil
         selectedDriver = nil
         rideRequestErrorMessage = message
         rideRequestErrorMessage = message ?? RideRequestError.noDriversAvailable.localizedDescription
@@ -1024,6 +1033,7 @@ final class RideManager: ObservableObject {
         currentWaitChargePerMinute = 0
         hasPlayedTripStartedSoundForCurrentRide = false
         releaseAppliedRydrBankCodeIfNeeded()
+        clearPendingRideSnapshot()
         clearActiveRideSnapshot()
         state = .cancelled
         closeRideChatIfNeeded(chatContext)
@@ -1405,6 +1415,66 @@ final class RideManager: ObservableObject {
         throw CancellationError()
     }
 
+    /// Re-checks the backend whenever the app returns to the foreground. iOS
+    /// may suspend Firestore callbacks while the rider switches to another
+    /// app, so the UI must not depend on receiving one particular callback.
+    func reconcilePendingRideIfNeeded() {
+        guard state == .awaitingDriver, let rideId = currentServiceRideId else { return }
+        startDecisionMonitoring(rideId: rideId, reconcileFirst: true)
+    }
+
+    private func startDecisionMonitoring(rideId: String, reconcileFirst: Bool) {
+        decisionTask?.cancel()
+        decisionTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                if reconcileFirst {
+                    do {
+                        let dispatch = try await self.rideService.refreshRideDispatch(rideId: rideId)
+                        guard !Task.isCancelled else { return }
+                        switch dispatch.status.lowercased() {
+                        case "accepted":
+                            self.applyAcceptedDriver(dispatch.driverId)
+                            self.handleAccept()
+                            return
+                        case "declined", "drivercancelled", "cancelled", "ridercancelled", "nodriversavailable":
+                            self.handleDecline(message: "No nearby drivers are available right now. Try again in a moment.")
+                            return
+                        default:
+                            break
+                        }
+                    } catch {
+                        // A foreground HTTP refresh can briefly fail while the
+                        // network reconnects. Keep the Firestore listener alive
+                        // so cached or subsequently synchronized state can still
+                        // move the rider into the accepted ride.
+                        guard !Task.isCancelled else { return }
+                    }
+                }
+
+                let decision = try await self.awaitDriverDecisionWithTimeout(rideId: rideId)
+                guard !Task.isCancelled else { return }
+                switch decision {
+                case .accepted(let driverId):
+                    self.applyAcceptedDriver(driverId)
+                    self.handleAccept()
+                case .declined:
+                    self.handleDecline(message: "That driver declined the ride. Pick another nearby driver.")
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.rideRequestErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func applyAcceptedDriver(_ driverId: String?) {
+        guard let driverId else { return }
+        if let acceptedDriver = availableDrivers.first(where: { $0.id == driverId }) {
+            selectedDriver = acceptedDriver
+        }
+    }
+
     private struct CoordinateSnapshot: Codable {
         let latitude: Double
         let longitude: Double
@@ -1496,6 +1566,74 @@ final class RideManager: ObservableObject {
         let appliedRydrBankCode: String?
         let baseFare: Double
         let waitChargePerMinute: Double
+    }
+
+    private struct PendingRideSnapshot: Codable {
+        let savedAt: Date
+        let serviceRideId: String
+        let pickup: String
+        let dropoff: String
+        let rideType: String
+        let estimate: RideEstimate
+        let selectedDriverId: String
+        let drivers: [DriverSnapshot]
+        let pickupCoordinate: CoordinateSnapshot?
+        let dropoffCoordinate: CoordinateSnapshot?
+        let appliedRydrBankCode: String?
+    }
+
+    private func persistPendingRideSnapshot() {
+        guard state == .awaitingDriver,
+              let serviceRideId = currentServiceRideId,
+              let driver = selectedDriver else { return }
+        let snapshot = PendingRideSnapshot(
+            savedAt: Date(),
+            serviceRideId: serviceRideId,
+            pickup: cachedPickup,
+            dropoff: cachedDropoff,
+            rideType: cachedRideType,
+            estimate: cachedEstimate,
+            selectedDriverId: driver.id,
+            drivers: availableDrivers.isEmpty ? [DriverSnapshot(driver)] : availableDrivers.map(DriverSnapshot.init),
+            pickupCoordinate: cachedPickupCoordinate.map(CoordinateSnapshot.init),
+            dropoffCoordinate: cachedDropoffCoordinate.map(CoordinateSnapshot.init),
+            appliedRydrBankCode: currentAppliedRydrBankCode
+        )
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        UserDefaults.standard.set(data, forKey: pendingRideSnapshotKey)
+    }
+
+    private func clearPendingRideSnapshot() {
+        UserDefaults.standard.removeObject(forKey: pendingRideSnapshotKey)
+    }
+
+    private func restorePendingRideIfNeeded() {
+        guard let data = UserDefaults.standard.data(forKey: pendingRideSnapshotKey),
+              let snapshot = try? JSONDecoder().decode(PendingRideSnapshot.self, from: data) else {
+            return
+        }
+        guard Date().timeIntervalSince(snapshot.savedAt) < 4 * 60 * 60 else {
+            clearPendingRideSnapshot()
+            return
+        }
+
+        let drivers = snapshot.drivers.map(\.driver)
+        guard let driver = drivers.first(where: { $0.id == snapshot.selectedDriverId }) ?? drivers.first else {
+            clearPendingRideSnapshot()
+            return
+        }
+        currentServiceRideId = snapshot.serviceRideId
+        cachedPickup = snapshot.pickup
+        cachedDropoff = snapshot.dropoff
+        cachedRideType = snapshot.rideType
+        cachedEstimate = snapshot.estimate
+        cachedPickupCoordinate = snapshot.pickupCoordinate?.coordinate
+        cachedDropoffCoordinate = snapshot.dropoffCoordinate?.coordinate
+        currentAppliedRydrBankCode = snapshot.appliedRydrBankCode
+        selectedDriver = driver
+        availableDrivers = drivers
+        state = .awaitingDriver
+        pendingRideWasRestored = true
     }
 
     private func persistActiveRideSnapshot() {

@@ -5,7 +5,8 @@ import { AmbassadorForm } from "../CampusGrowthForms";
 
 export const dynamic = "force-dynamic";
 
-export default async function CampusAmbassadorsPage({ searchParams }: { searchParams: { q?: string } }) {
+export default async function CampusAmbassadorsPage(props: { searchParams: Promise<{ q?: string }> }) {
+  const searchParams = await props.searchParams;
   const query = (searchParams.q ?? "").toLowerCase().trim();
   const [campuses, ambassadorsRaw] = await Promise.all([listCampuses(250), listAmbassadors(500)]);
   const ambassadors = filter(ambassadorsRaw, query, ["name", "email", "campusName", "notes", "status"]);

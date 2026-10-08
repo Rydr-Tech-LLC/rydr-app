@@ -7,6 +7,7 @@ const { promoteNextQueuedRide } = require("../services/driverQueueService");
 const { recordBackgroundCheckIntent } = require("../services/driverScreeningService");
 const { updateDriverRateCard } = require("../services/driverRateCardService");
 const { driverEarningsSummary } = require("../services/driverInsightsService");
+const { prepareDriverLicense, finalizeDriverDocuments, updateVehiclePlate } = require("../services/driverOnboardingService");
 const { requireFirebaseAuth, assertOwnsUid } = require("../middleware/firebaseAuth");
 
 const router = express.Router();
@@ -68,6 +69,24 @@ router.post("/background-check/:action", async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
+});
+
+router.post("/onboarding/license/prepare", async (req, res, next) => {
+  try {
+    return res.json({ ok: true, ...(await prepareDriverLicense({ uid: req.firebaseUid, payload: req.body })) });
+  } catch (err) { return next(err); }
+});
+
+router.post("/onboarding/documents/:kind/finalize", async (req, res, next) => {
+  try {
+    return res.json({ ok: true, ...(await finalizeDriverDocuments({ uid: req.firebaseUid, kind: req.params.kind, payload: req.body })) });
+  } catch (err) { return next(err); }
+});
+
+router.put("/vehicle/plate", async (req, res, next) => {
+  try {
+    return res.json({ ok: true, ...(await updateVehiclePlate({ uid: req.firebaseUid, plate: req.body?.plate })) });
+  } catch (err) { return next(err); }
 });
 
 router.put("/rate-card", async (req, res, next) => {

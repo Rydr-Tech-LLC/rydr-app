@@ -8,7 +8,7 @@
 // backend owns lifecycle transitions, so notifications reflect persisted,
 // server-validated state rather than a client-side simulation.
 
-import { onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { sendPushToUser } from "../services/notificationSender";
 import { db, FieldValue } from "../admin";
 
@@ -93,22 +93,24 @@ const CANCELLED_STATUSES = new Set(["cancelled", "riderCancelled", "driverCancel
 const EN_ROUTE_TO_PICKUP_STATUSES = new Set(["accepted", "enRouteToPickup", "navigatingToPickup"]);
 
 /**
- * Fires on every write to `rides/{rideId}`. Only acts on the specific
- * status/paymentStatus *transitions* that matter — re-saves of an already
- * "completed" ride, location pings, etc. must never re-fire a push.
+ * Fires on every create or update to `rides/{rideId}`. Standard ride
+ * requests do not create this document until a driver accepts, so listening
+ * only for updates would miss the initial acceptance notification. It acts
+ * only on the specific status/paymentStatus transitions that matter —
+ * re-saves of an already "completed" ride or location pings must not re-fire.
  */
-export const onRideUpdated = onDocumentUpdated("rides/{rideId}", async (event) => {
+export const onRideUpdated = onDocumentWritten("rides/{rideId}", async (event) => {
   const before = event.data?.before.data() as RideDoc | undefined;
   const after = event.data?.after.data() as RideDoc | undefined;
-  if (!before || !after) return;
+  if (!after) return;
 
   const rideId = event.params.rideId;
   const riderId = after.riderId;
   const driverId = after.driverId;
 
-  const beforeStatus = normalizeStatus(before.status);
+  const beforeStatus = normalizeStatus(before?.status);
   const afterStatus = normalizeStatus(after.status);
-  const beforePayment = before.paymentStatus ?? "pending";
+  const beforePayment = before?.paymentStatus ?? "pending";
   const afterPayment = after.paymentStatus ?? "pending";
 
   if (beforeStatus !== afterStatus && after.scheduledRideId) {

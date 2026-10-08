@@ -7,7 +7,8 @@ import { deleteAccount } from "@/lib/accountDeletion";
 // Admin-initiated hard deletion. The shared account-deletion service owns
 // Stripe cleanup, Auth removal, every Rider/Driver profile attached to the
 // uid, phone indexes, notification tokens, and driver presence projections.
-export async function POST(request: NextRequest, { params }: { params: { uid: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ uid: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 

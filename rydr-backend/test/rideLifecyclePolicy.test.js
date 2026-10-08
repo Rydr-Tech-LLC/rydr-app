@@ -15,3 +15,24 @@ test("queued rides have an explicit backend-owned promotion action", () => {
   assert.equal(ACTIONS.promote_queue.status, "accepted");
   assert.ok(ACTIONS.promote_queue.fields.includes("queuedRideStartedAt"));
 });
+
+test("Mission Control cancellation is a backend lifecycle action", () => {
+  assert.equal(ACTIONS.admin_cancel.status, "adminCancelled");
+  assert.equal(ACTIONS.admin_cancel.finalizes, true);
+  assert.ok(ACTIONS.admin_cancel.from.includes("inProgress"));
+});
+
+test("admin cancellation is finalized without charging the rider", () => {
+  const outcome = calculateOutcome({
+    rideType: "Rydr Go",
+    status: "adminCancelled",
+    cancelledByRole: "admin",
+    estimatedDistanceMiles: 3,
+    estimatedDurationMinutes: 8,
+    driverMinimumFareCents: 700,
+    driverRatePerMileCents: 100,
+    driverRatePerMinuteCents: 25
+  });
+  assert.equal(outcome.finalRiderChargeCents, 0);
+  assert.equal(outcome.driverPayoutCents, 0);
+});

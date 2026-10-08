@@ -10,7 +10,8 @@ import { writeAuditLog } from "@/lib/auditLog";
 // the `onSupportMessageCreated` Cloud Function trigger checks before
 // pushing a notification to the ticket's owner, so every reply sent here
 // reaches the rider/driver automatically.
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 

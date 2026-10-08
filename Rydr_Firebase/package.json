@@ -1,0 +1,11 @@
+{
+  "name": "rydr-firebase-rules",
+  "private": true,
+  "scripts": {
+    "test:rules": "node --test test/firestore.rules.test.js"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.10.0"
+  }
+}

@@ -1543,7 +1543,6 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         let user = Auth.auth().currentUser
         let displayName = resolvedDriverDisplayName(authUser: user)
         db.collection("drivers").document(uid).setData([
-            "uid": uid,
             "displayName": displayName,
             "email": user?.email ?? "",
             "standardDispatchEnabled": true,

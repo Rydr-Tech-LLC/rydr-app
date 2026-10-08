@@ -11,7 +11,7 @@
 // client, which parse exactly those keys out of the notification's data
 // payload to route a tap to the right screen.
 
-import type * as admin from "firebase-admin";
+import type { MulticastMessage } from "firebase-admin/messaging";
 import { db, FieldValue, messaging } from "../admin";
 
 export type NotificationAudience = "rider" | "driver";
@@ -122,7 +122,7 @@ export async function sendPushToUser(args: SendPushArgs): Promise<void> {
 
     if (tokens.length === 0) return;
 
-    const message: admin.messaging.MulticastMessage = {
+    const message: MulticastMessage = {
       tokens,
       notification: { title, body },
       data: dataPayload(route),

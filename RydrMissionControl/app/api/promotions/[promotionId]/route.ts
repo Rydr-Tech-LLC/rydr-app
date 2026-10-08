@@ -3,7 +3,8 @@ import { getAdminSession } from "@/lib/session";
 import { writeAuditLog } from "@/lib/auditLog";
 import { getPromotion, setPromotionStatus, updatePromotion } from "@/lib/promotions";
 
-export async function GET(_request: NextRequest, { params }: { params: { promotionId: string } }) {
+export async function GET(_request: NextRequest, props: { params: Promise<{ promotionId: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
@@ -12,7 +13,8 @@ export async function GET(_request: NextRequest, { params }: { params: { promoti
   return NextResponse.json({ promotion });
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { promotionId: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ promotionId: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
@@ -35,7 +37,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { promot
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: { params: { promotionId: string } }) {
+export async function DELETE(_request: NextRequest, props: { params: Promise<{ promotionId: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 

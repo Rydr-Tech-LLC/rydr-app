@@ -15,7 +15,8 @@ import { getCampusGrowthSession } from "@/lib/session";
 
 const ACTIONS = ["approve", "reject", "reset"] as const;
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await getCampusGrowthSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 

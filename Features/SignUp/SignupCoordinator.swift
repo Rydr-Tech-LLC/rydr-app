@@ -65,11 +65,7 @@ struct SignupCoordinator: View {
                         betaInviteApproved(phoneE164: verifiedPhone) { approved in
                             Task { @MainActor in
                                 if approved {
-                                    upsertRider([
-                                        "phoneNumber": verifiedPhone,
-                                        "phoneE164": verifiedPhone,
-                                        "createdAt": FieldValue.serverTimestamp()
-                                    ])
+                                    writePhoneIndex(phoneE164: verifiedPhone, uid: Auth.auth().currentUser?.uid ?? "")
                                     path.append(.betaWaiver)
                                 } else {
                                     try? Auth.auth().signOut()
@@ -92,11 +88,6 @@ struct SignupCoordinator: View {
                     BetaWaiverView(
                         onAgree: {
                             betaWaiverAccepted = true
-                            upsertRider([
-                                "betaWaiverAccepted": true,
-                                "betaWaiverAcceptedAt": FieldValue.serverTimestamp(),
-                                "betaWaiverVersion": "2026-07-04"
-                            ])
                             Task { @MainActor in
                                 path.append(.nameEntry)
                             }
@@ -276,13 +267,10 @@ struct SignupCoordinator: View {
     private func finishAuthAccountSetup(for user: User) {
         let e164Phone = normalizedE164Phone(phoneNumber)
         upsertRider([
-            "uid": user.uid,
             "email": email,
             "firstName": firstName,
             "lastName": lastName,
-            "preferredName": preferredName,
-            "phoneNumber": e164Phone,
-            "phoneE164": e164Phone
+            "preferredName": preferredName
         ])
         writePhoneIndex(phoneE164: e164Phone, uid: user.uid)
 
@@ -305,17 +293,13 @@ struct SignupCoordinator: View {
         email = resolvedEmail
 
         upsertRider([
-            "uid": user.uid,
             "email": resolvedEmail,
             "firstName": resolvedFirstName,
             "lastName": resolvedLastName,
             "preferredName": preferredName,
-            "phoneNumber": e164Phone,
-            "phoneE164": e164Phone,
             "authProvider": profile.providerID,
             "socialAuthLinked": true,
-            "socialAuthLinkedAt": FieldValue.serverTimestamp(),
-            "createdAt": FieldValue.serverTimestamp()
+            "socialAuthLinkedAt": FieldValue.serverTimestamp()
         ])
         writePhoneIndex(phoneE164: e164Phone, uid: user.uid)
         provisionStripeCustomerIfNeeded()
@@ -327,55 +311,38 @@ struct SignupCoordinator: View {
 
     /// Final save (still uses merge so it’s idempotent), then load profile & go to app.
     private func saveUserToFirestore() {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard Auth.auth().currentUser != nil else {
             print("❌ No authenticated user to save.")
             return
         }
-        let e164Phone = normalizedE164Phone(phoneNumber)
-
-        let riderData: [String: Any] = [
-            "uid": uid,
-            "firstName": firstName,
-            "lastName": lastName,
-            "preferredName": preferredName,
-            "email": email,
-            "phoneNumber": e164Phone,
-            "phoneE164": e164Phone,
-            "address": [
-                "street": streetAddress,
-                "line2": addressLine2,
-                "city": city,
-                "state": state,
-                "zip": zip
-            ],
-            "agreedToTerms": agreedToTerms,
-            "betaWaiverAccepted": betaWaiverAccepted,
-            "verificationRequested": verificationRequested,
-            "hasRydrRiderAccess": true,
-            "cashHubRole": CashHubRole.rider.rawValue,
-            "createdAt": FieldValue.serverTimestamp()
-        ]
-
-        Firestore.firestore()
-            .collection("riders").document(uid)
-            .setData(riderData, merge: true) { error in
-                if let error = error {
-                    print("❌ Error saving rider: \(error.localizedDescription)")
-                } else {
-                    print("✅ Rider saved to Firestore.")
-                    writePhoneIndex(phoneE164: e164Phone, uid: uid)
-                    Task { @MainActor in
-                        // 🔁 Pull name/preferred so Profile greeting updates immediately
-                        session.login(
-                            name: preferredName.isEmpty ? "\(firstName) \(lastName)" : preferredName,
-                            email: email,
-                            startingTab: .ride,
-                            access: .rider
-                        )
-                        showMainApp = true
-                    }
-                }
+        Task { @MainActor in
+            do {
+                try await RiderBackendIdentityService.finalizeRiderProfile(
+                    firstName: firstName,
+                    lastName: lastName,
+                    preferredName: preferredName,
+                    email: email,
+                    street: streetAddress,
+                    line2: addressLine2,
+                    city: city,
+                    state: state,
+                    zip: zip,
+                    agreedToTerms: agreedToTerms,
+                    betaWaiverAccepted: betaWaiverAccepted,
+                    verificationRequested: verificationRequested
+                )
+                session.login(
+                    name: preferredName.isEmpty ? "\(firstName) \(lastName)" : preferredName,
+                    email: email,
+                    startingTab: .ride,
+                    access: .rider
+                )
+                showMainApp = true
+            } catch {
+                betaAccessError = error.localizedDescription
+                showBetaAccessAlert = true
             }
+        }
     }
 
     private func loadExistingProfile() {

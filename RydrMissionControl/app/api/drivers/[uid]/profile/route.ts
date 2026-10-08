@@ -33,7 +33,8 @@ type ProfilePayload = {
   };
 };
 
-export async function PATCH(request: NextRequest, { params }: { params: { uid: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ uid: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 

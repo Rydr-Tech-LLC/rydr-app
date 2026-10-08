@@ -29,7 +29,8 @@ const ACTIONS = {
   leave_stop: { from: ["arrivedAtStop"], status: "inProgress", fields: ["headedToDropoffAt", "navigatingToDropoffAt"], message: "Your ride is headed to drop-off." },
   complete: { from: ["inProgress", "navigatingToDropoff"], status: "completed", fields: ["completedAt"], message: "Your ride is complete.", finalizes: true },
   driver_cancel: { from: ["accepted", "enRouteToPickup", "arrivedAtPickup", "inProgress", "navigatingToStop", "arrivedAtStop", "navigatingToDropoff"], status: "driverCancelled", fields: ["cancelledAt"], message: "Your driver cancelled this ride.", finalizes: true },
-  rider_cancel: { from: ["pending", "accepted", "enRouteToPickup", "arrivedAtPickup", "inProgress", "navigatingToStop", "arrivedAtStop", "navigatingToDropoff"], status: "riderCancelled", fields: ["cancelledAt"], message: "Ride cancelled.", finalizes: true }
+  rider_cancel: { from: ["pending", "accepted", "enRouteToPickup", "arrivedAtPickup", "inProgress", "navigatingToStop", "arrivedAtStop", "navigatingToDropoff"], status: "riderCancelled", fields: ["cancelledAt"], message: "Ride cancelled.", finalizes: true },
+  admin_cancel: { from: ["pending", "accepted", "enRouteToPickup", "navigatingToPickup", "arrivedAtPickup", "inProgress", "navigatingToStop", "arrivedAtStop", "navigatingToDropoff"], status: "adminCancelled", fields: ["cancelledAt", "adminCancelledAt"], message: "Support cancelled this ride.", finalizes: true }
 };
 
 function error(message, statusCode) { const err = new Error(message); err.statusCode = statusCode; return err; }
@@ -119,9 +120,12 @@ function rydrBankRewardGroup(rideType) {
   return "go_eco";
 }
 
-async function transitionRide({ rideId, action, uid, reason, requestId, queued = false }) {
+async function transitionRide({ rideId, action, uid, reason, requestId, queued = false, actorRole = null }) {
   const policy = ACTIONS[action];
   if (!policy) throw error("Unsupported ride action", 400);
+  const isAdminAction = actorRole === "admin" && action === "admin_cancel";
+  if (action === "admin_cancel" && !isAdminAction) throw error("Admin ride action is not allowed", 403);
+  if (isAdminAction && (!uid || !/^[A-Za-z0-9:_-]{1,128}$/.test(uid))) throw error("A valid admin uid is required", 400);
   if (!requestId || !/^[A-Za-z0-9_-]{8,80}$/.test(requestId)) throw error("requestId is required", 400);
   if (action === "driver_decline" || action === "driver_miss") {
     return advanceRideDispatch({
@@ -159,7 +163,7 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
 
   if (policy.finalizes) {
     try {
-      await calculateAndStoreRideRouteEstimate({ rideId, uid });
+      await calculateAndStoreRideRouteEstimate({ rideId, uid, trustedInternal: isAdminAction });
     } catch (routeError) {
       if (process.env.NODE_ENV !== "test") {
         console.warn("Unable to refresh the backend route before ride finalization", {
@@ -177,7 +181,7 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     const ride = rideSnap.exists ? rideSnap.data() : requestSnap.data();
     const isRiderAction = action === "rider_cancel";
     const assignedDriverId = ride.driverId || ride.targetDriverId || ride.requestedDriverId;
-    if ((isRiderAction ? ride.riderId : assignedDriverId) !== uid) throw error("Ride action is not allowed for this user", 403);
+    if (!isAdminAction && (isRiderAction ? ride.riderId : assignedDriverId) !== uid) throw error("Ride action is not allowed for this user", 403);
     if (ride.lastLifecycleRequestId === requestId) return { status: ride.status, outcome: outcomeSnap.exists ? outcomeSnap.data() : null, duplicate: true };
     if (!policy.from.includes(ride.status)) throw error(`Cannot ${action} from ${ride.status}`, 409);
     if (action === "driver_accept") {
@@ -186,7 +190,7 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
       if (offerExpiresAt === null || offerExpiresAt <= Date.now()) throw error("Ride offer expired", 409);
     }
     if (action === "promote_queue" && ride.driverQueueStatus !== "queued") throw error("Ride is not queued", 409);
-    if (!["driver_accept", "promote_queue", "driver_cancel", "rider_cancel"].includes(action) && ride.driverQueueStatus === "queued") {
+    if (!["driver_accept", "promote_queue", "driver_cancel", "rider_cancel", "admin_cancel"].includes(action) && ride.driverQueueStatus === "queued") {
       throw error("Queued ride must be promoted before navigation starts", 409);
     }
 
@@ -262,7 +266,14 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     }
     if (action === "start_paid_wait") update.pickupComplimentaryWaitSeconds = 180;
     if (action === "promote_queue") update.driverQueueStatus = "active";
-    if (action.endsWith("cancel")) Object.assign(update, { cancelledBy: uid, cancelledByRole: isRiderAction ? "rider" : "driver", cancellationReason: String(reason || "Other").slice(0, 500) });
+    if (action.endsWith("cancel")) Object.assign(update, {
+      driverQueueStatus: "cancelled",
+      dispatchStatus: "cancelled",
+      cancelledBy: uid,
+      cancelledByRole: isAdminAction ? "admin" : isRiderAction ? "rider" : "driver",
+      cancellationReason: String(reason || "Other").slice(0, 500),
+      ...(isAdminAction ? { adminCancelledBy: uid } : {})
+    });
     if (action === "driver_accept") {
       const attemptNumber = Number(ride.dispatchAttemptNumber || 1);
       const attemptRef = requestRef.collection("dispatchAttempts").doc(String(attemptNumber).padStart(4, "0"));

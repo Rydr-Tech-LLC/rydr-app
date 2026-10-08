@@ -13,7 +13,8 @@ const statusByAction: Partial<Record<PromotionAction, PromotionStatus>> = {
   archive: "archived"
 };
 
-export async function POST(request: NextRequest, { params }: { params: { promotionId: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ promotionId: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 

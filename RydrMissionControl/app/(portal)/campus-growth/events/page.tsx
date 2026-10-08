@@ -5,7 +5,8 @@ import { EventForm } from "../CampusGrowthForms";
 
 export const dynamic = "force-dynamic";
 
-export default async function CampusEventsPage({ searchParams }: { searchParams: { q?: string } }) {
+export default async function CampusEventsPage(props: { searchParams: Promise<{ q?: string }> }) {
+  const searchParams = await props.searchParams;
   const query = (searchParams.q ?? "").toLowerCase().trim();
   const [campuses, eventsRaw] = await Promise.all([listCampuses(250), listCampusEvents(500)]);
   const events = filter(eventsRaw, query, ["name", "campusName", "venue", "category", "source", "notes"]);

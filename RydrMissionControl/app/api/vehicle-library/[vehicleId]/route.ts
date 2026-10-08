@@ -10,7 +10,8 @@ import {
   type VehicleBodyStyle
 } from "@/lib/vehicleLibrary";
 
-export async function GET(_request: NextRequest, { params }: { params: { vehicleId: string } }) {
+export async function GET(_request: NextRequest, props: { params: Promise<{ vehicleId: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -23,7 +24,8 @@ export async function GET(_request: NextRequest, { params }: { params: { vehicle
   return NextResponse.json({ entry });
 }
 
-export async function PATCH(request: NextRequest, { params }: { params: { vehicleId: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ vehicleId: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -73,7 +75,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { vehicl
   return NextResponse.json({ entry });
 }
 
-export async function POST(request: NextRequest, { params }: { params: { vehicleId: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ vehicleId: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -102,7 +105,8 @@ export async function POST(request: NextRequest, { params }: { params: { vehicle
   return NextResponse.json({ entry, matchedDriverCount });
 }
 
-export async function DELETE(_request: NextRequest, { params }: { params: { vehicleId: string } }) {
+export async function DELETE(_request: NextRequest, props: { params: Promise<{ vehicleId: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });

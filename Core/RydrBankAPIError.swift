@@ -107,6 +107,35 @@ enum RiderBackendIdentityService {
         try await send(path: "/account/cash-hub-rider-profile", body: ["firstName": firstName, "lastName": lastName, "email": email])
     }
 
+    static func finalizeRiderProfile(
+        firstName: String,
+        lastName: String,
+        preferredName: String,
+        email: String,
+        street: String,
+        line2: String,
+        city: String,
+        state: String,
+        zip: String,
+        agreedToTerms: Bool,
+        betaWaiverAccepted: Bool,
+        verificationRequested: Bool
+    ) async throws {
+        try await send(path: "/account/profile/finalize", body: [
+            "role": "rider",
+            "profile": [
+                "firstName": firstName,
+                "lastName": lastName,
+                "preferredName": preferredName,
+                "email": email,
+                "address": ["street": street, "line2": line2, "city": city, "state": state, "zip": zip],
+                "agreedToTerms": agreedToTerms,
+                "betaWaiverAccepted": betaWaiverAccepted,
+                "verificationRequested": verificationRequested
+            ]
+        ])
+    }
+
     private static func send(path: String, body: [String: Any]) async throws {
         guard let user = Auth.auth().currentUser else { throw RydrBankAPIError.notSignedIn }
         guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,

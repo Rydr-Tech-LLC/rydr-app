@@ -1,4 +1,37 @@
-const admin = require("firebase-admin");
+const {
+  applicationDefault,
+  cert,
+  getApp,
+  getApps,
+  initializeApp
+} = require("firebase-admin/app");
+const {
+  FieldValue,
+  GeoPoint,
+  Timestamp,
+  getFirestore: getAdminFirestore
+} = require("firebase-admin/firestore");
+const { getStorage } = require("firebase-admin/storage");
+const { getAuth } = require("firebase-admin/auth");
+const { getAppCheck } = require("firebase-admin/app-check");
+
+// Keep the service layer's established `admin.firestore.Timestamp`-style API
+// while using Firebase Admin 14's modular entry points underneath.
+function firestoreFor(appInstance) { return getAdminFirestore(appInstance); }
+firestoreFor.FieldValue = FieldValue;
+firestoreFor.GeoPoint = GeoPoint;
+firestoreFor.Timestamp = Timestamp;
+
+const admin = {
+  credential: { applicationDefault, cert },
+  get apps() { return getApps(); },
+  app: getApp,
+  initializeApp,
+  firestore: firestoreFor,
+  storage: (appInstance) => getStorage(appInstance),
+  auth: (appInstance) => getAuth(appInstance),
+  appCheck: (appInstance) => getAppCheck(appInstance)
+};
 
 let app;
 let db;

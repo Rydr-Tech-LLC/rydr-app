@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const admin = require("firebase-admin");
+const { admin } = require("../src/config/firebase");
 const {
   createRideRequest,
   deterministicRideId,

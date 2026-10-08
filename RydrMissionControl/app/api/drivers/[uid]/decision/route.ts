@@ -18,7 +18,8 @@ const ACTION_LABEL: Record<Decision, string> = {
 // `approvedAt` / `approvedBy` themselves) and re-checks the admin session
 // from the cookie rather than trusting anything the browser sends except
 // which button was clicked.
-export async function POST(request: NextRequest, { params }: { params: { uid: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ uid: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });

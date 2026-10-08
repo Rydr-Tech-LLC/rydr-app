@@ -3,11 +3,12 @@ import VehicleLibraryClient from "./VehicleLibraryClient";
 
 export const dynamic = "force-dynamic";
 
-export default async function VehicleLibraryPage({
-  searchParams
-}: {
-  searchParams: { make?: string; model?: string };
-}) {
+export default async function VehicleLibraryPage(
+  props: {
+    searchParams: Promise<{ make?: string; model?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const make = searchParams?.make;
   const model = searchParams?.model;
   const entries = make || model ? await searchVehicleLibrary({ make, model }) : await listVehicleLibrary();

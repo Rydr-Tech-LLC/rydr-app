@@ -1,4 +1,5 @@
 const express = require("express");
+const { timingSafeEqual } = require("node:crypto");
 const { requireFirebaseAuth } = require("../middleware/firebaseAuth");
 const { requireFirebaseAppCheck } = require("../middleware/appCheck");
 const { transitionRide } = require("../services/rideLifecycleService");
@@ -8,8 +9,53 @@ const { recordRideTelemetry } = require("../services/rideTelemetryService");
 const { submitRideRating } = require("../services/rideRatingService");
 const { createRideRequest } = require("../services/rideRequestService");
 const { createRideMatchSession } = require("../services/rideMatchService");
+const { resolvePaymentFailure } = require("../services/adminFinancialService");
 
 const router = express.Router();
+
+function requireInternalService(req, res) {
+  const expected = process.env.RYDR_INTERNAL_SERVICE_TOKEN;
+  const supplied = req.header("x-rydr-internal-token");
+  const expectedBuffer = expected ? Buffer.from(expected) : null;
+  const suppliedBuffer = supplied ? Buffer.from(supplied) : null;
+  const valid = expectedBuffer && suppliedBuffer && expectedBuffer.length === suppliedBuffer.length
+    && timingSafeEqual(expectedBuffer, suppliedBuffer);
+  if (!valid) {
+    res.status(401).json({ error: "Internal service authentication is required" });
+    return false;
+  }
+  return true;
+}
+
+router.post("/internal/:rideId/admin-cancel", async (req, res, next) => {
+  if (!requireInternalService(req, res)) return;
+  try {
+    const result = await transitionRide({
+      rideId: req.params.rideId,
+      action: "admin_cancel",
+      uid: String(req.body?.adminUid || "").slice(0, 128),
+      actorRole: "admin",
+      reason: req.body?.reason,
+      requestId: req.body?.requestId
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) { return next(err); }
+});
+
+router.post("/internal/:rideId/payment-resolution", async (req, res, next) => {
+  if (!requireInternalService(req, res)) return;
+  try {
+    const result = await resolvePaymentFailure({
+      rideId: req.params.rideId,
+      action: req.body?.action,
+      adminUid: String(req.body?.adminUid || "").slice(0, 128),
+      reason: req.body?.reason,
+      requestId: req.body?.requestId
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) { return next(err); }
+});
+
 router.use(requireFirebaseAuth);
 router.use(requireFirebaseAppCheck);
 router.post("/match-session", async (req, res, next) => {

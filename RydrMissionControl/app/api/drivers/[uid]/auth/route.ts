@@ -13,7 +13,8 @@ const ACTION_LABEL: Record<AuthAction, string> = {
   mark_email_verified: "Driver Email Marked Verified"
 };
 
-export async function POST(request: NextRequest, { params }: { params: { uid: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ uid: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 

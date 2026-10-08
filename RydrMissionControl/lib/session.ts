@@ -22,7 +22,7 @@ export interface MissionControlSession {
  * confirms an approved Mission Control role and staff email domain.
  */
 export async function getMissionControlSession(): Promise<MissionControlSession | null> {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const sessionCookie = cookieStore.get(SESSION_COOKIE)?.value;
   if (!sessionCookie) return null;
 

@@ -8,7 +8,7 @@ export default async function PortalLayout({ children }: { children: React.React
   const session = await getMissionControlSession();
   if (!session) redirect("/login");
 
-  const pathname = headers().get(MISSION_CONTROL_PATH_HEADER);
+  const pathname = (await headers()).get(MISSION_CONTROL_PATH_HEADER);
   if (session.role === "marketing" && (!pathname || !canAccessMissionControlPath(session.role, pathname))) {
     redirect("/campus-growth");
   }

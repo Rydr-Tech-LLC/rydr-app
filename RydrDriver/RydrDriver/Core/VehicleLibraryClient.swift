@@ -156,8 +156,8 @@ enum VehicleLibraryClient {
     /// is what the signup flow's final "Continue" tap should call, so the
     /// stored record is always self-consistent even if the on-screen
     /// preview state ever drifted.
-    static func submitVehicleVin(vin: String, color: VehicleColor) async throws -> VehicleImageInfo {
-        let result = try await functions.httpsCallable("submitVehicleVin").call(["vin": vin, "color": color.rawValue])
+    static func submitVehicleVin(vin: String, color: VehicleColor, plate: String) async throws -> VehicleImageInfo {
+        let result = try await functions.httpsCallable("submitVehicleVin").call(["vin": vin, "color": color.rawValue, "plate": plate])
         guard let data = result.data as? [String: Any] else {
             throw VehicleLibraryClientError.invalidResponse
         }
@@ -178,12 +178,13 @@ enum VehicleLibraryClient {
     /// authoritative write for that path, mirroring `submitVehicleVin` but
     /// skipping NHTSA entirely. Server marks the record `vinDecodeStatus:
     /// "manual"` so Mission Control can flag it for a quick human check.
-    static func submitVehicleManual(_ info: ManualVehicleInfo, color: VehicleColor) async throws -> VehicleImageInfo {
+    static func submitVehicleManual(_ info: ManualVehicleInfo, color: VehicleColor, plate: String) async throws -> VehicleImageInfo {
         var payload: [String: Any] = [
             "make": info.make,
             "model": info.model,
             "year": Int(info.year) ?? info.year,
-            "color": color.rawValue
+            "color": color.rawValue,
+            "plate": plate
         ]
         if let vin = info.vin, !vin.isEmpty { payload["vin"] = vin }
         if let trim = info.trim, !trim.isEmpty { payload["trim"] = trim }

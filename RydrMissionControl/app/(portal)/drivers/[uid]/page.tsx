@@ -23,7 +23,8 @@ import DriverProfileAdminTools, { type DriverProfileAdminInitial } from "./Drive
 
 export const dynamic = "force-dynamic";
 
-export default async function DriverReviewPage({ params }: { params: { uid: string } }) {
+export default async function DriverReviewPage(props: { params: Promise<{ uid: string }> }) {
+  const params = await props.params;
   const [snap, activeRide, cashHubBilling, cashHubConfigSnap] = await Promise.all([
     adminDb.collection("drivers").doc(params.uid).get(),
     findActiveRideForDriver(params.uid),

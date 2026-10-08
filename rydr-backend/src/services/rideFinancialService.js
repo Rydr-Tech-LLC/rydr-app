@@ -57,7 +57,7 @@ function calculateOutcome(ride, options = {}) {
   const perMileCents = integer(ride.driverRatePerMileCents, config.suggestedMile);
   const perMinuteCents = integer(ride.driverRatePerMinuteCents, config.suggestedMinute);
   const minimumFareCents = integer(ride.driverMinimumFareCents, DEFAULT_MINIMUM_FARE_CENTS);
-  const cancelled = ["riderCancelled", "driverCancelled", "cancelled"].includes(ride.status);
+  const cancelled = ["riderCancelled", "driverCancelled", "adminCancelled", "cancelled"].includes(ride.status);
   const midRide = Boolean(startedAt) && cancelled;
 
   // Mid-ride cancellation uses distance reduced from trip telemetry. Legacy

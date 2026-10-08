@@ -386,19 +386,14 @@ private struct AddDriverVehicleSheet: View {
             return
         }
 
-        // VIN/manual submission already asked the Cloud Function to resolve
-        // authoritative vehicle eligibility. This follow-up only stores the
-        // driver-entered plate; it must not recalculate qualified ride types.
-        Firestore.firestore().collection("drivers").document(uid).setData([
-            "vehicle": [
-                "plate": plate.trimmingCharacters(in: .whitespacesAndNewlines)
-            ]
-        ], merge: true) { error in
-            if let error {
-                saveError = error.localizedDescription
-            } else {
+        _ = uid
+        Task { @MainActor in
+            do {
+                try await RydrBackendService.updateVehiclePlate(plate.trimmingCharacters(in: .whitespacesAndNewlines))
                 onComplete()
                 dismiss()
+            } catch {
+                saveError = error.localizedDescription
             }
         }
     }

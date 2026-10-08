@@ -20,7 +20,8 @@ interface RydrBankCodeRecord {
   usedAt?: { toDate?: () => Date } | null;
 }
 
-export default async function RiderReviewPage({ params }: { params: { uid: string } }) {
+export default async function RiderReviewPage(props: { params: Promise<{ uid: string }> }) {
+  const params = await props.params;
   const [snap, userSnap, codesSnap, activeRide] = await Promise.all([
     adminDb.collection("riders").doc(params.uid).get(),
     adminDb.collection("users").doc(params.uid).get(),

@@ -17,7 +17,8 @@ function isValidColor(value: unknown): value is VehicleColor {
 
 // POST /api/vehicle-library/{vehicleId}/image — multipart/form-data with
 // fields: `file` (image), `color` (optional — omit to set the default image).
-export async function POST(request: NextRequest, { params }: { params: { vehicleId: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ vehicleId: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -68,7 +69,8 @@ export async function POST(request: NextRequest, { params }: { params: { vehicle
 }
 
 // DELETE /api/vehicle-library/{vehicleId}/image?color=Red (omit color to delete the default image)
-export async function DELETE(request: NextRequest, { params }: { params: { vehicleId: string } }) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ vehicleId: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });

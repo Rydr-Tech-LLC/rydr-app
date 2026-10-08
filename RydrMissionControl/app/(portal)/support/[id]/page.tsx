@@ -7,7 +7,8 @@ import SupportReplyForm from "./SupportReplyForm";
 
 export const dynamic = "force-dynamic";
 
-export default async function SupportTicketPage({ params }: { params: { id: string } }) {
+export default async function SupportTicketPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const ticketRef = adminDb.collection("supportTickets").doc(params.id);
   const ticketSnap = await ticketRef.get();
   if (!ticketSnap.exists) notFound();

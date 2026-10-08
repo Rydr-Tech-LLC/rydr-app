@@ -15,7 +15,8 @@ import { notificationService } from "@/src/services/notifications/NotificationSe
 
 const ACTIONS = ["approve", "approve_and_send", "deny", "mark_sent", "mark_replied", "reset"] as const;
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await getCampusGrowthSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 

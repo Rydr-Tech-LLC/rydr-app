@@ -45,7 +45,7 @@ function routePoints(ride) {
   return [pickup, stop, dropoff].filter(Boolean);
 }
 
-async function calculateAndStoreRideRouteEstimate({ rideId, uid, departureDate }) {
+async function calculateAndStoreRideRouteEstimate({ rideId, uid, departureDate, trustedInternal = false }) {
   const db = getFirestore();
   const rideRef = db.collection("rides").doc(rideId);
   const requestRef = db.collection("rideRequests").doc(rideId);
@@ -62,7 +62,7 @@ async function calculateAndStoreRideRouteEstimate({ rideId, uid, departureDate }
     ...(requestSnap.exists ? requestSnap.data() : {}),
     ...(rideSnap.exists ? rideSnap.data() : {})
   };
-  assertParticipant(ride, uid);
+  if (!trustedInternal) assertParticipant(ride, uid);
   if (
     ride.backendRouteProvider === "apple_maps" &&
     Number.isFinite(Number(ride.backendDistanceMeters)) &&

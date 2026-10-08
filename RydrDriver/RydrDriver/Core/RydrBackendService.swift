@@ -32,14 +32,60 @@ enum RydrBackendService {
         }
     }
 
-    static func syncAccountIdentity() async throws {
-        let body = AccountIdentityRequest(role: "driver")
+    static func syncAccountIdentity(acceptBetaWaiver: Bool = false) async throws {
+        let body = AccountIdentityRequest(role: "driver", betaWaiverAccepted: acceptBetaWaiver)
         guard let request = try await makeAuthenticatedRequest(path: "/account/identity/sync", method: "POST", body: body) else {
             throw URLError(.badURL)
         }
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Account identity could not be synchronized."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+    }
+
+    static func finalizeDriverAccount() async throws {
+        try await sendAuthenticatedJSON(path: "/account/profile/finalize", body: ["role": "driver"])
+    }
+
+    static func prepareDriverLicense(number: String, state: String) async throws {
+        try await sendAuthenticatedJSON(
+            path: "/driver/onboarding/license/prepare",
+            body: ["licenseNumber": number, "licenseState": state]
+        )
+    }
+
+    static func finalizeDriverLicenseDocuments(frontStoragePath: String, backStoragePath: String) async throws {
+        try await sendAuthenticatedJSON(
+            path: "/driver/onboarding/documents/license/finalize",
+            body: ["frontStoragePath": frontStoragePath, "backStoragePath": backStoragePath]
+        )
+    }
+
+    static func finalizeDriverVehicleDocuments(
+        plate: String,
+        registrationStoragePath: String,
+        insuranceStoragePath: String
+    ) async throws {
+        try await sendAuthenticatedJSON(
+            path: "/driver/onboarding/documents/vehicle/finalize",
+            body: [
+                "plate": plate,
+                "registrationStoragePath": registrationStoragePath,
+                "insuranceStoragePath": insuranceStoragePath
+            ]
+        )
+    }
+
+    static func updateVehiclePlate(_ plate: String) async throws {
+        guard let request = try await makeAuthenticatedRequest(
+            path: "/driver/vehicle/plate",
+            method: "PUT",
+            body: VehiclePlateRequest(plate: plate)
+        ) else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Vehicle plate could not be saved."
             throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
         }
     }
@@ -276,7 +322,11 @@ enum RydrBackendService {
         let reason: String?
     }
 
-    private struct AccountIdentityRequest: Encodable { let role: String }
+    private struct AccountIdentityRequest: Encodable {
+        let role: String
+        let betaWaiverAccepted: Bool
+    }
+    private struct VehiclePlateRequest: Encodable { let plate: String }
 
     private struct RideTransitionRequest: Encodable {
         let action: String

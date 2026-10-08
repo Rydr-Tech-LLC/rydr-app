@@ -8,6 +8,7 @@ import SwiftUI
 
 struct MainTabView: View {
     @EnvironmentObject private var session: UserSessionManager
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var rideManager = RideManager()   // ✅ provide once here
     @State private var showRecoveredRide = false
     @State private var didRequestProfileLoad = false
@@ -38,6 +39,11 @@ struct MainTabView: View {
         .onChange(of: rideManager.currentRide?.id, initial: false) { _, rideId in
             if rideId == nil && rideManager.state != .completed {
                 showRecoveredRide = false
+            }
+        }
+        .onChange(of: scenePhase, initial: true) { _, newPhase in
+            if newPhase == .active {
+                rideManager.reconcilePendingRideIfNeeded()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .riderNotificationRouteRequested)) { notification in

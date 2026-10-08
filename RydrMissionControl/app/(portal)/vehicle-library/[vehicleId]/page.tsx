@@ -6,7 +6,8 @@ import VehicleMetadataEditor from "./VehicleMetadataEditor";
 
 export const dynamic = "force-dynamic";
 
-export default async function VehicleLibraryEntryPage({ params }: { params: { vehicleId: string } }) {
+export default async function VehicleLibraryEntryPage(props: { params: Promise<{ vehicleId: string }> }) {
+  const params = await props.params;
   const entry = await getVehicleLibraryEntry(params.vehicleId);
   if (!entry) notFound();
 

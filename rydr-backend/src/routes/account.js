@@ -1,7 +1,7 @@
 const express = require("express");
 const { requireFirebaseAuth } = require("../middleware/firebaseAuth");
 const { createAccountDeletionRequest } = require("../services/accountDeletionService");
-const { syncAccountIdentity } = require("../services/accountIdentityService");
+const { syncAccountIdentity, finalizeAccountProfile } = require("../services/accountIdentityService");
 
 const router = express.Router();
 router.use(requireFirebaseAuth);
@@ -24,7 +24,22 @@ router.post("/identity/sync", async (req, res, next) => {
     const result = await syncAccountIdentity({
       uid: req.firebaseUid,
       role: req.body?.role,
-      token: req.firebaseToken
+      token: req.firebaseToken,
+      acceptBetaWaiver: req.body?.betaWaiverAccepted === true
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.post("/profile/finalize", async (req, res, next) => {
+  try {
+    const result = await finalizeAccountProfile({
+      uid: req.firebaseUid,
+      role: req.body?.role,
+      token: req.firebaseToken,
+      payload: req.body?.profile
     });
     return res.json({ ok: true, ...result });
   } catch (err) {

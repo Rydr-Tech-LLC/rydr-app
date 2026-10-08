@@ -567,9 +567,9 @@ struct VehicleInfoView: View {
                         trim: decoded.trim,
                         fuelType: decoded.fuelType
                     )
-                    result = try await VehicleLibraryClient.submitVehicleManual(manualInfo, color: selectedColor)
+                    result = try await VehicleLibraryClient.submitVehicleManual(manualInfo, color: selectedColor, plate: plate)
                 } else {
-                    result = try await VehicleLibraryClient.submitVehicleVin(vin: normalizedVin, color: selectedColor)
+                    result = try await VehicleLibraryClient.submitVehicleVin(vin: normalizedVin, color: selectedColor, plate: plate)
                 }
                 await MainActor.run {
                     imageInfo = result

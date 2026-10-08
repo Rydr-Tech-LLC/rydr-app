@@ -4,7 +4,8 @@ import { adminDb } from "@/lib/firebaseAdmin";
 import type { DriverRecord } from "@/lib/types";
 import { buildDriverOnboardingProgress } from "@/lib/driverOnboardingProgress";
 
-export async function GET(_request: Request, { params }: { params: { uid: string } }) {
+export async function GET(_request: Request, props: { params: Promise<{ uid: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 

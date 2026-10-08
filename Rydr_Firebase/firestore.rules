@@ -12,8 +12,8 @@ service cloud.firestore {
 
     function isAdmin() {
       return signedIn() && (
-        request.auth.token.admin == true ||
-        request.auth.token.role == "admin"
+        (("admin" in request.auth.token) && request.auth.token.admin == true) ||
+        (("role" in request.auth.token) && request.auth.token.role == "admin")
       );
     }
 
@@ -67,6 +67,11 @@ service cloud.firestore {
         "betaBackgroundCheckBypassedBy",
         "betaInviteVerifiedForAutoApproval",
         "betaTester",
+        "betaRole",
+        "badges",
+        "betaWaiverAccepted",
+        "betaWaiverAcceptedAt",
+        "betaWaiverVersion",
         "autoApprovalReason",
         "autoApprovedAt",
         "autoApprovedBy",
@@ -92,6 +97,7 @@ service cloud.firestore {
         "cashHubTermsAccepted",
         "cashHubTermsAcceptedAt",
         "cashHubTermsVersion",
+        "cashHubRole",
         "debugApprovalBypassEnabled",
         "debugApprovalBypassUpdatedAt",
         "documents",
@@ -100,6 +106,9 @@ service cloud.firestore {
         "identityStatus",
         "identityVerified",
         "identityVerifiedAt",
+        "identityVerificationStepCompleted",
+        "identityVerificationStepCompletedAt",
+        "hasRydrRiderAccess",
         "hasActiveRide",
         "isAdmin",
         "isApproved",
@@ -119,6 +128,10 @@ service cloud.firestore {
         "photoURL",
         "rating",
         "ratingCount",
+        "riderSignupCompleted",
+        "riderSignupCompletedAt",
+        "riderTermsAcceptedAt",
+        "riderTermsVersion",
         "reputation",
         "reviewStatus",
         "resolvedSuggestedRates",
@@ -165,7 +178,71 @@ service cloud.firestore {
         "qualifiedRideTypes",
         "supportedRideTypes",
         "tierRates",
-        "vehicleEligibility"
+        "vehicleEligibility",
+        "driverOnboardingStatus",
+        "driverSignupCompleted",
+        "driverSignupCompletedAt",
+        "license",
+        "licensePhotosSelected",
+        "licensePreparedAt",
+        "licenseStepCompleted",
+        "licenseSubmission",
+        "payoutsStepCompleted",
+        "payoutsStepCompletedAt",
+        "registrationDocumentSelected",
+        "insuranceDocumentSelected",
+        "vehicle",
+        "vehicleDocumentSubmission",
+        "vehicleStepCompleted"
+      ];
+    }
+
+    function riderClientWritableProfileFields() {
+      return [
+        "address",
+        "authProvider",
+        "email",
+        "firstName",
+        "lastName",
+        "preferredName",
+        "socialAuthLinked",
+        "socialAuthLinkedAt",
+        "updatedAt",
+        "verificationRequested"
+      ];
+    }
+
+    function driverClientWritableProfileFields() {
+      return [
+        "address",
+        "addressStepCompleted",
+        "authProvider",
+        "authProviderDisplayName",
+        "authProviderFirstName",
+        "authProviderLastName",
+        "autoAcceptQueuedRides",
+        "displayName",
+        "dob",
+        "driverOnboardingCurrentStep",
+        "driverOnboardingCurrentStepIndex",
+        "driverOnboardingCurrentStepLabel",
+        "driverOnboardingLastSeenAt",
+        "driverOnboardingLastSeenSource",
+        "driverOnboardingTotalSteps",
+        "email",
+        "emailPasswordStepCompleted",
+        "firstName",
+        "lastName",
+        "legalFirstName",
+        "legalLastName",
+        "legalName",
+        "nameDOBStepCompleted",
+        "rideTypes",
+        "selectedRideTypes",
+        "socialAuthLinked",
+        "socialAuthLinkedAt",
+        "standardDispatchEnabled",
+        "updatedAt"
       ];
     }
 
@@ -852,8 +929,11 @@ service cloud.firestore {
     match /riders/{uid} {
       allow get: if isSelf(uid) || phoneMatches(resource.data) || isAdmin();
       allow list: if false;
-      allow create: if isSelf(uid) && hasApprovedBetaInvite("rider") && noBackendOwnedKeysOnCreate() && noCashHubTermsAcceptanceOnCreateWhenDisabled();
-      allow update: if isSelf(uid) && noBackendOwnedKeysChanged() && noCashHubTermsAcceptanceChangedWhenDisabled();
+      allow create: if isSelf(uid)
+        && hasApprovedBetaInvite("rider")
+        && request.resource.data.keys().hasOnly(riderClientWritableProfileFields());
+      allow update: if isSelf(uid)
+        && affectedKeys().hasOnly(riderClientWritableProfileFields());
       allow delete: if isAdmin();
 
       match /notificationTokens/{tokenId} {
@@ -894,12 +974,11 @@ service cloud.firestore {
     match /drivers/{uid} {
       allow get: if isSelf(uid) || phoneMatches(resource.data) || isAdmin();
       allow list: if false;
-      allow create: if isSelf(uid) && hasApprovedBetaInvite("driver") && noBackendOwnedKeysOnCreate()
-        && !request.resource.data.keys().hasAny(backendOwnedDriverProfileFields())
-        && noCashHubTermsAcceptanceOnCreateWhenDisabled();
-      allow update: if isSelf(uid) && noBackendOwnedKeysChanged()
-        && !affectedKeys().hasAny(backendOwnedDriverProfileFields())
-        && noCashHubTermsAcceptanceChangedWhenDisabled();
+      allow create: if isSelf(uid)
+        && hasApprovedBetaInvite("driver")
+        && request.resource.data.keys().hasOnly(driverClientWritableProfileFields());
+      allow update: if isSelf(uid)
+        && affectedKeys().hasOnly(driverClientWritableProfileFields());
       allow delete: if isAdmin();
 
       match /notificationTokens/{tokenId} {

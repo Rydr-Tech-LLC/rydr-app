@@ -6,7 +6,8 @@ import PromotionForm, { type PromotionFormInitial } from "../PromotionForm";
 
 export const dynamic = "force-dynamic";
 
-export default async function PromotionDetailPage({ params }: { params: { promotionId: string } }) {
+export default async function PromotionDetailPage(props: { params: Promise<{ promotionId: string }> }) {
+  const params = await props.params;
   const promotion = await getPromotion(params.promotionId);
   if (!promotion) notFound();
 

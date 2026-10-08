@@ -6,7 +6,8 @@ import { DiscoveredLeadActions, LeadDiscoveryPanel } from "./LeadDiscoveryClient
 
 export const dynamic = "force-dynamic";
 
-export default async function LeadDiscoveryPage({ searchParams }: { searchParams: { q?: string } }) {
+export default async function LeadDiscoveryPage(props: { searchParams: Promise<{ q?: string }> }) {
+  const searchParams = await props.searchParams;
   const query = (searchParams.q ?? "").toLowerCase().trim();
   const allLeads = await listDiscoveredCampusLeads(500);
   const leads = filter(allLeads, query, [

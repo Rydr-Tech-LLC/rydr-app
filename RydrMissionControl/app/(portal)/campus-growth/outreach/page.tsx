@@ -7,7 +7,8 @@ import OutreachActions from "./OutreachActions";
 
 export const dynamic = "force-dynamic";
 
-export default async function CampusOutreachPage({ searchParams }: { searchParams: { q?: string } }) {
+export default async function CampusOutreachPage(props: { searchParams: Promise<{ q?: string }> }) {
+  const searchParams = await props.searchParams;
   const query = (searchParams.q ?? "").toLowerCase().trim();
   const [campuses, organizations, draftsRaw] = await Promise.all([listCampuses(250), listOrganizations(500), listOutreachDrafts(500)]);
   const drafts = filter(draftsRaw, query, ["subject", "campusName", "organizationName", "recipientName", "recipientEmail", "body", "status"]);

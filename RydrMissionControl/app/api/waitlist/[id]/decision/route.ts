@@ -12,7 +12,8 @@ interface DecisionBody {
   reason?: unknown;
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   let session;
   try {
     session = await requireAdminSession();

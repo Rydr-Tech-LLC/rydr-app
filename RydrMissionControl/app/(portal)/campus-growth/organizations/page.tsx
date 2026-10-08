@@ -5,7 +5,8 @@ import { OrganizationForm } from "../CampusGrowthForms";
 
 export const dynamic = "force-dynamic";
 
-export default async function CampusOrganizationsPage({ searchParams }: { searchParams: { q?: string } }) {
+export default async function CampusOrganizationsPage(props: { searchParams: Promise<{ q?: string }> }) {
+  const searchParams = await props.searchParams;
   const query = (searchParams.q ?? "").toLowerCase().trim();
   const [campuses, organizationsRaw] = await Promise.all([listCampuses(250), listOrganizations(500)]);
   const organizations = filter(organizationsRaw, query, ["name", "campusName", "category", "publicEmail", "leaderName", "notes"]);

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
+import { callRydrBackendAdmin } from "@/lib/rydrBackendAdmin";
 
 type Action = "resolve" | "write_off";
 
@@ -13,7 +12,8 @@ type Action = "resolve" | "write_off";
 // own ledger state — so it can't accidentally trigger a duplicate charge or
 // refund. Real money movement (refunds) still goes through stripe-backend's
 // existing webhook-driven flows.
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
@@ -22,26 +22,16 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
-  const rideRef = adminDb.collection("rides").doc(params.id);
-  const rideSnap = await rideRef.get();
-  if (!rideSnap.exists) return NextResponse.json({ error: "Ride not found" }, { status: 404 });
-
-  const update: Record<string, unknown> = {
-    adminResolutionNote: reason ?? null,
-    adminResolvedBy: session.uid,
-    adminResolvedAt: FieldValue.serverTimestamp()
-  };
-
-  if (action === "write_off") {
-    update.paymentStatus = "refunded";
-  } else {
-    // "resolve" — clears the failure off the queue without claiming Stripe
-    // ever actually charged the card (e.g. the rider paid by another means).
-    update.paymentStatus = "refunded";
-    update.adminResolutionType = "manual_resolution";
+  let result: Record<string, unknown>;
+  try {
+    result = await callRydrBackendAdmin(`/rides/internal/${encodeURIComponent(params.id)}/payment-resolution`, session.uid, {
+      action,
+      reason,
+      requestId: crypto.randomUUID()
+    });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Payment resolution failed" }, { status: 409 });
   }
-
-  await rideRef.set(update, { merge: true });
 
   await writeAuditLog({
     adminUid: session.uid,
@@ -52,5 +42,5 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     reason
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json(result);
 }

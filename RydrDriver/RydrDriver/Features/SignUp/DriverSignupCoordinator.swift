@@ -205,15 +205,14 @@ struct DriverSignupCoordinator: View {
                 case .betaWaiver:
                     BetaWaiverView(
                         onAgree: {
-                            upsertDriver([
-                                "phoneNumber": phoneNumber,
-                                "phoneE164": phoneNumber,
-                                "phoneVerificationStepCompleted": true,
-                                "betaWaiverAccepted": true,
-                                "betaWaiverAcceptedAt": FieldValue.serverTimestamp(),
-                                "betaWaiverVersion": "2026-07-04"
-                            ])
-                            path.append(.nameDOB)
+                            Task { @MainActor in
+                                do {
+                                    try await RydrBackendService.syncAccountIdentity(acceptBetaWaiver: true)
+                                    path.append(.nameDOB)
+                                } catch {
+                                    errorText = error.localizedDescription
+                                }
+                            }
                         },
                         onDecline: {
                             try? Auth.auth().signOut()
@@ -354,17 +353,15 @@ struct DriverSignupCoordinator: View {
                         zip: zip,
                         connectOnboarded: $connectOnboarded
                     ) { accountId in
-                        var completionFields: [String: Any] = [
-                            "payoutsStepCompleted": true,
-                            "driverSignupCompleted": true,
-                            "driverSignupCompletedAt": FieldValue.serverTimestamp(),
-                            "driverOnboardingStatus": "completed"
-                        ]
-                        if let accountId {
-                            completionFields["stripeConnectAccountSeenByApp"] = accountId
+                        _ = accountId
+                        Task { @MainActor in
+                            do {
+                                try await RydrBackendService.finalizeDriverAccount()
+                                if connectOnboarded { path.append(.done) }
+                            } catch {
+                                errorText = error.localizedDescription
+                            }
                         }
-                        upsertDriver(completionFields)
-                        if connectOnboarded { path.append(.done) }
                     }
                     .onAppear { markCurrentOnboardingStep(.payouts) }
 
@@ -430,28 +427,13 @@ struct DriverSignupCoordinator: View {
         defer { isSubmittingDocuments = false }
 
         do {
+            try await RydrBackendService.prepareDriverLicense(number: licenseNumber, state: licenseState)
             let front = try await DriverDocumentUploadService.upload(item: licenseFront, kind: .driverLicense, side: .front)
             let back = try await DriverDocumentUploadService.upload(item: licenseBack, kind: .driverLicense, side: .back)
-            upsertDriver([
-                "license": [
-                    "number": licenseNumber,
-                    "state": licenseState,
-                    "imageUrl": front.downloadURL.absoluteString
-                ],
-                "documents": [
-                    "driverLicense": [
-                        "status": "pending",
-                        "frontStoragePath": front.storagePath,
-                        "frontURL": front.downloadURL.absoluteString,
-                        "backStoragePath": back.storagePath,
-                        "backURL": back.downloadURL.absoluteString,
-                        "uploadedAt": FieldValue.serverTimestamp(),
-                        "source": "driver-ios-signup"
-                    ]
-                ],
-                "licenseStepCompleted": true,
-                "licensePhotosSelected": true
-            ])
+            try await RydrBackendService.finalizeDriverLicenseDocuments(
+                frontStoragePath: front.storagePath,
+                backStoragePath: back.storagePath
+            )
             path.append(.vehicle)
         } catch {
             flowAlertText = error.localizedDescription
@@ -482,46 +464,15 @@ struct DriverSignupCoordinator: View {
         do {
             let registration = try await DriverDocumentUploadService.upload(item: registrationDoc, kind: .registration, side: .single)
             let insurance = try await DriverDocumentUploadService.upload(item: insuranceCard, kind: .insurance, side: .single)
-            writeVehicleStep(decodedVehicle: decodedVehicle, registration: registration, insurance: insurance)
+            try await RydrBackendService.finalizeDriverVehicleDocuments(
+                plate: plateNumber,
+                registrationStoragePath: registration.storagePath,
+                insuranceStoragePath: insurance.storagePath
+            )
             path.append(.identity)
         } catch {
             flowAlertText = error.localizedDescription
         }
-    }
-
-    private func writeVehicleStep(
-        decodedVehicle: DecodedVehicleInfo,
-        registration: DriverDocumentUploadResult,
-        insurance: DriverDocumentUploadResult
-    ) {
-        // Vehicle eligibility and default tier rates were resolved by the
-        // submitVehicleVin/submitVehicleManual Cloud Function. The app only
-        // attaches the uploaded documents and plate to that server record.
-        upsertDriver([
-            "vehicle": [
-                "plate": plateNumber,
-                "registrationImageUrl": registration.downloadURL.absoluteString,
-                "insuranceImageUrl": insurance.downloadURL.absoluteString
-            ],
-            "documents": [
-                "registration": pendingSingleDocumentPayload(registration),
-                "insurance": pendingSingleDocumentPayload(insurance)
-            ],
-            "vehicleStepCompleted": true,
-            "registrationDocumentSelected": true,
-            "insuranceDocumentSelected": true
-        ])
-    }
-
-    private func pendingSingleDocumentPayload(_ result: DriverDocumentUploadResult) -> [String: Any] {
-        [
-            "status": "pending",
-            "storagePath": result.storagePath,
-            "documentURL": result.downloadURL.absoluteString,
-            "downloadURL": result.downloadURL.absoluteString,
-            "uploadedAt": FieldValue.serverTimestamp(),
-            "source": "driver-ios-signup"
-        ]
     }
 
     // MARK: - Email/password step
@@ -584,7 +535,6 @@ struct DriverSignupCoordinator: View {
             .filter { !$0.isEmpty }
             .joined(separator: " ")
         upsertDriver([
-            "uid": uid,
             "email": email,
             "firstName": firstName,
             "lastName": lastName,
@@ -592,9 +542,6 @@ struct DriverSignupCoordinator: View {
             "legalLastName": lastName,
             "legalName": legalName,
             "displayName": legalName,
-            "phoneNumber": phoneNumber,
-            "phoneE164": phoneNumber,
-            "createdAt": FieldValue.serverTimestamp(),
             "emailPasswordStepCompleted": true
         ])
         writePhoneIndex(phoneE164: phoneNumber, uid: uid)
@@ -711,7 +658,6 @@ struct DriverSignupCoordinator: View {
         email = resolvedEmail
 
         upsertDriver([
-            "uid": uid,
             "email": resolvedEmail,
             "firstName": resolvedFirstName,
             "lastName": resolvedLastName,
@@ -719,15 +665,12 @@ struct DriverSignupCoordinator: View {
             "legalLastName": resolvedLastName,
             "legalName": legalName,
             "displayName": legalName,
-            "phoneNumber": phoneNumber,
-            "phoneE164": phoneNumber,
             "authProvider": profile.providerID,
             "authProviderFirstName": profile.firstName,
             "authProviderLastName": profile.lastName,
             "authProviderDisplayName": profile.displayName,
             "socialAuthLinked": true,
             "socialAuthLinkedAt": FieldValue.serverTimestamp(),
-            "createdAt": FieldValue.serverTimestamp(),
             "emailPasswordStepCompleted": true
         ])
         writePhoneIndex(phoneE164: phoneNumber, uid: uid)
@@ -742,7 +685,6 @@ struct DriverSignupCoordinator: View {
             "driverOnboardingCurrentStepLabel": step.trackingLabel,
             "driverOnboardingCurrentStepIndex": step.trackingIndex,
             "driverOnboardingTotalSteps": DriverSignupStep.trackedTotalSteps,
-            "driverOnboardingStatus": step == .done ? "completed" : "in_progress",
             "driverOnboardingLastSeenAt": FieldValue.serverTimestamp(),
             "driverOnboardingLastSeenSource": "driver-ios-signup"
         ], merge: true) { err in
