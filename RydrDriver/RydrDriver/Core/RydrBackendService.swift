@@ -304,6 +304,8 @@ enum RydrBackendService {
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(try await appCheckToken(), forHTTPHeaderField: "X-Firebase-AppCheck")
+        request.timeoutInterval = 20
         request.httpBody = try? JSONEncoder().encode(body)
         return request
     }

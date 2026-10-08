@@ -24,6 +24,9 @@ struct BookingView: View {
     @State private var showScheduledReview = false
     @State private var showScheduledStatus = false
     @State private var showScheduledList = false
+    @State private var openScheduledReviewAfterDismiss = false
+    @State private var openScheduledStatusAfterReviewDismiss = false
+    @State private var openScheduledStatusAfterListDismiss = false
 
     // Map / region
     @State private var region = RydrMapDefaults.atlantaRegion
@@ -206,17 +209,25 @@ struct BookingView: View {
                 )
             }
         }
-        .sheet(isPresented: $showScheduleTime) {
+        .sheet(isPresented: $showScheduleTime, onDismiss: {
+            guard openScheduledReviewAfterDismiss else { return }
+            openScheduledReviewAfterDismiss = false
+            showScheduledReview = true
+        }) {
             ScheduleTimeSelectionView(
                 manager: scheduledRideManager,
                 onCancel: { showScheduleTime = false },
                 onContinue: {
+                    openScheduledReviewAfterDismiss = true
                     showScheduleTime = false
-                    showScheduledReview = true
                 }
             )
         }
-        .sheet(isPresented: $showScheduledReview) {
+        .sheet(isPresented: $showScheduledReview, onDismiss: {
+            guard openScheduledStatusAfterReviewDismiss else { return }
+            openScheduledStatusAfterReviewDismiss = false
+            showScheduledStatus = true
+        }) {
             ScheduledRideReviewView(
                 manager: scheduledRideManager,
                 pickup: pickupText,
@@ -226,8 +237,8 @@ struct BookingView: View {
                 rideType: rideType,
                 onClose: { showScheduledReview = false },
                 onCreated: { _ in
+                    openScheduledStatusAfterReviewDismiss = true
                     showScheduledReview = false
-                    showScheduledStatus = true
                 }
             )
         }
@@ -237,12 +248,16 @@ struct BookingView: View {
                 onClose: { showScheduledStatus = false }
             )
         }
-        .sheet(isPresented: $showScheduledList) {
+        .sheet(isPresented: $showScheduledList, onDismiss: {
+            guard openScheduledStatusAfterListDismiss else { return }
+            openScheduledStatusAfterListDismiss = false
+            showScheduledStatus = true
+        }) {
             ScheduledRideListView(
                 manager: scheduledRideManager,
                 onSelect: { _ in
+                    openScheduledStatusAfterListDismiss = true
                     showScheduledList = false
-                    showScheduledStatus = true
                 },
                 onClose: { showScheduledList = false }
             )
