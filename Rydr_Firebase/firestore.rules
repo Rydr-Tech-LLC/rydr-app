@@ -1148,6 +1148,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /{path=**}/offers/{driverId} {
+      allow read: if isAdmin() || (
+        signedIn() && resource.data.driverId == request.auth.uid
+      );
+      allow write: if false;
+    }
+
     match /scheduledRideIdempotency/{documentId} {
       allow read, write: if false;
     }

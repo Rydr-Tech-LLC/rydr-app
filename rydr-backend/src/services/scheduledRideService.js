@@ -1,10 +1,11 @@
 const { admin, getFirestore } = require("../config/firebase");
 const { getDirections } = require("./appleMapsService");
 const { calculateOutcome, tierFor, PRICING_VERSION } = require("./rideFinancialService");
-const { rateObject, verifyPaymentReadiness, createRideRequest } = require("./rideRequestService");
+const { configuredRateObject, verifyPaymentReadiness, createRideRequest } = require("./rideRequestService");
 const { findBestDrivers } = require("./driverMatchingService");
+const { hasCurrentOnlinePresence } = require("./driverPresenceService");
 
-const MINIMUM_LEAD_TIME_MS = 2 * 60 * 60 * 1000;
+const MINIMUM_LEAD_TIME_MS = 60 * 1000;
 const MAXIMUM_LEAD_TIME_MS = 30 * 24 * 60 * 60 * 1000;
 const CHECK_IN_LEAD_MS = 60 * 60 * 1000;
 const CHECK_IN_CUTOFF_MS = 15 * 60 * 1000;
@@ -12,6 +13,11 @@ const ACTIVATION_BUFFER_SECONDS = 6 * 60;
 const DRIVER_RESPONSE_LIMIT = 3;
 const OPPORTUNITY_LIMIT = 20;
 const REPLACEMENT_CUTOFF_MS = 15 * 60 * 1000;
+const ONLINE_READINESS_WINDOW_MS = 60 * 60 * 1000;
+const MINIMUM_ONLINE_LEAD_MS = 20 * 60 * 1000;
+const ONLINE_ARRIVAL_BUFFER_SECONDS = 10 * 60;
+const DISPATCH_FALLBACK_WINDOW_MS = 15 * 60 * 1000;
+const DISPATCH_FALLBACK_LEAD_MS = 5 * 60 * 1000;
 
 function error(message, statusCode, details) {
   const err = new Error(message);
@@ -87,7 +93,7 @@ function quoteFor({ rideType, route, rates }) {
 function validateSchedule(value, nowMillis = Date.now()) {
   const pickupMillis = timestampMillis(value);
   if (pickupMillis == null) throw error("scheduledPickupAt is required", 422);
-  if (pickupMillis < nowMillis + MINIMUM_LEAD_TIME_MS) throw error("Scheduled rides require at least two hours of lead time", 422);
+  if (pickupMillis < nowMillis + MINIMUM_LEAD_TIME_MS) throw error("Choose a scheduled pickup time at least one minute from now", 422);
   if (pickupMillis > nowMillis + MAXIMUM_LEAD_TIME_MS) throw error("Scheduled rides may be booked up to 30 days ahead", 422);
   return pickupMillis;
 }
@@ -121,7 +127,9 @@ async function eligibleCandidates({
   scheduledRideId,
   scheduledPickupMillis,
   durationMinutes,
-  excludedDriverIds = []
+  excludedDriverIds = [],
+  requireOnline = false,
+  nowMillis = Date.now()
 }) {
   const excluded = new Set(excludedDriverIds);
   const candidates = [];
@@ -129,19 +137,27 @@ async function eligibleCandidates({
   const canonicalSnapshots = publicSnapshots.length > 0
     ? await db.getAll(...publicSnapshots.map((snapshot) => db.collection("drivers").doc(snapshot.id)))
     : [];
+  const statusSnapshots = requireOnline && publicSnapshots.length > 0
+    ? await db.getAll(...publicSnapshots.map((snapshot) => db.collection("driver_status").doc(snapshot.id)))
+    : [];
   const canonicalById = new Map(canonicalSnapshots.filter((snapshot) => snapshot.exists).map((snapshot) => [snapshot.id, snapshot.data()]));
+  const statusById = new Map(statusSnapshots
+    .filter((snapshot) => snapshot.exists && hasCurrentOnlinePresence(snapshot.data(), nowMillis))
+    .map((snapshot) => [snapshot.id, snapshot.data()]));
   for (const snapshot of publicSnapshots) {
     if (excluded.has(snapshot.id)) continue;
     const canonical = canonicalById.get(snapshot.id);
     if (!scheduledCandidateEligible(canonical, rideType)) continue;
+    if (requireOnline && !statusById.has(snapshot.id)) continue;
     const presence = snapshot.data();
+    const liveStatus = statusById.get(snapshot.id);
     const profile = {
       ...presence,
       ...canonical,
-      isOnline: presence.isOnline,
-      availabilityStatus: presence.availabilityStatus,
-      approximateLocation: presence.approximateLocation,
-      eligibleRideTypes: presence.eligibleRideTypes ?? canonical.eligibleRideTypes
+      isOnline: liveStatus?.isOnline ?? presence.isOnline,
+      availabilityStatus: liveStatus?.availabilityStatus ?? presence.availabilityStatus,
+      approximateLocation: liveStatus?.location ?? presence.approximateLocation,
+      eligibleRideTypes: liveStatus?.selectedRideTypes ?? presence.eligibleRideTypes ?? canonical.eligibleRideTypes
     };
     const locks = await db.collection("drivers").doc(snapshot.id).collection("scheduledRideLocks")
       .where("status", "==", "active").limit(25).get();
@@ -164,7 +180,7 @@ async function eligibleCandidates({
     dropoffCoordinate: dropoff,
     routeDistanceMiles,
     candidates,
-    requireOnline: false,
+    requireOnline,
     maxResults: OPPORTUNITY_LIMIT
   });
 }
@@ -192,8 +208,23 @@ async function routeForPayload(payload, routeProvider) {
   return { pickup, dropoff, route: result.route };
 }
 
-async function buildCandidateQuotes({ db, rideType, pickup, dropoff, route, scheduledRideId, scheduledPickupMillis, excludedDriverIds }) {
-  const candidates = await eligibleCandidates({
+async function buildCandidateQuotes({
+  db,
+  rideType,
+  pickup,
+  dropoff,
+  route,
+  scheduledRideId,
+  scheduledPickupMillis,
+  excludedDriverIds,
+  requireOnline = false,
+  arriveByMillis = null,
+  rateOverride = null,
+  quoteOverride = null,
+  routeProvider = getDirections,
+  nowMillis = Date.now()
+}) {
+  let candidates = await eligibleCandidates({
     db,
     rideType,
     pickup,
@@ -202,14 +233,33 @@ async function buildCandidateQuotes({ db, rideType, pickup, dropoff, route, sche
     scheduledRideId,
     scheduledPickupMillis,
     durationMinutes: route.durationSeconds / 60,
-    excludedDriverIds
+    excludedDriverIds,
+    requireOnline,
+    nowMillis
   });
+  if (requireOnline && Number.isFinite(arriveByMillis)) {
+    const arrivalChecks = await Promise.all(candidates.map(async (candidate) => {
+      try {
+        const result = await routeProvider({
+          origin: candidate.location,
+          destination: pickup,
+          departureDate: new Date(nowMillis).toISOString()
+        });
+        const etaSeconds = Number(result.route?.durationSeconds || 0);
+        return etaSeconds > 0 && nowMillis + (etaSeconds + 5 * 60) * 1000 <= arriveByMillis;
+      } catch {
+        return false;
+      }
+    }));
+    candidates = candidates.filter((_, index) => arrivalChecks[index]);
+  }
   return candidates.map((candidate) => {
-    const rates = rateObject(candidate.profile, rideType);
+    const rates = rateOverride || configuredRateObject(candidate.profile, rideType);
+    if (!rates) return null;
     return {
       driverId: candidate.id,
       rideType,
-      driverName: text(candidate.profile.displayName, 120) || text(candidate.profile.firstName, 120) || "Rydr Driver",
+      driverName: text(candidate.profile.firstName, 120) || text(candidate.profile.legalFirstName, 120) || text(candidate.profile.displayName, 120) || "Rydr Driver",
       driverPhotoURL: text(candidate.profile.profilePhotoURL, 1000),
       vehicleSummary: text(candidate.profile.vehicleSummary, 240) || text(candidate.profile.carMakeModel, 240),
       rating: Number(candidate.profile.rating || 0),
@@ -219,9 +269,9 @@ async function buildCandidateQuotes({ db, rideType, pickup, dropoff, route, sche
       matchReasons: candidate.matchReasons,
       preferenceMatch: candidate.preferenceMatch,
       rates,
-      quote: quoteFor({ rideType, route, rates })
+      quote: quoteOverride || quoteFor({ rideType, route, rates })
     };
-  });
+  }).filter(Boolean);
 }
 
 async function previewScheduledRide({ riderId, authorization, payload, db = getFirestore(), routeProvider = getDirections, paymentVerifier = verifyPaymentReadiness, nowMillis = Date.now() }) {
@@ -330,6 +380,7 @@ async function createScheduledRide({ riderId, authorization, payload, db = getFi
         ...candidate,
         pickup: pickupName,
         dropoff: dropoffName,
+        pickupCoordinate: { lat: pickup.latitude, lng: pickup.longitude },
         scheduledPickupAt,
         mode,
         status: "available",
@@ -340,6 +391,19 @@ async function createScheduledRide({ riderId, authorization, payload, db = getFi
     return { requestId: requestRef.id, duplicate: false };
   });
   if (creation.duplicate) return creation;
+  if (pickupMillis - now.toMillis() <= DISPATCH_FALLBACK_LEAD_MS) {
+    const fallback = await activateScheduledDispatchFallback({ requestId: requestRef.id, db, now });
+    return {
+      requestId: requestRef.id,
+      duplicate: false,
+      fallbackDispatch: true,
+      request: requestPublicFields({
+        ...request,
+        status: fallback.status,
+        activeRideId: fallback.rideId || null
+      })
+    };
+  }
   return { requestId: requestRef.id, duplicate: false, request: requestPublicFields(request) };
 }
 
@@ -350,6 +414,7 @@ async function createDriverLock({ tx, db, requestRef, request, driverId, now }) 
     driverId,
     riderId: request.riderId,
     scheduledPickupAt: request.scheduledPickupAt,
+    pickupCoordinate: request.pickupCoordinate,
     estimatedDurationMinutes: request.backendDurationMinutes,
     status: "active",
     createdAt: now,
@@ -433,7 +498,7 @@ async function respondToScheduledRide({ driverId, requestId, response, db = getF
     }
     const currentOpportunity = currentOpportunitySnap.data();
     if (current.assignedDriverId) throw error("Another driver already accepted this scheduled ride", 409);
-    if (current.mode === "quickSchedule") {
+    if (current.mode === "quickSchedule" || current.replacementPolicy === "autoAssignFirstAcceptance") {
       const update = {
         status: "confirmed",
         assignedDriverId: driverId,
@@ -442,6 +507,7 @@ async function respondToScheduledRide({ driverId, requestId, response, db = getF
         lockedQuote: currentOpportunity.quote,
         lockedRates: currentOpportunity.rates,
         confirmedAt: now,
+        replacementPolicy: admin.firestore.FieldValue.delete(),
         updatedAt: now
       };
       tx.set(requestRef, update, { merge: true });
@@ -463,6 +529,109 @@ async function respondToScheduledRide({ driverId, requestId, response, db = getF
   if (result.status === "confirmed") await closeRemainingOpportunities(requestRef, driverId, now);
   if (result.offerLimitReached) await closeRemainingOpportunities(requestRef, null, now);
   return result;
+}
+
+function onlineReadinessDeadlineMillis({ pickupMillis, etaSeconds }) {
+  const travelLead = Math.max(
+    MINIMUM_ONLINE_LEAD_MS,
+    (Math.max(0, Number(etaSeconds) || 0) + ONLINE_ARRIVAL_BUFFER_SECONDS) * 1000
+  );
+  return pickupMillis - travelLead;
+}
+
+async function assignedDriverReadiness({ db, request, nowMillis, routeProvider = getDirections }) {
+  const driverId = request.assignedDriverId;
+  if (!driverId) return { online: false, etaSeconds: null };
+  const [statusSnap, publicSnap] = await Promise.all([
+    db.collection("driver_status").doc(driverId).get(),
+    db.collection("publicDriverProfiles").doc(driverId).get()
+  ]);
+  const status = statusSnap.exists ? statusSnap.data() : {};
+  const online = hasCurrentOnlinePresence(status, nowMillis);
+  const location = status.location || (publicSnap.exists ? publicSnap.data().approximateLocation : null);
+  if (!location) return { online, etaSeconds: null };
+  try {
+    const result = await routeProvider({
+      origin: coordinate(location, "driverLocation"),
+      destination: coordinate(request.pickupCoordinate, "pickupCoordinate"),
+      departureDate: new Date(nowMillis).toISOString()
+    });
+    return { online, etaSeconds: Number(result.route?.durationSeconds || 0) || null };
+  } catch {
+    return { online, etaSeconds: null };
+  }
+}
+
+async function startAutomaticReplacement({ db, requestRef, request, now, routeProvider = getDirections }) {
+  const nowMillis = now.toMillis();
+  const pickupMillis = timestampMillis(request.scheduledPickupAt);
+  const previousDriverId = request.assignedDriverId;
+  const excluded = [...new Set([...(request.attemptedDriverIds || []), previousDriverId].filter(Boolean))];
+  if (previousDriverId) {
+    await db.collection("drivers").doc(previousDriverId).collection("scheduledRideLocks").doc(requestRef.id)
+      .set({ status: "replaced_unavailable", updatedAt: now }, { merge: true });
+  }
+
+  const pickup = coordinate(request.pickupCoordinate, "pickupCoordinate");
+  const dropoff = coordinate(request.dropoffCoordinate, "dropoffCoordinate");
+  const candidates = await buildCandidateQuotes({
+    db,
+    rideType: request.rideType,
+    pickup,
+    dropoff,
+    route: { distanceMeters: request.backendDistanceMeters, durationSeconds: request.backendDurationSeconds },
+    scheduledRideId: requestRef.id,
+    scheduledPickupMillis: pickupMillis,
+    excludedDriverIds: excluded,
+    requireOnline: true,
+    arriveByMillis: pickupMillis,
+    rateOverride: request.lockedRates,
+    quoteOverride: request.lockedQuote,
+    routeProvider,
+    nowMillis
+  });
+  if (candidates.length === 0 || !request.lockedQuote || !request.lockedRates) {
+    await requestRef.set({
+      status: "dispatchFallbackSearching",
+      fallbackReason: "on_time_replacement_unavailable",
+      fallbackSearchStartedAt: now,
+      assignedDriverId: admin.firestore.FieldValue.delete(),
+      attemptedDriverIds: excluded,
+      updatedAt: now
+    }, { merge: true });
+    return "dispatchFallbackSearching";
+  }
+
+  const replacementCandidates = candidates.map((candidate) => ({
+      ...candidate,
+      pickup: request.pickup,
+      dropoff: request.dropoff,
+      pickupCoordinate: request.pickupCoordinate,
+      scheduledPickupAt: request.scheduledPickupAt,
+      mode: request.mode,
+      lockedReplacementFare: true
+    }));
+  const batch = db.batch();
+  replacementCandidates.forEach((candidate) => {
+    batch.set(requestRef.collection("opportunities").doc(candidate.driverId), {
+      ...candidate,
+      status: "available",
+      createdAt: now,
+      updatedAt: now
+    });
+  });
+  batch.set(requestRef, {
+    status: "replacementSearching",
+    replacementPolicy: "autoAssignFirstAcceptance",
+    replacementReason: "assigned_driver_not_online_in_time",
+    assignedDriverId: admin.firestore.FieldValue.delete(),
+    acceptedOpportunityId: admin.firestore.FieldValue.delete(),
+    attemptedDriverIds: excluded,
+    replacementStartedAt: now,
+    updatedAt: now
+  }, { merge: true });
+  await batch.commit();
+  return "replacementSearching";
 }
 
 async function selectScheduledDriver({ riderId, requestId, driverId, db = getFirestore(), now = admin.firestore.Timestamp.now() }) {
@@ -571,6 +740,7 @@ async function cancelScheduledRide({ uid, requestId, reason, db = getFirestore()
       ...candidate,
       pickup: request.pickup,
       dropoff: request.dropoff,
+      pickupCoordinate: request.pickupCoordinate,
       scheduledPickupAt: request.scheduledPickupAt,
       mode: request.mode
     })),
@@ -637,10 +807,111 @@ async function activateScheduledRide({ requestId, db = getFirestore(), now = adm
   }
 }
 
-async function sweepScheduledRides({ db = getFirestore(), now = admin.firestore.Timestamp.now() }) {
+async function activateScheduledDispatchFallback({ requestId, db = getFirestore(), now = admin.firestore.Timestamp.now() }) {
+  const requestRef = db.collection("scheduledRideRequests").doc(requestId);
+  const snapshot = await requestRef.get();
+  if (!snapshot.exists) throw error("Scheduled ride not found", 404);
+  const request = snapshot.data();
+  if (request.status === "active" && request.activeRideId) {
+    return { status: "active", rideId: request.activeRideId, duplicate: true };
+  }
+  const pickupMillis = timestampMillis(request.scheduledPickupAt);
+  if (pickupMillis == null) throw error("Scheduled pickup time is unavailable", 409);
+  if (now.toMillis() > pickupMillis + DISPATCH_FALLBACK_WINDOW_MS) {
+    await requestRef.set({
+      status: "expired",
+      terminalReason: "dispatch_fallback_window_elapsed",
+      updatedAt: now
+    }, { merge: true });
+    return { status: "expired", rideId: null };
+  }
+
+  const pickup = coordinate(request.pickupCoordinate, "pickupCoordinate");
+  const dropoff = coordinate(request.dropoffCoordinate, "dropoffCoordinate");
+  const route = { distanceMeters: request.backendDistanceMeters, durationSeconds: request.backendDurationSeconds };
+  const candidates = (await buildCandidateQuotes({
+    db,
+    rideType: request.rideType,
+    pickup,
+    dropoff,
+    route,
+    scheduledRideId: requestId,
+    scheduledPickupMillis: pickupMillis,
+    excludedDriverIds: request.attemptedDriverIds || [],
+    requireOnline: true,
+    nowMillis: now.toMillis()
+  })).sort((left, right) => left.distanceToPickupMiles - right.distanceToPickupMiles);
+
+  if (candidates.length === 0) {
+    await requestRef.set({
+      status: "dispatchFallbackSearching",
+      fallbackReason: "scheduled_ride_unassigned_at_pickup",
+      fallbackSearchStartedAt: request.fallbackSearchStartedAt || now,
+      assignedDriverId: admin.firestore.FieldValue.delete(),
+      updatedAt: now
+    }, { merge: true });
+    await closeRemainingOpportunities(requestRef, null, now);
+    await closeRemainingOffers(requestRef, null, now);
+    return { status: "dispatchFallbackSearching", rideId: null };
+  }
+
+  const firstCandidate = candidates[0];
+  await requestRef.set({ status: "dispatchFallbackActivating", updatedAt: now }, { merge: true });
+  try {
+    const result = await createRideRequest({
+      riderId: request.riderId,
+      payload: {
+        idempotencyKey: `scheduled_${requestId}`,
+        selectedCandidateId: firstCandidate.driverId,
+        candidateDriverIds: candidates.map((candidate) => candidate.driverId),
+        pickup: request.pickup,
+        dropoff: request.dropoff,
+        pickupCoordinate: request.pickupCoordinate,
+        dropoffCoordinate: request.dropoffCoordinate,
+        rideType: request.rideType,
+        ridePreferences: request.riderPreferences,
+        source: "scheduledRydr",
+        scheduledRideId: requestId
+      },
+      db,
+      paymentVerifier: async () => true,
+      authUserProvider: async (uid) => admin.auth().getUser(uid),
+      authoritativeRateOverride: firstCandidate.rates,
+      authoritativeRouteOverride: {
+        name: "Scheduled dispatch fallback route",
+        distanceMeters: request.backendDistanceMeters,
+        durationSeconds: request.backendDurationSeconds,
+        hasTolls: null,
+        transportType: "AUTOMOBILE"
+      },
+      trustedScheduledActivation: true,
+      now
+    });
+    await requestRef.set({
+      status: "active",
+      activeRideId: result.rideId,
+      assignedDriverId: admin.firestore.FieldValue.delete(),
+      fallbackDispatchedAt: now,
+      fallbackReason: "scheduled_ride_unassigned_at_pickup",
+      updatedAt: now
+    }, { merge: true });
+    await closeRemainingOpportunities(requestRef, firstCandidate.driverId, now);
+    await closeRemainingOffers(requestRef, null, now);
+    return { status: "active", rideId: result.rideId, duplicate: result.duplicate };
+  } catch (fallbackError) {
+    await requestRef.set({
+      status: "dispatchFallbackSearching",
+      fallbackActivationError: fallbackError.message,
+      updatedAt: now
+    }, { merge: true });
+    return { status: "dispatchFallbackSearching", rideId: null };
+  }
+}
+
+async function sweepScheduledRides({ db = getFirestore(), now = admin.firestore.Timestamp.now(), routeProvider = getDirections }) {
   const nowMillis = now.toMillis();
   const snapshot = await db.collection("scheduledRideRequests")
-    .where("status", "in", ["confirmed", "checkInRequired", "checkedIn", "seekingDrivers", "awaitingRiderSelection", "replacementSearching", "replacementApprovalRequired"])
+    .where("status", "in", ["confirmed", "checkInRequired", "checkedIn", "seekingDrivers", "awaitingRiderSelection", "replacementSearching", "replacementApprovalRequired", "dispatchFallbackSearching", "dispatchFallbackActivating"])
     .limit(200)
     .get();
   const results = [];
@@ -648,6 +919,27 @@ async function sweepScheduledRides({ db = getFirestore(), now = admin.firestore.
     const request = doc.data();
     const pickupMillis = timestampMillis(request.scheduledPickupAt);
     if (!pickupMillis) continue;
+    if (["confirmed", "checkInRequired"].includes(request.status)
+        && request.assignedDriverId
+        && nowMillis >= pickupMillis - ONLINE_READINESS_WINDOW_MS) {
+      const readiness = await assignedDriverReadiness({ db, request, nowMillis, routeProvider });
+      const deadline = onlineReadinessDeadlineMillis({ pickupMillis, etaSeconds: readiness.etaSeconds });
+      const cannotArriveOnTime = readiness.etaSeconds != null
+        && nowMillis + (readiness.etaSeconds + ONLINE_ARRIVAL_BUFFER_SECONDS) * 1000 > pickupMillis;
+      const readinessCannotBeProven = readiness.etaSeconds == null
+        && nowMillis >= pickupMillis - MINIMUM_ONLINE_LEAD_MS;
+      if (cannotArriveOnTime || readinessCannotBeProven || (!readiness.online && nowMillis >= deadline)) {
+        const action = await startAutomaticReplacement({ db, requestRef: doc.ref, request, now, routeProvider });
+        results.push({ requestId: doc.id, action });
+        continue;
+      }
+    }
+    if (["seekingDrivers", "awaitingRiderSelection", "replacementSearching", "replacementApprovalRequired", "dispatchFallbackSearching", "dispatchFallbackActivating"].includes(request.status)
+        && nowMillis >= pickupMillis - DISPATCH_FALLBACK_LEAD_MS) {
+      const fallback = await activateScheduledDispatchFallback({ requestId: doc.id, db, now });
+      results.push({ requestId: doc.id, action: fallback.status });
+      continue;
+    }
     if (request.status === "confirmed" && nowMillis >= pickupMillis - CHECK_IN_LEAD_MS) {
       await doc.ref.set({ status: "checkInRequired", updatedAt: now }, { merge: true });
       results.push({ requestId: doc.id, action: "checkInRequired" });
@@ -655,15 +947,20 @@ async function sweepScheduledRides({ db = getFirestore(), now = admin.firestore.
       await activateScheduledRide({ requestId: doc.id, db, now });
       results.push({ requestId: doc.id, action: "activated" });
     } else if (["confirmed", "checkInRequired"].includes(request.status) && nowMillis >= pickupMillis - CHECK_IN_CUTOFF_MS) {
-      await doc.ref.set({ status: "expired", terminalReason: "driver_missed_check_in", updatedAt: now }, { merge: true });
       if (request.assignedDriverId) {
         await db.collection("drivers").doc(request.assignedDriverId).collection("scheduledRideLocks").doc(doc.id)
-          .set({ status: "expired", updatedAt: now }, { merge: true });
+          .set({ status: "released_to_dispatch_fallback", updatedAt: now }, { merge: true });
       }
-      results.push({ requestId: doc.id, action: "expired" });
+      await doc.ref.set({
+        status: "dispatchFallbackSearching",
+        fallbackReason: "driver_missed_check_in",
+        assignedDriverId: admin.firestore.FieldValue.delete(),
+        updatedAt: now
+      }, { merge: true });
+      results.push({ requestId: doc.id, action: "dispatchFallbackSearching" });
     } else if (nowMillis >= pickupMillis) {
-      await doc.ref.set({ status: "expired", terminalReason: "pickup_window_elapsed", updatedAt: now }, { merge: true });
-      results.push({ requestId: doc.id, action: "expired" });
+      const fallback = await activateScheduledDispatchFallback({ requestId: doc.id, db, now });
+      results.push({ requestId: doc.id, action: fallback.status });
     }
   }
   return { processed: snapshot.size, changes: results };
@@ -673,10 +970,16 @@ module.exports = {
   MINIMUM_LEAD_TIME_MS,
   MAXIMUM_LEAD_TIME_MS,
   ACTIVATION_BUFFER_SECONDS,
+  ONLINE_READINESS_WINDOW_MS,
+  MINIMUM_ONLINE_LEAD_MS,
+  ONLINE_ARRIVAL_BUFFER_SECONDS,
+  DISPATCH_FALLBACK_WINDOW_MS,
+  DISPATCH_FALLBACK_LEAD_MS,
   DRIVER_RESPONSE_LIMIT,
   validateSchedule,
   scheduledCandidateEligible,
   quoteFor,
+  onlineReadinessDeadlineMillis,
   previewScheduledRide,
   createScheduledRide,
   respondToScheduledRide,
@@ -684,5 +987,6 @@ module.exports = {
   checkInScheduledRide,
   cancelScheduledRide,
   activateScheduledRide,
+  activateScheduledDispatchFallback,
   sweepScheduledRides
 };

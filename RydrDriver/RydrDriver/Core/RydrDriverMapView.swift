@@ -10,9 +10,11 @@ struct RydrDriverMapView: View {
     let driverCoordinate: CLLocationCoordinate2D?
     let isOnline: Bool
     let pendingRequests: [DriverRideRadarBlip]
+    let scheduledRides: [DriverScheduledMapOpportunity]
     let recenterButtonBottomPadding: CGFloat
     let workZoneControlBottomPadding: CGFloat
     let onZoomToggle: () -> Void
+    let onScheduledRideSelected: (String) -> Void
 
     /// Coordinate the work zone camera was last fit to. Used to detect meaningful GPS
     /// movement so the work zone keeps following the driver instead of staying pinned
@@ -31,6 +33,8 @@ struct RydrDriverMapView: View {
             driverCoordinate: driverCoordinate,
             isOnline: isOnline,
             pendingRequests: pendingRequests,
+            scheduledRides: scheduledRides,
+            onScheduledRideSelected: onScheduledRideSelected,
             onUserRegionChange: { region in
                 // The driver just panned/zoomed the map directly (native MapKit
                 // gesture, not our work-zone MagnificationGesture). Cancel any
@@ -224,6 +228,8 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
     let driverCoordinate: CLLocationCoordinate2D?
     let isOnline: Bool
     let pendingRequests: [DriverRideRadarBlip]
+    let scheduledRides: [DriverScheduledMapOpportunity]
+    let onScheduledRideSelected: (String) -> Void
     let onUserRegionChange: (MKCoordinateRegion) -> Void
 
     func makeUIView(context: Context) -> MKMapView {
@@ -240,13 +246,15 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
 
     func updateUIView(_ mapView: MKMapView, context: Context) {
         context.coordinator.onUserRegionChange = onUserRegionChange
+        context.coordinator.onScheduledRideSelected = onScheduledRideSelected
         context.coordinator.configure(
             mapView,
             position: position,
             filterPreferences: filterPreferences,
             driverCoordinate: driverCoordinate,
             isOnline: isOnline,
-            pendingRequests: pendingRequests
+            pendingRequests: pendingRequests,
+            scheduledRides: scheduledRides
         )
     }
 
@@ -262,6 +270,7 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
         /// apart from "the driver just panned/pinched the map".
         private var isApplyingProgrammaticRegion = false
         var onUserRegionChange: ((MKCoordinateRegion) -> Void)?
+        var onScheduledRideSelected: ((String) -> Void)?
         private var regionAnimationDisplayLink: CADisplayLink?
         private var regionAnimationStart: MKCoordinateRegion?
         private var regionAnimationTarget: MKCoordinateRegion?
@@ -302,7 +311,8 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
             filterPreferences: DriverRideFilterPreferences,
             driverCoordinate: CLLocationCoordinate2D?,
             isOnline: Bool,
-            pendingRequests: [DriverRideRadarBlip]
+            pendingRequests: [DriverRideRadarBlip],
+            scheduledRides: [DriverScheduledMapOpportunity]
         ) {
             workZoneOverlayIDs.removeAll()
             destinationGlowOverlayIDs.removeAll()
@@ -364,6 +374,15 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
 
             for blip in pendingRequests.filter({ !$0.isExpired }) {
                 mapView.addAnnotation(RydrDriverMapAnnotation(coordinate: blip.coordinate, kind: .rideRequest))
+            }
+
+            for ride in scheduledRides {
+                mapView.addAnnotation(
+                    RydrDriverMapAnnotation(
+                        coordinate: ride.coordinate,
+                        kind: .scheduledRide(id: ride.id, pickupAt: ride.scheduledPickupAt)
+                    )
+                )
             }
 
             if let region = position.region {
@@ -461,6 +480,13 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
             return view
         }
 
+        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+            guard let annotation = view.annotation as? RydrDriverMapAnnotation,
+                  case .scheduledRide(let id, _) = annotation.kind else { return }
+            onScheduledRideSelected?(id)
+            mapView.deselectAnnotation(annotation, animated: false)
+        }
+
         private func annotationView(for kind: RydrDriverMapAnnotation.Kind) -> UIView {
             switch kind {
             case .driverLocation(let isOnline):
@@ -475,6 +501,8 @@ private struct RydrDriverMKMapView: UIViewRepresentable {
                 return host(DestinationModePin(corridorMiles: corridorMiles))
             case .rideRequest:
                 return host(RiderRequestBlip())
+            case .scheduledRide(_, let pickupAt):
+                return host(ScheduledRideMapPin(pickupAt: pickupAt))
             }
         }
 
@@ -621,6 +649,7 @@ private final class RydrDriverMapAnnotation: NSObject, MKAnnotation {
         case workZoneHandle(miles: Double)
         case destination(corridorMiles: Double)
         case rideRequest
+        case scheduledRide(id: String, pickupAt: Date)
 
         var reuseIdentifier: String {
             switch self {
@@ -636,6 +665,8 @@ private final class RydrDriverMapAnnotation: NSObject, MKAnnotation {
                 return "destination"
             case .rideRequest:
                 return "rideRequest"
+            case .scheduledRide:
+                return "scheduledRide"
             }
         }
     }
@@ -928,6 +959,43 @@ struct RiderRequestBlip: View {
     var body: some View {
         RideSignalBlipView()
             .accessibilityLabel("Ride activity nearby")
+    }
+}
+
+private struct ScheduledRideMapPin: View {
+    let pickupAt: Date
+
+    var body: some View {
+        VStack(spacing: 4) {
+            VStack(spacing: 1) {
+                Text("Scheduled pickup")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.primary)
+                Text(pickupAt.formatted(date: .omitted, time: .shortened))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(.systemBackground).opacity(0.96)))
+            .shadow(color: .black.opacity(0.14), radius: 7, y: 3)
+
+            ZStack {
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 46, height: 46)
+                    .shadow(color: Color.red.opacity(0.28), radius: 10, y: 4)
+                Circle()
+                    .fill(Styles.rydrGradient)
+                    .frame(width: 36, height: 36)
+                Image(systemName: "calendar")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Scheduled pickup at \(pickupAt.formatted(date: .abbreviated, time: .shortened))")
+        .accessibilityHint("Double tap to review and accept this scheduled ride")
     }
 }
 

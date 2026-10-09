@@ -444,6 +444,7 @@ final class RideManager: ObservableObject {
     private let pendingRideSnapshotKey = "rydr.pendingRideSnapshot.v1"
     private let driverDecisionTimeoutSeconds: UInt64 = 18
     private var pendingRideWasRestored = false
+    private var isCancellingRide = false
 
     init(rideService: RideService = FirestoreRideService()) {
         self.rideService = rideService
@@ -937,6 +938,28 @@ final class RideManager: ObservableObject {
         mode: RideCancellationMode = .findAnotherDriver,
         notifyBackend: Bool = true
     ) {
+        if notifyBackend, let rideId = currentServiceRideId {
+            guard !isCancellingRide else { return }
+            isCancellingRide = true
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    _ = try await rideService.cancelRide(rideId: rideId, mode: mode)
+                    await MainActor.run {
+                        self.isCancellingRide = false
+                        self.cancelBeforePickupAndReturnToSelection(mode: mode, notifyBackend: false)
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.isCancellingRide = false
+                        self.rideRequestErrorMessage = "Cancellation failed: \(error.localizedDescription)"
+                        self.observeActiveRideLifecycleIfNeeded()
+                    }
+                }
+            }
+            return
+        }
+
         rideLifecycleTask?.cancel()
         decisionTask?.cancel()
         pickupWaitCountdownTask?.cancel()
@@ -974,20 +997,40 @@ final class RideManager: ObservableObject {
             state = .selecting
         }
 
-        Task {
-            if notifyBackend, let id = cancelledServiceRideId {
-                _ = try? await rideService.cancelRide(rideId: id, mode: mode)
-            }
-        }
         closeRideChatIfNeeded(chatContext)
     }
 
     private func cancelRideWithoutReassignment(mode: RideCancellationMode) {
+        guard let rideId = currentServiceRideId else {
+            rideRequestErrorMessage = "The backend ride record is unavailable. Please try again."
+            return
+        }
+        guard !isCancellingRide else { return }
+        isCancellingRide = true
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await rideService.cancelRide(rideId: rideId, mode: mode)
+                await MainActor.run {
+                    self.isCancellingRide = false
+                    self.finishRiderCancellation()
+                }
+            } catch {
+                await MainActor.run {
+                    self.isCancellingRide = false
+                    self.rideRequestErrorMessage = "Cancellation failed: \(error.localizedDescription)"
+                    self.observeActiveRideLifecycleIfNeeded()
+                }
+            }
+        }
+    }
+
+    private func finishRiderCancellation() {
         rideLifecycleTask?.cancel()
         decisionTask?.cancel()
         pickupWaitCountdownTask?.cancel()
         let chatContext = activeRideChatContext
-        let cancelledServiceRideId = currentServiceRideId
         replacementForRideId = nil
 
         currentRide = nil
@@ -1005,11 +1048,6 @@ final class RideManager: ObservableObject {
         clearActiveRideSnapshot()
         state = .cancelled
 
-        Task {
-            if let id = cancelledServiceRideId {
-                _ = try? await rideService.cancelRide(rideId: id, mode: mode)
-            }
-        }
         closeRideChatIfNeeded(chatContext)
     }
 

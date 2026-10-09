@@ -11,7 +11,8 @@ export const onDriverPublicProfileProjection = onDocumentWritten("drivers/{uid}"
     await Promise.all([ref.delete().catch(() => undefined), cashHubRef.delete().catch(() => undefined), cashHubEligibilityRef.delete().catch(() => undefined)]);
     return;
   }
-  const fullName = String(driver.displayName ?? [driver.firstName, driver.lastName].filter(Boolean).join(" ") ?? "Rydr Driver").trim();
+  const legalName = [driver.firstName, driver.lastName].filter(Boolean).join(" ").trim();
+  const fullName = String(legalName || driver.displayName || "Rydr Driver").trim();
   const displayName = fullName.split(/\s+/)[0] || "Rydr Driver";
   const vehicle = driver.vehicle ?? {};
   await ref.set({

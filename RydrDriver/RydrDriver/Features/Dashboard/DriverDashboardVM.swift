@@ -51,6 +51,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         }
     }
     @Published var mapRideRequestBlips: [DriverRideRadarBlip] = []
+    @Published var scheduledMapOpportunities: [DriverScheduledMapOpportunity] = []
+    @Published var selectedScheduledMapOpportunity: DriverScheduledMapOpportunity?
+    @Published var respondingScheduledRideIDs: Set<String> = []
     @Published var demandSnapshot = DriverDemandSnapshot()
     @Published var demandByRideType: [String: DriverDemandLevel] = [:]
     @Published var suggestedRatesByRideType: [String: DriverRateSetting] = [:]
@@ -222,6 +225,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private var driverListener: ListenerRegistration?
     private var requestListener: ListenerRegistration?
     private var mapRequestBlipListener: ListenerRegistration?
+    private var scheduledMapOpportunityListener: ListenerRegistration?
     private var activeRideListener: ListenerRegistration?
     private var activeRideDocumentListener: ListenerRegistration?
     private var notificationListener: ListenerRegistration?
@@ -239,6 +243,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private let cancellationSoundPlayer = DriverCancellationSoundPlayer()
     private var lastTripTelemetryAt: Date?
     private var lastTripTelemetryLocation: CLLocation?
+    private var hasStartedDashboard = false
     #if DEBUG
     private var shouldUseAtlantaPilotLocationInSimulator: Bool {
         #if targetEnvironment(simulator)
@@ -261,6 +266,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         driverListener?.remove()
         requestListener?.remove()
         mapRequestBlipListener?.remove()
+        scheduledMapOpportunityListener?.remove()
         activeRideListener?.remove()
         activeRideDocumentListener?.remove()
         notificationListener?.remove()
@@ -270,6 +276,8 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func startDashboard() {
+        guard !hasStartedDashboard else { return }
+        hasStartedDashboard = true
         loadReadLocalNotificationIDs()
         loadDismissedLocalNotificationIDs()
         #if DEBUG
@@ -280,9 +288,13 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         requestLocationAuth()
         startObservingDriverEligibility()
         startMapRequestBlipListener()
+        startScheduledMapOpportunityListener()
         startActiveRideListener()
         startNotificationListeners()
         publishDriverProfile()
+        // A fresh dashboard starts offline. Reconcile the backend immediately
+        // so a stale presence lease cannot leave this driver visible to riders.
+        updateDriverPresence(online: false)
     }
 
     func requestLocationAuth() {
@@ -491,6 +503,38 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     func refreshMapRequestBlips() {
         startMapRequestBlipListener()
+    }
+
+    func selectScheduledMapOpportunity(id: String) {
+        guard pendingRequests.isEmpty, activeRide == nil else { return }
+        selectedScheduledMapOpportunity = scheduledMapOpportunities.first { $0.id == id }
+    }
+
+    func dismissScheduledMapOpportunity() {
+        selectedScheduledMapOpportunity = nil
+    }
+
+    func acceptScheduledMapOpportunity(_ opportunity: DriverScheduledMapOpportunity) {
+        guard !respondingScheduledRideIDs.contains(opportunity.id) else { return }
+        respondingScheduledRideIDs.insert(opportunity.id)
+        Task { [weak self] in
+            do {
+                try await RydrBackendService.respondToScheduledRide(requestId: opportunity.id, response: "accept")
+                await MainActor.run {
+                    self?.respondingScheduledRideIDs.remove(opportunity.id)
+                    self?.selectedScheduledMapOpportunity = nil
+                    self?.scheduledMapOpportunities.removeAll { $0.id == opportunity.id }
+                    self?.statusMessage = opportunity.mode == "chooseMyDriver" && !opportunity.isLockedReplacement
+                        ? "You were added as a driver option. The rider will choose from the available drivers."
+                        : "Scheduled ride accepted. It is now in My Schedule."
+                }
+            } catch {
+                await MainActor.run {
+                    self?.respondingScheduledRideIDs.remove(opportunity.id)
+                    self?.statusMessage = "Could not accept scheduled ride: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
     func refreshRideFilters() {
@@ -1201,6 +1245,59 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             }
     }
 
+    private func startScheduledMapOpportunityListener() {
+        scheduledMapOpportunityListener?.remove()
+        guard let uid = Auth.auth().currentUser?.uid else {
+            scheduledMapOpportunities = []
+            selectedScheduledMapOpportunity = nil
+            return
+        }
+
+        scheduledMapOpportunityListener = db.collectionGroup("opportunities")
+            .whereField("driverId", isEqualTo: uid)
+            .whereField("status", isEqualTo: "available")
+            .addSnapshotListener { [weak self] snapshot, error in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if let error {
+                        self.statusMessage = "Scheduled ride map error: \(error.localizedDescription)"
+                        self.scheduledMapOpportunities = []
+                        self.selectedScheduledMapOpportunity = nil
+                        return
+                    }
+
+                    let now = Date()
+                    self.scheduledMapOpportunities = snapshot?.documents.compactMap { document in
+                        let data = document.data()
+                        guard let requestId = document.reference.parent.parent?.documentID,
+                              let scheduledAt = (data["scheduledPickupAt"] as? Timestamp)?.dateValue(),
+                              scheduledAt > now,
+                              let coordinateData = data["pickupCoordinate"] as? [String: Any],
+                              let latitude = Self.doubleValue(coordinateData["lat"] ?? coordinateData["latitude"]),
+                              let longitude = Self.doubleValue(coordinateData["lng"] ?? coordinateData["longitude"]),
+                              let quote = data["quote"] as? [String: Any] else { return nil }
+                        return DriverScheduledMapOpportunity(
+                            id: requestId,
+                            mode: data["mode"] as? String ?? "quickSchedule",
+                            isLockedReplacement: data["lockedReplacementFare"] as? Bool ?? false,
+                            pickup: data["pickup"] as? String ?? "Pickup",
+                            dropoff: data["dropoff"] as? String ?? "Destination",
+                            rideType: data["rideType"] as? String ?? "Rydr",
+                            scheduledPickupAt: scheduledAt,
+                            totalCents: Int(Self.doubleValue(quote["totalCents"]) ?? 0),
+                            coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+                        )
+                    }
+                    .sorted { $0.scheduledPickupAt < $1.scheduledPickupAt } ?? []
+
+                    if let selected = self.selectedScheduledMapOpportunity,
+                       !self.scheduledMapOpportunities.contains(where: { $0.id == selected.id }) {
+                        self.selectedScheduledMapOpportunity = nil
+                    }
+                }
+            }
+    }
+
     private func refreshBackendDemand() {
         let rideTypes = eligibleRideTypes.isEmpty
             ? DriverDashboardVM.availableRideTypes
@@ -1861,6 +1958,7 @@ enum MapZoomLevel: CaseIterable {
 
 struct DriverDashboardView: View {
     @EnvironmentObject var session: DriverSessionManager
+    @AppStorage(DriverScheduledDashboardPreference.key) private var showScheduledRidesOnDashboard = DriverScheduledDashboardPreference.defaultValue
     @StateObject private var vm = DriverDashboardVM()
     @State private var mapPosition: MapCameraPosition = .region(DriverMapDefaults.pilotRegion)
     @State private var activeSheet: DriverDashboardSheet?
@@ -1876,9 +1974,11 @@ struct DriverDashboardView: View {
                     driverCoordinate: vm.lastLocation?.coordinate,
                     isOnline: vm.isOnline,
                     pendingRequests: vm.mapRideRequestBlips,
+                    scheduledRides: scheduledRidesVisibleOnMap,
                     recenterButtonBottomPadding: metrics.recenterButtonBottomPadding,
                     workZoneControlBottomPadding: metrics.workZoneControlBottomPadding,
-                    onZoomToggle: toggleMapZoom
+                    onZoomToggle: toggleMapZoom,
+                    onScheduledRideSelected: vm.selectScheduledMapOpportunity(id:)
                 )
                 .onReceive(vm.$mapRegion) { newRegion in
                     mapPosition = .region(newRegion)
@@ -1909,8 +2009,19 @@ struct DriverDashboardView: View {
                 }
 
                 VStack(spacing: metrics.compactHeight ? 8 : 12) {
-                    DriverRideWorkPanel(vm: vm) { rideType in
-                        activeSheet = .rideType(rideType)
+                    if let scheduledRide = vm.selectedScheduledMapOpportunity,
+                       vm.pendingRequests.isEmpty,
+                       vm.activeRide == nil {
+                        ScheduledRideDashboardCard(
+                            opportunity: scheduledRide,
+                            isAccepting: vm.respondingScheduledRideIDs.contains(scheduledRide.id),
+                            onAccept: { vm.acceptScheduledMapOpportunity(scheduledRide) },
+                            onDismiss: vm.dismissScheduledMapOpportunity
+                        )
+                    } else {
+                        DriverRideWorkPanel(vm: vm) { rideType in
+                            activeSheet = .rideType(rideType)
+                        }
                     }
 
                     if vm.isSearchingForRides {
@@ -2024,6 +2135,17 @@ struct DriverDashboardView: View {
             )
             .presentationDetents([.medium])
         }
+        .onChange(of: vm.pendingRequests) { _, requests in
+            if !requests.isEmpty { vm.dismissScheduledMapOpportunity() }
+        }
+    }
+
+    private var scheduledRidesVisibleOnMap: [DriverScheduledMapOpportunity] {
+        guard showScheduledRidesOnDashboard,
+              vm.isSearchingForRides,
+              vm.activeRide == nil,
+              vm.pendingRequests.isEmpty else { return [] }
+        return Array(vm.scheduledMapOpportunities.prefix(12))
     }
 
     @ViewBuilder

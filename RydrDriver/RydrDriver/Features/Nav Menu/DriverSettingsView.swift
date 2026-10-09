@@ -58,6 +58,7 @@ struct DriverSettingsView: View {
     @ObservedObject var vm: DriverDashboardVM
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(DriverNavigationHandoff.preferenceKey) private var defaultNavigationProvider = DriverNavigationProvider.rydr.rawValue
+    @AppStorage(DriverScheduledDashboardPreference.key) private var showScheduledRidesOnDashboard = DriverScheduledDashboardPreference.defaultValue
 
     @State private var showLinkPhoneSheet = false
     @State private var phoneProviderLinked = Auth.auth().currentUser?.providerData.contains { $0.providerID == PhoneAuthProviderID } ?? false
@@ -80,6 +81,7 @@ struct DriverSettingsView: View {
             accountSection
             cashRydrHubSection
             navigationSection
+            scheduledRideSection
             queuedRideSection
             driverAppSection
         }
@@ -292,6 +294,25 @@ struct DriverSettingsView: View {
             Text("Ride Queue")
         } footer: {
             Text("Queued rides wait until your current ride ends. If this is off, you can accept or decline queued requests manually.")
+        }
+    }
+
+    private var scheduledRideSection: some View {
+        Section {
+            Toggle(isOn: $showScheduledRidesOnDashboard) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Scheduled Rides on Dashboard")
+                        .font(.body.weight(.semibold))
+                    Text("Show scheduled pickup pins while you are online and standing by.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        } header: {
+            Text("Scheduled Rides")
+        } footer: {
+            Text("Scheduled pins never appear during an active ride or turn-by-turn navigation. The Scheduled Rides menu remains available when this is off.")
         }
     }
 

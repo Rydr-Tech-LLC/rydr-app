@@ -1,11 +1,13 @@
 const { admin, getFirestore } = require("../config/firebase");
 const { getDirections } = require("./appleMapsService");
 const { findBestDrivers } = require("./driverMatchingService");
-const { isApprovedDriver } = require("./driverPresenceService");
-const { rateObject, quoteFingerprint } = require("./rideRequestService");
+const { isApprovedDriver, hasCurrentOnlinePresence } = require("./driverPresenceService");
+const { configuredRateObject, quoteFingerprint } = require("./rideRequestService");
 const { calculateOutcome, PRICING_VERSION } = require("./rideFinancialService");
 
 const MATCH_SESSION_TTL_MS = 5 * 60 * 1000;
+const SCHEDULED_RIDE_PROTECTION_WINDOW_MS = 3 * 60 * 60 * 1000;
+const SCHEDULED_RIDE_ARRIVAL_BUFFER_SECONDS = 10 * 60;
 
 function error(message, statusCode) {
   const err = new Error(message);
@@ -35,7 +37,7 @@ function publicDriverProjection(profile, location) {
   ].filter(Boolean).join(" ") || "Verified Rydr vehicle").trim();
   const rawGender = String(profile?.gender || profile?.driverGender || profile?.genderIdentity || "").toLowerCase();
   return {
-    displayName: firstName(profile?.displayName || profile?.firstName || profile?.name),
+    displayName: firstName(profile?.firstName || profile?.legalFirstName || profile?.displayName || profile?.name),
     profilePhotoURL: profile?.profilePhotoURL || profile?.profileImage || null,
     vehicleImageURL: profile?.vehicleImageURL || profile?.carImage || vehicle.imageURL || null,
     vehicleSummary,
@@ -49,6 +51,69 @@ function publicDriverProjection(profile, location) {
     gender: rawGender === "male" ? "Male" : rawGender === "female" ? "Female" : null,
     approximateLocation: { lat: location.latitude, lng: location.longitude }
   };
+}
+
+function timestampMillis(value) {
+  if (!value) return null;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") return value.toDate().getTime();
+  if (value instanceof Date) return value.getTime();
+  if (Number.isFinite(Number(value))) return Number(value);
+  return null;
+}
+
+async function scheduledPickupCoordinate({ db, lock }) {
+  const direct = lock.pickupCoordinate;
+  if (direct && Number.isFinite(Number(direct.lat ?? direct.latitude)) && Number.isFinite(Number(direct.lng ?? direct.longitude))) {
+    return coordinate(direct, "scheduledPickupCoordinate");
+  }
+  const requestId = String(lock.scheduledRideId || "").trim();
+  if (!requestId) return null;
+  const snapshot = await db.collection("scheduledRideRequests").doc(requestId).get();
+  return snapshot.exists ? coordinate(snapshot.data().pickupCoordinate, "scheduledPickupCoordinate") : null;
+}
+
+async function driverCanFinishBeforeScheduledPickup({ candidate, db, pickup, dropoff, tripDurationSeconds, routeProvider, nowMillis }) {
+  const locks = await db.collection("drivers").doc(candidate.id).collection("scheduledRideLocks")
+    .where("status", "==", "active").limit(10).get();
+  const upcoming = (locks.docs || [])
+    .map((doc) => ({ id: doc.id, ...doc.data() }))
+    .map((lock) => ({ lock, pickupMillis: timestampMillis(lock.scheduledPickupAt) }))
+    .filter(({ pickupMillis }) => pickupMillis != null && pickupMillis > nowMillis)
+    .sort((left, right) => left.pickupMillis - right.pickupMillis)[0];
+  if (!upcoming || upcoming.pickupMillis - nowMillis > SCHEDULED_RIDE_PROTECTION_WINDOW_MS) return true;
+
+  try {
+    const protectedPickup = await scheduledPickupCoordinate({ db, lock: upcoming.lock });
+    if (!protectedPickup) return false;
+    const [toRider, toScheduledPickup] = await Promise.all([
+      routeProvider({ origin: candidate.location, destination: pickup, departureDate: new Date(nowMillis).toISOString() }),
+      routeProvider({
+        origin: dropoff,
+        destination: protectedPickup,
+        departureDate: new Date(nowMillis + Number(tripDurationSeconds || 0) * 1000).toISOString()
+      })
+    ]);
+    const requiredSeconds = Number(toRider.route?.durationSeconds || 0)
+      + Number(tripDurationSeconds || 0)
+      + Number(toScheduledPickup.route?.durationSeconds || 0)
+      + SCHEDULED_RIDE_ARRIVAL_BUFFER_SECONDS;
+    return requiredSeconds > 0 && nowMillis + requiredSeconds * 1000 <= upcoming.pickupMillis;
+  } catch {
+    // Protect the scheduled commitment when an authoritative travel-time check
+    // cannot prove the additional ride is safe.
+    return false;
+  }
+}
+
+async function protectScheduledCommitments({ candidates, db, pickup, dropoff, tripDurationSeconds, routeProvider, nowMillis }) {
+  const decisions = await Promise.all(candidates.map(async (candidate) => ({
+    candidate,
+    allowed: await driverCanFinishBeforeScheduledPickup({
+      candidate, db, pickup, dropoff, tripDurationSeconds, routeProvider, nowMillis
+    })
+  })));
+  return decisions.filter((decision) => decision.allowed).map((decision) => decision.candidate);
 }
 
 async function createRideMatchSession({ riderId, payload, db = getFirestore(), routeProvider = getDirections, now = admin.firestore.Timestamp.now() }) {
@@ -65,8 +130,14 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
   const canonicalSnapshots = publicSnapshots.length > 0
     ? await db.getAll(...publicSnapshots.map((doc) => db.collection("drivers").doc(doc.id)))
     : [];
+  const statusSnapshots = publicSnapshots.length > 0
+    ? await db.getAll(...publicSnapshots.map((doc) => db.collection("driver_status").doc(doc.id)))
+    : [];
   const canonicalById = new Map(canonicalSnapshots
     .filter((doc) => doc.exists && isApprovedDriver(doc.data()))
+    .map((doc) => [doc.id, doc.data()]));
+  const statusById = new Map(statusSnapshots
+    .filter((doc) => doc.exists && hasCurrentOnlinePresence(doc.data(), now.toMillis()))
     .map((doc) => [doc.id, doc.data()]));
   const eligible = findBestDrivers({
     rideType,
@@ -74,18 +145,19 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
     dropoffCoordinate: dropoff,
     routeDistanceMiles: route.distanceMeters / 1609.344,
     candidates: publicSnapshots
-      .filter((doc) => canonicalById.has(doc.id))
+      .filter((doc) => canonicalById.has(doc.id) && statusById.has(doc.id))
       .map((doc) => {
         const presence = doc.data();
+        const status = statusById.get(doc.id);
         return {
           id: doc.id,
           profile: {
             ...presence,
             ...canonicalById.get(doc.id),
-            isOnline: presence.isOnline,
-            availabilityStatus: presence.availabilityStatus,
-            approximateLocation: presence.approximateLocation,
-            eligibleRideTypes: presence.eligibleRideTypes
+            isOnline: status.isOnline,
+            availabilityStatus: status.availabilityStatus,
+            approximateLocation: status.location || presence.approximateLocation,
+            eligibleRideTypes: status.selectedRideTypes || presence.eligibleRideTypes
           }
         };
       }),
@@ -93,8 +165,20 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
   });
   if (eligible.length === 0) throw error("No nearby drivers are available", 409);
 
-  const candidates = eligible.map((candidate) => {
-    const rates = rateObject(candidate.profile, rideType);
+  const onTimeEligible = await protectScheduledCommitments({
+    candidates: eligible,
+    db,
+    pickup,
+    dropoff,
+    tripDurationSeconds: route.durationSeconds,
+    routeProvider,
+    nowMillis: now.toMillis()
+  });
+  if (onTimeEligible.length === 0) throw error("No nearby drivers can complete this ride without risking a scheduled pickup", 409);
+
+  const candidates = onTimeEligible.map((candidate) => {
+    const rates = configuredRateObject(candidate.profile, rideType);
+    if (!rates) return null;
     const outcome = calculateOutcome({
       rideType,
       backendDistanceMiles: route.distanceMeters / 1609.344,
@@ -115,7 +199,8 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
       estimatedRiderTotalCents: outcome.finalRiderChargeCents,
       estimatedDriverPayoutCents: outcome.driverPayoutCents
     };
-  });
+  }).filter(Boolean);
+  if (candidates.length === 0) throw error("No nearby drivers with a current rate card are available", 409);
   const sessionRef = db.collection("rideMatchSessions").doc();
   const expiresAt = admin.firestore.Timestamp.fromMillis(now.toMillis() + MATCH_SESSION_TTL_MS);
   await sessionRef.create({
@@ -146,4 +231,11 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
   };
 }
 
-module.exports = { createRideMatchSession, MATCH_SESSION_TTL_MS, publicDriverProjection };
+module.exports = {
+  createRideMatchSession,
+  MATCH_SESSION_TTL_MS,
+  SCHEDULED_RIDE_PROTECTION_WINDOW_MS,
+  SCHEDULED_RIDE_ARRIVAL_BUFFER_SECONDS,
+  publicDriverProjection,
+  driverCanFinishBeforeScheduledPickup
+};

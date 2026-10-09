@@ -133,7 +133,7 @@ property, and `vehicleSummary` into `Driver.carMakeModel`.
 image source as a bundled asset name first (legacy/local test data), then as
 a remote URL (Vehicle Library images, served from Firebase Storage), and
 otherwise renders the provided fallback. It's used in `DriverSelectionView`,
-`DriverCardView`, and `RideInProgressView` so riders see the generic vehicle
+`DriverSelectionView`, and `RideInProgressView` so riders see the generic vehicle
 image at every stage: matching, confirmation, and the active ride.
 
 ## 8. Mission Control (`RydrMissionControl`)

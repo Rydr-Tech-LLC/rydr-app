@@ -26,6 +26,8 @@ enum ScheduledRideStatus: String {
     case completed
     case replacementSearching
     case replacementApprovalRequired
+    case dispatchFallbackSearching
+    case dispatchFallbackActivating
     case cancelled
     case expired
 
@@ -41,6 +43,8 @@ enum ScheduledRideStatus: String {
         case .completed: "Completed"
         case .replacementSearching: "Finding a replacement"
         case .replacementApprovalRequired: "Choose a replacement"
+        case .dispatchFallbackSearching: "Finding a nearby driver"
+        case .dispatchFallbackActivating: "Starting regular dispatch"
         case .cancelled: "Cancelled"
         case .expired: "Needs attention"
         }

@@ -22,14 +22,6 @@ const XL_MODEL_FRAGMENTS = [
   "suburban", "tahoe", "telluride", "traverse", "yukon"
 ];
 
-const BASELINE_RATES: Record<string, { minimumFare: number; perMile: number; perMinute: number }> = {
-  go: { minimumFare: 7, perMile: 1, perMinute: 0.25 },
-  eco: { minimumFare: 7, perMile: 1.10, perMinute: 0.25 },
-  xl: { minimumFare: 7, perMile: 1.25, perMinute: 0.25 },
-  prestine: { minimumFare: 7, perMile: 1.50, perMinute: 0.35 },
-  executive: { minimumFare: 7, perMile: 2, perMinute: 0.50 }
-};
-
 function normalized(value: unknown): string {
   return String(value ?? "").toLowerCase().replace(/[-_]/g, " ").trim();
 }
@@ -101,12 +93,10 @@ export function evaluateVehicleEligibility(input: {
   };
 }
 
-export function mergeDefaultTierRates(existing: unknown, rideTypes: string[]) {
+export function mergeDefaultTierRates(existing: unknown, _rideTypes: string[]) {
   const current = existing && typeof existing === "object" ? existing as Record<string, unknown> : {};
-  const merged: Record<string, unknown> = { ...current };
-  for (const rideType of rideTypes) {
-    const key = canonicalRideType(rideType);
-    if (!merged[key]) merged[key] = { ...BASELINE_RATES[key], useSuggestedPricing: false };
-  }
-  return merged;
+  // Eligibility determines which tiers a vehicle may serve; it must not
+  // manufacture a driver-owned rate card. Rates only become authoritative
+  // after the driver saves them through the backend rate-card endpoint.
+  return { ...current };
 }

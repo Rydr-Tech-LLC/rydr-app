@@ -54,6 +54,14 @@ test.before(async () => {
       driverId: "driver-2",
       status: "available"
     });
+    await setDoc(doc(db, "scheduledRideRequests/request-1/offers/driver-1"), {
+      driverId: "driver-1",
+      status: "available"
+    });
+    await setDoc(doc(db, "scheduledRideRequests/request-1/offers/driver-2"), {
+      driverId: "driver-2",
+      status: "available"
+    });
     await setDoc(doc(db, "scheduledRideRequests/request-2"), {
       riderId: "rider-1",
       assignedDriverId: "driver-1",
@@ -106,6 +114,24 @@ test("driver may query only their own scheduled ride opportunities", async () =>
   const snapshot = await assertSucceeds(getDocs(ownOpportunities));
   assert.equal(snapshot.size, 1);
   await assertFails(getDocs(otherOpportunities));
+});
+
+test("driver may query only their own pending scheduled driver selections", async () => {
+  const db = environment.authenticatedContext("driver-1", { phone_number: "+16783225555" }).firestore();
+  const ownOffers = query(
+    collectionGroup(db, "offers"),
+    where("driverId", "==", "driver-1"),
+    where("status", "==", "available")
+  );
+  const otherOffers = query(
+    collectionGroup(db, "offers"),
+    where("driverId", "==", "driver-2"),
+    where("status", "==", "available")
+  );
+
+  const snapshot = await assertSucceeds(getDocs(ownOffers));
+  assert.equal(snapshot.size, 1);
+  await assertFails(getDocs(otherOffers));
 });
 
 test("driver may query their own scheduled assignments", async () => {

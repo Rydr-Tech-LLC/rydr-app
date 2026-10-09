@@ -5,6 +5,7 @@ const {
   createRideRequest,
   deterministicRideId,
   rateObject,
+  configuredRateObject,
   quoteFingerprint
 } = require("../src/services/rideRequestService");
 
@@ -81,6 +82,7 @@ function readyDb() {
     "drivers/driver-1": {
       isApproved: true,
       accountStatus: "active",
+      rateCardUpdatedAt: { seconds: 1 },
       tierRates: { go: { minimumFare: 8, perMile: 1, perMinute: 0.28 } }
     },
     "publicDriverProfiles/driver-1": {
@@ -88,6 +90,11 @@ function readyDb() {
       availabilityStatus: "available",
       eligibleRideTypes: ["Rydr Go"],
       tierRates: { go: { minimumFare: 99, perMile: 99, perMinute: 99 } }
+    },
+    "driver_status/driver-1": {
+      isOnline: true,
+      availabilityStatus: "available",
+      presenceExpiresAt: { seconds: 4_000_000_000 }
     }
   });
 }
@@ -121,6 +128,17 @@ test("driver rate lookup accepts legacy display-name keys without falling back t
   assert.equal(rate.perMinuteCents, 61);
 });
 
+test("matching does not substitute baseline prices for a missing manual rate card", () => {
+  assert.equal(configuredRateObject({ tierRates: {} }, "Rydr Go"), null);
+  assert.equal(configuredRateObject({
+    rateCardUpdatedAt: { seconds: 1 },
+    tierRates: { go: { minimumFare: 9, perMile: 1.4, perMinute: 0.33 } }
+  }, "Rydr Go").minimumFareCents, 900);
+  assert.equal(configuredRateObject({
+    tierRates: { go: { minimumFare: 7, perMile: 1, perMinute: 0.25 } }
+  }, "Rydr Go"), null);
+});
+
 test("backend creates the authoritative request, signal, route, quote, and dispatch offer", async () => {
   const db = readyDb();
   const result = await createRideRequest({
@@ -148,6 +166,24 @@ test("backend creates the authoritative request, signal, route, quote, and dispa
   assert.equal(request.estimatedPlatformShareCents, 380);
   assert.match(request.quoteFingerprint, /^[a-f0-9]{64}$/);
   assert.equal(signal.driverId, "driver-1");
+});
+
+test("trusted scheduled fallback preserves the backend-ranked dispatch candidate pool", async () => {
+  const db = readyDb();
+  const payload = createPayload();
+  payload.candidateDriverIds = ["driver-1", "driver-2", "driver-1"];
+  const result = await createRideRequest({
+    riderId: "rider-1",
+    authorization: "Bearer token",
+    payload,
+    db,
+    routeProvider,
+    paymentVerifier: async () => true,
+    authUserProvider: async () => ({ displayName: "Rider One", photoURL: null }),
+    trustedScheduledActivation: true
+  });
+  const request = db.values.get(`rideRequests/${result.rideId}`);
+  assert.deepEqual(request.dispatchCandidateIds, ["driver-1", "driver-2"]);
 });
 
 test("backend rejects an offline selected driver before writing", async () => {

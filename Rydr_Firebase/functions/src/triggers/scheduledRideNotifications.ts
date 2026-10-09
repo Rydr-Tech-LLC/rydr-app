@@ -31,10 +31,23 @@ export const onScheduledRideUpdated = onDocumentUpdated(
     if (!before || !after || before.status === after.status) return;
     const requestId = event.params.requestId;
 
+    if (after.status === "replacementSearching" && before.assignedDriverId && before.assignedDriverId !== after.assignedDriverId) {
+      await sendPushToUser({
+        audience: "driver",
+        uid: before.assignedDriverId,
+        title: "Scheduled ride reassigned",
+        body: "You were not online in time to protect the scheduled pickup, so Rydr started on-time replacement matching.",
+        route: { type: "scheduledRideUpdate", target: "scheduledRides", requestId }
+      });
+    }
+
     if (after.riderId) {
       const riderMessage: Record<string, string> = {
         awaitingRiderSelection: "Drivers responded to your scheduled ride. Choose a driver.",
         confirmed: "Your scheduled ride is confirmed.",
+        replacementSearching: "Your original driver was not available in time. Rydr is finding an on-time replacement at your locked price.",
+        dispatchFallbackSearching: "Your scheduled request is now searching through regular Rydr dispatch for the closest available driver.",
+        dispatchFallbackActivating: "Your scheduled request is moving into regular Rydr dispatch.",
         replacementApprovalRequired: "A replacement driver is available for your approval.",
         active: "Your scheduled ride is now active.",
         cancelled: "Your scheduled ride was cancelled.",

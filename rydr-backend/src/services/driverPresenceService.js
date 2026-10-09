@@ -10,6 +10,7 @@ const ACTIVE_RIDE_STATUSES = new Set([
   "arrivedAtStop",
   "navigatingToDropoff"
 ]);
+const PRESENCE_LEASE_MS = 60 * 1000;
 
 function error(message, statusCode) {
   const err = new Error(message);
@@ -44,6 +45,23 @@ function normalizedLocation(value) {
   if (Number.isFinite(speed)) location.speed = speed;
   if (Number.isFinite(course)) location.course = course;
   return location;
+}
+
+function timestampMillis(value) {
+  if (!value) return null;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") return value.toDate().getTime();
+  if (value instanceof Date) return value.getTime();
+  if (Number.isFinite(value._seconds)) return value._seconds * 1000;
+  if (Number.isFinite(value.seconds)) return value.seconds * 1000;
+  return null;
+}
+
+function hasCurrentOnlinePresence(presence, nowMillis = Date.now()) {
+  if (presence?.isOnline !== true) return false;
+  if (!["available", "onCurrentRide"].includes(String(presence.availabilityStatus || ""))) return false;
+  const expiresAt = timestampMillis(presence.presenceExpiresAt);
+  return expiresAt != null && expiresAt >= nowMillis;
 }
 
 async function activeRideForDriver(db, uid) {
@@ -85,6 +103,7 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   const hasActiveRide = Boolean(activeRide);
   const availabilityStatus = online ? (hasActiveRide ? "onCurrentRide" : "available") : "offline";
   const now = admin.firestore.Timestamp.now();
+  const presenceExpiresAt = admin.firestore.Timestamp.fromMillis(now.toMillis() + PRESENCE_LEASE_MS);
   const cleanLocation = normalizedLocation(location);
   const common = {
     online,
@@ -93,6 +112,7 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
     hasActiveRide,
     selectedRideTypes: effectiveRideTypes,
     rideTypes: effectiveRideTypes,
+    presenceExpiresAt,
     updatedAt: now
   };
   const privatePresence = {
@@ -186,4 +206,11 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   return { online, availabilityStatus, hasActiveRide, selectedRideTypes: effectiveRideTypes };
 }
 
-module.exports = { updateDriverPresence, isApprovedDriver, normalizedLocation, normalizedRideTypes };
+module.exports = {
+  updateDriverPresence,
+  isApprovedDriver,
+  normalizedLocation,
+  normalizedRideTypes,
+  hasCurrentOnlinePresence,
+  PRESENCE_LEASE_MS
+};

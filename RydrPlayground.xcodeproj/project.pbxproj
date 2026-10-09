@@ -71,7 +71,6 @@
 		A5691757A685A2984CA66C25 /* RydrBankSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEB6F289F9BBFFB1D2FD10ED /* RydrBankSummary.swift */; };
 		A7B7C94C85EDCA3BFCC8617D /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C2DB1E40E4A1CF1DD0770E7 /* LoginView.swift */; };
 		A96FDDF8F8E31985FE66A32A /* RydrRideProgressMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6BE46F6F6C5FE5CA4622A9 /* RydrRideProgressMapView.swift */; };
-		A977218877B64CD80867CE9B /* DriverCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C8C5EC4F4A1D3D902A609C3 /* DriverCardView.swift */; };
 		B1E000000000000000000003 /* ScheduledRide.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E000000000000000000003 /* ScheduledRide.swift */; };
 		B1E000000000000000000005 /* ScheduledRideManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E000000000000000000005 /* ScheduledRideManager.swift */; };
 		B1E000000000000000000006 /* ScheduledRideViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E000000000000000000006 /* ScheduledRideViews.swift */; };
@@ -172,7 +171,6 @@
 		57F389897522773F5954E49F /* RydrBankAPIError.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RydrBankAPIError.swift; sourceTree = "<group>"; };
 		59F7A89DEADD42200C775417 /* NameEntryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NameEntryView.swift; sourceTree = "<group>"; };
 		5C2DB1E40E4A1CF1DD0770E7 /* LoginView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
-		5C8C5EC4F4A1D3D902A609C3 /* DriverCardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DriverCardView.swift; sourceTree = "<group>"; };
 		5EC99D72C84F6C0F12687F1C /* SupportTicketService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SupportTicketService.swift; sourceTree = "<group>"; };
 		5F6BE46F6F6C5FE5CA4622A9 /* RydrRideProgressMapView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RydrRideProgressMapView.swift; sourceTree = "<group>"; };
 		61C1E1A68C2D4C2B91287131 /* RiderRidePreferences.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RiderRidePreferences.swift; sourceTree = "<group>"; };
@@ -348,7 +346,6 @@
 		596475DE9C3500FCF53BB7A9 /* Driver */ = {
 			isa = PBXGroup;
 			children = (
-				5C8C5EC4F4A1D3D902A609C3 /* DriverCardView.swift */,
 				38FCAAD75C6C33288D219665 /* DriverSelectionView.swift */,
 			);
 			path = Driver;
@@ -744,7 +741,6 @@
 				B1E000000000000000000003 /* ScheduledRide.swift in Sources */,
 				B1E000000000000000000005 /* ScheduledRideManager.swift in Sources */,
 				B1E000000000000000000006 /* ScheduledRideViews.swift in Sources */,
-				A977218877B64CD80867CE9B /* DriverCardView.swift in Sources */,
 				3ED5EDA268FECB5C153A8E1A /* DriverSelectionView.swift in Sources */,
 				CBF3EBC9C85C41C142C65758 /* PaymentScreenView.swift in Sources */,
 				F243EF64A3AF3652B90A7508 /* CommunityView.swift in Sources */,
@@ -946,11 +942,12 @@
 		D9A572072DF9C6AB00C04006 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APP_ATTEST_ENVIRONMENT = development;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = RydrPlayground/RydrPlayground.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 13;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = DTD5H7A5FS;
 				ENABLE_PREVIEWS = YES;
@@ -972,10 +969,11 @@
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = "";
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
@@ -996,11 +994,12 @@
 		D9A572082DF9C6AB00C04006 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APP_ATTEST_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = RydrPlayground/RydrPlayground.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 13;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = DTD5H7A5FS;
 				ENABLE_PREVIEWS = YES;
@@ -1022,10 +1021,11 @@
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphonesimulator*]" = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = "";
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphoneos*]" = UIStatusBarStyleDefault;
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";

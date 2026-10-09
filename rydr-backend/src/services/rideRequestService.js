@@ -13,7 +13,7 @@ const {
   normalizedCandidateIds,
   isEligibleCandidate
 } = require("./rideDispatchService");
-const { isApprovedDriver } = require("./driverPresenceService");
+const { isApprovedDriver, hasCurrentOnlinePresence } = require("./driverPresenceService");
 
 function error(message, statusCode, details) {
   const err = new Error(message);
@@ -83,6 +83,19 @@ function rateObject(profile, rideType) {
     : dollarsToCents(raw.perMinute) ?? dollarsToCents(profile?.perMinute) ?? config.suggestedMinute;
 
   return { tier, minimumFareCents, perMileCents, perMinuteCents, usesSuggestedPricing };
+}
+
+function configuredRateObject(profile, rideType) {
+  const tier = canonicalRateKey(rideType);
+  const rawRates = profile?.tierRates && typeof profile.tierRates === "object" ? profile.tierRates : {};
+  const raw = tierEntry(rawRates, tier, rideType);
+  const savedByRateCard = raw.pricingOwner === "rydr_backend" || profile?.rateCardUpdatedAt != null;
+  if (!savedByRateCard) return null;
+  if (raw.useSuggestedPricing === true) return rateObject(profile, rideType);
+  if (nonnegativeNumber(raw.minimumFare) == null
+      || nonnegativeNumber(raw.perMile) == null
+      || nonnegativeNumber(raw.perMinute) == null) return null;
+  return rateObject(profile, rideType);
 }
 
 function quoteFingerprint({ riderId, driverId, rideType, pickup, dropoff, route, rates }) {
@@ -201,10 +214,12 @@ async function createRideRequest({
   const riderRef = db.collection("riders").doc(riderId);
   const publicDriverRef = db.collection("publicDriverProfiles").doc(selectedCandidateId);
   const canonicalDriverRef = db.collection("drivers").doc(selectedCandidateId);
-  const [riderSnap, publicDriverSnap, canonicalDriverSnap] = await Promise.all([
+  const driverStatusRef = db.collection("driver_status").doc(selectedCandidateId);
+  const [riderSnap, publicDriverSnap, canonicalDriverSnap, driverStatusSnap] = await Promise.all([
     riderRef.get(),
     publicDriverRef.get(),
-    canonicalDriverRef.get()
+    canonicalDriverRef.get(),
+    driverStatusRef.get()
   ]);
   if (!riderSnap.exists) throw error("Rider profile not found", 403);
   const rider = riderSnap.data();
@@ -212,7 +227,8 @@ async function createRideRequest({
     throw error("This rider account cannot request rides", 403);
   }
   if (!publicDriverSnap.exists || !isEligibleCandidate(publicDriverSnap.data(), rideType)
-      || !canonicalDriverSnap.exists || !isApprovedDriver(canonicalDriverSnap.data())) {
+      || !canonicalDriverSnap.exists || !isApprovedDriver(canonicalDriverSnap.data())
+      || !driverStatusSnap.exists || !hasCurrentOnlinePresence(driverStatusSnap.data(), now.toMillis())) {
     throw error("The selected driver is no longer available", 409);
   }
 
@@ -229,7 +245,8 @@ async function createRideRequest({
     throw error("A backend route could not be calculated", 422);
   }
 
-  const rates = authoritativeRateOverride ?? rateObject(canonicalDriverSnap.data(), rideType);
+  const rates = authoritativeRateOverride ?? configuredRateObject(canonicalDriverSnap.data(), rideType);
+  if (!rates) throw error("The selected driver's rate card is incomplete. Refresh nearby drivers.", 409);
   const distanceMiles = Number(route.distanceMeters) / 1609.344;
   const durationMinutes = Number(route.durationSeconds) / 60;
   const estimate = calculateOutcome({
@@ -245,7 +262,11 @@ async function createRideRequest({
     throw error("The selected driver's pricing changed. Refresh nearby drivers.", 409);
   }
   const candidateIds = trustedScheduledActivation
-    ? normalizedCandidateIds([selectedCandidateId])
+    ? normalizedCandidateIds(
+      Array.isArray(payload?.candidateDriverIds) && payload.candidateDriverIds.length > 0
+        ? payload.candidateDriverIds
+        : [selectedCandidateId]
+    )
     : normalizedCandidateIds(matchSession.candidateIds);
   const expiresAt = admin.firestore.Timestamp.fromMillis(now.toMillis() + OFFER_TTL_SECONDS * 1000);
   const authUser = await authUserProvider(riderId);
@@ -366,5 +387,6 @@ module.exports = {
   deterministicRideId,
   quoteFingerprint,
   rateObject,
+  configuredRateObject,
   tierEntry
 };

@@ -174,6 +174,73 @@ struct DriverRideWorkPanel: View {
     }
 }
 
+struct ScheduledRideDashboardCard: View {
+    let opportunity: DriverScheduledMapOpportunity
+    let isAccepting: Bool
+    let onAccept: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "calendar")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.red)
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(Color.red.opacity(0.10)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(opportunity.isLockedReplacement ? "On-Time Replacement" : opportunity.mode == "chooseMyDriver" ? "Choose My Driver" : "Quick Schedule")
+                        .font(.headline.weight(.bold))
+                    Text(opportunity.rideType)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close scheduled ride details")
+            }
+
+            Text(opportunity.scheduledPickupAt.formatted(date: .abbreviated, time: .shortened))
+                .font(.title3.weight(.bold))
+            Label(opportunity.pickup, systemImage: "circle.fill")
+                .lineLimit(1)
+            Label(opportunity.dropoff, systemImage: "mappin.and.ellipse")
+                .lineLimit(1)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(String(format: "$%.2f", Double(opportunity.totalCents) / 100))
+                    .font(.title2.weight(.bold))
+                Text("Upfront fare")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button(action: onAccept) {
+                HStack {
+                    if isAccepting { ProgressView().tint(.white) }
+                    Text(isAccepting ? "Submitting…" : opportunity.mode == "chooseMyDriver" && !opportunity.isLockedReplacement ? "Add Me as an Option" : "Accept Scheduled Ride")
+                        .font(.headline.weight(.bold))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(Styles.rydrGradient, in: RoundedRectangle(cornerRadius: 16))
+                .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+            .disabled(isAccepting)
+        }
+        .padding(18)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color.white.opacity(0.30)))
+        .shadow(color: .black.opacity(0.16), radius: 18, y: 10)
+    }
+}
+
 struct DriverRideTypeCommandPanel: View {
     @ObservedObject var vm: DriverDashboardVM
     var onRideTypeSelected: (String) -> Void

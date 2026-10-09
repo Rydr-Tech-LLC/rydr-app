@@ -136,6 +136,12 @@ export const onRideUpdated = onDocumentWritten("rides/{rideId}", async (event) =
       }, { merge: true });
       if (lockRef) batch.set(lockRef, { status: "cancelled", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       await batch.commit();
+    } else if ((afterStatus === "accepted" || afterStatus === "enRouteToPickup") && driverId) {
+      await scheduledRef.set({
+        status: "active",
+        assignedDriverId: driverId,
+        updatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
     }
   }
 

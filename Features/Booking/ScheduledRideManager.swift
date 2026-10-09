@@ -6,11 +6,11 @@ import FirebaseFirestore
 
 @MainActor
 final class ScheduledRideManager: ObservableObject {
-    static let minimumLeadTime: TimeInterval = 2 * 60 * 60
+    static let minimumLeadTime: TimeInterval = 60
     static let maximumLeadTime: TimeInterval = 30 * 24 * 60 * 60
 
     @Published var selectedMode: ScheduledRideMode = .quickSchedule
-    @Published var requestedPickupDate = Date().addingTimeInterval(2 * 60 * 60 + 5 * 60)
+    @Published var requestedPickupDate = Date().addingTimeInterval(5 * 60)
     @Published private(set) var preview: ScheduledRidePreview?
     @Published private(set) var activeRequest: ScheduledRideRequest?
     @Published private(set) var scheduledRequests: [ScheduledRideRequest] = []
@@ -32,7 +32,7 @@ final class ScheduledRideManager: ObservableObject {
 
     func validate(date: Date, now: Date = Date()) -> String? {
         let lead = date.timeIntervalSince(now)
-        if lead < Self.minimumLeadTime { return "Choose a pickup time at least two hours from now." }
+        if lead < Self.minimumLeadTime { return "Choose a future pickup time." }
         if lead > Self.maximumLeadTime { return "Scheduled rides may be booked up to 30 days ahead." }
         return nil
     }

@@ -11,12 +11,12 @@ struct ScheduleTimeSelectionView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    Text("Choose a pickup at least two hours from now.")
+                    Text("Choose a future pickup time. If no driver confirms before pickup, Rydr will automatically move the request into regular dispatch.")
                         .font(.subheadline).foregroundStyle(.secondary)
                     DatePicker(
                         "Pickup time",
                         selection: $manager.requestedPickupDate,
-                        in: Date().addingTimeInterval(ScheduledRideManager.minimumLeadTime + 5 * 60)...Date().addingTimeInterval(ScheduledRideManager.maximumLeadTime),
+                        in: Date().addingTimeInterval(ScheduledRideManager.minimumLeadTime)...Date().addingTimeInterval(ScheduledRideManager.maximumLeadTime),
                         displayedComponents: [.date, .hourAndMinute]
                     )
                     .datePickerStyle(.graphical)

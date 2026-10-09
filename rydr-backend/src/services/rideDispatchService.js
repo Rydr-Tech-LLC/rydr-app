@@ -1,6 +1,6 @@
 const { admin, getFirestore } = require("../config/firebase");
 const { tierFor } = require("./rideFinancialService");
-const { isApprovedDriver } = require("./driverPresenceService");
+const { isApprovedDriver, hasCurrentOnlinePresence } = require("./driverPresenceService");
 
 const OFFER_TTL_SECONDS = 18;
 const MAX_CANDIDATE_HINTS = 20;
@@ -57,15 +57,21 @@ async function selectNextCandidate({ db, request, attemptedDriverIds }) {
 
   const refs = hintedIds.map((id) => db.collection("publicDriverProfiles").doc(id));
   const canonicalRefs = hintedIds.map((id) => db.collection("drivers").doc(id));
-  const [snapshots, canonicalSnapshots] = await Promise.all([
+  const statusRefs = hintedIds.map((id) => db.collection("driver_status").doc(id));
+  const [snapshots, canonicalSnapshots, statusSnapshots] = await Promise.all([
     db.getAll(...refs),
-    db.getAll(...canonicalRefs)
+    db.getAll(...canonicalRefs),
+    db.getAll(...statusRefs)
   ]);
   const approvedIds = new Set(canonicalSnapshots
     .filter((snapshot) => snapshot.exists && isApprovedDriver(snapshot.data()))
     .map((snapshot) => snapshot.id));
+  const nowMillis = Date.now();
+  const onlineIds = new Set(statusSnapshots
+    .filter((snapshot) => snapshot.exists && hasCurrentOnlinePresence(snapshot.data(), nowMillis))
+    .map((snapshot) => snapshot.id));
   const candidates = snapshots
-    .filter((snapshot) => approvedIds.has(snapshot.id)
+    .filter((snapshot) => approvedIds.has(snapshot.id) && onlineIds.has(snapshot.id)
       && snapshot.exists
       && isEligibleCandidate(snapshot.data(), request.rideType))
     .map((snapshot) => ({ id: snapshot.id, profile: snapshot.data() }));
@@ -88,12 +94,14 @@ async function initializeRideDispatch({ rideId, uid, candidateIds, requestId, db
 
   const hints = normalizedCandidateIds(request.dispatchCandidateIds);
   if (hints.length === 0) hints.push(request.driverId);
-  const [initialCandidateSnap, canonicalCandidateSnap] = await Promise.all([
+  const [initialCandidateSnap, canonicalCandidateSnap, statusCandidateSnap] = await Promise.all([
     db.collection("publicDriverProfiles").doc(request.driverId).get(),
-    db.collection("drivers").doc(request.driverId).get()
+    db.collection("drivers").doc(request.driverId).get(),
+    db.collection("driver_status").doc(request.driverId).get()
   ]);
   if (!initialCandidateSnap.exists || !isEligibleCandidate(initialCandidateSnap.data(), request.rideType)
-      || !canonicalCandidateSnap.exists || !isApprovedDriver(canonicalCandidateSnap.data())) {
+      || !canonicalCandidateSnap.exists || !isApprovedDriver(canonicalCandidateSnap.data())
+      || !statusCandidateSnap.exists || !hasCurrentOnlinePresence(statusCandidateSnap.data())) {
     throw error("The selected driver is no longer eligible", 409);
   }
 

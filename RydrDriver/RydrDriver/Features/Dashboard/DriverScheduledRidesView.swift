@@ -7,6 +7,8 @@ import CoreLocation
 
 private struct DriverScheduledOpportunity: Identifiable {
     let id: String
+    let mode: String
+    let isLockedReplacement: Bool
     let pickup: String
     let dropoff: String
     let rideType: String
@@ -31,22 +33,26 @@ private struct DriverScheduledAssignment: Identifiable {
 @MainActor
 private final class DriverScheduledRidesVM: ObservableObject {
     @Published var opportunities: [DriverScheduledOpportunity] = []
+    @Published var pendingSelections: [DriverScheduledOpportunity] = []
     @Published var assignments: [DriverScheduledAssignment] = []
     @Published var workingIDs: Set<String> = []
     @Published var errorMessage: String?
 
     private let db = Firestore.firestore()
     private var opportunityListener: ListenerRegistration?
+    private var pendingSelectionListener: ListenerRegistration?
     private var assignmentListener: ListenerRegistration?
 
     deinit {
         opportunityListener?.remove()
+        pendingSelectionListener?.remove()
         assignmentListener?.remove()
     }
 
     func start() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         opportunityListener?.remove()
+        pendingSelectionListener?.remove()
         assignmentListener?.remove()
         opportunityListener = db.collectionGroup("opportunities")
             .whereField("driverId", isEqualTo: uid)
@@ -55,6 +61,16 @@ private final class DriverScheduledRidesVM: ObservableObject {
                 Task { @MainActor in
                     if let error { self?.errorMessage = error.localizedDescription; return }
                     self?.opportunities = snapshot?.documents.compactMap(Self.parseOpportunity)
+                        .sorted { $0.scheduledPickupAt < $1.scheduledPickupAt } ?? []
+                }
+            }
+        pendingSelectionListener = db.collectionGroup("offers")
+            .whereField("driverId", isEqualTo: uid)
+            .whereField("status", isEqualTo: "available")
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor in
+                    if let error { self?.errorMessage = error.localizedDescription; return }
+                    self?.pendingSelections = snapshot?.documents.compactMap(Self.parseOpportunity)
                         .sorted { $0.scheduledPickupAt < $1.scheduledPickupAt } ?? []
                 }
             }
@@ -120,6 +136,8 @@ private final class DriverScheduledRidesVM: ObservableObject {
               let quote = data["quote"] as? [String: Any] else { return nil }
         return DriverScheduledOpportunity(
             id: requestId,
+            mode: data["mode"] as? String ?? "quickSchedule",
+            isLockedReplacement: data["lockedReplacementFare"] as? Bool ?? false,
             pickup: data["pickup"] as? String ?? "Pickup",
             dropoff: data["dropoff"] as? String ?? "Destination",
             rideType: data["rideType"] as? String ?? "Rydr",
@@ -175,7 +193,12 @@ struct DriverScheduledRidesView: View {
             ScrollView {
                 LazyVStack(spacing: 14) {
                     if tab == 0 {
-                        if vm.opportunities.isEmpty { empty("No scheduled opportunities right now.") }
+                        if !vm.pendingSelections.isEmpty {
+                            sectionTitle("Waiting for rider selection")
+                            ForEach(vm.pendingSelections) { pendingSelectionCard($0) }
+                        }
+                        if vm.opportunities.isEmpty && vm.pendingSelections.isEmpty { empty("No scheduled opportunities right now.") }
+                        if !vm.opportunities.isEmpty { sectionTitle("Available") }
                         ForEach(vm.opportunities) { opportunity in opportunityCard(opportunity) }
                     } else {
                         if vm.assignments.isEmpty { empty("No confirmed scheduled rides.") }
@@ -189,17 +212,51 @@ struct DriverScheduledRidesView: View {
         .onAppear { vm.start() }
     }
 
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.headline)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func pendingSelectionCard(_ item: DriverScheduledOpportunity) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Waiting for rider selection", systemImage: "person.crop.circle.badge.clock")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(.blue)
+                Spacer()
+                Text(item.rideType).font(.caption.bold()).foregroundStyle(.secondary)
+            }
+            Text(item.scheduledPickupAt.formatted(date: .abbreviated, time: .shortened)).font(.headline)
+            Label(item.pickup, systemImage: "circle.fill")
+            Label(item.dropoff, systemImage: "mappin.and.ellipse")
+            Text("The rider can compare up to three drivers. This trip is not in My Schedule unless they select you.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
     private func opportunityCard(_ item: DriverScheduledOpportunity) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(item.rideType).font(.caption.bold()).foregroundStyle(.secondary)
+            HStack {
+                Text(item.isLockedReplacement ? "ON-TIME REPLACEMENT" : item.mode == "chooseMyDriver" ? "CHOOSE MY DRIVER" : "QUICK SCHEDULE")
+                    .font(.caption2.bold())
+                    .foregroundStyle(item.mode == "chooseMyDriver" ? .blue : .red)
+                Spacer()
+                Text(item.rideType).font(.caption.bold()).foregroundStyle(.secondary)
+            }
             Text(item.scheduledPickupAt.formatted(date: .abbreviated, time: .shortened)).font(.headline)
             Label(item.pickup, systemImage: "circle.fill")
             Label(item.dropoff, systemImage: "mappin.and.ellipse")
             HStack {
                 Text(money(item.totalCents)).font(.title3.bold())
                 Spacer()
-                Button("Decline") { Task { await vm.respond("decline", to: item.id) } }.buttonStyle(.bordered)
-                Button("Accept") { Task { await vm.respond("accept", to: item.id) } }.buttonStyle(.borderedProminent).tint(.red)
+                Button(item.mode == "chooseMyDriver" && !item.isLockedReplacement ? "Add Me as an Option" : "Accept Scheduled Ride") {
+                    Task { await vm.respond("accept", to: item.id) }
+                }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
             }
         }
         .padding(16).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))

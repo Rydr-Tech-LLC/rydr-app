@@ -161,6 +161,33 @@ struct DriverRideRadarBlip: Identifiable, Equatable {
     }
 }
 
+struct DriverScheduledMapOpportunity: Identifiable, Equatable {
+    let id: String
+    let mode: String
+    let isLockedReplacement: Bool
+    let pickup: String
+    let dropoff: String
+    let rideType: String
+    let scheduledPickupAt: Date
+    let totalCents: Int
+    let coordinate: CLLocationCoordinate2D
+
+    static func == (lhs: DriverScheduledMapOpportunity, rhs: DriverScheduledMapOpportunity) -> Bool {
+        lhs.id == rhs.id
+            && lhs.mode == rhs.mode
+            && lhs.isLockedReplacement == rhs.isLockedReplacement
+            && lhs.scheduledPickupAt == rhs.scheduledPickupAt
+            && lhs.totalCents == rhs.totalCents
+            && lhs.coordinate.latitude == rhs.coordinate.latitude
+            && lhs.coordinate.longitude == rhs.coordinate.longitude
+    }
+}
+
+enum DriverScheduledDashboardPreference {
+    static let key = "rydr.driver.settings.showScheduledRidesOnDashboard"
+    static let defaultValue = true
+}
+
 enum DriverDemandLevel: String, Codable {
     case low
     case moderate
