@@ -727,7 +727,13 @@ final class RideManager: ObservableObject {
         pendingRideWasRestored = false
         currentServiceRideId = nil
         selectedDriver = nil
-        rideRequestErrorMessage = message
+        // Every card belongs to the match session that created this request.
+        // That session may now be consumed, expired, or based on a driver who
+        // has gone offline. Keeping the array here displayed the previous
+        // driver's card and stale quote as though it were still selectable.
+        availableDrivers = []
+        driverSearchCompletedCount = 0
+        isLoadingDrivers = false
         rideRequestErrorMessage = message ?? RideRequestError.noDriversAvailable.localizedDescription
         state = .selecting
     }
@@ -1304,7 +1310,7 @@ final class RideManager: ObservableObject {
                     self.applyAcceptedDriver(driverId)
                     self.handleAccept()
                 case .declined:
-                    self.handleDecline(message: "That driver declined the ride. Pick another nearby driver.")
+                    self.handleDecline(message: "That match is no longer available. Refresh nearby drivers to get current availability and pricing.")
                 }
             } catch {
                 guard !Task.isCancelled else { return }

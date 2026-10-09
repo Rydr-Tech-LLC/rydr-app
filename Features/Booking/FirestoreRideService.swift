@@ -26,6 +26,11 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         estimatedDistanceMiles: Double?,
         riderPreferences: RiderRidePreferences?
     ) async throws -> [Driver] {
+        // A new search must never be able to reuse a previous driver's quote
+        // or fingerprint if this request fails or returns no candidates.
+        activeMatchSessionId = nil
+        activeQuoteFingerprints = [:]
+
         guard try await rideTypeAvailableForBeta(rideType) else { return [] }
 
         let match = try await createBackendMatchSession(
@@ -125,6 +130,10 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
                 userInfo: [NSLocalizedDescriptionKey: result?["error"] as? String ?? result?["message"] as? String ?? "Could not create the ride request."]
             )
         }
+        // The backend consumes a match session after creating the request.
+        // Drop the client copy as well so its cards cannot be reused.
+        activeMatchSessionId = nil
+        activeQuoteFingerprints = [:]
         return rideId
     }
 

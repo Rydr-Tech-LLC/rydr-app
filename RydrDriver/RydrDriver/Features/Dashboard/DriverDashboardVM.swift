@@ -1684,13 +1684,23 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             } catch {
                 await MainActor.run {
                     guard let self else { return }
-                    self.statusMessage = "Could not update online status: \(error.localizedDescription)"
                     if online {
+                        self.statusMessage = "Could not go online: \(error.localizedDescription)"
                         self.isOnline = false
                         self.isSearchingForRides = false
                         self.stopPushingDriverPresence()
                         self.stopRequestListener()
                         self.pendingRequests = []
+                    } else {
+                        // Do not leave the dashboard claiming the driver is
+                        // offline when the backend did not accept that change.
+                        // Restore online presence until the driver retries.
+                        self.isOnline = true
+                        self.resumeStandbyIfWaiting(
+                            statusMessage: "Could not go offline: \(error.localizedDescription). You are still online; try again."
+                        )
+                        self.startPushingDriverPresence()
+                        self.startRequestListener()
                     }
                 }
             }
