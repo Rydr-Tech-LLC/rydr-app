@@ -13,7 +13,7 @@ distance, and an expiry no more than 15 minutes in the future.
 
 ## Render configuration
 
-- Root directory: `rydr-bank-service`
+- Root directory: `rydr-backend/services/bank`
 - Build command: `npm ci`
 - Start command: `npm start`
 - Health check path: `/health`

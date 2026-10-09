@@ -82,7 +82,7 @@ instead of a broken image link. This is intentional: the system is built
 "empty" and Mission Control populates it over time; missing images are an
 expected, handled state, not a bug.
 
-## 5. Cloud Functions (callable, `Rydr_Firebase/functions`)
+## 5. Cloud Functions (callable, `rydr-backend/firebase/functions`)
 
 All three require a signed-in Firebase Auth user (driver or rider apps call
 these with an ID token; Mission Control does not call these — it uses the

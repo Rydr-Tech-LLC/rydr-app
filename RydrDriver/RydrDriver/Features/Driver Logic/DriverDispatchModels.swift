@@ -237,7 +237,7 @@ struct DriverActiveRide: Identifiable, Equatable {
     let headedToDropoffAt: Date?
     /// Backend-owned (stripe-backend), never written by the driver app.
     /// "pending" | "processing" | "succeeded" | "failed" | "refunded" — see
-    /// PAYMENT_STATUSES in stripe-backend/index.js. Lets the driver-facing
+    /// PAYMENT_STATUSES in rydr-backend/services/stripe/index.js. Lets the driver-facing
     /// completion screen show "Awaiting Rider Payment" instead of implying
     /// the fare has already settled.
     let paymentStatus: String?

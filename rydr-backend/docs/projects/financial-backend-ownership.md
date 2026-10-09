@@ -175,10 +175,10 @@ The exact handling of promotion subsidies must be documented and covered by test
 
 ## Suggested code structure
 
-Keep new financial logic out of the 2,000-line `stripe-backend/index.js` where practical:
+Keep new financial logic out of the 2,000-line `rydr-backend/services/stripe/index.js` where practical:
 
 ```text
-stripe-backend/
+rydr-backend/services/stripe/
   src/
     financial/
       money.js
@@ -213,8 +213,8 @@ Files to begin with:
 - `Features/Booking/RideManager.swift`
 - `Features/Booking/FirestoreRideService.swift`
 - `RydrDriver/RydrDriver/Features/Dashboard/DriverDashboardVM.swift`
-- `stripe-backend/index.js`
-- `Rydr_Firebase/firestore.rules`
+- `rydr-backend/services/stripe/index.js`
+- `rydr-backend/firebase/firestore.rules`
 
 Checkpoint: The student can explain why “Stripe ignores the client amount” is not sufficient if Stripe trusts a client-written Firestore fare.
 
@@ -534,8 +534,8 @@ Start with these files:
 - `Features/Booking/RideManager.swift`
 - `Features/Booking/FirestoreRideService.swift`
 - `RydrDriver/RydrDriver/Features/Dashboard/DriverDashboardVM.swift`
-- `stripe-backend/index.js`
-- `Rydr_Firebase/firestore.rules`
+- `rydr-backend/services/stripe/index.js`
+- `rydr-backend/firebase/firestore.rules`
 
 Complete one emulator/test-mode ride. List every financial field, where it is calculated, who can write it, and where Stripe later reads it.
 

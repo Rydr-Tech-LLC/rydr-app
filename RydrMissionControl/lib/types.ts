@@ -60,7 +60,7 @@ export interface DriverVehicle {
 
   // Vehicle Library System (VIN decode + managed image library) — written
   // by the `submitVehicleVin` Cloud Function when a driver decodes their
-  // VIN and picks a color. See Rydr_Firebase/functions and
+  // VIN and picks a color. See rydr-backend/firebase/functions and
   // VEHICLE_LIBRARY_README.md.
   trim?: string | null;
   bodyStyle?: string | null;

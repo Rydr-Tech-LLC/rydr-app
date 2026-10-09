@@ -11,7 +11,7 @@ Nothing in this phase touches the existing decision to keep rider-side automatic
 
 ## Files Modified
 
-**Cloud Functions (`Rydr_Firebase`)** — completed in a prior session, unchanged this phase: `notificationSender.ts`, `onRideUpdated`, `onSupportMessageCreated`, `onDriverApprovalDecision` triggers.
+**Cloud Functions (`rydr-backend/firebase`)** — completed in a prior session, unchanged this phase: `notificationSender.ts`, `onRideUpdated`, `onSupportMessageCreated`, `onDriverApprovalDecision` triggers.
 
 **stripe-backend**
 - `index.js` — added `requireAdminUid()` and `POST /admin/cleanup-account`.

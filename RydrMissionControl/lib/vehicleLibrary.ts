@@ -4,7 +4,7 @@ import { adminDb, adminStorage } from "./firebaseAdmin";
 
 // Mission Control's side of the Vehicle Library System. The Firestore
 // `vehicleLibrary` collection and `vehicle-library/` Storage layout here are
-// the SAME schema the Firebase Cloud Functions in Rydr_Firebase/functions
+// the SAME schema the Firebase Cloud Functions in rydr-backend/firebase/functions
 // (VehicleLibraryService) read from — see VEHICLE_LIBRARY_README.md. Mission
 // Control writes directly via the Admin SDK (consistent with every other
 // privileged write in this app — driver approval, report actions, etc.)

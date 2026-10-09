@@ -29,7 +29,7 @@ Firebase Admin service account can set:
    `approvedBy`, `isApproved`, etc.) are written only by the Admin SDK
    (`lib/firebaseAdmin.ts`), which bypasses Firestore security rules
    entirely — consistent with how those fields are already blocked from
-   client writes in `Rydr_Firebase/firestore.rules` via
+   client writes in `rydr-backend/firebase/firestore.rules` via
    `backendOwnedProfileFields()`.
 
 No staff member has Mission Control access until you explicitly grant it
@@ -122,7 +122,7 @@ this is expected, not a bug in Mission Control:
   the beta. `backgroundCheckStatus: "beta_deferred"` plus
   `betaAgreementAccepted: true` is enough to unblock approval.
 - **Safety Reports** lists rider incident reports written by the iOS rider app
-  to `safetyReports`. Deploy `Rydr_Firebase/firestore.rules` with
+  to `safetyReports`. Deploy `rydr-backend/firebase/firestore.rules` with
   `firebase deploy --only firestore:rules` before relying on this in beta.
 - **Driver/Rider Search** does a bounded in-memory scan (good for beta-scale
   data, a few hundred to low thousands of users). Swap for a real search

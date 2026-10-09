@@ -48,9 +48,9 @@ Checked the three places mock data could leak into a Release/TestFlight build: `
 ## Repo / secrets hygiene
 
 - No `.gitignore` anywhere in the repo.
-- `stripe-backend/.env` is tracked in git and contains a Stripe **test-mode** secret key (`sk_test_...`, confirmed not live). Not an active leak since it's test-mode, but it should be removed from git history and `.gitignore`'d before this repo is ever made more widely accessible, and especially before a live key is ever used.
+- `rydr-backend/services/stripe/.env` is tracked in git and contains a Stripe **test-mode** secret key (`sk_test_...`, confirmed not live). Not an active leak since it's test-mode, but it should be removed from git history and `.gitignore`'d before this repo is ever made more widely accessible, and especially before a live key is ever used.
 - `node_modules/` is tracked (2132 of 2397 tracked files). Not a security issue, just repo bloat — add a `.gitignore`.
-- Backend code itself (`stripe-backend/index.js`, `rydr-backend/src/config/*.js`) correctly reads all secrets from `process.env`, no hardcoded secrets in code.
+- Backend code itself (`rydr-backend/services/stripe/index.js`, `rydr-backend/src/config/*.js`) correctly reads all secrets from `process.env`, no hardcoded secrets in code.
 
 ## Testing
 
@@ -72,6 +72,6 @@ No automated test files exist in either app (0 found under any `Tests/` director
 5. Hide or wire up Apple/Google Sign-In buttons (don't ship dead buttons).
 6. Manual end-to-end test of the card-payment flow with a Stripe test card.
 7. Grep RydrDriver for any native camera/photo picker calls missing Info.plist strings; add them.
-8. Remove `stripe-backend/.env` from git, add `.gitignore`.
+8. Remove `rydr-backend/services/stripe/.env` from git, add `.gitignore`.
 9. Full manual regression pass on critical flows (no automated tests to lean on).
 10. Archive builds, set up TestFlight groups, write beta tester instructions covering known gaps (no push notifications, driver verification manually handled, etc.).

@@ -1,11 +1,15 @@
 # rydr-backend
 
-Primary backend foundation for future Rydr platform features.
+Home for all Rydr backend code, infrastructure, tests, and backend planning
+documents. The package at this folder's root is the primary Rydr API.
 
-This service is intentionally separate from the existing payment and banking services:
+The payment and banking services remain separately deployed applications, but
+their source now lives alongside the primary API:
 
-- `rydr-stripe-backend` / Stripe backend service
-- `rydr-bank-service`
+- `services/stripe` — deployed as `rydr-stripe-backend`
+- `services/bank` — deployed as `rydr-bank-service`
+- `firebase` — Cloud Functions, Firestore rules/indexes, and Storage rules
+- `docs` — backend project briefs and historical readiness audits
 
 Those services remain operational and should continue to own their current responsibilities. `rydr-backend` is the home for new Rydr platform features including Community, Discover, Ticketmaster, Cash Rydr Hub, Chat, and Notifications.
 
@@ -20,27 +24,23 @@ Those services remain operational and should continue to own their current respo
 - helmet
 - morgan
 
-## Folder Structure
+## Repository Layout
 
 ```text
-src/
-├── routes/
-│   ├── health.js
-│   ├── events.js
-│   ├── driver.js
-│   └── moderation.js
-│
+rydr-backend/
+├── src/                    # Primary Express API
+├── test/                   # Primary API tests
+├── firebase/               # Firebase deploy root
+│   ├── functions/          # Cloud Functions TypeScript package
+│   ├── firestore.rules
+│   ├── firestore.indexes.json
+│   └── storage.rules
 ├── services/
-│   ├── ticketmasterService.js
-│   ├── firestoreService.js
-│   ├── driverService.js
-│   └── moderationService.js
-│
-├── middleware/
-├── config/
-│   └── firebase.js
-├── utils/
-└── app.js
+│   ├── stripe/             # Stripe/Connect service
+│   └── bank/               # Rydr Bank service
+└── docs/
+    ├── projects/           # Backend project briefs
+    └── audits/             # Historical audits and readiness notes
 ```
 
 ## Local Development
@@ -67,6 +67,22 @@ Start the production server locally:
 
 ```bash
 npm start
+```
+
+Run every backend validation from this folder:
+
+```bash
+npm run test:all
+```
+
+The Firestore rules portion of `test:all` starts the Firebase emulator and
+therefore requires JDK 21 or newer.
+
+Firebase CLI commands must be run from `rydr-backend/firebase`, for example:
+
+```bash
+cd firebase
+firebase deploy --only firestore:rules,firestore:indexes,storage,functions
 ```
 
 ## Endpoints
@@ -190,9 +206,9 @@ The downloaded `.p8` file is ignored by Git. Keep it outside this repository and
 
 ## Backend-Ownership Deployment Order
 
-1. Deploy `stripe-backend` first with `RYDR_INTERNAL_SERVICE_TOKEN`, `RYDR_INTERNAL_ADMIN_SECRET`, and `/health` configured as its Render health check. Use the service token's same high-entropy value for the Firebase Functions secret of that name; use the admin secret's same value only in Mission Control.
+1. Deploy `services/stripe` first with `RYDR_INTERNAL_SERVICE_TOKEN`, `RYDR_INTERNAL_ADMIN_SECRET`, and `/health` configured as its Render health check. Use the service token's same high-entropy value for the Firebase Functions secret of that name; use the admin secret's same value only in Mission Control.
 2. Set the Firebase secret with `firebase functions:secrets:set RYDR_INTERNAL_SERVICE_TOKEN`. Set `RYDR_STRIPE_BACKEND_URL` if the Stripe service is not at the default Render URL, then deploy Firebase Functions. The payment worker must exist before the main backend can create payment jobs.
-3. Deploy `rydr-bank-service`, configure `/health`, `CORS_ORIGINS`, and `RYDR_WEB_BOOKING_SECRET`, and verify its authoritative completed-ride checks.
+3. Deploy `services/bank`, configure `/health`, `CORS_ORIGINS`, and `RYDR_WEB_BOOKING_SECRET`, and verify its authoritative completed-ride checks.
 4. Deploy `rydr-backend` with the Apple Maps environment variables and `REQUIRE_FIREBASE_APP_CHECK=true`. Use a non-sleeping instance for dispatch and lifecycle traffic.
 5. Verify authenticated identity sync, backend match sessions, ride-request creation, scheduled-ride preview/creation/response/selection/check-in/activation, profile-photo finalization, screening, rate-card, telemetry, rating, Cash Hub, safety, support, queue-promotion, ride-transition, earnings-summary, route-estimate, payment-job, and Rydr Bank calls.
 6. Release the Rider and Driver builds that call the new backend-owned endpoints.

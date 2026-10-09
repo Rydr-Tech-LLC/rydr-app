@@ -3,7 +3,7 @@
 //  Rydr Driver
 //
 //  Thin async wrapper around the Vehicle Library System's Firebase Cloud
-//  Functions (Rydr_Firebase/functions): VIN decoding via the free NHTSA
+//  Functions (rydr-backend/firebase/functions): VIN decoding via the free NHTSA
 //  decoder and generic vehicle image matching. The driver app never talks
 //  to NHTSA or Firebase Storage directly — every call goes through these
 //  callable functions, which run with backend privileges and keep the
@@ -15,7 +15,7 @@ import Foundation
 import FirebaseFunctions
 
 /// The fixed 11-color list drivers choose from. Keep in sync with
-/// Rydr_Firebase/functions/src/types.ts `VEHICLE_COLORS` and Mission
+/// rydr-backend/firebase/functions/src/types.ts `VEHICLE_COLORS` and Mission
 /// Control's color filter.
 enum VehicleColor: String, CaseIterable, Identifiable {
     case black = "Black"

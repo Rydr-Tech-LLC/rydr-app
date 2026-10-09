@@ -1448,7 +1448,7 @@ service cloud.firestore {
     }
 
     // Vehicle Library System: the managed library of generic factory-style
-    // vehicle images (see Rydr_Firebase/functions and VEHICLE_LIBRARY_README.md).
+    // vehicle images (see rydr-backend/firebase/functions and docs/vehicle-library.md).
     // Every app reads this to display a vehicle's image; only the Admin SDK
     // (Cloud Functions + Mission Control) ever writes it.
     match /vehicleLibrary/{vehicleId} {

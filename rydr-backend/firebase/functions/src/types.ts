@@ -1,5 +1,5 @@
 // Shared types for the Vehicle Library System.
-// Mirrors the Firestore schema documented in Rydr_Firebase/VEHICLE_LIBRARY_README.md.
+// Mirrors the Firestore schema documented in ../docs/vehicle-library.md.
 
 /** The fixed color list drivers choose from. Keep in sync with RydrDriver's
  * VehicleColorPicker and Mission Control's color filter. */

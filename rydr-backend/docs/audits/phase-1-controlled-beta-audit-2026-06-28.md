@@ -23,11 +23,11 @@ The largest remaining product risk is the rider app standard-ride lifecycle. Aft
   - Rider: `com.khris.rydr.RydrPlayground`
   - Driver: `Rydr-Tech-LLC.Rydr-Drivers`
 - RydrDriver signing teams appear aligned to `DTD5H7A5FS`.
-- Firebase Storage rules now exist and are wired in `Rydr_Firebase/firebase.json`.
+- Firebase Storage rules now exist and are wired in `rydr-backend/firebase/firebase.json`.
 - Notification token registration exists in both apps.
 - Ride chat Firestore rules are now participant-scoped.
 - Cash Hub update rules are tighter than before.
-- Stripe Identity and Connect backend endpoints now exist in `stripe-backend/index.js`.
+- Stripe Identity and Connect backend endpoints now exist in `rydr-backend/services/stripe/index.js`.
 - Driver profile photo moderation/storage has a real path.
 - Work Zone and Destination Filter were just tightened in the driver/rider matching path.
 
@@ -64,7 +64,7 @@ Minimum August 1 acceptable fix:
 ### 2. Stripe backend payment/customer routes are not consistently authenticated or ownership-checked
 
 File:
-- `stripe-backend/index.js`
+- `rydr-backend/services/stripe/index.js`
 
 Evidence:
 - `verifiedFirebaseUid()` exists, but several sensitive routes accept only client-provided identifiers:
@@ -86,7 +86,7 @@ Required fix:
 ### 3. Real-money beta must not proceed until Stripe idempotency and charge error handling are fixed
 
 Files:
-- `stripe-backend/index.js`
+- `rydr-backend/services/stripe/index.js`
 - `Features/Booking/RideManager.swift`
 
 Evidence:
@@ -127,7 +127,7 @@ Required beta operating rule:
 ### 5. Firestore privacy is better, but Cash Hub reads are still broad
 
 File:
-- `Rydr_Firebase/firestore.rules`
+- `rydr-backend/firebase/firestore.rules`
 
 Evidence:
 - `cashRydrRequests/{requestId}` read is `if signedIn()`.

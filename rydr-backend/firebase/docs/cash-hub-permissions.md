@@ -33,6 +33,7 @@ can register its own token in Firebase Console.
 After editing `firestore.rules`, deploy the rules:
 
 ```bash
+cd rydr-backend/firebase
 firebase deploy --only firestore:rules
 ```
 

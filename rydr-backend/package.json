@@ -6,7 +6,12 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js",
+    "test:all": "npm test && npm --prefix services/stripe test && npm --prefix services/bank test && npm run test:firebase-rules && npm run build:functions",
+    "test:stripe": "npm --prefix services/stripe test",
+    "test:bank": "npm --prefix services/bank test",
+    "test:firebase-rules": "cd firebase && firebase emulators:exec --only firestore \"npm run test:rules\"",
+    "build:functions": "npm --prefix firebase/functions run build"
   },
   "keywords": [
     "rydr",

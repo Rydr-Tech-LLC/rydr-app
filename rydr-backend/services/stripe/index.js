@@ -171,7 +171,7 @@ async function requireFirebaseUid(req, res) {
   }
 }
 
-// Admin-claim auth — mirrors the `isAdmin()` check in Rydr_Firebase's
+// Admin-claim auth — mirrors the `isAdmin()` check in rydr-backend/firebase's
 // Firestore rules and Mission Control's session role check. Used only by
 // the account-deletion cleanup endpoint below, which is the one place in
 // this service that needs to act on a Stripe customer/Connect account on

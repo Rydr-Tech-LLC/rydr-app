@@ -10,9 +10,9 @@ Legend: **P0** = must fix before any real money/real strangers go live. **P1** =
 
 | # | Issue | Where | Effort |
 |---|---|---|---|
-| 1 | Stripe backend has **no auth** on `/create-payment-intent`, `/connect/accounts`, `/connect/instant-payout`, `/connect/status`, `/connect/balance`. Anyone with the URL can move money or read balances. | `stripe-backend/index.js` | 1–2 days (add Firebase ID token verification middleware to every route) |
-| 2 | Stripe backend is still on **test-mode keys** (`sk_test_...`). | `stripe-backend/.env` (Render env vars) | 30 min once Stripe live account is approved |
-| 3 | No **idempotency keys** on payment-intent / instant-payout creation — retried mobile requests can double-charge or double-pay. | `stripe-backend/index.js`, `rydr-bank-service/server.js` | 1 day |
+| 1 | Stripe backend has **no auth** on `/create-payment-intent`, `/connect/accounts`, `/connect/instant-payout`, `/connect/status`, `/connect/balance`. Anyone with the URL can move money or read balances. | `rydr-backend/services/stripe/index.js` | 1–2 days (add Firebase ID token verification middleware to every route) |
+| 2 | Stripe backend is still on **test-mode keys** (`sk_test_...`). | `rydr-backend/services/stripe/.env` (Render env vars) | 30 min once Stripe live account is approved |
+| 3 | No **idempotency keys** on payment-intent / instant-payout creation — retried mobile requests can double-charge or double-pay. | `rydr-backend/services/stripe/index.js`, `rydr-backend/services/bank/server.js` | 1 day |
 | 4 | Rider ride lifecycle is a **client-side fake simulation** decoupled from the real driver. Timer-driven movement/arrival/completion; real Firestore `driverLocationStream` exists but is never called. Ride auto-"completes" (and charges the rider) on a fixed timer regardless of the real driver's status. | `Features/Booking/RideManager.swift` — `handleAccept()` ~577, `startDriverMovement()` ~717, `completeRide()` ~769 | This is the single biggest item — likely 1–2 weeks to rewire rider UI to consume real driver state instead of the simulator |
 | 5 | Fare estimates are generated from **string hashing**, not real distance/time. | `RideManager.swift` `estimateFor(pickup:dropoff:)` ~791 | 2–3 days if a routing/maps API is already available; longer if not |
 | 6 | Payment failures are **silently swallowed** (`print()` only, no retry, no rider-facing error, no flag on the ride record). | `RideManager.swift` `chargeRiderForRide` ~1237 | 1–2 days |
@@ -23,7 +23,7 @@ Legend: **P0** = must fix before any real money/real strangers go live. **P1** =
 | 11 | Driver ratings and safety/incident reports are **never persisted**. "Report an incident" shows a static alert with no backend call at all. | Rider: `RideInProgressView.swift` ~92-115, `EndRideView.swift` `submitFeedback()` ~499; Driver: rating UI similarly disconnected | 2–4 days |
 | 12 | `rydr-backend` has **no auth middleware at all** — `/chat`, `/community`, `/driver/wait-time-events`, `/driver/account-deletion-requests` are wide open. | `rydr-backend/src/middleware/` (empty), `src/routes/*` | 1–2 days |
 | 13 | Firestore rule `driver_status/{uid}`: `read: if signedIn()` exposes **every driver's live location** to any signed-in user, not just matched ride participants. | Firestore rules file | Half day |
-| 14 | Stripe secret committed to git history in `stripe-backend/.env` (removed in a later commit but recoverable from history). | git history | Rotate the key — 1 hour, do it regardless of severity |
+| 14 | Stripe secret committed to git history in `rydr-backend/services/stripe/.env` (removed in a later commit but recoverable from history). | git history | Rotate the key — 1 hour, do it regardless of severity |
 | 15 | No **account deletion** path found anywhere in the rider app; Apple requires in-app account deletion for apps with account creation — this can block App Store submission entirely, separate from the beta. | Rider app-wide (grep returned nothing); Driver app version exists but is broken (`requestAccountDeletion` always throws `URLError(.badURL)` due to missing `RYDR_BACKEND_BASE_URL` in Info.plist) | 1–2 days both apps |
 
 ---
@@ -32,13 +32,13 @@ Legend: **P0** = must fix before any real money/real strangers go live. **P1** =
 
 | # | Issue | Where | Effort |
 |---|---|---|---|
-| 16 | No rate limiting on any backend service, including unauthenticated promo-code endpoints (brute-forceable). | `rydr-bank-service/server.js` ~538/577, all services | 1 day |
+| 16 | No rate limiting on any backend service, including unauthenticated promo-code endpoints (brute-forceable). | `rydr-backend/services/bank/server.js` ~538/577, all services | 1 day |
 | 17 | No crash reporting/monitoring on any Node service (no Sentry, no `uncaughtException` handler) — a stray throw kills the process silently. | `stripe-backend`, `rydr-backend`, `rydr-bank-service` | 1 day per service |
 | 18 | Crashlytics wired client-side but **no dSYM upload build phase** — crashes arrive unsymbolicated. | RydrDriver `project.pbxproj` | Half day |
 | 19 | Push notifications for ride-state transitions are just `// TODO` comments; token registration is real but nothing is ever sent. `aps-environment` is also still `development` in entitlements. | `DriverDashboardVM.swift` (`markArrivedAtPickup`, `startPassengerRide`) | 2–3 days |
 | 20 | Saved-cards race condition: hardcoded mock Visa/Mastercard show as "selected" before real Stripe cards load asynchronously. | `RideManager.swift` ~402, `loadRealPaymentMethods()` ~1215 | 1 day |
-| 21 | Two divergent `stripe-backend` folders — `RydrDriver/stripe-backend/` is dead/stale, only the repo-root one is live. Risk of someone editing or deploying the wrong one. | Delete `RydrDriver/stripe-backend/` | 15 min |
-| 22 | `node_modules/` fully git-tracked in root and `stripe-backend` despite `.gitignore`; an AppleDouble shadow file `stripe-backend/._.env` is also tracked — verify it doesn't carry secret bytes, then clean up. | repo-wide | Half day |
+| 21 | Resolved: the dead `RydrDriver/stripe-backend/` duplicate was removed when backend code was consolidated under `rydr-backend/`. | Git history | Complete |
+| 22 | `node_modules/` fully git-tracked in root and the former Stripe service path despite `.gitignore`; an AppleDouble shadow file was also tracked — verify it doesn't carry secret bytes, then clean up. | repo-wide | Half day |
 | 23 | Driver presence Firestore write has no error handling — a failed write leaves stale online/location state with no recovery. | `DriverDashboardVM.swift` `updateDriverPresence` ~1347 | Half day |
 | 24 | Backend base URL hardcoded/duplicated in two places instead of centralized config, with no staging/prod split. | `PayoutsSetupView.swift:282`, `DriverWalletPayoutsView.swift:13` | Half day |
 | 25 | Stray `http://localhost:3000` left in a rider feature — will silently fail in production builds. | `Features/Profile/CommunityView.swift` | 15 min |

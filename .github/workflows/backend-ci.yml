@@ -15,13 +15,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - directory: rydr-bank-service
+          - directory: rydr-backend/services/bank
             command: npm test
           - directory: rydr-backend
             command: npm test
-          - directory: stripe-backend
+          - directory: rydr-backend/services/stripe
             command: npm test
-          - directory: Rydr_Firebase/functions
+          - directory: rydr-backend/firebase/functions
             command: npm run build
           - directory: RydrMissionControl
             command: npm run build
