@@ -572,17 +572,33 @@ struct RideTypeConfigurationView: View {
         switch field {
         case .minimumFare:
             guard let value = parsedRate(text), value >= 0 else { return }
-            draftMinimumFare = roundToCents(value)
+            let next = roundToCents(value)
+            if abs(next - currentMinimumFare) > 0.001 {
+                draftUsesSuggestedPricing = false
+            }
+            draftMinimumFare = next
         case .perMile:
             guard let value = parsedRate(text), value >= 0 else { return }
-            draftPerMile = roundToCents(value)
+            let next = roundToCents(value)
+            if abs(next - currentPerMile) > 0.001 {
+                draftUsesSuggestedPricing = false
+            }
+            draftPerMile = next
         case .perMinute:
             guard let value = parsedRate(text), value >= 0 else { return }
-            draftPerMinute = roundToCents(value)
+            let next = roundToCents(value)
+            if abs(next - currentPerMinute) > 0.001 {
+                draftUsesSuggestedPricing = false
+            }
+            draftPerMinute = next
         }
     }
 
     private func stepRate(field: RateField, delta: Double) {
+        // A driver changing any value is choosing a custom rate card. Without
+        // this, saving while the suggested-pricing toggle is on silently
+        // replaces the edited value with the backend suggestion.
+        draftUsesSuggestedPricing = false
         switch field {
         case .minimumFare:
             let next = roundToCents(max(0, currentMinimumFare + delta))
@@ -628,8 +644,29 @@ struct RideTypeConfigurationView: View {
 
     private func saveRateChanges() {
         guard canSaveRate else { return }
-        onSaveRate(currentMinimumFare, currentPerMile, currentPerMinute, currentUsesSuggestedPricing)
-        resetDrafts()
+        let submittedMinimumFare = currentMinimumFare
+        let submittedPerMile = currentPerMile
+        let submittedPerMinute = currentPerMinute
+        let submittedUsesSuggestedPricing = currentUsesSuggestedPricing
+
+        onSaveRate(
+            submittedMinimumFare,
+            submittedPerMile,
+            submittedPerMinute,
+            submittedUsesSuggestedPricing
+        )
+
+        // Keep the submitted values on screen while the parent view publishes
+        // its updated rate. resetDrafts() reads the previous immutable `rate`
+        // value during this button action and made a successful save appear to
+        // fall back immediately.
+        draftMinimumFare = submittedMinimumFare
+        draftPerMile = submittedPerMile
+        draftPerMinute = submittedPerMinute
+        draftUsesSuggestedPricing = submittedUsesSuggestedPricing
+        minimumFareText = rateText(submittedMinimumFare)
+        perMileText = rateText(submittedPerMile)
+        perMinuteText = rateText(submittedPerMinute)
     }
 
     private func isValidRateText(_ text: String) -> Bool {
