@@ -95,14 +95,8 @@ struct BookingView: View {
         && routeEstimate != nil
         && !isResolvingLocations
     }
-    private var hasBookingDraft: Bool {
-        pickupCoordinate != nil
-        || dropoffCoordinate != nil
-        || !pickupText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        || !dropoffText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
     private var isCompactSheet: Bool {
-        hasBookingDraft
+        canRequestRide
         && focusedField == nil
         && editingShortcutID == nil
         && sliderOffset > sliderMaxY * 0.42
@@ -285,6 +279,10 @@ struct BookingView: View {
             if rideId == nil && rideManager.state != .completed {
                 syncRidePresentation(with: rideManager.state)
             }
+        }
+        .onChange(of: scheduledRideManager.activatedRideId, initial: true) { _, rideId in
+            guard let rideId else { return }
+            Task { await rideManager.recoverActiveRide(rideId: rideId) }
         }
         .onAppear { scheduledRideManager.startScheduleListener() }
         .onReceive(NotificationCenter.default.publisher(for: .riderNotificationRouteRequested)) { notification in
@@ -608,8 +606,8 @@ struct BookingView: View {
             }
             .buttonStyle(.plain)
             .padding(12)
-            .background(RoundedRectangle(cornerRadius: 16).fill(.white.opacity(0.92)))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground).opacity(0.96)))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.35), lineWidth: 1))
         } else if hasRequiredAddressText {
             Button {
                 Task { await openRoutePreview() }
@@ -646,8 +644,8 @@ struct BookingView: View {
             }
             .buttonStyle(.plain)
             .padding(12)
-            .background(RoundedRectangle(cornerRadius: 16).fill(.white.opacity(0.92)))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.black.opacity(0.06), lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground).opacity(0.96)))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.35), lineWidth: 1))
             .disabled(isResolvingLocations)
         } else if let routeErrorMessage {
             validationBanner(text: routeErrorMessage)
@@ -1967,7 +1965,7 @@ private struct RoutePreviewSheet: View {
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(Color.black)
+                    .foregroundStyle(.primary)
                     .frame(width: 50, height: 50)
                     .background(.ultraThinMaterial, in: Circle())
                     .shadow(color: .black.opacity(0.12), radius: 12, x: 0, y: 6)
@@ -1980,7 +1978,7 @@ private struct RoutePreviewSheet: View {
             Button(action: fitRoute) {
                 Image(systemName: "scope")
                     .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(Color.black)
+                    .foregroundStyle(.primary)
                     .frame(width: 50, height: 50)
                     .background(.ultraThinMaterial, in: Circle())
                     .shadow(color: .black.opacity(0.12), radius: 12, x: 0, y: 6)
@@ -2068,10 +2066,10 @@ private struct RoutePreviewSheet: View {
                 }
                 .foregroundStyle(.primary)
                 .frame(height: 50)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                        .stroke(Color(.separator).opacity(0.35), lineWidth: 1)
                 )
             }
             .buttonStyle(.plain)
@@ -2117,7 +2115,7 @@ private struct RoutePreviewSheet: View {
         .padding(12)
         .background(
             LinearGradient(
-                colors: [Color.white, Color.red.opacity(0.08)],
+                colors: [Color(.secondarySystemBackground), Color.red.opacity(0.08)],
                 startPoint: .leading,
                 endPoint: .trailing
             ),
@@ -2125,7 +2123,7 @@ private struct RoutePreviewSheet: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                .stroke(Color(.separator).opacity(0.35), lineWidth: 1)
         )
     }
 
@@ -2161,17 +2159,17 @@ private struct RoutePreviewSheet: View {
             }
         }
         .padding(12)
-        .background(Color.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color(.secondarySystemBackground).opacity(0.92), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                .stroke(Color(.separator).opacity(0.35), lineWidth: 1)
         )
     }
 
     private func metricPill(icon: String, value: String) -> some View {
         Label(value, systemImage: icon)
             .font(.caption.weight(.bold))
-            .foregroundStyle(Color.black.opacity(0.78))
+            .foregroundStyle(.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(Color.red.opacity(0.08), in: Capsule())

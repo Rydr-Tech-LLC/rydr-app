@@ -60,18 +60,18 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
   };
 
   if (action === "dismiss") {
-    await reportRef.set({ status: "dismissed" }, { merge: true });
+    await reportRef.set({ status: "dismissed", investigationStatus: "resolved", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   } else if (action === "escalate") {
-    await reportRef.set({ status: "escalated" }, { merge: true });
+    await reportRef.set({ status: "escalated", investigationStatus: "in_review", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   } else if (action === "suspend_driver" && report.driverId) {
     await adminDb.collection("drivers").doc(report.driverId).set(
       { driverApprovalStatus: "rejected", isApproved: false, canGoOnline: false },
       { merge: true }
     );
-    await reportRef.set({ status: "escalated" }, { merge: true });
+    await reportRef.set({ status: "escalated", investigationStatus: "in_review", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   } else if (action === "suspend_rider" && report.riderId) {
     await adminDb.collection("riders").doc(report.riderId).set({ accountStatus: "suspended" }, { merge: true });
-    await reportRef.set({ status: "escalated" }, { merge: true });
+    await reportRef.set({ status: "escalated", investigationStatus: "in_review", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   } else if (penaltyActions[action] && report.driverId) {
     const penalty = penaltyActions[action]!;
     const penaltyRef = adminDb.collection("driverSafetyPenalties").doc(`${params.id}_${penalty.category}`);
@@ -114,6 +114,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     await reportRef.set(
       {
         status: "escalated",
+        investigationStatus: "in_review",
         driverSafetyPenaltyId: penaltyRef.id,
         updatedAt: FieldValue.serverTimestamp()
       },

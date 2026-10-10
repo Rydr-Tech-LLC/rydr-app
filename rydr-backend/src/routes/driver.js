@@ -5,7 +5,7 @@ const { updateDriverPresence } = require("../services/driverPresenceService");
 const { getDriverDemandSnapshot } = require("../services/driverDemandService");
 const { promoteNextQueuedRide } = require("../services/driverQueueService");
 const { recordBackgroundCheckIntent } = require("../services/driverScreeningService");
-const { updateDriverRateCard } = require("../services/driverRateCardService");
+const { getDriverRateCard, updateDriverRateCard } = require("../services/driverRateCardService");
 const { driverEarningsSummary } = require("../services/driverInsightsService");
 const { prepareDriverLicense, finalizeDriverDocuments, updateVehiclePlate } = require("../services/driverOnboardingService");
 const { requireFirebaseAuth, assertOwnsUid } = require("../middleware/firebaseAuth");
@@ -92,6 +92,15 @@ router.put("/vehicle/plate", async (req, res, next) => {
 router.put("/rate-card", async (req, res, next) => {
   try {
     const result = await updateDriverRateCard({ uid: req.firebaseUid, payload: req.body });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+router.get("/rate-card", async (req, res, next) => {
+  try {
+    const result = await getDriverRateCard({ uid: req.firebaseUid });
     return res.json({ ok: true, ...result });
   } catch (err) {
     return next(err);

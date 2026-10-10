@@ -3597,7 +3597,7 @@ private struct CashHubRequestForm: View {
     @State private var resolvedPickupText = ""
     @State private var resolvedDestinationText = ""
 
-    private enum AddressField {
+    private enum AddressField: String {
         case pickup
         case destination
     }
@@ -3719,6 +3719,25 @@ private struct CashHubRequestForm: View {
                 showsCurrentLocation: false
             )
             addressSuggestions(for: destinationCompleter, field: .destination)
+
+            if draft.tripFormat == "Round trip" {
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.up.arrow.down.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(Styles.rydrGradient)
+                    Text("Drag either handle to reorder your route, or swap Point A and Point B.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                    Button("Swap") {
+                        swapRouteEndpoints()
+                    }
+                    .font(.caption.weight(.bold))
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .disabled(draft.pickup.isEmpty && draft.destination.isEmpty)
+                }
+            }
 
             routeMap
             tripPreview
@@ -4012,9 +4031,28 @@ private struct CashHubRequestForm: View {
                 }
                 .buttonStyle(.plain)
             }
+            if draft.tripFormat == "Round trip" {
+                Image(systemName: "line.3.horizontal")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+                    .draggable(field.rawValue)
+                    .accessibilityLabel("Drag Point \(point) to reorder")
+                    .accessibilityAction(named: Text("Swap Point A and Point B")) {
+                        swapRouteEndpoints()
+                    }
+            }
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemGroupedBackground)))
+        .dropDestination(for: String.self) { values, _ in
+            guard let sourceValue = values.first,
+                  let source = AddressField(rawValue: sourceValue),
+                  source != field else { return false }
+            swapRouteEndpoints()
+            return true
+        }
     }
 
     @ViewBuilder
@@ -4079,6 +4117,33 @@ private struct CashHubRequestForm: View {
         resolvedPickupText = draft.pickup
         resolvedDestinationText = draft.destination
         await calculateRoute()
+    }
+
+    private func swapRouteEndpoints() {
+        let pickupText = draft.pickup
+        let destinationText = draft.destination
+        let pickupItem = pickupMapItem
+        let destinationItem = destinationMapItem
+        let pickupResolved = resolvedPickupText
+        let destinationResolved = resolvedDestinationText
+        let pickupLatitude = draft.pickupLatitude
+        let pickupLongitude = draft.pickupLongitude
+
+        draft.pickup = destinationText
+        draft.destination = pickupText
+        pickupMapItem = destinationItem
+        destinationMapItem = pickupItem
+        resolvedPickupText = destinationResolved
+        resolvedDestinationText = pickupResolved
+        draft.pickupLatitude = draft.destinationLatitude
+        draft.pickupLongitude = draft.destinationLongitude
+        draft.destinationLatitude = pickupLatitude
+        draft.destinationLongitude = pickupLongitude
+        focusedAddressField = nil
+        pickupCompleter.setQuery("")
+        destinationCompleter.setQuery("")
+        invalidateRouteSuggestion()
+        Task { await calculateRoute() }
     }
 
     private func searchMapItem(for query: String) async -> MKMapItem? {

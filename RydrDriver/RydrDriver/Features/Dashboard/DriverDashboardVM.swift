@@ -287,6 +287,8 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         #endif
         requestLocationAuth()
         startObservingDriverEligibility()
+        loadCachedRateCard()
+        loadBackendRateCard()
         startMapRequestBlipListener()
         startScheduledMapOpportunityListener()
         startActiveRideListener()
@@ -415,12 +417,90 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         )
         Task { [weak self] in
             do {
-                try await RydrBackendService.updateRateCard(request)
-                await MainActor.run { self?.statusMessage = "\(rideType) rate saved. You can go online when ready." }
+                let response = try await RydrBackendService.updateRateCard(request)
+                await MainActor.run {
+                    guard let self else { return }
+                    // The backend response is the source of truth. Applying it
+                    // immediately prevents a stale Firestore snapshot from
+                    // making the card appear to jump back to older defaults.
+                    self.tierRates[rideType] = DriverRateSetting(
+                        minimumFare: response.rate.minimumFare,
+                        perMile: response.rate.perMile,
+                        perMinute: response.rate.perMinute,
+                        useSuggestedPricing: response.rate.useSuggestedPricing
+                    )
+                    self.cacheCurrentRateCard()
+                    self.hasSavedRateSettings = true
+                    self.statusMessage = "\(rideType) rate saved. You can go online when ready."
+                }
             } catch {
                 await MainActor.run { self?.statusMessage = "Could not save rate: \(error.localizedDescription)" }
             }
         }
+    }
+
+    private func loadBackendRateCard() {
+        Task { [weak self] in
+            do {
+                let response = try await RydrBackendService.loadRateCard()
+                await MainActor.run {
+                    guard let self else { return }
+                    for rideType in DriverDashboardVM.availableRideTypes {
+                        let key = RydrRideTierCatalog.canonicalRideType(rideType)
+                        guard let rate = response.tierRates[key] else { continue }
+                        self.tierRates[rideType] = DriverRateSetting(
+                            minimumFare: rate.minimumFare,
+                            perMile: rate.perMile,
+                            perMinute: rate.perMinute,
+                            useSuggestedPricing: rate.useSuggestedPricing
+                        )
+                    }
+                    self.hasSavedRateSettings = !response.tierRates.isEmpty
+                    self.cacheCurrentRateCard()
+                }
+            } catch {
+                await MainActor.run {
+                    self?.statusMessage = "Could not load your saved rate card: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private var rateCardCacheKey: String? {
+        guard let uid = Auth.auth().currentUser?.uid else { return nil }
+        return "rydr.driver.rate-card.\(uid).v1"
+    }
+
+    private func loadCachedRateCard() {
+        guard let rateCardCacheKey,
+              let data = UserDefaults.standard.data(forKey: rateCardCacheKey),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: [String: Any]] else { return }
+        for rideType in DriverDashboardVM.availableRideTypes {
+            let key = RydrRideTierCatalog.canonicalRideType(rideType)
+            guard let rate = payload[key] else { continue }
+            tierRates[rideType] = DriverRateSetting(
+                minimumFare: max(0, Self.doubleValue(rate["minimumFare"]) ?? 0),
+                perMile: max(0, Self.doubleValue(rate["perMile"]) ?? 0),
+                perMinute: max(0, Self.doubleValue(rate["perMinute"]) ?? 0),
+                useSuggestedPricing: rate["useSuggestedPricing"] as? Bool ?? false
+            )
+        }
+        hasSavedRateSettings = !payload.isEmpty
+    }
+
+    private func cacheCurrentRateCard() {
+        guard let rateCardCacheKey else { return }
+        var payload: [String: [String: Any]] = [:]
+        for (rideType, rate) in tierRates {
+            payload[RydrRideTierCatalog.canonicalRideType(rideType)] = [
+                "minimumFare": rate.minimumFare,
+                "perMile": rate.perMile,
+                "perMinute": rate.perMinute,
+                "useSuggestedPricing": rate.useSuggestedPricing
+            ]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        UserDefaults.standard.set(data, forKey: rateCardCacheKey)
     }
 
     func toggleOnline() {
@@ -1257,45 +1337,66 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             .whereField("driverId", isEqualTo: uid)
             .whereField("status", isEqualTo: "available")
             .addSnapshotListener { [weak self] snapshot, error in
-                DispatchQueue.main.async {
+                Task { [weak self] in
                     guard let self else { return }
                     if let error {
-                        self.statusMessage = "Scheduled ride map error: \(error.localizedDescription)"
-                        self.scheduledMapOpportunities = []
-                        self.selectedScheduledMapOpportunity = nil
+                        await MainActor.run {
+                            self.statusMessage = "Scheduled ride map error: \(error.localizedDescription)"
+                            self.scheduledMapOpportunities = []
+                            self.selectedScheduledMapOpportunity = nil
+                        }
                         return
                     }
 
-                    let now = Date()
-                    self.scheduledMapOpportunities = snapshot?.documents.compactMap { document in
-                        let data = document.data()
-                        guard let requestId = document.reference.parent.parent?.documentID,
-                              let scheduledAt = (data["scheduledPickupAt"] as? Timestamp)?.dateValue(),
-                              scheduledAt > now,
-                              let coordinateData = data["pickupCoordinate"] as? [String: Any],
-                              let latitude = Self.doubleValue(coordinateData["lat"] ?? coordinateData["latitude"]),
-                              let longitude = Self.doubleValue(coordinateData["lng"] ?? coordinateData["longitude"]),
-                              let quote = data["quote"] as? [String: Any] else { return nil }
-                        return DriverScheduledMapOpportunity(
-                            id: requestId,
-                            mode: data["mode"] as? String ?? "quickSchedule",
-                            isLockedReplacement: data["lockedReplacementFare"] as? Bool ?? false,
-                            pickup: data["pickup"] as? String ?? "Pickup",
-                            dropoff: data["dropoff"] as? String ?? "Destination",
-                            rideType: data["rideType"] as? String ?? "Rydr",
-                            scheduledPickupAt: scheduledAt,
-                            totalCents: Int(Self.doubleValue(quote["totalCents"]) ?? 0),
-                            coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-                        )
-                    }
-                    .sorted { $0.scheduledPickupAt < $1.scheduledPickupAt } ?? []
-
-                    if let selected = self.selectedScheduledMapOpportunity,
-                       !self.scheduledMapOpportunities.contains(where: { $0.id == selected.id }) {
-                        self.selectedScheduledMapOpportunity = nil
+                    let opportunities = await Self.openScheduledMapOpportunities(from: snapshot?.documents ?? [])
+                    await MainActor.run {
+                        self.scheduledMapOpportunities = opportunities
+                        if let selected = self.selectedScheduledMapOpportunity,
+                           !opportunities.contains(where: { $0.id == selected.id }) {
+                            self.selectedScheduledMapOpportunity = nil
+                        }
                     }
                 }
             }
+    }
+
+    private static func openScheduledMapOpportunities(
+        from documents: [QueryDocumentSnapshot]
+    ) async -> [DriverScheduledMapOpportunity] {
+        let openStatuses: Set<String> = [
+            "seekingDrivers",
+            "awaitingRiderSelection",
+            "replacementSearching",
+            "replacementApprovalRequired"
+        ]
+        let now = Date()
+        var opportunities: [DriverScheduledMapOpportunity] = []
+        for document in documents {
+            let data = document.data()
+            guard let requestRef = document.reference.parent.parent,
+                  let request = try? await requestRef.getDocument(),
+                  request.exists,
+                  let requestStatus = request.data()?["status"] as? String,
+                  openStatuses.contains(requestStatus),
+                  let scheduledAt = (data["scheduledPickupAt"] as? Timestamp)?.dateValue(),
+                  scheduledAt > now,
+                  let coordinateData = data["pickupCoordinate"] as? [String: Any],
+                  let latitude = doubleValue(coordinateData["lat"] ?? coordinateData["latitude"]),
+                  let longitude = doubleValue(coordinateData["lng"] ?? coordinateData["longitude"]),
+                  let quote = data["quote"] as? [String: Any] else { continue }
+            opportunities.append(DriverScheduledMapOpportunity(
+                id: requestRef.documentID,
+                mode: data["mode"] as? String ?? "quickSchedule",
+                isLockedReplacement: data["lockedReplacementFare"] as? Bool ?? false,
+                pickup: data["pickup"] as? String ?? "Pickup",
+                dropoff: data["dropoff"] as? String ?? "Destination",
+                rideType: data["rideType"] as? String ?? "Rydr",
+                scheduledPickupAt: scheduledAt,
+                totalCents: Int(doubleValue(quote["totalCents"]) ?? 0),
+                coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            ))
+        }
+        return opportunities.sorted { $0.scheduledPickupAt < $1.scheduledPickupAt }
     }
 
     private func refreshBackendDemand() {
@@ -1801,8 +1902,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             ?? (data["vehicleEligibility"] as? [String: Any])?["rideTypes"] as? [String]
         let computedRideTypes = normalizeRideTypes(storedQualifiedRideTypes ?? [])
         eligibleRideTypes = computedRideTypes
-        applyStoredRates(data["tierRates"] as? [String: Any])
-
+        applyLegacyStoredRatesIfNeeded(data["tierRates"] as? [String: Any])
         let storedSelectedRideTypes = normalizeRideTypes(data["selectedRideTypes"] as? [String] ?? [])
         if selectedRideTypes.isEmpty, !storedSelectedRideTypes.isEmpty {
             selectedRideTypes = Set(storedSelectedRideTypes).intersection(Set(computedRideTypes))
@@ -1819,41 +1919,30 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         RydrRideTierCatalog.normalizedRideTypes(rideTypes)
     }
 
-    private func applyStoredRates(_ rawRates: [String: Any]?) {
-        guard let rawRates else { return }
-        var nextRates = tierRates
-        var didLoadStoredRate = false
-        for rideType in DriverDashboardVM.availableRideTypes {
-            let key = RydrRideTierCatalog.canonicalRideType(rideType)
-            let raw = rawRates[rideType] as? [String: Any] ?? rawRates[key] as? [String: Any]
-            guard let raw else { continue }
-            didLoadStoredRate = true
-            nextRates[rideType] = DriverRateSetting(
-                minimumFare: max(0, Self.doubleValue(raw["minimumFare"]) ?? 0),
-                perMile: max(0, Self.doubleValue(raw["perMile"]) ?? 0),
-                perMinute: max(0, Self.doubleValue(raw["perMinute"]) ?? 0),
-                useSuggestedPricing: raw["useSuggestedPricing"] as? Bool ?? false
-            )
-        }
-        tierRates = nextRates
-        if didLoadStoredRate {
-            hasSavedRateSettings = true
-        }
-    }
-
     private func ensureDefaultRates(for rideTypes: [String]) {
         for rideType in rideTypes where tierRates[rideType] == nil {
             tierRates[rideType] = .empty
         }
     }
 
-    private func tierRatesPayload() -> [String: Any] {
-        var payload: [String: Any] = [:]
-        for rideType in eligibleRideTypes {
+    /// One-time compatibility fallback for an account that has not yet loaded
+    /// its backend-owned card. It never overwrites a cached or backend value.
+    private func applyLegacyStoredRatesIfNeeded(_ rawRates: [String: Any]?) {
+        guard let rawRates else { return }
+        var didLoadRate = false
+        for rideType in DriverDashboardVM.availableRideTypes where tierRates[rideType] == nil {
             let key = RydrRideTierCatalog.canonicalRideType(rideType)
-            payload[key] = rate(for: rideType).dictionary(for: rideType)
+            let raw = rawRates[key] as? [String: Any] ?? rawRates[rideType] as? [String: Any]
+            guard let raw else { continue }
+            didLoadRate = true
+            tierRates[rideType] = DriverRateSetting(
+                minimumFare: max(0, Self.doubleValue(raw["minimumFare"]) ?? 0),
+                perMile: max(0, Self.doubleValue(raw["perMile"]) ?? 0),
+                perMinute: max(0, Self.doubleValue(raw["perMinute"]) ?? 0),
+                useSuggestedPricing: raw["useSuggestedPricing"] as? Bool ?? false
+            )
         }
-        return payload
+        if didLoadRate { hasSavedRateSettings = true }
     }
 
     private func rideFilterPayload() -> [String: Any] {
@@ -2152,7 +2241,6 @@ struct DriverDashboardView: View {
 
     private var scheduledRidesVisibleOnMap: [DriverScheduledMapOpportunity] {
         guard showScheduledRidesOnDashboard,
-              vm.isSearchingForRides,
               vm.activeRide == nil,
               vm.pendingRequests.isEmpty else { return [] }
         return Array(vm.scheduledMapOpportunities.prefix(12))

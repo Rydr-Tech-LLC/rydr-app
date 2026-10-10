@@ -28,8 +28,8 @@ const ACTIONS = {
   arrive_stop: { from: ["inProgress", "navigatingToStop"], status: "arrivedAtStop", fields: ["arrivedAtStopAt", "stopWaitStartedAt"], message: "Your driver is waiting at the added stop." },
   leave_stop: { from: ["arrivedAtStop"], status: "inProgress", fields: ["headedToDropoffAt", "navigatingToDropoffAt"], message: "Your ride is headed to drop-off." },
   complete: { from: ["inProgress", "navigatingToDropoff"], status: "completed", fields: ["completedAt"], message: "Your ride is complete.", finalizes: true },
-  driver_cancel: { from: ["accepted", "enRouteToPickup", "arrivedAtPickup", "inProgress", "navigatingToStop", "arrivedAtStop", "navigatingToDropoff"], status: "driverCancelled", fields: ["cancelledAt"], message: "Your driver cancelled this ride.", finalizes: true },
-  rider_cancel: { from: ["pending", "accepted", "enRouteToPickup", "arrivedAtPickup", "inProgress", "navigatingToStop", "arrivedAtStop", "navigatingToDropoff"], status: "riderCancelled", fields: ["cancelledAt"], message: "Ride cancelled.", finalizes: true },
+  driver_cancel: { from: ["accepted", "enRouteToPickup", "navigatingToPickup", "arrived", "arrivedAtPickup", "waitingForRider", "inProgress", "navigatingToStop", "arrivedAtStop", "waitingAtStop", "navigatingToDropoff"], status: "driverCancelled", fields: ["cancelledAt"], message: "Your driver cancelled this ride.", finalizes: true },
+  rider_cancel: { from: ["pending", "accepted", "enRouteToPickup", "navigatingToPickup", "arrived", "arrivedAtPickup", "waitingForRider", "inProgress", "navigatingToStop", "arrivedAtStop", "waitingAtStop", "navigatingToDropoff"], status: "riderCancelled", fields: ["cancelledAt"], message: "Ride cancelled.", finalizes: true },
   admin_cancel: { from: ["pending", "accepted", "enRouteToPickup", "navigatingToPickup", "arrivedAtPickup", "inProgress", "navigatingToStop", "arrivedAtStop", "navigatingToDropoff"], status: "adminCancelled", fields: ["cancelledAt", "adminCancelledAt"], message: "Support cancelled this ride.", finalizes: true }
 };
 
@@ -112,6 +112,20 @@ async function actualTripDistanceMiles(db, rideId) {
   return points.length >= 2 ? total : null;
 }
 
+async function closeScheduledRideListings(db, scheduledRideId, now, status) {
+  if (!scheduledRideId) return;
+  const requestRef = db.collection("scheduledRideRequests").doc(scheduledRideId);
+  const [opportunities, offers] = await Promise.all([
+    requestRef.collection("opportunities").where("status", "==", "available").get(),
+    requestRef.collection("offers").where("status", "==", "available").get()
+  ]);
+  if (opportunities.empty && offers.empty) return;
+  const batch = db.batch();
+  opportunities.docs.forEach((doc) => batch.set(doc.ref, { status, updatedAt: now }, { merge: true }));
+  offers.docs.forEach((doc) => batch.set(doc.ref, { status, updatedAt: now }, { merge: true }));
+  await batch.commit();
+}
+
 function rydrBankRewardGroup(rideType) {
   const key = String(rideType || "").toLowerCase();
   if (key.includes("xl")) return "xl";
@@ -182,7 +196,12 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     const isRiderAction = action === "rider_cancel";
     const assignedDriverId = ride.driverId || ride.targetDriverId || ride.requestedDriverId;
     if (!isAdminAction && (isRiderAction ? ride.riderId : assignedDriverId) !== uid) throw error("Ride action is not allowed for this user", 403);
-    if (ride.lastLifecycleRequestId === requestId) return { status: ride.status, outcome: outcomeSnap.exists ? outcomeSnap.data() : null, duplicate: true };
+    if (ride.lastLifecycleRequestId === requestId) return {
+      status: ride.status,
+      outcome: outcomeSnap.exists ? outcomeSnap.data() : null,
+      duplicate: true,
+      scheduledRideId: policy.finalizes ? ride.scheduledRideId ?? null : null
+    };
     if (!policy.from.includes(ride.status)) throw error(`Cannot ${action} from ${ride.status}`, 409);
     if (action === "driver_accept") {
       if (!["offered", "rematching"].includes(ride.dispatchStatus)) throw error("Ride offer is not active", 409);
@@ -381,13 +400,34 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     }
     if (!policy.requestOnly) tx.set(rideRef, !rideSnap.exists || action === "driver_accept" ? { ...ride, ...update } : update, { merge: true });
     tx.set(requestRef, update, { merge: true });
+    if (ride.scheduledRideId && policy.finalizes) {
+      tx.set(db.collection("scheduledRideRequests").doc(ride.scheduledRideId), {
+        status: action === "complete" ? "completed" : "cancelled",
+        terminalReason: action,
+        updatedAt: now
+      }, { merge: true });
+    }
     if (action === "driver_accept") tx.set(signalRef, { status: "accepted", updatedAt: now }, { merge: true });
     if (action.endsWith("cancel")) tx.set(signalRef, { status: "cancelled", updatedAt: now }, { merge: true });
     if (policy.finalizes && !policy.requestOnly) {
       tx.set(db.collection("rideChats").doc(rideId), { status: "closed", closedAt: now, updatedAt: now }, { merge: true });
     }
-    return { status: resolvedStatus, outcome, duplicate: false };
+    return {
+      status: resolvedStatus,
+      outcome,
+      duplicate: false,
+      scheduledRideId: policy.finalizes ? ride.scheduledRideId ?? null : null
+    };
   });
+
+  if (result.scheduledRideId && policy.finalizes) {
+    await closeScheduledRideListings(
+      db,
+      result.scheduledRideId,
+      admin.firestore.Timestamp.now(),
+      action === "complete" ? "completed" : "cancelled"
+    );
+  }
 
   if (action === "driver_accept" && !result.duplicate) {
     try {
@@ -402,7 +442,8 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     }
   }
 
-  return result;
+  const { scheduledRideId: _, ...publicResult } = result;
+  return publicResult;
 }
 
 module.exports = { transitionRide, ACTIONS, serverRateFields };

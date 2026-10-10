@@ -27,6 +27,14 @@ const CASH_HUB_SUGGESTED_PER_MINUTE = 0.28;
 
 function error(message, statusCode) { const err = new Error(message); err.statusCode = statusCode; return err; }
 function text(value, max = 500) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
+function verifiedDriverName(driver) {
+  const profile = driver && typeof driver === "object" ? driver : {};
+  const legalName = text(profile.legalName, 80);
+  const first = text(profile.legalFirstName ?? profile.firstName, 40);
+  const last = text(profile.legalLastName ?? profile.lastName, 40);
+  const composedName = text([first, last].filter(Boolean).join(" "), 80);
+  return legalName || composedName || text(profile.displayName, 80) || "Cash Hub Driver";
+}
 function amount(value) { const n = Number(value); return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null; }
 function idempotencyKey(value) {
   const candidate = text(value, 160);
@@ -642,7 +650,7 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
       if (request.status !== "open" || request.connectedDriverUid) throw error("Request is no longer available", 409);
       if (!driverCanAccessRequest(request, uid)) throw error("This CashRydr Hub request is not available to this driver", 403);
       const driver = actorProfile;
-      const driverName = text(driver.displayName ?? `${driver.firstName ?? ""} ${driver.lastName ?? ""}`, 80) || "Cash Hub Driver";
+      const driverName = verifiedDriverName(driver);
       const vehicleInfo = driverVehicleSummary(driver);
       if (!vehicleInfo) throw error("Add your current vehicle to the Driver app before connecting to a CashRydr Hub request", 409);
       const selectedConversationId = `${requestId}_${uid}`;
@@ -660,10 +668,12 @@ async function commandCashHubRequest({ uid, requestId, action, payload, db = get
       const offer = offerSnap.data();
       if (offer.offerStatus !== "pending" || offer.status !== "open") throw error("Offer is no longer pending", 409);
       if (offer.priceProposedByUid === uid) throw error("The other participant must respond to this price", 409);
+      const driverSnap = await tx.get(db.collection("drivers").doc(offer.driverUid));
+      const driverName = verifiedDriverName(driverSnap.exists ? driverSnap.data() : { displayName: offer.driverName });
       await closeCompetingCashHubNegotiations({ tx, db, requestId, selectedConversationId:offerId, riderUid:request.riderUid, selectedDriverUid:offer.driverUid, now });
-      update = { ...update, status: "connected", driverQueueStatus: "scheduled", connectedDriverUid: offer.driverUid, connectedDriverName: offer.driverName, connectedVehicleInfo: offer.vehicleInfo, acceptedByUid: offer.driverUid, acceptedByName: offer.driverName, selectedOfferId: offerId, connectedAt: now, acceptedAt: now, expiresAt: admin.firestore.Timestamp.fromMillis((timestampMillis(request.scheduledTime) || nowMillis) + 24 * 60 * 60 * 1000) };
+      update = { ...update, status: "connected", driverQueueStatus: "scheduled", connectedDriverUid: offer.driverUid, connectedDriverName: driverName, connectedVehicleInfo: offer.vehicleInfo, acceptedByUid: offer.driverUid, acceptedByName: driverName, selectedOfferId: offerId, connectedAt: now, acceptedAt: now, expiresAt: admin.firestore.Timestamp.fromMillis((timestampMillis(request.scheduledTime) || nowMillis) + 24 * 60 * 60 * 1000) };
       if (amount(offer.offerAmount) !== null) update.agreedPrice = amount(offer.offerAmount);
-      tx.set(conversationRef, { status: "connected", offerStatus: "accepted", chatStatus: "active", connectedAt: now, updatedAt: now }, { merge: true });
+      tx.set(conversationRef, { driverName, status: "connected", offerStatus: "accepted", chatStatus: "active", connectedAt: now, updatedAt: now }, { merge: true });
     } else if (action === "decline_offer") {
       const offerId = text(payload?.offerId, 160);
       if (!offerId) throw error("Offer ID is required", 400);
@@ -734,7 +744,7 @@ async function createCashHubOffer({ uid, requestId, payload, db = getFirestore()
   const conversationRef = db.collection("cashHubConversations").doc(conversationId);
   const operationKey = idempotencyKey(payload?.idempotencyKey);
   const messageRef = conversationRef.collection("messages").doc(operationKey || undefined);
-  const driverName = text(driver.displayName ?? `${driver.firstName ?? ""} ${driver.lastName ?? ""}`, 80) || "Cash Hub Driver";
+  const driverName = verifiedDriverName(driver);
   const vehicleInfo = driverVehicleSummary(driver);
   const { offerAmount, message } = normalizeCashHubOffer(payload);
   if (!vehicleInfo) throw error("Add your current vehicle to the Driver app before making a CashRydr Hub offer", 409);
@@ -869,10 +879,12 @@ async function commandCashHubConversation({ uid, conversationId, action, payload
 
     const agreedPrice = amount(conversation.offerAmount);
     const driverUid = conversation.driverUid;
+    const driverSnap = await tx.get(db.collection("drivers").doc(driverUid));
+    const driverName = verifiedDriverName(driverSnap.exists ? driverSnap.data() : { displayName: conversation.driverName });
     const scheduledMillis = timestampMillis(request.scheduledTime) || nowMillis;
     await closeCompetingCashHubNegotiations({ tx, db, requestId:conversation.requestId, selectedConversationId:conversationId, riderUid:conversation.riderUid, selectedDriverUid:driverUid, now });
-    tx.set(requestRef, { status:"connected", driverQueueStatus:"scheduled", connectedDriverUid:driverUid, connectedDriverName:conversation.driverName, connectedVehicleInfo:conversation.vehicleInfo, acceptedByUid:driverUid, acceptedByName:conversation.driverName, selectedOfferId:conversationId, agreedPrice, connectedAt:now, acceptedAt:now, expiresAt:admin.firestore.Timestamp.fromMillis(scheduledMillis + 24 * 60 * 60 * 1000), updatedAt:now, stateOwner:"rydr_backend" }, { merge:true });
-    tx.set(conversationRef, { status:"connected", offerStatus:"accepted", chatStatus:"active", connectedAt:now, updatedAt:now }, { merge:true });
+    tx.set(requestRef, { status:"connected", driverQueueStatus:"scheduled", connectedDriverUid:driverUid, connectedDriverName:driverName, connectedVehicleInfo:conversation.vehicleInfo, acceptedByUid:driverUid, acceptedByName:driverName, selectedOfferId:conversationId, agreedPrice, connectedAt:now, acceptedAt:now, expiresAt:admin.firestore.Timestamp.fromMillis(scheduledMillis + 24 * 60 * 60 * 1000), updatedAt:now, stateOwner:"rydr_backend" }, { merge:true });
+    tx.set(conversationRef, { driverName, status:"connected", offerStatus:"accepted", chatStatus:"active", connectedAt:now, updatedAt:now }, { merge:true });
     tx.create(messageRef, { requestId:conversation.requestId, conversationId, senderUid:"system", senderName:"CashRydr Hub", senderRole:"system", kind:"priceAccepted", text:`Price accepted at ${agreedPrice.toLocaleString("en-US", { style:"currency", currency:"USD" })}. The trip is now connected.`, offerAmount:agreedPrice, auditVisibleToAdmin:true, createdAt:now });
     const result = { status:"connected", agreedPrice };
     if (receiptRef) tx.create(receiptRef, { uid, operation, result, createdAt: now });
@@ -882,7 +894,7 @@ async function commandCashHubConversation({ uid, conversationId, action, payload
 
 module.exports = {
   acceptCashHubTerms, optOutCashHub, createCashHubRequest, commandCashHubRequest, createCashHubOffer, sendCashHubMessage, commandCashHubConversation, updateCashHubRelationship,
-  normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, isCashHubConnectedStatus, cashHubRemovalUpdate, cashHubReleaseVisibilityUpdate, cashHubRiderCancellationUpdate, cashHubActionRequiresActiveAccess, normalizeCashHubOffer, cashHubOfferOpeningMessage, cashHubAccessAllowed,
+  normalizeVisibility, normalizeTripFormat, driverCanAccessRequest, driverVehicleSummary, verifiedDriverName, validateScheduledTime, hasCurrentTerms, canTransitionDriverQueue, isCashHubConnectedStatus, cashHubRemovalUpdate, cashHubReleaseVisibilityUpdate, cashHubRiderCancellationUpdate, cashHubActionRequiresActiveAccess, normalizeCashHubOffer, cashHubOfferOpeningMessage, cashHubAccessAllowed,
   coordinate, distanceMilesBetween, suggestedContribution, combinedRouteTotals, validateLifecycleEvidence, eligibleDriverAudience,
   PUBLIC_VISIBILITY, FAVORITES_VISIBILITY, MINIMUM_LEAD_TIME_MS
 };

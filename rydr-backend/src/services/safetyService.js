@@ -1,6 +1,40 @@
 const { admin, getFirestore } = require("../config/firebase");
 function error(message, statusCode) { const err = new Error(message); err.statusCode = statusCode; return err; }
 function text(value, max) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
+function timestampMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") return value.toDate().getTime();
+  if (Number.isFinite(value._seconds)) return value._seconds * 1000;
+  if (Number.isFinite(value.seconds)) return value.seconds * 1000;
+  return 0;
+}
+
+async function listReportableRides({ uid, limit = 30, db = getFirestore() }) {
+  const requestedLimit = Number(limit);
+  const safeLimit = Number.isFinite(requestedLimit)
+    ? Math.min(50, Math.max(1, Math.trunc(requestedLimit)))
+    : 30;
+  const snapshot = await db.collection("rides")
+    .where("driverId", "==", uid)
+    .where("status", "==", "completed")
+    .orderBy("updatedAt", "desc")
+    .limit(safeLimit)
+    .get();
+
+  return snapshot.docs.map((doc) => {
+    const ride = doc.data();
+    const completedAtMillis = timestampMillis(ride.completedAt ?? ride.updatedAt);
+    return {
+      id: doc.id,
+      pickup: text(ride.pickup, 300) || "Pickup",
+      dropoff: text(ride.dropoff, 300) || "Drop-off",
+      rideType: text(ride.rideType, 80) || "Rydr ride",
+      riderName: text(ride.riderName, 160) || "Rider",
+      completedAt: completedAtMillis ? new Date(completedAtMillis).toISOString() : null
+    };
+  });
+}
 
 async function createSafetyReport({ uid, payload, db = getFirestore() }) {
   const rideId = text(payload?.rideId, 160); const cashHubRequestId = text(payload?.cashHubRequestId, 160);
@@ -11,7 +45,20 @@ async function createSafetyReport({ uid, payload, db = getFirestore() }) {
     const ride = snap.data();
     reporterRole = uid === ride.riderId ? "rider" : uid === ride.driverId ? "driver" : null;
     if (!reporterRole) throw error("Only ride participants may report this ride", 403);
-    evidence = { rideId, riderId: ride.riderId, driverId: ride.driverId, rideStatus: ride.status, rideType: ride.rideType, pickup: ride.pickup ?? null, dropoff: ride.dropoff ?? null };
+    evidence = {
+      surface: "ride",
+      rideId,
+      riderId: ride.riderId,
+      driverId: ride.driverId,
+      riderName: text(ride.riderName, 160) || null,
+      driverName: text(ride.driverName, 160) || null,
+      reportedUserUid: reporterRole === "driver" ? ride.riderId : ride.driverId,
+      rideStatus: ride.status,
+      rideType: ride.rideType,
+      pickup: ride.pickup ?? null,
+      dropoff: ride.dropoff ?? null,
+      completedAt: ride.completedAt ?? null
+    };
   } else if (cashHubRequestId) {
     const snap = await db.collection("cashRydrRequests").doc(cashHubRequestId).get();
     if (!snap.exists) throw error("Cash Hub request not found", 404);
@@ -32,7 +79,20 @@ async function createSafetyReport({ uid, payload, db = getFirestore() }) {
   const description = text(payload?.description, 4000);
   if (description.length < 12) throw error("More report detail is required", 400);
   const ref = db.collection("safetyReports").doc(); const now = admin.firestore.Timestamp.now();
-  await ref.create({ id: ref.id, ...evidence, reportType: text(payload?.reportType, 100) || "Safety concern", description, reporterUid: uid, reporterRole, status: "open", source: "rydr_backend", createdAt: now, updatedAt: now });
+  await ref.create({
+    id: ref.id,
+    ...evidence,
+    reportType: text(payload?.reportType, 100) || "Safety concern",
+    description,
+    reporterUid: uid,
+    reporterRole,
+    status: "open",
+    investigationStatus: "pending_review",
+    missionControlQueue: "safety",
+    source: "rydr_backend",
+    createdAt: now,
+    updatedAt: now
+  });
   return { reportId: ref.id };
 }
 
@@ -45,4 +105,4 @@ async function createSafetyAppeal({ uid, payload, db = getFirestore() }) {
   await ref.create({ penaltyId, driverId: uid, rideId: penalty.rideId ?? null, riderReportId: penalty.riderReportId ?? null, category: penalty.category ?? "other", reason, status: "submitted", source: "rydr_backend", createdAt: now, updatedAt: now });
   return { appealId: ref.id };
 }
-module.exports = { createSafetyReport, createSafetyAppeal };
+module.exports = { createSafetyReport, createSafetyAppeal, listReportableRides, timestampMillis };

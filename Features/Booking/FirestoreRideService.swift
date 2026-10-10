@@ -350,6 +350,74 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         }
     }
 
+    func recoverRide(rideId: String) async throws -> RideRecoverySnapshot {
+        guard let riderId = Auth.auth().currentUser?.uid else { throw RideDispatchError.notSignedIn }
+        let rideSnapshot = try await db.collection("rides").document(rideId).getDocument()
+        guard let ride = rideSnapshot.data(), ride["riderId"] as? String == riderId else {
+            throw NSError(domain: "RydrRideRecovery", code: 404, userInfo: [NSLocalizedDescriptionKey: "The active ride could not be found."])
+        }
+        guard let status = Self.rideStatus(from: ride["status"] as? String),
+              status != .completed, status != .cancelled else {
+            throw NSError(domain: "RydrRideRecovery", code: 409, userInfo: [NSLocalizedDescriptionKey: "This ride is no longer active."])
+        }
+        guard let driverId = ride["driverId"] as? String,
+              let pickup = nonEmptyString(ride["pickup"]),
+              let dropoff = nonEmptyString(ride["dropoff"]),
+              let rideType = nonEmptyString(ride["rideType"]),
+              let pickupCoordinate = Self.coordinate(from: ride["pickupCoordinate"] ?? ride["pickupGeoPoint"]),
+              let dropoffCoordinate = Self.coordinate(from: ride["dropoffCoordinate"] ?? ride["dropoffGeoPoint"]) else {
+            throw NSError(domain: "RydrRideRecovery", code: 422, userInfo: [NSLocalizedDescriptionKey: "The active ride record is incomplete."])
+        }
+
+        let profile = try await db.collection("publicDriverProfiles").document(driverId).getDocument().data() ?? [:]
+        let driverCoordinate = Self.coordinate(from: ride["driverLocation"])
+            ?? coordinate(from: profile)
+            ?? pickupCoordinate
+        let perMinute = Double(Self.intValue(ride["driverRatePerMinuteCents"]) ?? 0) / 100
+        let perMile = Double(Self.intValue(ride["driverRatePerMileCents"]) ?? 0) / 100
+        let minimumFare = Double(Self.intValue(ride["driverMinimumFareCents"]) ?? 0) / 100
+        let fare = Double(Self.intValue(ride["estimatedRiderTotalCents"]) ?? 0) / 100
+        let driver = Driver(
+            id: driverId,
+            name: driverName(from: profile),
+            profileImage: nonEmptyString(profile["profilePhotoURL"]) ?? nonEmptyString(profile["profileImage"]),
+            carImage: nonEmptyString(profile["vehicleImageURL"]) ?? nonEmptyString(profile["carImage"]),
+            carMakeModel: vehicleName(from: profile),
+            rating: Self.doubleValue(profile["rating"]) ?? 5,
+            compliments: profile["compliments"] as? [String] ?? [],
+            perMinute: perMinute,
+            perMile: perMile,
+            minimumFare: minimumFare,
+            usesSuggestedPricing: ride["driverUsesSuggestedPricing"] as? Bool ?? false,
+            coordinate: driverCoordinate,
+            score: 100,
+            ratingCount: Self.intValue(profile["ratingCount"]) ?? 0,
+            completedRideCount: Self.intValue(profile["completedRideCount"] ?? profile["lifetimeRideCount"]),
+            acceptanceRate: Self.intValue(profile["acceptanceRate"]),
+            gender: driverGender(from: profile),
+            quotedRiderTotalCents: Self.intValue(ride["estimatedRiderTotalCents"]),
+            quotedDriverPayoutCents: Self.intValue(ride["estimatedDriverPayoutCents"])
+        )
+        return RideRecoverySnapshot(
+            rideId: rideId,
+            pickup: pickup,
+            dropoff: dropoff,
+            rideType: rideType,
+            estimate: RideEstimate(
+                distanceMiles: Self.doubleValue(ride["backendDistanceMiles"]) ?? 0,
+                durationMinutes: Self.doubleValue(ride["backendDurationMinutes"]) ?? 0
+            ),
+            driver: driver,
+            status: status,
+            startedAt: Self.date(from: ride["acceptedAt"] ?? ride["createdAt"]) ?? Date(),
+            fare: fare,
+            pickupCoordinate: pickupCoordinate,
+            dropoffCoordinate: dropoffCoordinate,
+            driverCoordinate: driverCoordinate,
+            waitChargePerMinute: perMinute
+        )
+    }
+
     func cancelRide(rideId: String, mode: RideCancellationMode) async throws -> BackendRideFinancialOutcome? {
         let reason = mode == .findAnotherDriver ? "Rider cancelled to find another driver" : "Rider cancelled"
         return try await sendRideTransition(rideId: rideId, action: "rider_cancel", reason: reason)
@@ -380,6 +448,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(try await appCheckToken(), forHTTPHeaderField: "X-Firebase-AppCheck")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["action": action, "reason": reason, "requestId": UUID().uuidString])
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {

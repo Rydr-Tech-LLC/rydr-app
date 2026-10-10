@@ -212,6 +212,8 @@ export interface SafetyReport {
   riderName?: string;
   description?: string;
   status: SafetyReportStatus;
+  investigationStatus?: "pending_review" | "in_review" | "resolved";
+  missionControlQueue?: "safety";
   createdAt?: { toDate?: () => Date } | null;
 }
 

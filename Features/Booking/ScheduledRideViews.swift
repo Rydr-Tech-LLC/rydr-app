@@ -76,15 +76,15 @@ struct ScheduledRideReviewView: View {
                         Label(manager.requestedPickupDate.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar.badge.clock")
                     }.padding(16).background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
 
-                    if manager.isWorking { ProgressView("Calculating backend price…").frame(maxWidth: .infinity) }
+                    if manager.isWorking { ProgressView("Calculating your fare…").frame(maxWidth: .infinity) }
                     if let preview = manager.preview {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Backend price range").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                            Text("Estimated fare range").font(.caption.weight(.bold)).foregroundStyle(.secondary)
                             Text("\(money(preview.suggestedLowCents)) – \(money(preview.suggestedHighCents))").font(.title2.bold())
                             Text("\(preview.distanceMiles, specifier: "%.1f") mi • \(Int(preview.durationMinutes.rounded())) min • \(preview.eligibleDriverCount) eligible drivers")
                                 .font(.caption).foregroundStyle(.secondary)
                             if manager.selectedMode == .quickSchedule {
-                                Text("You approve a maximum of \(money(preview.suggestedHighCents)). The accepted driver's exact price is locked by the backend.")
+                                Text("You approve a maximum of \(money(preview.suggestedHighCents)). The accepted driver's exact price is locked when they accept.")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }.padding(16).background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
@@ -170,11 +170,12 @@ struct ScheduledRideStatusView: View {
                                 }.buttonStyle(.plain)
                             }
                         }
-                        if ![ScheduledRideStatus.active, .completed, .cancelled, .expired].contains(request.status) {
+                        if ![ScheduledRideStatus.active, .completed, .cancelled].contains(request.status) {
                             Button("Cancel scheduled ride", role: .destructive) {
                                 Task {
                                     do {
                                         try await manager.cancel()
+                                        onClose()
                                     } catch {
                                         manager.errorMessage = error.localizedDescription
                                     }
@@ -221,12 +222,54 @@ struct ScheduledRideListView: View {
                             Text(request.scheduledPickupAt.formatted(date: .abbreviated, time: .shortened)).font(.headline)
                             Text("\(request.pickup) → \(request.dropoff)").font(.caption).foregroundStyle(.secondary).lineLimit(2)
                         }.padding(.vertical, 5)
-                    }.buttonStyle(.plain)
+                    }
+                    .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(removalTitle(for: request), role: .destructive) {
+                            Task {
+                                do {
+                                    try await manager.cancel(
+                                        requestId: request.id,
+                                        reason: removalReason(for: request)
+                                    )
+                                } catch {
+                                    manager.errorMessage = error.localizedDescription
+                                }
+                            }
+                        }
+                        .disabled(manager.cancellingRequestIDs.contains(request.id))
+                    }
                 }
             }
             .navigationTitle("My Scheduled Rides")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done", action: onClose) } }
+            .alert(
+                "Unable to update scheduled ride",
+                isPresented: Binding(
+                    get: { manager.errorMessage != nil },
+                    set: { if !$0 { manager.errorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { manager.errorMessage = nil }
+            } message: {
+                Text(manager.errorMessage ?? "Please try again.")
+            }
         }
+    }
+
+    private func isPastDueUndispatched(_ request: ScheduledRideRequest) -> Bool {
+        request.activeRideId == nil
+            && (request.status == .expired || request.scheduledPickupAt < Date())
+    }
+
+    private func removalTitle(for request: ScheduledRideRequest) -> String {
+        isPastDueUndispatched(request) ? "Remove" : "Cancel"
+    }
+
+    private func removalReason(for request: ScheduledRideRequest) -> String {
+        isPastDueUndispatched(request)
+            ? "Rider removed an undispatched past-due scheduled ride"
+            : "Rider cancelled scheduled ride"
     }
 
     private func money(_ cents: Int) -> String { String(format: "$%.2f", Double(cents) / 100) }

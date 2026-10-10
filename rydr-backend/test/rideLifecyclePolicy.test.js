@@ -22,6 +22,18 @@ test("Mission Control cancellation is a backend lifecycle action", () => {
   assert.ok(ACTIONS.admin_cancel.from.includes("inProgress"));
 });
 
+test("rider and driver cancellation accept every active status recognized by the apps", () => {
+  const activeStatuses = [
+    "accepted", "enRouteToPickup", "navigatingToPickup", "arrived", "arrivedAtPickup",
+    "waitingForRider", "inProgress", "navigatingToStop", "arrivedAtStop", "waitingAtStop",
+    "navigatingToDropoff"
+  ];
+  for (const status of activeStatuses) {
+    assert.ok(ACTIONS.rider_cancel.from.includes(status), `rider cancellation must support ${status}`);
+    assert.ok(ACTIONS.driver_cancel.from.includes(status), `driver cancellation must support ${status}`);
+  }
+});
+
 test("admin cancellation is finalized without charging the rider", () => {
   const outcome = calculateOutcome({
     rideType: "Rydr Go",

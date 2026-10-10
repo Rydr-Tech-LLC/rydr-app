@@ -27,6 +27,46 @@ function normalizeTierRates(value) {
   return Object.fromEntries(Object.entries(value).map(([key, rate]) => [tierFor(key), rate]));
 }
 
+function timestampMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") return value.toDate().getTime();
+  if (Number.isFinite(value._seconds)) return value._seconds * 1000;
+  if (Number.isFinite(value.seconds)) return value.seconds * 1000;
+  return 0;
+}
+
+async function getDriverRateCard({ uid, db = getFirestore() }) {
+  const driverRef = db.collection("drivers").doc(uid);
+  const publicRef = db.collection("publicDriverProfiles").doc(uid);
+  return db.runTransaction(async (tx) => {
+    const [driverSnap, publicSnap] = await Promise.all([tx.get(driverRef), tx.get(publicRef)]);
+    if (!driverSnap.exists) throw error("Driver profile not found", 404);
+
+    const driver = driverSnap.data() || {};
+    const publicProfile = publicSnap.exists ? (publicSnap.data() || {}) : {};
+    const driverRates = normalizeTierRates(driver.tierRates);
+    const publicRates = normalizeTierRates(publicProfile.tierRates);
+    const publicIsCanonical = Object.keys(publicRates).length > 0 && (
+      Object.keys(driverRates).length === 0
+      || timestampMillis(publicProfile.rateCardUpdatedAt) >= timestampMillis(driver.rateCardUpdatedAt)
+    );
+    const tierRates = publicIsCanonical ? publicRates : driverRates;
+
+    // Older clients could leave the private and public copies out of sync.
+    // Reconcile them on authenticated reads so driver UI and rider quotes use
+    // the same backend-owned rate card.
+    if (Object.keys(tierRates).length > 0) {
+      const rateCardUpdatedAt = publicIsCanonical
+        ? (publicProfile.rateCardUpdatedAt || admin.firestore.Timestamp.now())
+        : (driver.rateCardUpdatedAt || admin.firestore.Timestamp.now());
+      tx.set(driverRef, { tierRates, rateCardUpdatedAt }, { merge: true });
+      tx.set(publicRef, { tierRates, rateCardUpdatedAt }, { merge: true });
+    }
+    return { tierRates };
+  });
+}
+
 async function updateDriverRateCard({ uid, payload, db = getFirestore() }) {
   const rideType = canonical(payload?.rideType);
   const rateKey = tierFor(rideType);
@@ -60,4 +100,4 @@ async function updateDriverRateCard({ uid, payload, db = getFirestore() }) {
   });
 }
 
-module.exports = { updateDriverRateCard, canonical, validRate, normalizeTierRates };
+module.exports = { getDriverRateCard, updateDriverRateCard, canonical, validRate, normalizeTierRates, timestampMillis };

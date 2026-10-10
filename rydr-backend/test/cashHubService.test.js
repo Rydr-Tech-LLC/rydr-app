@@ -6,6 +6,7 @@ const {
   normalizeTripFormat,
   driverCanAccessRequest,
   driverVehicleSummary,
+  verifiedDriverName,
   validateScheduledTime,
   hasCurrentTerms,
   canTransitionDriverQueue,
@@ -45,6 +46,15 @@ test("Cash Hub uses arrangement formats rather than Rydr Dispatch tiers", () => 
     assert.equal(normalizeTripFormat(value), value);
   }
   assert.throws(() => normalizeTripFormat("Rydr Go"), /trip format/);
+});
+
+test("Cash Hub shows the driver's verified legal name instead of a username", () => {
+  assert.equal(verifiedDriverName({
+    legalFirstName: "Marcus",
+    legalLastName: "Nunnally",
+    displayName: "nunster2005"
+  }), "Marcus Nunnally");
+  assert.equal(verifiedDriverName({ firstName: "Maya", lastName: "Rivers", displayName: "maya_r" }), "Maya Rivers");
 });
 
 test("favorite-only Cash Hub requests reject drivers outside the backend-owned audience", () => {

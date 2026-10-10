@@ -10,6 +10,7 @@ struct MainTabView: View {
     @EnvironmentObject private var session: UserSessionManager
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var rideManager = RideManager()   // ✅ provide once here
+    @StateObject private var scheduledRideManager = ScheduledRideManager()
     @State private var showRecoveredRide = false
     @State private var didRequestProfileLoad = false
 
@@ -27,6 +28,11 @@ struct MainTabView: View {
                 session.loadUserProfile()
             }
             showRecoveredRide = rideManager.hasRecoveredActiveRide
+            scheduledRideManager.startScheduleListener()
+        }
+        .onChange(of: scheduledRideManager.activatedRideId, initial: true) { _, rideId in
+            guard let rideId else { return }
+            Task { await rideManager.recoverActiveRide(rideId: rideId) }
         }
         .onChange(of: rideManager.hasRecoveredActiveRide, initial: false) { _, recovered in
             showRecoveredRide = recovered

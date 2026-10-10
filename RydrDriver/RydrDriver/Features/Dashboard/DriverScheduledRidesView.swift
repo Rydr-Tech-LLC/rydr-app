@@ -42,6 +42,12 @@ private final class DriverScheduledRidesVM: ObservableObject {
     private var opportunityListener: ListenerRegistration?
     private var pendingSelectionListener: ListenerRegistration?
     private var assignmentListener: ListenerRegistration?
+    private static let openOpportunityStatuses: Set<String> = [
+        "seekingDrivers",
+        "awaitingRiderSelection",
+        "replacementSearching",
+        "replacementApprovalRequired"
+    ]
 
     deinit {
         opportunityListener?.remove()
@@ -60,8 +66,8 @@ private final class DriverScheduledRidesVM: ObservableObject {
             .addSnapshotListener { [weak self] snapshot, error in
                 Task { @MainActor in
                     if let error { self?.errorMessage = error.localizedDescription; return }
-                    self?.opportunities = snapshot?.documents.compactMap(Self.parseOpportunity)
-                        .sorted { $0.scheduledPickupAt < $1.scheduledPickupAt } ?? []
+                    guard let self else { return }
+                    self.opportunities = await self.openOpportunities(from: snapshot?.documents ?? [])
                 }
             }
         pendingSelectionListener = db.collectionGroup("offers")
@@ -70,8 +76,8 @@ private final class DriverScheduledRidesVM: ObservableObject {
             .addSnapshotListener { [weak self] snapshot, error in
                 Task { @MainActor in
                     if let error { self?.errorMessage = error.localizedDescription; return }
-                    self?.pendingSelections = snapshot?.documents.compactMap(Self.parseOpportunity)
-                        .sorted { $0.scheduledPickupAt < $1.scheduledPickupAt } ?? []
+                    guard let self else { return }
+                    self.pendingSelections = await self.openOpportunities(from: snapshot?.documents ?? [])
                 }
             }
         assignmentListener = db.collection("scheduledRideRequests")
@@ -146,6 +152,22 @@ private final class DriverScheduledRidesVM: ObservableObject {
             distanceMiles: double(data["distanceToPickupMiles"]),
             durationMinutes: 0
         )
+    }
+
+    private func openOpportunities(from documents: [QueryDocumentSnapshot]) async -> [DriverScheduledOpportunity] {
+        var open: [DriverScheduledOpportunity] = []
+        let now = Date()
+        for document in documents {
+            guard let opportunity = Self.parseOpportunity(document),
+                  opportunity.scheduledPickupAt > now,
+                  let requestRef = document.reference.parent.parent,
+                  let request = try? await requestRef.getDocument(),
+                  request.exists,
+                  let status = request.data()?["status"] as? String,
+                  Self.openOpportunityStatuses.contains(status) else { continue }
+            open.append(opportunity)
+        }
+        return open.sorted { $0.scheduledPickupAt < $1.scheduledPickupAt }
     }
 
     private static func parseAssignment(_ document: QueryDocumentSnapshot) -> DriverScheduledAssignment? {

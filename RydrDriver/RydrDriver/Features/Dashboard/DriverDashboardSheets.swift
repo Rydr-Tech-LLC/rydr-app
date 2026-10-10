@@ -125,7 +125,7 @@ struct RideTypeConfigurationView: View {
         HStack(spacing: 16) {
             ZStack {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.white.opacity(0.92))
+                    .fill(Color(.systemBackground).opacity(0.92))
                     .shadow(color: Color.red.opacity(0.12), radius: 12, y: 7)
                 Image(systemName: icon)
                     .font(.title2.weight(.bold))
@@ -153,8 +153,8 @@ struct RideTypeConfigurationView: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color.white,
-                            Color(red: 1.0, green: 0.93, blue: 0.93),
+                            Color(.secondarySystemBackground),
+                            Color.red.opacity(0.12),
                             Color.red.opacity(0.22)
                         ],
                         startPoint: .leading,
@@ -1002,7 +1002,12 @@ private struct DriverCommunityEvent: Identifiable, Decodable {
 
     var displayTime: String {
         guard let localTime else { return "Time TBA" }
-        return String(localTime.prefix(5))
+        let components = localTime.split(separator: ":").compactMap { Int($0) }
+        guard components.count >= 2,
+              let date = Calendar.current.date(
+                from: DateComponents(hour: components[0], minute: components[1])
+              ) else { return "Time TBA" }
+        return date.formatted(date: .omitted, time: .shortened)
     }
 
     var venueLine: String {
@@ -1329,7 +1334,7 @@ private struct DriverCommunityHubView: View {
         }
         .background(
             LinearGradient(
-                colors: [Color(.systemBackground), Color(red: 1.0, green: 0.965, blue: 0.97)],
+                colors: [Color(.systemBackground), Color(.systemGroupedBackground)],
                 startPoint: .top,
                 endPoint: .bottom
             )

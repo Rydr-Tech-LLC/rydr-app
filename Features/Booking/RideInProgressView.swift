@@ -136,6 +136,28 @@ struct RideInProgressView: View {
             } message: {
                 Text(reportResultMessage)
             }
+            .alert(
+                "Unable to cancel ride",
+                isPresented: Binding(
+                    get: { rideManager.rideCancellationErrorMessage != nil },
+                    set: { if !$0 { rideManager.rideCancellationErrorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { rideManager.rideCancellationErrorMessage = nil }
+            } message: {
+                Text(rideManager.rideCancellationErrorMessage ?? "Please try again.")
+            }
+            .overlay {
+                if rideManager.isCancellingRide {
+                    ZStack {
+                        Color.black.opacity(0.18).ignoresSafeArea()
+                        ProgressView("Cancelling ride…")
+                            .padding(.horizontal, 22)
+                            .padding(.vertical, 16)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    }
+                }
+            }
     }
 
     // MARK: content (awaiting→pickup vs on the way to drop-off)

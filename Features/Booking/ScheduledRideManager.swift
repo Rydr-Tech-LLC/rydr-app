@@ -14,8 +14,10 @@ final class ScheduledRideManager: ObservableObject {
     @Published private(set) var preview: ScheduledRidePreview?
     @Published private(set) var activeRequest: ScheduledRideRequest?
     @Published private(set) var scheduledRequests: [ScheduledRideRequest] = []
+    @Published private(set) var activatedRideId: String?
     @Published private(set) var offers: [ScheduledDriverOffer] = []
     @Published private(set) var isWorking = false
+    @Published private(set) var cancellingRequestIDs: Set<String> = []
     @Published var errorMessage: String?
 
     private let db = Firestore.firestore()
@@ -85,7 +87,7 @@ final class ScheduledRideManager: ObservableObject {
         guard let pickupCoordinate, let dropoffCoordinate else {
             throw ScheduledRideError.invalidResponse("Choose a valid pickup and drop-off first.")
         }
-        guard let preview else { throw ScheduledRideError.invalidResponse("Load the backend price range before scheduling.") }
+        guard let preview else { throw ScheduledRideError.invalidResponse("Wait for the estimated fare range before scheduling.") }
         isWorking = true
         defer { isWorking = false }
         var payload = basePayload(
@@ -113,7 +115,20 @@ final class ScheduledRideManager: ObservableObject {
 
     func cancel(reason: String = "Rider cancelled scheduled ride") async throws {
         guard let requestId = activeRequest?.id else { return }
+        try await cancel(requestId: requestId, reason: reason)
+    }
+
+    func cancel(requestId: String, reason: String = "Rider cancelled scheduled ride") async throws {
+        guard !cancellingRequestIDs.contains(requestId) else { return }
+        errorMessage = nil
+        cancellingRequestIDs.insert(requestId)
+        defer { cancellingRequestIDs.remove(requestId) }
         _ = try await backendRequest(path: "/scheduled-rides/\(requestId)/cancel", body: ["reason": reason])
+
+        // Do not wait for the Firestore listener to remove a successful
+        // cancellation. This makes swipe-to-remove deterministic even if the
+        // listener is reconnecting or the expired record has no further writes.
+        scheduledRequests.removeAll { $0.id == requestId }
     }
 
     func listen(requestId: String) {
@@ -146,8 +161,25 @@ final class ScheduledRideManager: ObservableObject {
             .addSnapshotListener { [weak self] snapshot, error in
                 Task { @MainActor in
                     if let error { self?.errorMessage = error.localizedDescription; return }
-                    self?.scheduledRequests = snapshot?.documents.compactMap { Self.parseRequest(id: $0.documentID, data: $0.data()) }
-                        .sorted { $0.scheduledPickupAt > $1.scheduledPickupAt } ?? []
+                    let requests: [ScheduledRideRequest] = snapshot?.documents.compactMap { document -> ScheduledRideRequest? in
+                        let data = document.data()
+                        guard data["riderArchivedAt"] == nil else { return nil }
+                        return Self.parseRequest(id: document.documentID, data: data)
+                    } ?? []
+                    self?.activatedRideId = requests
+                        .filter { $0.status == .active && $0.activeRideId != nil }
+                        .sorted { $0.scheduledPickupAt > $1.scheduledPickupAt }
+                        .first?.activeRideId
+                    self?.scheduledRequests = requests
+                        // Once regular dispatch has created the live ride, it
+                        // belongs in the normal ride flow rather than the
+                        // scheduled-rides list. Completed and cancelled rides
+                        // are historical records and should not remain here.
+                        .filter { request in
+                            request.activeRideId == nil
+                                && ![.active, .completed, .cancelled].contains(request.status)
+                        }
+                        .sorted { $0.scheduledPickupAt > $1.scheduledPickupAt }
                 }
             }
     }

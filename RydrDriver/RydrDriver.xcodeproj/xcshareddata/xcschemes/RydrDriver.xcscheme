@@ -50,6 +50,17 @@
                ReferencedContainer = "container:RydrDriver.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "8B2D1F082E98039C00229527"
+               BuildableName = "RydrDriverUITests.xctest"
+               BlueprintName = "RydrDriverUITests"
+               ReferencedContainer = "container:RydrDriver.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

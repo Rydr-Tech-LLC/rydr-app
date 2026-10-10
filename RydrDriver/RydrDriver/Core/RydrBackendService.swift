@@ -185,7 +185,7 @@ enum RydrBackendService {
         }
     }
 
-    static func updateRateCard(_ body: RateCardRequest) async throws {
+    static func updateRateCard(_ body: RateCardRequest) async throws -> RateCardResponse {
         guard let request = try await makeAuthenticatedRequest(path: "/driver/rate-card", method: "PUT", body: body) else {
             throw URLError(.badURL)
         }
@@ -194,6 +194,21 @@ enum RydrBackendService {
             let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Rate card could not be saved."
             throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
         }
+        return try JSONDecoder().decode(RateCardResponse.self, from: data)
+    }
+
+    static func loadRateCard() async throws -> RateCardLoadResponse {
+        guard let request = try await makeAuthenticatedRequest(
+            path: "/driver/rate-card",
+            method: "GET",
+            body: EmptyRequest()
+        ) else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Rate card could not be loaded."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        return try JSONDecoder().decode(RateCardLoadResponse.self, from: data)
     }
 
     static func cashHubCommand(requestId: String, action: String, body: [String: Any] = [:]) async throws {
@@ -252,6 +267,29 @@ enum RydrBackendService {
 
     static func submitSafetyReport(_ body: [String: Any]) async throws { try await sendAuthenticatedJSON(path: "/safety/reports", body: body) }
     static func submitSafetyAppeal(_ body: [String: Any]) async throws { try await sendAuthenticatedJSON(path: "/safety/appeals", body: body) }
+
+    static func fetchReportableRides(limit: Int = 30) async throws -> [ReportableRide] {
+        guard let baseURLString,
+              let baseURL = URL(string: baseURLString),
+              let endpoint = URL(string: "/safety/reportable-rides", relativeTo: baseURL),
+              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: true),
+              let user = Auth.auth().currentUser else {
+            throw URLError(.userAuthenticationRequired)
+        }
+        components.queryItems = [URLQueryItem(name: "limit", value: String(min(50, max(1, limit))))]
+        guard let url = components.url else { throw URLError(.badURL) }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
+        request.setValue(try await appCheckToken(), forHTTPHeaderField: "X-Firebase-AppCheck")
+        request.timeoutInterval = 20
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Completed rides could not be loaded."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        return try JSONDecoder().decode(ReportableRidesResponse.self, from: data).rides
+    }
 
     static func fetchDriverEarningsSummary() async throws -> EarningsSummaryResponse {
         guard let baseURLString,let base=URL(string:baseURLString),let url=URL(string:"/driver/earnings-summary",relativeTo:base),let user=Auth.auth().currentUser else{throw URLError(.userAuthenticationRequired)}
@@ -329,6 +367,7 @@ enum RydrBackendService {
         let betaWaiverAccepted: Bool
     }
     private struct VehiclePlateRequest: Encodable { let plate: String }
+    private struct EmptyRequest: Encodable {}
 
     private struct RideTransitionRequest: Encodable {
         let action: String
@@ -426,9 +465,45 @@ enum RydrBackendService {
         let useSuggestedPricing: Bool
     }
 
+    struct RateCardResponse: Decodable {
+        struct SavedRate: Decodable {
+            let minimumFare: Double
+            let perMile: Double
+            let perMinute: Double
+            let useSuggestedPricing: Bool
+        }
+
+        let ok: Bool
+        let rideType: String
+        let rate: SavedRate
+    }
+
+    struct RateCardLoadResponse: Decodable {
+        let ok: Bool
+        let tierRates: [String: RateCardResponse.SavedRate]
+    }
+
     struct EarningsSummaryResponse: Decodable {
         struct Trip: Decodable { let id:String;let pickup:String;let dropoff:String;let fareCents:Int;let completedAt:String? }
         let todayCents:Int;let weekCents:Int;let monthCents:Int;let acceptanceRate:Double?;let completionRate:Double?;let recentTrips:[Trip]
+    }
+
+    struct ReportableRide: Decodable, Identifiable, Hashable {
+        let id: String
+        let pickup: String
+        let dropoff: String
+        let rideType: String
+        let riderName: String
+        let completedAt: String?
+
+        var completedDate: Date? {
+            guard let completedAt else { return nil }
+            return ISO8601DateFormatter().date(from: completedAt)
+        }
+    }
+
+    private struct ReportableRidesResponse: Decodable {
+        let rides: [ReportableRide]
     }
 
     struct QueuePromotionResponse: Decodable {

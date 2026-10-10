@@ -23,13 +23,13 @@ struct DriverSafetyCenterView: View {
         .navigationTitle("Safety")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            model.start(activeRide: vm.activeRide)
+            model.start()
         }
         .onDisappear {
             model.stop()
         }
         .sheet(isPresented: $showIncidentReport) {
-            DriverIncidentReportSheet(activeRide: vm.activeRide) { type, rideId, description in
+            DriverIncidentReportSheet { type, rideId, description in
                 await model.submitIncidentReport(type: type, rideId: rideId, description: description)
             }
             .presentationDetents([.medium, .large])
@@ -73,7 +73,7 @@ struct DriverSafetyCenterView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Report an incident")
                             .font(.headline.weight(.bold))
-                        Text(vm.activeRide == nil ? "Submit a driver safety report for Mission Control review." : "Active ride attached: \(vm.activeRide?.id ?? "")")
+                        Text("Choose a completed trip and send the details directly to Mission Control for review.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -177,14 +177,11 @@ final class DriverSafetyCenterModel: ObservableObject {
     private let db = Firestore.firestore()
     private var penaltyListener: ListenerRegistration?
     private var appealListener: ListenerRegistration?
-    private var activeRide: DriverActiveRide?
-
     var hasInvestigationHold: Bool {
         penalties.contains { $0.requiresInvestigationHold && !$0.isClosed }
     }
 
-    func start(activeRide: DriverActiveRide?) {
-        self.activeRide = activeRide
+    func start() {
         guard let uid = Auth.auth().currentUser?.uid else {
             isLoading = false
             message = "Sign in to view safety records."
@@ -238,41 +235,31 @@ final class DriverSafetyCenterModel: ObservableObject {
             .first
     }
 
-    func submitIncidentReport(type: DriverIncidentType, rideId: String?, description: String) async {
-        guard let uid = Auth.auth().currentUser?.uid else {
+    func submitIncidentReport(type: DriverIncidentType, rideId: String, description: String) async -> String? {
+        guard Auth.auth().currentUser != nil else {
             message = "Sign in before submitting a report."
-            return
+            return message
         }
         let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 12 else {
             message = "Add more detail before submitting the report."
-            return
+            return message
         }
 
-        var payload: [String: Any] = [
+        let payload: [String: Any] = [
             "reportType": type.rawValue,
-            "reportTypeLabel": type.title,
-            "reporterRole": "driver",
-            "driverId": uid,
             "description": trimmed,
-            "status": "open",
-            "createdAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp()
+            "rideId": rideId
         ]
-        if let rideId, !rideId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            payload["rideId"] = rideId.trimmingCharacters(in: .whitespacesAndNewlines)
-        } else if let activeRide {
-            payload["rideId"] = activeRide.id
-            payload["riderId"] = activeRide.riderId
-            payload["riderName"] = activeRide.riderName
-        }
 
         do {
             try await RydrBackendService.submitSafetyReport(payload)
-            message = "Incident report submitted."
+            message = "Safety concern sent to Mission Control for investigation."
+            return nil
         } catch {
             RydrCrashReporter.record(error, context: "driver_submit_safety_report")
             message = "Report could not be submitted: \(error.localizedDescription)"
+            return message
         }
     }
 
@@ -404,6 +391,16 @@ enum DriverIncidentType: String, CaseIterable, Identifiable {
         case .other: return "Other"
         }
     }
+
+    var icon: String {
+        switch self {
+        case .riderBehavior: return "person.crop.circle.badge.exclamationmark"
+        case .safetyHazard: return "exclamationmark.triangle.fill"
+        case .vehicleOrRoadIssue: return "car.badge.gearshape.fill"
+        case .tripProblem: return "map.fill"
+        case .other: return "ellipsis.bubble.fill"
+        }
+    }
 }
 
 private struct DriverSafetyPenaltyRow: View {
@@ -473,54 +470,248 @@ private struct DriverSafetyPenaltyRow: View {
 }
 
 private struct DriverIncidentReportSheet: View {
-    let activeRide: DriverActiveRide?
-    let onSubmit: (DriverIncidentType, String?, String) async -> Void
+    let onSubmit: (DriverIncidentType, String, String) async -> String?
     @Environment(\.dismiss) private var dismiss
     @State private var type: DriverIncidentType = .riderBehavior
-    @State private var rideId: String = ""
+    @State private var rides: [RydrBackendService.ReportableRide] = []
+    @State private var selectedRide: RydrBackendService.ReportableRide?
     @State private var description: String = ""
+    @State private var isLoadingRides = true
     @State private var isSubmitting = false
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Incident") {
-                    Picker("Type", selection: $type) {
-                        ForEach(DriverIncidentType.allCases) { type in
-                            Text(type.title).tag(type)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+                    VStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.shield.fill")
+                            .font(.system(size: 30, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 58, height: 58)
+                            .background(Circle().fill(Styles.rydrGradient))
+                        Text("Report a safety concern")
+                            .font(.title2.weight(.heavy))
+                        Text("Select the completed trip so Mission Control receives the correct rider and trip details.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 12)
+
+                    reportSection(title: "Completed trip", systemImage: "car.fill") {
+                        if isLoadingRides {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                Text("Loading your completed rides…")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                        } else if rides.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("No completed rides found")
+                                    .font(.subheadline.weight(.bold))
+                                Text("Completed rides will appear here automatically. If this is an emergency, contact emergency services.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                        } else {
+                            Menu {
+                                ForEach(rides) { ride in
+                                    Button {
+                                        selectedRide = ride
+                                        errorMessage = nil
+                                    } label: {
+                                        Text(menuTitle(for: ride))
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .font(.headline.weight(.bold))
+                                        .foregroundStyle(Styles.rydrGradient)
+                                        .frame(width: 38, height: 38)
+                                        .background(Circle().fill(Color.red.opacity(0.10)))
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(selectedRide?.riderName ?? "Select a completed ride")
+                                            .font(.subheadline.weight(.bold))
+                                            .foregroundStyle(.primary)
+                                        Text(selectedRide.map(routeLabel) ?? "Tap to view your recent trips")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(14)
+                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            }
+
+                            if let selectedRide {
+                                HStack(spacing: 8) {
+                                    Label(selectedRide.rideType, systemImage: "car.side.fill")
+                                    Spacer()
+                                    Text(dateLabel(for: selectedRide))
+                                }
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
+                            }
                         }
                     }
-                    TextField("Ride ID", text: $rideId)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    TextEditor(text: $description)
-                        .frame(minHeight: 140)
+
+                    reportSection(title: "What happened?", systemImage: "list.bullet.clipboard.fill") {
+                        Menu {
+                            ForEach(DriverIncidentType.allCases) { incidentType in
+                                Button {
+                                    type = incidentType
+                                } label: {
+                                    Label(incidentType.title, systemImage: incidentType.icon)
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Label(type.title, systemImage: type.icon)
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: "chevron.down")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(14)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        }
+
+                        ZStack(alignment: .topLeading) {
+                            if description.isEmpty {
+                                Text("Tell Mission Control what happened. Include where it happened and anything that may help the investigation.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.horizontal, 17)
+                                    .padding(.vertical, 18)
+                                    .allowsHitTesting(false)
+                            }
+                            TextEditor(text: $description)
+                                .scrollContentBackground(.hidden)
+                                .frame(minHeight: 150)
+                                .padding(8)
+                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        }
+                    }
+
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "lock.shield.fill")
+                            .foregroundStyle(.blue)
+                        Text("Your report is sent securely to Mission Control and opened as a pending safety investigation.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    Button {
+                        submit()
+                    } label: {
+                        HStack(spacing: 9) {
+                            if isSubmitting { ProgressView().tint(.white) }
+                            Text(isSubmitting ? "Sending to Mission Control…" : "Submit safety report")
+                                .font(.headline.weight(.bold))
+                            if !isSubmitting { Image(systemName: "arrow.right") }
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(RoundedRectangle(cornerRadius: 17, style: .continuous).fill(canSubmit ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.gray.opacity(0.45))))
+                    }
+                    .disabled(!canSubmit)
                 }
+                .padding(16)
             }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Report Incident")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(isSubmitting ? "Submitting" : "Submit") {
-                        Task {
-                            isSubmitting = true
-                            await onSubmit(type, rideId.isEmpty ? activeRide?.id : rideId, description)
-                            isSubmitting = false
-                            dismiss()
-                        }
-                    }
-                    .disabled(isSubmitting || description.trimmingCharacters(in: .whitespacesAndNewlines).count < 12)
-                }
             }
-            .onAppear {
-                if rideId.isEmpty, let activeRide {
-                    rideId = activeRide.id
-                }
+            .task {
+                await loadRides()
             }
         }
+    }
+
+    private var canSubmit: Bool {
+        !isSubmitting && selectedRide != nil && description.trimmingCharacters(in: .whitespacesAndNewlines).count >= 12
+    }
+
+    private func reportSection<Content: View>(title: String, systemImage: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: systemImage)
+                .font(.headline.weight(.bold))
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+    }
+
+    private func loadRides() async {
+        isLoadingRides = true
+        errorMessage = nil
+        do {
+            let loaded = try await RydrBackendService.fetchReportableRides()
+            rides = loaded
+            if selectedRide == nil { selectedRide = loaded.first }
+        } catch {
+            errorMessage = "Completed rides could not be loaded: \(error.localizedDescription)"
+        }
+        isLoadingRides = false
+    }
+
+    private func submit() {
+        guard canSubmit, let selectedRide else { return }
+        Task {
+            isSubmitting = true
+            errorMessage = nil
+            let submissionError = await onSubmit(type, selectedRide.id, description)
+            isSubmitting = false
+            if let submissionError {
+                errorMessage = submissionError
+            } else {
+                dismiss()
+            }
+        }
+    }
+
+    private func routeLabel(_ ride: RydrBackendService.ReportableRide) -> String {
+        "\(ride.pickup) → \(ride.dropoff)"
+    }
+
+    private func menuTitle(for ride: RydrBackendService.ReportableRide) -> String {
+        "\(dateLabel(for: ride)) · \(ride.pickup) → \(ride.dropoff)"
+    }
+
+    private func dateLabel(for ride: RydrBackendService.ReportableRide) -> String {
+        guard let date = ride.completedDate else { return "Completed ride" }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
 

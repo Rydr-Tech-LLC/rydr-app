@@ -51,6 +51,12 @@ function timestampMillis(value) {
   return null;
 }
 
+function isPastDueUndispatchedScheduledRide(request, nowMillis = Date.now()) {
+  const pickupMillis = timestampMillis(request?.scheduledPickupAt);
+  return request?.status === "expired"
+    || (!request?.activeRideId && pickupMillis != null && pickupMillis < nowMillis);
+}
+
 function coordinate(value, name) {
   const latitude = Number(value?.latitude ?? value?.lat);
   const longitude = Number(value?.longitude ?? value?.lng);
@@ -701,15 +707,29 @@ async function cancelScheduledRide({ uid, requestId, reason, db = getFirestore()
   const isRider = request.riderId === uid;
   const isDriver = request.assignedDriverId === uid;
   if (!isRider && !isDriver) throw error("This scheduled ride does not belong to this user", 403);
-  if (["active", "completed", "cancelled", "expired"].includes(request.status)) throw error("This scheduled ride can no longer be cancelled here", 409);
+  if (["active", "completed", "cancelled"].includes(request.status)
+      || (request.status === "expired" && !isRider)) {
+    throw error("This scheduled ride can no longer be cancelled here", 409);
+  }
 
   if (isRider) {
-    await requestRef.set({ status: "cancelled", cancelledByRole: "rider", cancellationReason: text(reason, 500), cancelledAt: now, updatedAt: now }, { merge: true });
+    const pastDueUndispatched = isPastDueUndispatchedScheduledRide(request, now.toMillis());
+    const update = {
+      status: "cancelled",
+      cancelledByRole: "rider",
+      cancellationReason: text(reason, 500),
+      cancelledAt: now,
+      updatedAt: now
+    };
+    if (pastDueUndispatched) update.riderArchivedAt = now;
+    await requestRef.set(update, { merge: true });
     if (request.assignedDriverId) {
       await db.collection("drivers").doc(request.assignedDriverId).collection("scheduledRideLocks").doc(requestId)
         .set({ status: "cancelled", updatedAt: now }, { merge: true });
     }
-    return { status: "cancelled", cancellationFeeCents: 0 };
+    await closeRemainingOpportunities(requestRef, null, now);
+    await closeRemainingOffers(requestRef, null, now);
+    return { status: "cancelled", archived: pastDueUndispatched, cancellationFeeCents: 0 };
   }
 
   const excluded = [...new Set([...(request.attemptedDriverIds || []), uid])];
@@ -980,6 +1000,7 @@ module.exports = {
   scheduledCandidateEligible,
   quoteFor,
   onlineReadinessDeadlineMillis,
+  isPastDueUndispatchedScheduledRide,
   previewScheduledRide,
   createScheduledRide,
   respondToScheduledRide,

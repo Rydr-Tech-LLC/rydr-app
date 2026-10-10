@@ -8,6 +8,7 @@ const {
   MINIMUM_ONLINE_LEAD_MS,
   DISPATCH_FALLBACK_LEAD_MS,
   onlineReadinessDeadlineMillis,
+  isPastDueUndispatchedScheduledRide,
   validateSchedule,
   scheduledCandidateEligible,
   quoteFor
@@ -80,4 +81,21 @@ test("online readiness deadline reserves travel time plus a ten-minute arrival b
 
 test("unassigned scheduled rides enter regular dispatch five minutes before pickup", () => {
   assert.equal(DISPATCH_FALLBACK_LEAD_MS, 5 * 60 * 1000);
+});
+
+test("past-due undispatched scheduled rides can be archived from the rider list", () => {
+  const now = Date.UTC(2026, 9, 10, 12);
+  assert.equal(isPastDueUndispatchedScheduledRide({
+    status: "expired",
+    scheduledPickupAt: now + 60_000
+  }, now), true);
+  assert.equal(isPastDueUndispatchedScheduledRide({
+    status: "dispatchFallbackSearching",
+    scheduledPickupAt: now - 60_000
+  }, now), true);
+  assert.equal(isPastDueUndispatchedScheduledRide({
+    status: "active",
+    activeRideId: "ride-1",
+    scheduledPickupAt: now - 60_000
+  }, now), false);
 });

@@ -152,7 +152,12 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   const vehicle = driver.vehicle || {};
   const cashHubPresence = {
     driverUid: uid,
-    driverName: String(driver.displayName || [driver.firstName, driver.lastName].filter(Boolean).join(" ") || "Cash Hub Driver").trim(),
+    driverName: String(
+      driver.legalName
+      || [driver.legalFirstName || driver.firstName, driver.legalLastName || driver.lastName].filter(Boolean).join(" ")
+      || driver.displayName
+      || "Cash Hub Driver"
+    ).trim(),
     profilePhotoURL: driver.profilePhotoURL || driver.photoURL || "",
     vehicleInfo: [vehicle.color, vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "),
     cashHubRating: Number(driver.cashHubRating ?? driver.rating ?? 5),

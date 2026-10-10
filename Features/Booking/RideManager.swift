@@ -308,6 +308,22 @@ struct RideLifecycleSnapshot {
     let proratedCancellationDistanceMiles: Double?
 }
 
+struct RideRecoverySnapshot {
+    let rideId: String
+    let pickup: String
+    let dropoff: String
+    let rideType: String
+    let estimate: RideEstimate
+    let driver: Driver
+    let status: Ride.Status
+    let startedAt: Date
+    let fare: Double
+    let pickupCoordinate: CLLocationCoordinate2D
+    let dropoffCoordinate: CLLocationCoordinate2D
+    let driverCoordinate: CLLocationCoordinate2D
+    let waitChargePerMinute: Double
+}
+
 enum RideRequestError: LocalizedError {
     case driverTimedOut
     case noDriversAvailable
@@ -353,6 +369,7 @@ protocol RideService: AnyObject, Sendable {
     func awaitDriverDecision(rideId: String) async throws -> DriverDecision
     func refreshRideDispatch(rideId: String) async throws -> RideDispatchRefresh
     func rideLifecycleStream(rideId: String) -> AsyncThrowingStream<RideLifecycleSnapshot, Error>
+    func recoverRide(rideId: String) async throws -> RideRecoverySnapshot
     func driverLocationStream(rideId: String) -> AsyncStream<CLLocationCoordinate2D>
     func cancelRide(rideId: String, mode: RideCancellationMode) async throws -> BackendRideFinancialOutcome?
     func cancelMidRide(rideId: String) async throws -> BackendRideFinancialOutcome
@@ -375,6 +392,8 @@ final class RideManager: ObservableObject {
     @Published var driverSearchTargetCount = 3
     @Published var driverSearchCompletedCount = 0
     @Published var rideRequestErrorMessage: String?
+    @Published var rideCancellationErrorMessage: String?
+    @Published private(set) var isCancellingRide = false
     @Published var hasRecoveredActiveRide = false
 
     // Payment
@@ -444,7 +463,7 @@ final class RideManager: ObservableObject {
     private let pendingRideSnapshotKey = "rydr.pendingRideSnapshot.v1"
     private let driverDecisionTimeoutSeconds: UInt64 = 18
     private var pendingRideWasRestored = false
-    private var isCancellingRide = false
+    private var recoveringRideId: String?
 
     init(rideService: RideService = FirestoreRideService()) {
         self.rideService = rideService
@@ -745,7 +764,6 @@ final class RideManager: ObservableObject {
 
     func riderCancelAndFindAnother() {
         guard let ride = currentRide else { return }
-        cancellationSoundPlayer.play()
 
         switch ride.status {
         case .enRouteToPickup, .waitingForRider:
@@ -759,8 +777,56 @@ final class RideManager: ObservableObject {
 
     func riderCancelRide() {
         guard currentRide != nil else { return }
-        cancellationSoundPlayer.play()
         cancelRideWithoutReassignment(mode: .cancelRide)
+    }
+
+    /// Rebuilds the rider's active UI from the authoritative ride document.
+    /// Scheduled dispatch can create a live ride while the app is backgrounded,
+    /// so it cannot rely on the local snapshot used by ordinary matching.
+    func recoverActiveRide(rideId: String) async {
+        guard !rideId.isEmpty else { return }
+        if currentServiceRideId == rideId, currentRide != nil { return }
+        guard recoveringRideId != rideId else { return }
+
+        recoveringRideId = rideId
+        defer { recoveringRideId = nil }
+        do {
+            let recovered = try await rideService.recoverRide(rideId: rideId)
+            currentServiceRideId = recovered.rideId
+            cachedPickup = recovered.pickup
+            cachedDropoff = recovered.dropoff
+            cachedRideType = recovered.rideType
+            cachedEstimate = recovered.estimate
+            cachedPickupCoordinate = recovered.pickupCoordinate
+            cachedDropoffCoordinate = recovered.dropoffCoordinate
+            pickupCoordinate = recovered.pickupCoordinate
+            dropoffCoordinate = recovered.dropoffCoordinate
+            liveDriverCoordinate = recovered.driverCoordinate
+            selectedDriver = recovered.driver
+            currentBaseFare = recovered.fare
+            currentWaitChargePerMinute = recovered.waitChargePerMinute
+            currentRide = Ride(
+                pickup: recovered.pickup,
+                dropoff: recovered.dropoff,
+                rideType: recovered.rideType,
+                estimate: recovered.estimate,
+                driver: recovered.driver,
+                startedAt: recovered.startedAt,
+                status: recovered.status,
+                fare: recovered.fare
+            )
+            pickupEtaSecondsRemaining = recovered.status == .enRouteToPickup
+                ? estimatedPickupEtaSeconds(from: recovered.driverCoordinate, to: recovered.pickupCoordinate)
+                : 0
+            destinationEtaSecondsRemaining = max(60, Int((recovered.estimate.durationMinutes * 0.6 * 60).rounded()))
+            state = .inProgress
+            hasRecoveredActiveRide = true
+            clearPendingRideSnapshot()
+            persistActiveRideSnapshot()
+            observeActiveRideLifecycleIfNeeded()
+        } catch {
+            rideRequestErrorMessage = "Unable to restore your active ride: \(error.localizedDescription)"
+        }
     }
 
     /// Finalize the rider UI exclusively from the backend financial outcome.
@@ -946,19 +1012,23 @@ final class RideManager: ObservableObject {
     ) {
         if notifyBackend, let rideId = currentServiceRideId {
             guard !isCancellingRide else { return }
+            rideCancellationErrorMessage = nil
             isCancellingRide = true
             Task { [weak self] in
                 guard let self else { return }
                 do {
                     _ = try await rideService.cancelRide(rideId: rideId, mode: mode)
                     await MainActor.run {
+                        self.cancellationSoundPlayer.play()
                         self.isCancellingRide = false
                         self.cancelBeforePickupAndReturnToSelection(mode: mode, notifyBackend: false)
                     }
                 } catch {
                     await MainActor.run {
                         self.isCancellingRide = false
-                        self.rideRequestErrorMessage = "Cancellation failed: \(error.localizedDescription)"
+                        let message = "Cancellation failed: \(error.localizedDescription)"
+                        self.rideRequestErrorMessage = message
+                        self.rideCancellationErrorMessage = message
                         self.observeActiveRideLifecycleIfNeeded()
                     }
                 }
@@ -1008,10 +1078,13 @@ final class RideManager: ObservableObject {
 
     private func cancelRideWithoutReassignment(mode: RideCancellationMode) {
         guard let rideId = currentServiceRideId else {
-            rideRequestErrorMessage = "The backend ride record is unavailable. Please try again."
+            let message = "The backend ride record is unavailable. Please try again."
+            rideRequestErrorMessage = message
+            rideCancellationErrorMessage = message
             return
         }
         guard !isCancellingRide else { return }
+        rideCancellationErrorMessage = nil
         isCancellingRide = true
 
         Task { [weak self] in
@@ -1019,13 +1092,16 @@ final class RideManager: ObservableObject {
             do {
                 _ = try await rideService.cancelRide(rideId: rideId, mode: mode)
                 await MainActor.run {
+                    self.cancellationSoundPlayer.play()
                     self.isCancellingRide = false
                     self.finishRiderCancellation()
                 }
             } catch {
                 await MainActor.run {
                     self.isCancellingRide = false
-                    self.rideRequestErrorMessage = "Cancellation failed: \(error.localizedDescription)"
+                    let message = "Cancellation failed: \(error.localizedDescription)"
+                    self.rideRequestErrorMessage = message
+                    self.rideCancellationErrorMessage = message
                     self.observeActiveRideLifecycleIfNeeded()
                 }
             }
@@ -1060,17 +1136,23 @@ final class RideManager: ObservableObject {
     private func cancelMidRideAndComplete() {
         guard let ride = currentRide else { return }
         guard let backendRideId = currentServiceRideId else {
-            rideRequestErrorMessage = "The backend ride record is unavailable. Please contact support before cancelling."
+            let message = "The backend ride record is unavailable. Please contact support before cancelling."
+            rideRequestErrorMessage = message
+            rideCancellationErrorMessage = message
             return
         }
 
         rideLifecycleTask?.cancel()
         decisionTask?.cancel()
+        rideCancellationErrorMessage = nil
+        isCancellingRide = true
 
         Task {
             do {
                 let outcome = try await rideService.cancelMidRide(rideId: backendRideId)
                 await MainActor.run {
+                    self.cancellationSoundPlayer.play()
+                    self.isCancellingRide = false
                     self.finalizeRide(
                         ride,
                         backendRideId: backendRideId,
@@ -1081,7 +1163,10 @@ final class RideManager: ObservableObject {
                 }
             } catch {
                 await MainActor.run {
-                    self.rideRequestErrorMessage = "Cancellation failed: \(error.localizedDescription)"
+                    self.isCancellingRide = false
+                    let message = "Cancellation failed: \(error.localizedDescription)"
+                    self.rideRequestErrorMessage = message
+                    self.rideCancellationErrorMessage = message
                     self.observeActiveRideLifecycleIfNeeded()
                 }
             }
