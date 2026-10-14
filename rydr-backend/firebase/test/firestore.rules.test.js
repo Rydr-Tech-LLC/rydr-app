@@ -200,3 +200,16 @@ test("marketplace access rejects expired documents and beta screening bypass aft
   await seed({ backgroundChecksRequired: true }, { backgroundScreening: { status: "passed", reviewedBy: "admin", reportReference: "provider/report", requirementVersion: "open-pilot-v1", validUntil: future } });
   await assertSucceeds(getDoc(doc(db, "cashHubDriverProfiles/example")));
 });
+
+test("vehicle security archive is readable only by admin and cannot be changed by clients", async () => {
+  await environment.withSecurityRulesDisabled(async context => {
+    await setDoc(doc(context.firestore(), "drivers/driver-1/vehicleArchive/record-1"), { vehicle: { vin: "fixture", plate: "SAFE1" }, action: "removed" });
+  });
+  const driver = environment.authenticatedContext("driver-1").firestore();
+  const admin = environment.authenticatedContext("admin-1", { admin: true }).firestore();
+  const archivePath = "drivers/driver-1/vehicleArchive/record-1";
+  await assertFails(getDoc(doc(driver, archivePath)));
+  await assertSucceeds(getDoc(doc(admin, archivePath)));
+  await assertFails(updateDoc(doc(driver, archivePath), { action: "edited" }));
+  await assertFails(updateDoc(doc(admin, archivePath), { action: "edited" }));
+});

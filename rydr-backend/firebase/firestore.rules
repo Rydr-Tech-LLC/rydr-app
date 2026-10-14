@@ -1024,6 +1024,11 @@ service cloud.firestore {
         && affectedKeys().hasOnly(driverClientWritableProfileFields());
       allow delete: if isAdmin();
 
+      match /vehicleArchive/{archiveId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+
       match /notificationTokens/{tokenId} {
         allow read: if isSelf(uid) || isAdmin();
         allow create, update: if validNotificationToken(uid, "driver", "driver");

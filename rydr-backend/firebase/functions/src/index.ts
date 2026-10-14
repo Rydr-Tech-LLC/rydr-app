@@ -355,3 +355,5 @@ export const deleteDriverVehicle = onCall(async request => {
   await deleteSavedDriverVehicle(auth.uid, vehicleId, request.data?.vin, request.data?.plate);
   return { deleted: true };
 });
+
+export { onDriverVehicleHistoryChanged } from "./triggers/driverVehicleHistory";

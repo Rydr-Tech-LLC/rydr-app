@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const Module = require('node:module');
 const rows = new Map();
 const DELETE = Symbol('delete');
-function ref(key) {return {key};}
+function ref(key) {return {key,collection:name=>({doc:id=>ref(`${key}/${name}/${id}`)})};}
 const db = { collection: name => ({doc:id=>ref(`${name}/${id}`), where:()=>({query:name})}), runTransaction:async fn=>{
  const writes=[];
  await fn({get:async r=>r.query ? {docs:[...(rows.get('rides')??[])].map(data=>({data:()=>data}))} : {exists:rows.has(r.key),data:()=>rows.get(r.key)}, update:(r,data)=>writes.push(()=>{
@@ -35,4 +35,16 @@ test('current deletion removes driving eligibility and preserves other saved veh
 });
 test('stale deletion cannot remove a vehicle changed by another session',async()=>{
  seed();await assert.rejects(deleteSavedDriverVehicle('driver','current','OTHER',current.plate),/changed/);assert.deepEqual(rows.get('drivers/driver').vehicle,current);
+});
+
+test('every removal retains vehicle VIN, plate and actor in a server archive',async()=>{
+ seed();const id=await addSavedDriverVehicle('driver',added,{});await deleteSavedDriverVehicle('driver',id);
+ const archives=[...rows.entries()].filter(([key])=>key.startsWith('drivers/driver/vehicleArchive/')).map(([,v])=>v);
+ assert.equal(archives.length,1);assert.equal(archives[0].vehicle.vin,added.vin);assert.equal(archives[0].vehicle.plate,added.plate);assert.equal(archives[0].actorRole,'driver');
+});
+test('Mission Control removals preserve the administrator and required reason',async()=>{
+ seed();const id=await addSavedDriverVehicle('driver',added,{});
+ const {removeDriverVehicle}=require('../lib/services/driverVehicleArchivePolicy');
+ await removeDriverVehicle({db,FieldValue:{serverTimestamp:()=>123,delete:()=>DELETE},uid:'driver',vehicleId:id,actorUid:'admin-1',actorRole:'admin',reason:'Driver requested removal'});
+ const row=[...rows.entries()].find(([key])=>key.startsWith('drivers/driver/vehicleArchive/'))[1];assert.equal(row.actorUid,'admin-1');assert.equal(row.actorRole,'admin');assert.equal(row.reason,'Driver requested removal');assert.equal(row.vehicle.plate,added.plate);
 });
