@@ -40,9 +40,9 @@ export default function PromotionActions({ id, status }: { id: string; status: s
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
-        {status !== "active" && <Button label="Activate" loading={loading === "activate"} onClick={() => run("activate")} />}
+        {status !== "archived" && status !== "active" && <Button label="Activate" loading={loading === "activate"} onClick={() => { if(window.confirm("Activate this promotion with its saved terms? Review the campaign before continuing.")) void run("activate"); }} />}
         {status === "active" && <Button label="Pause" loading={loading === "pause"} onClick={() => run("pause")} />}
-        {status !== "scheduled" && status !== "active" && <Button label="Schedule" loading={loading === "schedule"} onClick={() => run("schedule")} />}
+        {status !== "archived" && status !== "scheduled" && status !== "active" && <Button label="Schedule" loading={loading === "schedule"} onClick={() => { if(window.confirm("Schedule this promotion with its saved terms?")) void run("schedule"); }} />}
         {status !== "ended" && <Button label="End" loading={loading === "end"} onClick={() => run("end")} muted />}
         <Button label="Reuse" loading={loading === "reuse"} onClick={() => run("reuse")} muted />
         <Button label="Delete" loading={loading === "archive"} onClick={archive} danger />

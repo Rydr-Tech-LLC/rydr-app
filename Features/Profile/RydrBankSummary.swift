@@ -223,6 +223,7 @@ struct RydrBankView: View {
     @StateObject private var vm = RydrBankVM()
 
     // Transfer sheet state
+    @State private var showPromotions = false
     @State private var showTransferSheet = false
     @State private var transferTargetEmail = ""
     @State private var codePendingTransfer: RydrBankCode?
@@ -242,6 +243,7 @@ struct RydrBankView: View {
                 VStack(spacing: 22) {
                     bankHeader
                     balanceCard
+                    Button { showPromotions = true } label: { Label("Promotions & ride rewards", systemImage: "gift.fill").font(.headline).frame(maxWidth: .infinity).padding().background(Color.purple.opacity(0.1), in: RoundedRectangle(cornerRadius: 16)) }.padding(.horizontal)
                     activeCodesSection
                     earnMoreCard
 
@@ -261,6 +263,7 @@ struct RydrBankView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { vm.start() }
         .onDisappear { vm.stop() }
+        .sheet(isPresented: $showPromotions) { RiderPromotionPanel() }
         .sheet(isPresented: $showTransferSheet) {
             TransferSheet
         }
@@ -1237,4 +1240,105 @@ private extension RydrBankCode {
         default: return "ticket"
         }
     }
+}
+
+// Account-wide code enrollment is validated by the backend; client inputs never set a discount or bonus amount.
+struct RiderPromotionPanel: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var code = ""
+    @State private var message: String?
+    @State private var loading = false
+    @State private var offers: [RiderPromotionOffer] = []
+    @State private var progress: [RiderPromotionProgress] = []
+    @State private var rewards: [RiderPromotionReward] = []
+    @State private var bonuses: [RiderPromotionBonus] = []
+    private let gradient = LinearGradient(colors: [.red, .purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing)
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Your next reward").font(.title2.bold())
+                        Text("Earn ride rewards and add promo codes. Discounts never reduce your driver’s pay.").font(.subheadline)
+                    }.foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading).padding(24).background(gradient, in: RoundedRectangle(cornerRadius: 24))
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Have a promo code?").font(.headline)
+                        TextField("Enter promo code", text: $code).textInputAutocapitalization(.characters).autocorrectionDisabled().textFieldStyle(.roundedBorder).accessibilityIdentifier("promotionCode")
+                        Button { Task { await enroll() } } label: { Text(loading ? "Checking…" : "Add code").font(.headline).frame(maxWidth: .infinity).padding(12).foregroundStyle(.white).background(gradient, in: RoundedRectangle(cornerRadius: 12)) }.disabled(loading || code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("promotionEnroll")
+                        if let message { Text(message).font(.footnote).accessibilityIdentifier("promotionMessage") }
+                    }.padding().background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
+                    if loading && offers.isEmpty { ProgressView("Loading promotions…") }
+                    if !loading && offers.isEmpty { Text("No promotions available yet. Eligible offers will appear here.").font(.subheadline).foregroundStyle(.secondary) }
+                    ForEach(offers) { offer in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(offer.title).font(.headline)
+                            if let description = offer.description, !description.isEmpty { Text(description).font(.subheadline) }
+                            Text(offer.terms).font(.subheadline.weight(.semibold))
+                            if let goal = offer.milestoneRideCount {
+                                let accountProgress = progress.first { $0.promotionId == offer.id }
+                                let count = max(0, (accountProgress?.eligibleRideCount ?? 0) - (accountProgress?.issuedCount ?? 0) * goal)
+                                ProgressView(value: Double(min(count, goal)), total: Double(max(1, goal)))
+                                Text("\(count) qualifying rides · goal \(goal)").font(.caption)
+                            }
+                            Text(offer.rideTypes.isEmpty ? "All eligible ride types" : offer.rideTypes.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                            if !offer.markets.isEmpty { Text(offer.markets.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary) }
+                        }.padding().frame(maxWidth: .infinity, alignment: .leading).background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
+                    }
+                    ForEach(rewards.filter { $0.status == "available" || $0.status == "reserved" }) { reward in
+                        VStack(alignment: .leading, spacing: 8) { Label(reward.promotionTitle, systemImage: "gift.fill").font(.headline); Text(reward.status == "reserved" ? "Reserved for your ride" : "Earned reward — applies automatically to an eligible ride").font(.subheadline); if let offer = reward.offer { Text(offer.terms).font(.footnote) }; if let expires = reward.expiresAt { Text("Expires \(riderPromotionExpiration(expires))").font(.caption) } }.padding().frame(maxWidth: .infinity, alignment: .leading).background(Color.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 20))
+                    }
+                    ForEach(bonuses) { bonus in
+                        HStack { VStack(alignment: .leading) { Text(bonus.title ?? "Promotion bonus").font(.headline); Text(bonus.status == "paid" ? "Added to your payout balance" : "Processing — Rydr reviews any payment issues").font(.caption) }; Spacer(); Text(Double(bonus.rewardCents)/100, format: .currency(code: "USD")).font(.headline) }.padding().background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
+                    }
+                }.padding(20)
+            }.background(Color(.systemGroupedBackground)).navigationTitle("Promotions").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.accessibilityIdentifier("promotionDone") } }
+                .task { await load() }.refreshable { await load() }
+        }
+    }
+    @MainActor private func request(path: String, body: [String: String]? = nil) async throws -> Data {
+        guard let user = Auth.auth().currentUser else { throw NSError(domain: "Promotions", code: 401, userInfo: [NSLocalizedDescriptionKey: "Sign in to view your promotions."]) }
+        let token = try await user.getIDToken()
+        var request = URLRequest(url: URL(string: "https://rydr-stripe-backend.onrender.com\(path)")!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let body { request.httpMethod = "POST"; request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try JSONSerialization.data(withJSONObject: body) }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw NSError(domain: "Promotions", code: 1, userInfo: [NSLocalizedDescriptionKey: json?["message"] as? String ?? "Promotions could not be loaded. Try again."])
+        }
+        return data
+    }
+    @MainActor private func load() async {
+        loading = true; defer { loading = false }
+        do { let data = try await request(path: "/promotions/account?audience=riders"); let summary = try JSONDecoder().decode(RiderPromotionSummary.self, from: data); offers = summary.promotions; progress = summary.progress; rewards = summary.rewards; bonuses = summary.bonuses }
+        catch { message = error.localizedDescription }
+    }
+    @MainActor private func enroll() async {
+        loading = true; defer { loading = false }
+        do { _ = try await request(path: "/promotions/enroll", body: ["code": code.trimmingCharacters(in: .whitespacesAndNewlines), "audience": "riders"]); code = ""; message = "Code added. Your promotion applies to qualifying rides."; await load() }
+        catch { message = error.localizedDescription }
+    }
+}
+private struct RiderPromotionSummary: Decodable { let promotions: [RiderPromotionOffer]; let progress: [RiderPromotionProgress]; let rewards: [RiderPromotionReward]; let bonuses: [RiderPromotionBonus] }
+private struct RiderPromotionOffer: Decodable, Identifiable {
+    let id: String; let title: String; let description: String?; let milestoneRideCount: Int?; let bonusCents: Int?; let rewardCents: Int?; let discountKind: String?; let discountPercent: Int?; let discountCents: Int?; let maxDiscountCents: Int?; let maxDistanceMiles: Double?; let markets: [String]; let rideTypes: [String]
+    var terms: String {
+        if let bonusCents { return String(format: "$%.2f extra per qualifying ride", Double(bonusCents)/100) }
+        if let rewardCents { return String(format: "$%.2f reward", Double(rewardCents)/100) }
+        if let maxDistanceMiles { return "Fare and booking fee covered up to \(maxDistanceMiles.formatted()) miles. Excess fare and extras are payable." }
+        if let discountPercent { return "\(discountPercent)% off fare and booking fee" }
+        if let amount = discountCents ?? maxDiscountCents { return String(format: "Up to $%.2f off fare and booking fee", Double(amount)/100) }
+        return "Reward applies within the promotion limits."
+    }
+}
+private struct RiderPromotionProgress: Decodable { let promotionId: String; let eligibleRideCount: Int?; let issuedCount: Int? }
+private struct RiderPromotionReward: Decodable, Identifiable { let id: String; let promotionTitle: String; let status: String; let expiresAt: String?; let offer: RiderPromotionOffer? }
+private struct RiderPromotionBonus: Decodable, Identifiable { let id: String; let title: String?; let status: String; let rewardCents: Int }
+
+private func riderPromotionExpiration(_ value: String) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    guard let date = formatter.date(from: value) else { return String(value.prefix(10)) }
+    return date.formatted(date: .abbreviated, time: .omitted)
 }

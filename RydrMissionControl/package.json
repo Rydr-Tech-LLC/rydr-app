@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "set-admin": "node scripts/setAdminClaim.mjs",
-    "test:auth-compatibility": "node --no-experimental-require-module --test scripts/authCompatibility.test.cjs"
+    "test:auth-compatibility": "node --no-experimental-require-module --test scripts/authCompatibility.test.cjs",
+    "test:promotions": "node --test test/promotions.test.cjs"
   },
   "dependencies": {
     "@google-cloud/firestore": "^9.1.0",

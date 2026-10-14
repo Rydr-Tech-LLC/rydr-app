@@ -68,3 +68,15 @@ function rideWithFinancialOutcome(ride, outcome) {
 }
 
 module.exports = { normalizeFinancialOutcome, rideWithFinancialOutcome };
+
+// Signed asynchronous success must settle the same server-owned discounted fare.
+function paidOutcomeForIntent(outcome, ride, intent, reservation) {
+  if (!outcome || outcome.status === 'paid') return null;
+  if (intent.metadata?.riderId !== ride.riderId || intent.metadata?.driverId !== (ride.driverId || '')) throw new Error('payment_intent_owner_mismatch');
+  const discount = reservation?.discountCents ?? ride.backendPromotionDiscountCents ?? 0;
+  if (!Number.isInteger(discount) || discount < 0) throw new Error('promotion_discount_invalid');
+  const adjusted = require('./promotionPolicy').financialAfterPromotion(outcome, discount);
+  if (intent.amount !== adjusted.finalRiderChargeCents || intent.currency !== 'usd') throw new Error('payment_intent_amount_mismatch');
+  return {...adjusted,status:'paid',paymentIntentId:intent.id,appliedPromotionId:reservation?.promotionId ?? ride.appliedPromotionId ?? null};
+}
+module.exports.paidOutcomeForIntent = paidOutcomeForIntent;

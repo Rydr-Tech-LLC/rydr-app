@@ -28,7 +28,7 @@ export { onDriverApprovalDecision } from "./triggers/driverApprovalNotifications
 export { onDriverAutoApprovalEligibility } from "./triggers/driverAutoApproval";
 export { onRydrBankCodeCreated, onRydrBankSummaryUpdated } from "./triggers/rydrBankNotifications";
 export { onDocumentUploadedForReview } from "./triggers/documentReview";
-export { onPaymentJobCreated } from "./triggers/paymentJobs";
+export { onPaymentJobCreated, onPaidRidePromotionSettlement } from "./triggers/paymentJobs";
 export { onDriverPublicProfileProjection } from "./triggers/driverPublicProfileProjection";
 export { maintainScheduledRides } from "./triggers/scheduledRideJobs";
 export { onScheduledRideOpportunityCreated, onScheduledRideUpdated } from "./triggers/scheduledRideNotifications";

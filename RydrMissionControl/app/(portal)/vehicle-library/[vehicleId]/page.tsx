@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getVehicleLibraryEntry } from "@/lib/vehicleLibrary";
 import VehicleImageManager from "./VehicleImageManager";
@@ -13,12 +14,13 @@ export default async function VehicleLibraryEntryPage(props: { params: Promise<{
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <Link href="/vehicle-library" className="text-sm font-medium text-fuchsia-700">← Vehicle Library</Link>
+      <div className="flex flex-col gap-3 rounded-3xl bg-gradient-to-br from-red-500 via-fuchsia-700 to-blue-700 p-7 text-white shadow-lg sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold text-ink">
+          <h1 className="text-3xl font-semibold">
             {entry.make} {entry.model}
           </h1>
-          <p className="mt-1 text-sm text-muted">
+          <p className="mt-2 text-sm text-white/85">
             {entry.yearStart === entry.yearEnd ? entry.yearStart : `${entry.yearStart}–${entry.yearEnd}`}
             {entry.trim ? ` · ${entry.trim}` : ""} · {entry.bodyStyle} · {entry.vehicleId}
           </p>
@@ -26,6 +28,7 @@ export default async function VehicleLibraryEntryPage(props: { params: Promise<{
         <VehicleEntryActions vehicleId={entry.vehicleId} />
       </div>
 
+      <nav aria-label="Vehicle sections" className="flex gap-3"><a href="#vehicle-metadata" className="rounded-full border border-line bg-white px-5 py-2 text-sm font-semibold text-ink">Specifications & eligibility</a><a href="#vehicle-images" className="rounded-full border border-line bg-white px-5 py-2 text-sm font-semibold text-ink">Images & colors</a></nav>
       <VehicleMetadataEditor entry={entry} />
       <VehicleImageManager entry={entry} />
     </div>

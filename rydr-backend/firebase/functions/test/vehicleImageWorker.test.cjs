@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const records = new Map(), files = new Map();
 let editCount=0, editFails=false;
+let colorMatches=true, searchText="", assessedColor="";
 let searchCount=0, aiCount=0, license='CC0', whiteBackground=true, aiFails=false, noCredits=false;
 function assign(path, update, merge) {
   const data=merge ? structuredClone(records.get(path) ?? {}) : {};
@@ -21,7 +22,7 @@ require.cache[adminPath]={id:adminPath,filename:adminPath,loaded:true,exports:{d
 const fetchPath=require.resolve('node-fetch');
 require.cache[fetchPath]={id:fetchPath,filename:fetchPath,loaded:true,exports:async(url,opts)=>{
  if(url.startsWith('https://commons.wikimedia.org/w/api.php')){
-  searchCount++;
+  searchCount++; searchText=new URL(url).searchParams.get("gsrsearch");
   return {ok:true,json:async()=>({query:{pages:{1:{title:'File:2024 Range Rover Sport P360 SE.jpg',imageinfo:[{width:1600,height:900,mime:'image/jpeg',url:'https://upload.wikimedia.org/car.jpg',descriptionurl:'https://commons.wikimedia.org/wiki/File:Car.jpg',extmetadata:{LicenseShortName:{value:license},ImageDescription:{value:'2024 Range Rover Sport P360 SE Black'}}}]}}}})};
  }
  if(url==='https://upload.wikimedia.org/car.jpg'){
@@ -30,9 +31,10 @@ require.cache[fetchPath]={id:fetchPath,filename:fetchPath,loaded:true,exports:as
  }
  if(url==='https://api.openai.com/v1/responses'){
   aiCount++;assert.equal(JSON.parse(opts.body).store,false);
+  assessedColor=JSON.parse(JSON.parse(opts.body).input[0].content[0].text).requested.color;
   if(noCredits)return{ok:false,status:429,json:async()=>({error:{code:'credit_balance_exhausted'}})};
   if(aiFails)return{ok:false,status:503};
-  return {ok:true,json:async()=>({output:[{content:[{type:'output_text',text:JSON.stringify({vehicleMatches:true,yearSupported:true,trimSupported:true,colorMatches:true,whiteBackground,singleVehicle:true,noWatermark:true,confidence:0.99,reason:'Verified'})}]}]})};
+  return {ok:true,json:async()=>({output:[{content:[{type:'output_text',text:JSON.stringify({vehicleMatches:true,yearSupported:true,trimSupported:true,colorMatches,whiteBackground,singleVehicle:true,noWatermark:true,confidence:0.99,reason:'Verified'})}]}]})};
  }
  throw new Error(`Unexpected URL ${url}`);
 }};
@@ -42,7 +44,7 @@ const {enqueueImageJob,processImageJob,imageJobId,updateWaitingDrivers}=require(
 const {buildVehicleId}=require('../lib/services/vehicleLibraryService');
 const query={make:'LAND ROVER',model:'Range Rover Sport',year:2024,trim:'P360 SE',color:'Black',bodyStyle:'suv'};
 const jobId=imageJobId(query);
-function reset(){records.clear();files.clear();searchCount=0;aiCount=0;license='CC0';whiteBackground=true;aiFails=false;noCredits=false;delete process.env.VEHICLE_IMAGE_DAILY_LIMIT;}
+function reset(){colorMatches=true;searchText="";assessedColor="";records.clear();files.clear();searchCount=0;aiCount=0;license='CC0';whiteBackground=true;aiFails=false;noCredits=false;delete process.env.VEHICLE_IMAGE_DAILY_LIMIT;}
 test('imports once and propagates to matching waiters, including later registrations',async()=>{
  reset();records.set('drivers/a',{vehicle:{...query}});records.set('drivers/b',{vehicle:{...query,color:'White'}});
  await enqueueImageJob(query,'a');await enqueueImageJob(query,'a');await enqueueImageJob(query,'b');
@@ -110,4 +112,12 @@ test('licensed matching vehicles get a white background edit and are rechecked b
  reset();editCount=0;editFails=false;whiteBackground=false;
  await enqueueImageJob(query);await processImageJob(jobId,'test-key');
  assert.equal(editCount,1);assert.equal(records.get(`vehicleImageJobs/${jobId}`).status,'completed');assert.ok(aiCount>=2);
+});
+
+test('Silver search and visual assessment retain requested color and reject wrong-color candidates',async()=>{
+ reset();colorMatches=false;const silver={...query,color:'Silver'};
+ await enqueueImageJob(silver);await processImageJob(imageJobId(silver),'test-key');
+ assert.match(searchText,/2024 Silver/);assert.equal(assessedColor,'Silver');
+ assert.equal(records.get(`vehicleImageJobs/${imageJobId(silver)}`).status,'needs_review');
+ assert.equal(files.size,0);
 });

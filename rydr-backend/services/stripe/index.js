@@ -12,7 +12,10 @@ const { randomInt, timingSafeEqual } = require("crypto");
 const { DriverPayoutService, PayoutError } = require("./driverPayouts");
 const { walletSnapshot, accountSessionComponents, instantEligibility, allExternalAccounts, payoutSummary } = require("./driverWallet");
 const { runtimeConfig, modeProfile, canChargeRide, verifyWebhook, StripeModeState } = require("./stripeMode");
-const { rideWithFinancialOutcome } = require("./financialOutcome");
+const { promotionTransfer } = require("./promotionTransfer");
+const { PromotionEngine } = require("./promotionEngine");
+const { financialAfterPromotion } = require("./promotionPolicy");
+const { rideWithFinancialOutcome, paidOutcomeForIntent } = require("./financialOutcome");
 const { reserveCashHubFee, finalizeCashHubFee, releaseCashHubFee, applyCashHubWithholding } = require("./cashHubBilling");
 
 function firestoreFor(appInstance) { return getFirestore(appInstance); }
@@ -39,6 +42,8 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: stripeCon
 const stripeModeState = new StripeModeState({ mode: stripeConfig.mode, fieldValue: FieldValue, getDb: () => { initializeFirebase(); return admin.firestore(); } });
 const driverPayoutService = new DriverPayoutService({ stripe, mode: stripeConfig.mode, getDb: () => { initializeFirebase(); return admin.firestore(); } });
 const identityFlows = stripeConfig.identityFlows;
+function promotionsEngine(){initializeFirebase();return new PromotionEngine({db:admin.firestore(),fieldValue:FieldValue,stripe,mode:stripeConfig.mode});}
+
 
 function secureStringEquals(supplied, expected) {
   if (!supplied || !expected) return false;
@@ -572,7 +577,7 @@ async function activePromotionsForRide(ride, appliesTo) {
     .get();
   return snap.docs
     .map((doc) => ({ id: doc.id, ...doc.data() }))
-    .filter((promotion) => promotionAppliesToRide(promotion, ride, appliesTo, nowMillis));
+    .filter((promotion) => promotion.schemaVersion !== 2 && promotionAppliesToRide(promotion, ride, appliesTo, nowMillis));
 }
 
 async function redemptionCountForPromotion(promotionId, field, value) {
@@ -609,7 +614,9 @@ function riderPromotionDiscountCents(promotion, chargeCents) {
   return Math.min(Math.max(0, discount), chargeCents);
 }
 
-async function bestRiderFarePromotion({ ride, riderId, chargeCents }) {
+async function bestRiderFarePromotion({ ride, rideId, outcome, riderId, chargeCents }) {
+  const reserved=await promotionsEngine().reserveRider({rideId,ride,outcome,uid:riderId});
+  if(reserved)return reserved;
   if (chargeCents <= 0) return null;
   const promotions = await activePromotionsForRide(ride, "normalRydr");
   let best = null;
@@ -625,7 +632,7 @@ async function bestRiderFarePromotion({ ride, riderId, chargeCents }) {
 }
 
 async function recordRiderPromotionRedemption({ rideId, riderId, driverId, promotion, discountCents }) {
-  if (!promotion || discountCents <= 0) return;
+  if (!promotion || discountCents <= 0 || promotion.schemaVersion===2) return;
   const ref = admin.firestore().collection("promotionRedemptions").doc(`${promotion.id}_${rideId}_${riderId}`);
   await ref.set(
     {
@@ -939,22 +946,13 @@ async function transferPromoSubsidyIfNeeded({ rideRef, rideId, ride, driverAccou
     return { subsidyCents, transferId: null, transferStatus: "pending_driver_connect_account" };
   }
 
-  const transfer = await stripe.transfers.create(
-    {
-      amount: subsidyCents,
-      currency: "usd",
-      destination: driverAccountId,
-      metadata: {
-        rideId,
-        riderId: ride.riderId || "",
-        driverId: ride.driverId || "",
-        reason: "promo_driver_payout_subsidy",
-      },
-    },
-    { idempotencyKey: `promo_subsidy_${rideId}` }
-  );
-
-  return { subsidyCents, transferId: transfer.id, transferStatus: "succeeded" };
+  const result = await promotionTransfer({
+    db:admin.firestore(),ref:rideRef.collection("financial").doc("promotionSubsidy"),stripe,fieldValue:FieldValue,
+    amount:subsidyCents,destination:driverAccountId,mode:stripeConfig.mode,
+    metadata:{rideId,riderId:ride.riderId || "",driverId:ride.driverId || "",reason:"promo_driver_payout_subsidy"},
+    idempotencyKey:`promo_subsidy_${rideId}`
+  });
+  return {subsidyCents,...result};
 }
 
 /** Persists payment state onto the ride document the rider/driver apps already listen to. */
@@ -1073,6 +1071,25 @@ async function stripeWebhookHandler(req,res,scope) {
               failureReason: null,
               failureCode: null,
             });
+            const paidRide = (await rideRef.get()).data();
+            const outcomeRef = rideRef.collection("financial").doc("outcome");
+            const financial = (await outcomeRef.get()).data();
+            const reserved = (await rideRef.collection("financial").doc("promotion").get()).data();
+            const finalized = paidOutcomeForIntent(financial, paidRide, pi, reserved);
+            if (finalized) {
+              const destination = typeof pi.transfer_data?.destination === "string" ? pi.transfer_data.destination : pi.transfer_data?.destination?.id;
+              const target = nonNegativeIntegerField(paidRide, "netDriverTransferCents") ?? financial.driverPayoutCents;
+              try {
+                const subsidy = await transferPromoSubsidyIfNeeded({rideRef,rideId,ride:paidRide,driverAccountId:destination || null,targetDriverPayoutCents:target,amountTransferredFromChargeCents:destination ? Math.max(0,pi.amount-(pi.application_fee_amount || 0)) : 0});
+                await rideRef.set({promoSubsidyTransferCents:subsidy.subsidyCents,promoSubsidyTransferId:subsidy.transferId,promoSubsidyTransferStatus:subsidy.transferStatus},{merge:true});
+              } catch(error) {
+                await rideRef.set({promoSubsidyTransferStatus:"failed",promoSubsidyTransferError:"Promotion funding transfer requires review",updatedAt:FieldValue.serverTimestamp()},{merge:true});
+              }
+              await admin.firestore().runTransaction(async tx => {
+                const current = await tx.get(outcomeRef);
+                if (current.data()?.status !== "paid") tx.set(outcomeRef,{...finalized,paidAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()},{merge:true});
+              });
+            }
             const cashHubFeeCents = Number(pi.metadata?.cashHubFeeCents || 0);
             if (cashHubFeeCents > 0 && pi.metadata?.driverId && pi.metadata?.cashHubBillingPeriod) {
               await finalizeCashHubFee({
@@ -1408,6 +1425,7 @@ async function chargeRideAttempt({
   const outcome = outcomeSnap.data();
   const outcomeRef = outcomeSnap.ref;
   if (outcome.status === "paid") {
+    await promotionsEngine().settle(rideId);
     return {
       httpStatus: 409,
       body: { error: "ride_already_paid", paymentIntentId: outcome.paymentIntentId || null },
@@ -1442,7 +1460,7 @@ async function chargeRideAttempt({
   }
   const baseAuthoritativeAmount = resolvedCharge.amount;
   const riderPromotion = paymentType === "ride_fare"
-    ? await bestRiderFarePromotion({ ride, riderId: uid, chargeCents: baseAuthoritativeAmount })
+    ? await bestRiderFarePromotion({ ride, rideId, outcome, riderId: uid, chargeCents: baseAuthoritativeAmount })
     : null;
   const backendPromotionDiscountCents = riderPromotion?.discountCents || 0;
   const authoritativeAmount = Math.max(0, baseAuthoritativeAmount - backendPromotionDiscountCents);
@@ -1515,7 +1533,7 @@ async function chargeRideAttempt({
       promoSubsidyTransferId: subsidyResult.transferId,
       promoSubsidyTransferStatus: subsidyResult.transferStatus,
     });
-    await outcomeRef.set({ status: "paid", paymentIntentId: null, paidAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await outcomeRef.set({ ...financialAfterPromotion(outcome, backendPromotionDiscountCents), appliedPromotionId:riderPromotion?.promotion.id??null, status: "paid", paymentIntentId: null, paidAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
     if (paymentType === "ride_fare") {
       await recordRiderPromotionRedemption({
         rideId,
@@ -1714,7 +1732,7 @@ async function chargeRideAttempt({
       if (cashHubFeeWithheldCents > 0) {
         await finalizeCashHubFee({ admin, driverId: ride.driverId, rideId, periodId: cashHubReservation.periodId, paymentIntentId: pi.id });
       }
-      await outcomeRef.set({ status: "paid", paymentIntentId: pi.id, paidAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      await outcomeRef.set({ ...financialAfterPromotion(outcome, backendPromotionDiscountCents), appliedPromotionId:riderPromotion?.promotion.id??null, status: "paid", paymentIntentId: pi.id, paidAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
     }
     if (pi.status === "succeeded" && paymentType === "ride_fare") {
       await recordRiderPromotionRedemption({
@@ -1773,6 +1791,21 @@ app.get("/internal/stripe-mode",async(req,res)=>{
   if(!validInternalServiceToken(req))return res.status(401).json({error:"invalid_internal_service_token"});
   try {const state=await stripeModeState.ensure();res.set("Cache-Control","no-store").json({mode:stripeConfig.mode,status:state.status,apiVersion:stripeConfig.apiVersion,platformWebhookConfigured:!!stripeConfig.platformWebhookSecret,connectWebhookConfigured:!!stripeConfig.connectWebhookSecret,driverIdentityConfigured:!!identityFlows.driver,riderIdentityConfigured:!!identityFlows.verified_rider,livePreparation:stripeConfig.livePreparation});}
   catch {res.status(503).json({error:"stripe_mode_preparation_failed"});}
+});
+
+app.post("/promotions/enroll",async(req,res)=>{
+ try{const uid=await requireFirebaseUid(req,res);if(!uid)return;const audience=req.body?.audience==='drivers'?'drivers':'riders';res.json(await promotionsEngine().enroll(uid,req.body?.code,audience));}
+ catch(error){res.status(400).json({error:"promotion_not_available",message:String(error.message)});}
+});
+app.get("/promotions/account",async(req,res)=>{
+ try{const uid=await requireFirebaseUid(req,res);if(!uid)return;res.set("Cache-Control","no-store").json(await promotionsEngine().accountSummary(uid,req.query.audience==='drivers'?'drivers':'riders'));}
+ catch{res.status(500).json({error:"promotion_account_unavailable"});}
+});
+app.post("/internal/rides/:rideId/promotions/settle",async(req,res)=>{
+ if(!validInternalServiceToken(req))return res.status(401).json({error:"invalid_internal_service_token"});
+ if(!/^[A-Za-z0-9_-]{1,150}$/.test(req.params.rideId))return res.status(400).json({error:"invalid_ride_id"});
+ try{await stripeModeState.ensure();res.json(await promotionsEngine().settle(req.params.rideId));}
+ catch{res.status(503).json({error:"promotion_settlement_failed"});}
 });
 
 // Migration changes payout timing only; it never calls stripe.payouts.create.

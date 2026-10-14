@@ -23,6 +23,21 @@ final class RydrPlaygroundUITests: XCTestCase {
     }
 
     @MainActor
+    func testPromotionCodeScreenAcceptsInputAndRequiresSignIn() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-RydrPromotionsUITest"]
+        app.launch()
+        let code = app.textFields["promotionCode"]
+        XCTAssertTrue(code.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["promotionEnroll"].isEnabled)
+        code.tap(); code.typeText("TESTCODE")
+        XCTAssertTrue(app.buttons["promotionEnroll"].isEnabled)
+        app.buttons["promotionEnroll"].tap()
+        XCTAssertTrue(app.staticTexts["promotionMessage"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["promotionDone"].exists)
+    }
+
+    @MainActor
     func testPrestineSUVContinuesToBooking() throws {
         try verifyPrestineFlow(choice: "SUV")
     }

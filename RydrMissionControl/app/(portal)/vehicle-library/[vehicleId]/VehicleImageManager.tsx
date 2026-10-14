@@ -72,7 +72,7 @@ export default function VehicleImageManager({ entry: initialEntry }: { entry: Ve
   ];
 
   return (
-    <section className="space-y-4 rounded-lg border border-line bg-white p-5 shadow-sm">
+    <section id="vehicle-images" className="space-y-4 rounded-3xl border border-line bg-white p-6 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-ink">Image Coverage</h2>
@@ -105,11 +105,11 @@ export default function VehicleImageManager({ entry: initialEntry }: { entry: Ve
       {error && <p className="text-xs text-rydr-red">{error}</p>}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
         {slots.map((slot) => (
-          <div key={slot.key} className="overflow-hidden rounded-lg border border-line bg-white">
+          <div key={slot.key} className="overflow-hidden rounded-2xl border border-line bg-white">
             <div className="flex h-32 items-center justify-center bg-grouped">
               {slot.url ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={slot.url} alt={slot.label} className="h-full w-full object-cover" />
+                <img src={slot.url} alt={slot.label} className="h-full w-full object-contain" />
               ) : (
                 <p className="px-2 text-center text-[11px] text-muted/70">Vehicle image not yet available.</p>
               )}
@@ -138,7 +138,7 @@ export default function VehicleImageManager({ entry: initialEntry }: { entry: Ve
                 <button
                   onClick={() => fileInputs.current[slot.key]?.click()}
                   disabled={busySlot === slot.key}
-                  className="flex-1 rounded-md bg-ink py-1 text-[11px] font-semibold text-white disabled:opacity-40"
+                  className="flex-1 rounded-xl bg-gradient-to-r from-red-500 via-fuchsia-600 to-blue-600 py-1 text-[11px] font-semibold text-white disabled:opacity-40"
                 >
                   {busySlot === slot.key ? "Saving" : slot.url ? "Replace" : "Upload"}
                 </button>

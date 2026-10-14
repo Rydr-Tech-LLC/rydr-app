@@ -1,6 +1,6 @@
 import fetch from "node-fetch";
 import { defineSecret, defineString } from "firebase-functions/params";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { db, FieldValue } from "../admin";
 
 const internalToken = defineSecret("RYDR_INTERNAL_SERVICE_TOKEN");
@@ -58,3 +58,17 @@ export const onPaymentJobCreated = onDocumentCreated(
     }, { merge: true });
   }
 );
+
+
+// Financial settlement, not client ride updates, is the reward source of truth.
+export const onPaidRidePromotionSettlement = onDocumentWritten({
+  document: "rides/{rideId}/financial/outcome", secrets: [internalToken], retry: true
+}, async event => {
+  const after = event.data?.after.data();
+  if (after?.status !== "paid" || after.outcomeType !== "completed") return;
+  const rideId = event.params.rideId;
+  const response = await fetch(`${stripeBackendURL.value().replace(/\/$/, "")}/internal/rides/${encodeURIComponent(rideId)}/promotions/settle`, {
+    method: "POST", headers: { "content-type": "application/json", "x-rydr-internal-token": internalToken.value() }, body: "{}", timeout: 55000
+  });
+  if (!response.ok) throw new Error(`Promotion settlement dispatch failed: ${response.status}`);
+});

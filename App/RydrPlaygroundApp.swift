@@ -21,7 +21,9 @@ struct RydrApp: App {
         WindowGroup {
             Group {
                 #if DEBUG && targetEnvironment(simulator)
-                if ProcessInfo.processInfo.arguments.contains("-PrestineBookingUITest") {
+                if ProcessInfo.processInfo.arguments.contains("-RydrPromotionsUITest") {
+                    RiderPromotionPanel()
+                } else if ProcessInfo.processInfo.arguments.contains("-PrestineBookingUITest") {
                     NavigationStack { RideTypeSelectionView(userName: "Test Rider") }
                         .environmentObject(session)
                         .environmentObject(RideManager())

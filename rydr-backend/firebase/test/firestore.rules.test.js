@@ -213,3 +213,23 @@ test("vehicle security archive is readable only by admin and cannot be changed b
   await assertFails(updateDoc(doc(driver, archivePath), { action: "edited" }));
   await assertFails(updateDoc(doc(admin, archivePath), { action: "edited" }));
 });
+
+test('promotion codes, financial rewards and eligibility counters are server-owned', async () => {
+  await environment.withSecurityRulesDisabled(async context => {
+    const db=context.firestore();
+    await setDoc(doc(db,'promotions/private-campaign'),{schemaVersion:2,status:'active',title:'Private',audienceUserIds:['rider-1']});
+    await setDoc(doc(db,'promotionCodes/PRIVATE'),{promotionId:'private-campaign'});
+    await setDoc(doc(db,'promotionRewards/reward-1'),{userId:'rider-1',status:'available'});
+    await setDoc(doc(db,'promotionProgress/progress-1'),{userId:'rider-1',eligibleRideCount:1});
+  });
+  const owner=environment.authenticatedContext('rider-1').firestore();
+  const other=environment.authenticatedContext('rider-2').firestore();
+  const admin=environment.authenticatedContext('admin-1',{admin:true}).firestore();
+  await assertFails(getDoc(doc(owner,'promotionCodes/PRIVATE')));
+  await assertFails(getDoc(doc(owner,'promotions/private-campaign')));
+  await assertSucceeds(getDoc(doc(owner,'promotionRewards/reward-1')));
+  await assertFails(getDoc(doc(other,'promotionRewards/reward-1')));
+  await assertFails(updateDoc(doc(owner,'promotionProgress/progress-1'),{eligibleRideCount:99}));
+  await assertFails(updateDoc(doc(admin,'promotionRewards/reward-1'),{status:'used'}));
+  await assertFails(setDoc(doc(owner,'promotionEnrollments/fake'),{userId:'rider-1',promotionId:'private-campaign'}));
+});

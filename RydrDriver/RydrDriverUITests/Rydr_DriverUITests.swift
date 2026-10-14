@@ -10,6 +10,28 @@ import XCTest
 final class Rydr_DriverUITests: XCTestCase {
 
     @MainActor
+    func testPromotionCodeScreenReturnsToWallet() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-RydrWalletNavigationUITest"]
+        app.launch()
+        XCTAssertTrue(app.buttons["driverMenu"].waitForExistence(timeout: 15))
+        app.buttons["driverMenu"].tap()
+        app.buttons["Wallet & Payouts"].tap()
+        let promotions = app.buttons["Driver promotions & bonuses"]
+        for _ in 0..<4 where !promotions.isHittable { app.swipeUp() }
+        XCTAssertTrue(promotions.isHittable, app.debugDescription)
+        promotions.tap()
+        let code = app.textFields["promotionCode"]
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["promotionEnroll"].isEnabled)
+        code.tap(); code.typeText("TESTCODE")
+        app.buttons["promotionDone"].tap()
+        XCTAssertTrue(app.buttons["walletBack"].waitForExistence(timeout: 5))
+        app.buttons["walletBack"].tap()
+        XCTAssertTrue(app.buttons["driverMenu"].isHittable)
+    }
+
+    @MainActor
     func testGarageAddAndDeletePreservesCurrentVehicle() {
         let app = XCUIApplication()
         app.launchArguments = ["-RydrWalletNavigationUITest", "-RydrGarageUITest"]

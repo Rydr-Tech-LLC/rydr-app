@@ -39,6 +39,11 @@ export default async function PromotionDetailPage(props: { params: Promise<{ pro
 
 function serializePromotion(promotion: PromotionRecord): PromotionFormInitial {
   return {
+    schemaVersion: promotion.schemaVersion,
+    applicationMode: promotion.applicationMode, promoCode: promotion.promoCode,
+    audienceRule: promotion.audienceRule, audienceUserIds: promotion.audienceUserIds,
+    limitKind: promotion.limitKind, maxDistanceMiles: promotion.maxDistanceMiles,
+    rewardExpiresAfterDays: promotion.rewardExpiresAfterDays, payExcessFare: promotion.payExcessFare,
     id: promotion.id,
     title: promotion.title,
     description: promotion.description,

@@ -57,13 +57,15 @@ export default function NewVehicleForm() {
   }
 
   return (
-    <div className="space-y-5 rounded-lg border border-line bg-white p-5 shadow-sm">
+    <div className="space-y-5 rounded-3xl border border-line bg-white p-6 shadow-sm">
+      <h2 className="text-lg font-semibold text-ink">1. Match the vehicle</h2>
+      <p className="text-sm text-muted">Use the manufacturer as the make, and the vehicle name as the model. These details match the VIN decoder.</p>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Make">
-          <input value={make} onChange={(e) => setMake(e.target.value)} placeholder="Vehicle make" className={inputClass} />
+          <input value={make} onChange={(e) => setMake(e.target.value)} placeholder="e.g. Land Rover" className={inputClass} />
         </Field>
         <Field label="Model">
-          <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Vehicle model" className={inputClass} />
+          <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. Range Rover Sport" className={inputClass} />
         </Field>
         <Field label="Year start">
           <input value={yearStart} onChange={(e) => setYearStart(e.target.value)} inputMode="numeric" placeholder="First model year" className={inputClass} />
@@ -85,10 +87,11 @@ export default function NewVehicleForm() {
         </Field>
       </div>
 
+      <h2 className="border-t border-line pt-5 text-lg font-semibold text-ink">2. Verify seating and classification</h2>
       <VehicleSpecificationFields value={specifications} onChange={setSpecifications} />
 
       <div>
-        <p className="mb-2 text-[11px] font-medium text-muted">Ride type eligibility</p>
+        <h2 className="mb-3 text-lg font-semibold text-ink">3. Choose ride eligibility</h2>
         <div className="grid gap-2 sm:grid-cols-3">
           {RIDE_TYPES.map((rideType) => (
             <label
@@ -134,21 +137,21 @@ export default function NewVehicleForm() {
       <button
         onClick={submit}
         disabled={loading || !make || !model || !yearStart}
-        className="w-full rounded-md bg-ink py-2 text-xs font-semibold text-white disabled:opacity-40"
+        className="w-full rounded-xl bg-gradient-to-r from-red-500 via-fuchsia-600 to-blue-600 py-2 text-xs font-semibold text-white disabled:opacity-40"
       >
-        {loading ? "Creating…" : "Create Entry"}
+        {loading ? "Creating…" : "Create vehicle → Add images"}
       </button>
     </div>
   );
 }
 
-const inputClass = "w-full rounded-md border border-line bg-grouped px-3 py-2 text-xs outline-none focus:border-ink";
+const inputClass = "w-full rounded-md border border-line bg-grouped px-3 py-2 text-xs outline-none focus:border-fuchsia-500 focus:ring-2 focus:ring-fuchsia-100";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <p className="mb-1 text-[11px] font-medium text-muted">{label}</p>
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
       {children}
-    </div>
+    </label>
   );
 }
