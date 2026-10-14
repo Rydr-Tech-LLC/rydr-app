@@ -14,6 +14,7 @@ struct RydrApp: App {
 
     @StateObject private var session = UserSessionManager()
     @State private var showSplash = true
+    @State private var prestineLightAppearance = false
     @AppStorage("appAppearance") private var appAppearance = RydrAppAppearance.system.rawValue
 
     var body: some Scene {
@@ -31,7 +32,8 @@ struct RydrApp: App {
                 appContent
                 #endif
             }
-            .preferredColorScheme(RydrAppAppearance(rawValue: appAppearance)?.colorScheme)
+            .onPreferenceChange(PrestineLightAppearancePreference.self) { prestineLightAppearance = $0 }
+            .preferredColorScheme(prestineLightAppearance && session.selectedTab == .ride ? .light : RydrAppAppearance(rawValue: appAppearance)?.colorScheme)
             .hideKeyboardOnTap()
         }
     }

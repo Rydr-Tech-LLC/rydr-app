@@ -44,3 +44,8 @@ extension EnvironmentValues {
     var rydrRideAccent: Color { get { self[RideAccentKey.self] } set { self[RideAccentKey.self] = newValue } }
     var rydrRideSurface: Color { get { self[RideSurfaceKey.self] } set { self[RideSurfaceKey.self] = newValue } }
 }
+
+struct PrestineLightAppearancePreference: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}

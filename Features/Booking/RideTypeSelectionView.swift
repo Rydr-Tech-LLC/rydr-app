@@ -284,6 +284,7 @@ struct PrestineVehicleSelectionView: View {
                     .environment(\.rydrRideAccent, PrestineTheme.gold)
                     .environment(\.rydrRideSurface, PrestineTheme.cream)
                     .environment(\.colorScheme, .light)
+                    .preference(key: PrestineLightAppearancePreference.self, value: true)
                     .toolbarColorScheme(.light, for: .navigationBar)
                     .toolbarBackground(PrestineTheme.cream, for: .navigationBar)
                     .toolbarBackground(.visible, for: .navigationBar)) {
@@ -299,6 +300,7 @@ struct PrestineVehicleSelectionView: View {
             }.padding(24)
         }
         .background(PrestineTheme.cream.ignoresSafeArea())
+        .preference(key: PrestineLightAppearancePreference.self, value: true)
         .tint(PrestineTheme.ink)
         .toolbarColorScheme(.light, for: .navigationBar)
         .toolbarBackground(PrestineTheme.cream, for: .navigationBar)
