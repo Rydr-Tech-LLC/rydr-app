@@ -10,6 +10,7 @@ const { getAuth } = require("firebase-admin/auth");
 const Stripe = require("stripe");
 const { randomInt, timingSafeEqual } = require("crypto");
 const { DriverPayoutService, PayoutError } = require("./driverPayouts");
+const { walletSnapshot, accountSessionComponents, instantEligibility, allExternalAccounts, payoutSummary } = require("./driverWallet");
 const { rideWithFinancialOutcome } = require("./financialOutcome");
 const { reserveCashHubFee, finalizeCashHubFee, releaseCashHubFee, applyCashHubWithholding } = require("./cashHubBilling");
 
@@ -2296,6 +2297,26 @@ app.get("/connect/status", async (req, res) => {
   }
 });
 
+// Rydr wallet: only the authenticated driver's server-owned Connect account.
+app.post("/connect/account-session", async (req,res)=>{
+  try {
+    const owned=await requireOwnAccountId(req,res);if(!owned)return;
+    const components=accountSessionComponents(req.body?.purpose);
+    const session=await stripe.accountSessions.create({account:owned.accountId,components});
+    const publicKey=String(process.env.STRIPE_PUBLISHABLE_KEY||"").trim();
+    if(!/^pk_(test|live)_/.test(publicKey) || publicKey.startsWith("pk_live_")!==session.livemode)return res.status(503).json({error:"stripe_mode_mismatch"});
+    res.set("Cache-Control","no-store").json({clientSecret:session.client_secret});
+  }catch(error){res.status(error instanceof PayoutError?error.status:500).json({error:error instanceof PayoutError?error.code:"account_session_failed"});}
+});
+app.get("/connect/wallet",async(req,res)=>{
+  try {
+    const owned=await requireOwnAccountId(req,res);if(!owned)return;
+    const cursor=req.query.startingAfter;
+    if(cursor && (typeof cursor!=="string" || !/^po_[A-Za-z0-9]+$/.test(cursor)))return res.status(400).json({error:"invalid_payout_cursor"});
+    res.set("Cache-Control","no-store").json(await walletSnapshot(stripe,owned.accountId,cursor));
+  }catch{res.status(500).json({error:"wallet_refresh_failed"});}
+});
+
 // Driver: Stripe Connect — Balance available for payouts
 // Auth required.
 app.get("/connect/balance", async (req, res) => {
@@ -2311,11 +2332,14 @@ app.get("/connect/balance", async (req, res) => {
 
     const available = balance.available.filter((entry) => entry.currency === "usd");
     const pending = balance.pending.filter((entry) => entry.currency === "usd");
-    const instantAvailableAmount = available.reduce((sum, entry) => sum + entry.amount, 0);
+    const externalAccounts=await allExternalAccounts(stripe,accountId);
+    const instantAvailableAmount = instantEligibility(acct,balance,externalAccounts).amount;
+    const availableAmount = available.reduce((sum, entry) => sum + entry.amount, 0);
     const pendingAmount = pending.reduce((sum, entry) => sum + entry.amount, 0);
 
     res.json({
       instantAvailableAmount,
+      availableAmount,
       pendingAmount,
       currency: "usd",
       payoutsEnabled: acct.payouts_enabled,
@@ -2370,20 +2394,12 @@ app.get("/connect/payouts", async (req, res) => {
     const limit = Math.max(1, Math.min(25, Number.isFinite(rawLimit) ? rawLimit : 10));
 
     const payouts = await stripe.payouts.list(
-      { limit },
+      { limit, expand: ["data.destination"] },
       { stripeAccount: accountId }
     );
 
     res.json({
-      payouts: payouts.data.map((payout) => ({
-        id: payout.id,
-        amount: payout.amount,
-        currency: payout.currency,
-        status: payout.status,
-        method: payout.method,
-        arrivalDate: payout.arrival_date || null,
-        created: payout.created,
-      })),
+      payouts: payouts.data.map(payoutSummary),
     });
   } catch (err) {
     console.error("❌ connect/payouts error", err);
@@ -2416,14 +2432,15 @@ app.post("/connect/instant-payout", async (req, res) => {
     if (!owned) return;
     const { uid, accountId } = owned;
 
-    const { amount, currency = "usd" } = req.body || {};
+    const { amount, currency = "usd", destination } = req.body || {};
     const payoutRequestId = requireRequestId(req, res, "connect_instant_payout");
     if (!payoutRequestId) return;
     if (!Number.isSafeInteger(amount) || amount <= 0 || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) {
       return res.status(400).json({ error: "invalid_amount" });
     }
 
-    const payout = await driverPayoutService.instant({ driverId: uid, accountId, amount, currency, requestId: payoutRequestId });
+    if(destination!==undefined && (typeof destination!=="string" || !/^(ba_|card_)[A-Za-z0-9]+$/.test(destination)))return res.status(400).json({error:"invalid_payout_destination"});
+    const payout = await driverPayoutService.instant({ driverId: uid, accountId, amount, currency, requestId: payoutRequestId, destination });
 
     res.json({
       payoutId: payout.id,
@@ -2433,7 +2450,7 @@ app.post("/connect/instant-payout", async (req, res) => {
     });
   } catch (err) {
     console.error("❌ connect/instant-payout error", err);
-    res.status(err instanceof PayoutError ? err.status : 500).json({ error: err instanceof PayoutError ? err.code : "instant_payout_failed", detail: err.message });
+    res.status(err instanceof PayoutError ? err.status : 500).json({ error: err instanceof PayoutError ? err.code : "instant_payout_failed", detail: err.message, canStartNewRequest: err.payoutSubmissionUncertain === false });
   }
 });
 
