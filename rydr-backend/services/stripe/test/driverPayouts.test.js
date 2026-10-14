@@ -69,3 +69,13 @@ test('rechecking an unsubmitted issue preserves its original reason',async()=>{
  const f=fixture();f.records.set(`driverPayouts/${f.id}`,{...f.job(),status:'needs_review',needsReview:true,reasonCode:'valid_default_bank_account_required',reason:'Add a bank account'});
  await f.service.reconcile(f.id);assert.equal(f.job().reasonCode,'valid_default_bank_account_required');assert.equal(f.job().reason,'Add a bank account');assert.equal(f.creates().length,0);
 });
+
+test('new instant requests check actual eligible funds and destination under the lock',async()=>{
+ const f=fixture();f.stripe.balance.retrieve=async()=>({instant_available:[{currency:'usd',amount:500}],available:[{currency:'usd',amount:10000}]});
+ f.stripe.accounts.listExternalAccounts=async()=>({data:[{id:'card_eligible',object:'card',currency:'usd',available_payout_methods:['instant']}],has_more:false});
+ const input={driverId:'driver',accountId:'acct_driver',amount:500,currency:'usd',requestId:'native',destination:'card_eligible'};
+ await f.service.instant(input);assert.equal(f.creates()[0].params.destination,'card_eligible');assert.equal(f.creates()[0].options.idempotencyKey,'instant_payout_v2_acct_driver_native');
+ await assert.rejects(f.service.instant({...input,destination:'card_other'}),e=>e.code==='payout_request_parameters_changed');
+ const blocked=fixture();blocked.stripe.balance.retrieve=async()=>({available:[{currency:'usd',amount:50000}]});
+ await assert.rejects(blocked.service.instant({...input,requestId:'invalid'}),e=>e.code==='instant_payout_not_eligible');assert.equal(blocked.creates().length,0);
+});

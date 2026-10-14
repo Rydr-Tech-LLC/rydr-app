@@ -2,19 +2,8 @@
 //  PayoutsSetupView.swift
 //  Rydr Driver
 //
-//  Step 8 of driver signup: Payouts launch screen. This is ONLY the launch
-//  screen shown before the Stripe-hosted Connect onboarding begins — it
-//  educates the driver, builds trust, and launches the existing Stripe
-//  Connect flow. It does NOT redesign or replace Stripe's hosted onboarding;
-//  the existing backend integration (createConnectAccount /
-//  createAccountLink / refreshStatus against
-//  https://rydr-stripe-backend.onrender.com) and SafariView launch mechanism
-//  are preserved as-is.
-//
-//  Per spec, there is no manual "I completed payout setup" toggle and no
-//  Finish button: when the driver returns from Stripe, status is polled
-//  automatically and the flow advances on its own once payouts are enabled.
-//
+//  Payout setup stays inside Rydr using Connect embedded onboarding.
+//  Completion is confirmed by the backend, never by a manual toggle.
 
 import SwiftUI
 import FirebaseAuth
@@ -43,7 +32,6 @@ struct PayoutsSetupView: View {
 
     @State private var accountId: String?
     @State private var isPresenting = false
-    @State private var onboardingURL: URL?
     @State private var isLoading = false
     @State private var isCheckingStatus = false
     @State private var message: String?
@@ -101,7 +89,7 @@ struct PayoutsSetupView: View {
                 .sheet(isPresented: $isPresenting, onDismiss: {
                     Task { await refreshStatus() }
                 }) {
-                    if let onboardingURL { SafariView(url: onboardingURL) }
+                    DriverPayoutAccountView(purpose: .onboarding)
                 }
                 .opacity(connectOnboarded ? 0.4 : 1)
                 .disabled(connectOnboarded)
@@ -278,7 +266,7 @@ struct PayoutsSetupView: View {
         }
     }
 
-    // MARK: - Backend integration (unchanged from existing Stripe Connect flow)
+    // MARK: - Backend integration
 
     private var stripeBackendBase: URL { URL(string: "https://rydr-stripe-backend.onrender.com")! }
 
@@ -325,8 +313,6 @@ struct PayoutsSetupView: View {
                 accountId = resolvedAccountId
             }
 
-            let url = try await createAccountLink()
-            onboardingURL = url
             isPresenting = true
         } catch {
             message = "Couldn't reach the payouts service. Please check your connection and try again."
@@ -358,26 +344,8 @@ struct PayoutsSetupView: View {
         return decoded.accountId
     }
 
-    private func createAccountLink() async throws -> URL {
-        var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/account-link"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let token = try await Auth.auth().currentUser?.getIDToken() {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["requestId": UUID().uuidString])
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
-        let decoded = try JSONDecoder().decode(AccountLinkResponse.self, from: data)
-        guard let url = URL(string: decoded.url) else { throw URLError(.badURL) }
-        return url
-    }
-
     /// Polls the backend for Stripe Connect account status after the driver returns from the
-    /// hosted onboarding sheet. No manual confirmation is ever required: if payouts are enabled
+    /// embedded onboarding screen. No manual confirmation is ever required: if payouts are enabled
     /// we mark the step complete and automatically advance; otherwise we surface a gentle
     /// "not finished yet" message while keeping the Set Up Payouts button available to retry.
     @MainActor
@@ -415,17 +383,16 @@ struct PayoutsSetupView: View {
                 message = "Stripe is verifying your information — this can take a little while. We'll let you know once it's done."
                 isError = false
             } else {
-                message = "We couldn't confirm your payout setup yet. Please finish your Stripe onboarding."
+                message = "We couldn't confirm your payout setup yet. Please complete payout setup in Rydr."
                 isError = false
             }
         } catch {
-            message = "We couldn't confirm your payout setup yet. Please finish your Stripe onboarding."
+            message = "We couldn't confirm your payout setup yet. Please complete payout setup in Rydr."
             isError = false
         }
     }
 
     struct ConnectAccountResponse: Decodable { let accountId: String }
-    struct AccountLinkResponse: Decodable { let url: String }
     struct ConnectStatusResponse: Decodable {
         let chargesEnabled: Bool
         let payoutsEnabled: Bool

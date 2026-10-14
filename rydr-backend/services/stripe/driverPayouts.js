@@ -70,7 +70,7 @@ class DriverPayoutService {
     const db = this.getDb(), ref = this.jobs().doc(jobId), owner = randomUUID();
     const result = await db.runTransaction(async tx => {
       const snap = await tx.get(ref); const existing = snap.data();
-      if (existing && initial && (existing.amount !== initial.amount || existing.currency !== initial.currency || existing.accountId !== initial.accountId || existing.driverId !== initial.driverId)) {
+      if (existing && initial && (existing.amount !== initial.amount || existing.currency !== initial.currency || existing.accountId !== initial.accountId || existing.driverId !== initial.driverId || existing.destination !== initial.destination)) {
         throw new PayoutError("payout_request_parameters_changed");
       }
       const job = existing ?? initial;
@@ -196,9 +196,9 @@ class DriverPayoutService {
       tx.update(ref,{parts,status,needsReview:status==="needs_review",...(status==="needs_review"?{reason:"Payout failed, was canceled, or still has an unresolved submission",reasonCode:"payout_needs_review"}:{reason:null,reasonCode:null}),updatedAt:FieldValue.serverTimestamp()});
     });
   }
-  async instant({driverId,accountId,amount,currency,requestId}) {
+  async instant({driverId,accountId,amount,currency,requestId,destination}) {
     const jobId=payoutJobId(accountId,"instant",requestId);
-    const claim=await this.claim(jobId,{driverId,accountId,kind:"instant",amount,currency,requestId,status:"queued",createdAt:Timestamp.fromMillis(this.now())});
+    const claim=await this.claim(jobId,{driverId,accountId,kind:"instant",amount,currency,requestId,...(destination?{destination}:{}),status:"queued",createdAt:Timestamp.fromMillis(this.now())});
     if (!claim.acquired) {
       const job=(await claim.ref.get()).data();
       if (job.parts?.[0]?.payoutId) {
@@ -212,16 +212,23 @@ class DriverPayoutService {
       const account=await this.stripe.accounts.retrieve(accountId);
       if (account.metadata?.uid && account.metadata.uid !== driverId) throw new PayoutError("payout_account_owner_mismatch",400);
       if (!account.payouts_enabled) throw new PayoutError("payouts_not_enabled",400);
-      const key=`instant_payout_${accountId}_${requestId}`; // Preserve the shipped client's existing idempotency namespace.
-      await claim.ref.set({parts:[{amount,currency,status:"prepared",payoutId:null,idempotencyKey:key,sourceType:"card"}],updatedAt:FieldValue.serverTimestamp()},{merge:true});
+      if(destination){
+        const {allExternalAccounts,instantEligibility}=require('./driverWallet');
+        const [balance,external]=await Promise.all([this.stripe.balance.retrieve({stripeAccount:accountId}),allExternalAccounts(this.stripe,accountId)]);
+        const eligibility=instantEligibility(account,balance,external.filter(a=>a.id===destination));
+        if(currency!=="usd" || eligibility.amount<amount || !eligibility.destination)throw new PayoutError("instant_payout_not_eligible",400);
+      }
+      const key=destination?`instant_payout_v2_${accountId}_${requestId}`:`instant_payout_${accountId}_${requestId}`; // Preserve the shipped client's existing idempotency namespace.
+      await claim.ref.set({parts:[{amount,currency,status:"prepared",payoutId:null,idempotencyKey:key,sourceType:"card",...(destination?{destination}:{})}],updatedAt:FieldValue.serverTimestamp()},{merge:true});
       await this.setPart(jobId,0,{status:"submitting",submissionStartedAt:Timestamp.fromMillis(this.now())},claim.owner);submissionStarted=true;
-      const payout=await this.stripe.payouts.create({amount,currency,method:"instant",metadata:{uid:driverId,source:"driver_wallet_instant_pay"}},{stripeAccount:accountId,idempotencyKey:key});
+      const payout=await this.stripe.payouts.create({amount,currency,method:"instant",...(destination?{destination}:{}),metadata:{uid:driverId,source:"driver_wallet_instant_pay"}},{stripeAccount:accountId,idempotencyKey:key});
       await this.recordPayout(jobId,accountId,payout);submissionStarted=false;
       await this.release(jobId,accountId,claim.owner);return payout;
     } catch(error) {
       if (submissionStarted && definiteRejection(error)) {
         await this.setPart(jobId,0,{status:"failed",failureCode:safeError(error)});submissionStarted=false;
       }
+      error.payoutSubmissionUncertain = submissionStarted;
       await this.markIssue(claim.ref,safeError(error),submissionStarted?"Instant payout response is uncertain. Reconcile with Stripe before another payout.":`Instant payout blocked: ${safeError(error)}`);
       if (!submissionStarted) await this.release(jobId,accountId,claim.owner);
       throw error;
