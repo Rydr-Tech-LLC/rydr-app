@@ -20,7 +20,7 @@ export const onDriverPublicProfileProjection = onDocumentWritten("drivers/{uid}"
     displayName,
     vehicleSummary: [vehicle.color, vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" "),
     vehicleColor: vehicle.color ?? "",
-    vehicleImageURL: vehicle.imageURL ?? driver.vehicleImageURL ?? "",
+    vehicleImageURL: vehicle.imageURL ?? vehicle.imageUrl ?? driver.vehicleImageURL ?? "",
     tierRates: driver.tierRates ?? {},
     rideFilters: driver.rideFilters ?? {},
     eligibleRideTypes: driver.qualifiedRideTypes ?? driver.supportedRideTypes ?? [],

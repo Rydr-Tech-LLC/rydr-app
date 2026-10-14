@@ -1459,6 +1459,17 @@ service cloud.firestore {
     // Cached NHTSA VIN decode responses. Never exposed to clients directly —
     // drivers/riders only ever see the result via the `decodeVin` /
     // `submitVehicleVin` Cloud Functions, which run with Admin SDK privileges.
+    // Acquisition jobs and candidate metadata are server/admin-session only.
+    match /vehicleImageJobs/{document=**} {
+      allow read, write: if false;
+    }
+
+    // Money movement, locks, Stripe links, and scheduled-run ledgers are server-only.
+    match /driverPayouts/{doc} { allow read, write: if false; }
+    match /driverPayoutLocks/{doc} { allow read, write: if false; }
+    match /driverPayoutStripeLinks/{doc} { allow read, write: if false; }
+    match /weeklyPayoutRuns/{doc} { allow read, write: if false; }
+
     match /vinDecodeCache/{vin} {
       allow read, write: if false;
     }

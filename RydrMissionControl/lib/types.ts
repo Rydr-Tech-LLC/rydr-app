@@ -227,6 +227,8 @@ export interface AuditLogEntry {
     | "ride"
     | "report"
     | "vehicleLibrary"
+    | "vehicleImageJobs"
+    | "driverPayout"
     | "accountDeletion"
     | "payment"
     | "promotion"

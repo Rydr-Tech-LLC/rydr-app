@@ -1,3 +1,4 @@
+import { enqueueImageJob, validImageQuery } from "./vehicleImageAcquisition";
 import { firebaseLibraryProvider, type VehicleImageProvider } from "./vehicleImageProvider";
 import type { VehicleImageQuery, VehicleImageResult, VehicleImageStatus } from "../types";
 
@@ -51,7 +52,7 @@ export class VehicleImageService {
   async getImage(query: VehicleImageQuery): Promise<VehicleImageLookup> {
     const key = cacheKey(query);
     const cached = this.cache.get(key);
-    if (cached && cached.expiresAt > Date.now()) {
+    if (cached && cached.value.result?.tier === 1 && cached.expiresAt > Date.now()) {
       return cached.value;
     }
 
@@ -64,6 +65,11 @@ export class VehicleImageService {
       }
     }
 
+    if (lookup.result?.tier !== 1 && validImageQuery(query)) {
+      await enqueueImageJob(query).catch(error => {
+        console.error("Vehicle image acquisition enqueue failed", error instanceof Error ? error.message : "unknown");
+      });
+    }
     this.cache.set(key, { value: lookup, expiresAt: Date.now() + CACHE_TTL_MS });
     return lookup;
   }

@@ -1,4 +1,4 @@
-import { App, getApp, getApps, initializeApp } from "firebase-admin/app";
+import { App, getApps, initializeApp } from "firebase-admin/app";
 import { FieldValue, Firestore, Timestamp, getFirestore } from "firebase-admin/firestore";
 import { Messaging, getMessaging } from "firebase-admin/messaging";
 import { Storage, getStorage } from "firebase-admin/storage";
@@ -8,7 +8,9 @@ import { Storage, getStorage } from "firebase-admin/storage";
 // when local ADC/metadata lookup is slow, so initialize lazily inside the first
 // real function invocation instead.
 function app(): App {
-  return getApps().length > 0 ? getApp() : initializeApp();
+  // The Functions runtime/tooling can register a *named* Admin app. That does
+  // not imply [DEFAULT] exists; getApp() would throw for every notification.
+  return getApps().find((candidate) => candidate.name === "[DEFAULT]") ?? initializeApp();
 }
 
 function firestore(): Firestore {
@@ -25,22 +27,25 @@ function firebaseMessaging(): Messaging {
 
 export const db = new Proxy({} as Firestore, {
   get(_target, prop, receiver) {
-    const value = Reflect.get(firestore(), prop, receiver);
-    return typeof value === "function" ? value.bind(firestore()) : value;
+    const service = firestore();
+    const value = Reflect.get(service, prop, service);
+    return typeof value === "function" ? value.bind(service) : value;
   }
 });
 
 export const storage = new Proxy({} as Storage, {
   get(_target, prop, receiver) {
-    const value = Reflect.get(firebaseStorage(), prop, receiver);
-    return typeof value === "function" ? value.bind(firebaseStorage()) : value;
+    const service = firebaseStorage();
+    const value = Reflect.get(service, prop, service);
+    return typeof value === "function" ? value.bind(service) : value;
   }
 });
 
 export const messaging = new Proxy({} as Messaging, {
   get(_target, prop, receiver) {
-    const value = Reflect.get(firebaseMessaging(), prop, receiver);
-    return typeof value === "function" ? value.bind(firebaseMessaging()) : value;
+    const service = firebaseMessaging();
+    const value = Reflect.get(service, prop, service);
+    return typeof value === "function" ? value.bind(service) : value;
   }
 });
 

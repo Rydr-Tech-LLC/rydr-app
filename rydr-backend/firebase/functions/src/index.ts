@@ -10,6 +10,8 @@ import { evaluateVehicleEligibility, mergeDefaultTierRates } from "./services/ve
 // sprint). Each trigger below listens to the same Firestore documents the
 // rider/driver apps and Mission Control already write/read, so every
 // notification is a reflection of real, persisted server state.
+export { queueMondayDriverPayouts, dispatchWeeklyDriverPayout, reconcileDriverPayouts } from "./triggers/weeklyDriverPayouts";
+export { onVehicleImageJobWritten, onDriverVehicleImageNeeded, maintainVehicleImageJobs } from "./triggers/vehicleImageJobs";
 export { onRideUpdated } from "./triggers/rideNotifications";
 export { onRideRequestCreated, onRideRequestRematched, onRideChatMessageCreated } from "./triggers/rideRequestNotifications";
 export { onCashHubRequestCreated, onCashHubConversationCreated, onCashHubMessageCreated, onCashHubRequestUpdated } from "./triggers/cashHubNotifications";
@@ -110,7 +112,7 @@ export const getVehicleImage = onCall(async (request) => {
     year: Number(year),
     color,
     trim: trim ? String(trim) : null,
-    bodyStyle: bodyStyle ?? null
+    bodyStyle: asBodyStyle(bodyStyle) ?? "unknown"
   });
 });
 
