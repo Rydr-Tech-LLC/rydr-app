@@ -71,7 +71,7 @@ export async function reconcileDriverCompliance(uid: string, policy?: Record<str
   // Renewals and newer reminder stages invalidate queued pushes from old dates.
   const pending = await ref.collection("notifications").where("pushStatus", "in", ["pending", "retry_pending", "awaiting_device"]).get();
   for (const notification of pending.docs) {
-    if (/^(document_|documents_verification_|screening_expiry_|background_required_)/.test(notification.id) && !activeReminderIds.has(notification.id)) {
+    if ((/^(document_|documents_verification_|screening_expiry_|background_required_)/.test(notification.id) && !activeReminderIds.has(notification.id)) || (notification.id.startsWith("compliance_restored_") && (!compliance.drivingAllowed || !baseApprovalAllowsDriving(driver)))) {
       await notification.ref.set({ pushStatus: "superseded" }, { merge: true });
     }
   }

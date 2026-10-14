@@ -97,3 +97,15 @@ test('a verified renewal cancels an undelivered expired-document reminder', asyn
   await reconcileDriverCompliance('fixture', {}, now);
   for (const key of queued) assert.equal(rows.get(key).pushStatus, 'superseded');
 });
+
+test('a new pilot screening hold cancels queued access-restored pushes', async () => {
+  seed('2026-10-13'); rows.delete('drivers/fixture/notificationTokens/device');
+  await reconcileDriverCompliance('fixture', {}, now);
+  for (const document of Object.values(rows.get('drivers/fixture').documents)) document.expirationDate = '2027-02-01';
+  await reconcileDriverCompliance('fixture', {}, now);
+  const restored = [...rows.keys()].find(key => key.includes('/notifications/compliance_restored_'));
+  assert.equal(rows.get(restored).pushStatus, 'awaiting_device');
+  await reconcileDriverCompliance('fixture', { backgroundChecksRequired: true }, now);
+  assert.equal(rows.get(restored).pushStatus, 'superseded');
+  assert.equal(rows.get('drivers/fixture').backgroundCheckHold, true);
+});
