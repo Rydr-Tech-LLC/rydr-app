@@ -64,3 +64,8 @@ test('a lost response in one source does not leave never-submitted parts locked 
  assert.equal(f.job().parts[1].status,'not_attempted');f.payouts.set('po_lost',{...f.creates()[0].params,id:'po_lost',status:'pending'});await f.service.reconcile(f.id);
  assert.equal(f.records.has('driverPayoutLocks/acct_driver'),false);assert.equal(f.job().needsReview,true);assert.equal(f.creates().length,1);
 });
+
+test('rechecking an unsubmitted issue preserves its original reason',async()=>{
+ const f=fixture();f.records.set(`driverPayouts/${f.id}`,{...f.job(),status:'needs_review',needsReview:true,reasonCode:'valid_default_bank_account_required',reason:'Add a bank account'});
+ await f.service.reconcile(f.id);assert.equal(f.job().reasonCode,'valid_default_bank_account_required');assert.equal(f.job().reason,'Add a bank account');assert.equal(f.creates().length,0);
+});

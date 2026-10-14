@@ -240,7 +240,7 @@ class DriverPayoutService {
     const interrupted=job.status==="processing" && this.now()-(job.startedAt?.toMillis?.()??this.now())>LOCK_WARNING_MS;
     if (!job.parts?.length) {
       if(interrupted || job.status==="needs_review") {
-        await ref.set({status:"needs_review",needsReview:true,owner:null,reasonCode:"payout_worker_interrupted",reason:"Payout worker stopped before a submission was prepared; inspect this week's payout before retrying",updatedAt:FieldValue.serverTimestamp()},{merge:true});
+        await ref.set({status:"needs_review",needsReview:true,owner:null,...(interrupted?{reasonCode:"payout_worker_interrupted",reason:"Payout worker stopped before a submission was prepared; inspect this week's payout before retrying"}:{}),updatedAt:FieldValue.serverTimestamp()},{merge:true});
         await this.release(jobId,job.accountId);
         return "needs_review";
       }
