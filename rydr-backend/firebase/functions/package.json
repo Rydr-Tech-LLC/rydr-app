@@ -15,7 +15,8 @@
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:vehicle-images": "npm run build && node --test test/vehicleImage*.test.cjs"
   },
   "dependencies": {
     "@google-cloud/firestore": "^9.3.1",

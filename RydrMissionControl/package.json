@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "set-admin": "node scripts/setAdminClaim.mjs"
+    "set-admin": "node scripts/setAdminClaim.mjs",
+    "test:auth-compatibility": "node --no-experimental-require-module --test scripts/authCompatibility.test.cjs"
   },
   "dependencies": {
     "@google-cloud/firestore": "^9.1.0",
@@ -33,6 +34,7 @@
   "overrides": {
     "@firebase/app": "0.16.2",
     "@firebase/app-compat": "0.5.18",
-    "@grpc/grpc-js": "1.14.5"
+    "@grpc/grpc-js": "1.14.5",
+    "jose": "5.10.0"
   }
 }
