@@ -1,3 +1,4 @@
+import { evaluatePremiumVehicle, availablePremiumRideTypes } from "../services/premiumVehiclePolicy";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { db, FieldValue } from "../admin";
 
@@ -15,6 +16,13 @@ export const onDriverPublicProfileProjection = onDocumentWritten("drivers/{uid}"
   const fullName = String(legalName || driver.displayName || "Rydr Driver").trim();
   const displayName = fullName.split(/\s+/)[0] || "Rydr Driver";
   const vehicle = driver.vehicle ?? {};
+  const premium = evaluatePremiumVehicle(driver);
+  const standardRideTypes = (driver.qualifiedRideTypes ?? driver.supportedRideTypes ?? []).filter((value: string) => !/prestine|pristine|executive/i.test(value));
+  const executiveConfig = await db.collection("platformConfig").doc("rydrExecutive").get();
+  const qualified = [...standardRideTypes, ...availablePremiumRideTypes(premium, executiveConfig.data() ?? {})];
+  if (JSON.stringify(driver.qualifiedRideTypes ?? []) !== JSON.stringify(qualified)) {
+    await db.collection("drivers").doc(uid).update({ qualifiedRideTypes: qualified, supportedRideTypes: qualified, selectedRideTypes: (driver.selectedRideTypes ?? []).filter((value: string) => qualified.includes(value)) });
+  }
   await ref.set({
     uid,
     displayName,
@@ -23,7 +31,8 @@ export const onDriverPublicProfileProjection = onDocumentWritten("drivers/{uid}"
     vehicleImageURL: vehicle.imageURL ?? vehicle.imageUrl ?? driver.vehicleImageURL ?? "",
     tierRates: driver.tierRates ?? {},
     rideFilters: driver.rideFilters ?? {},
-    eligibleRideTypes: driver.qualifiedRideTypes ?? driver.supportedRideTypes ?? [],
+    eligibleRideTypes: qualified,
+    premiumEligibility: premium,
     profilePhotoURL: driver.profilePhotoURL ?? "",
     rating: driver.rating ?? 5,
     ratingCount: driver.ratingCount ?? 0,

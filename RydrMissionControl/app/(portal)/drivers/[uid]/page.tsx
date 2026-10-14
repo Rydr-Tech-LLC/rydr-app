@@ -1,3 +1,5 @@
+import PremiumVehicleReview from "./PremiumVehicleReview";
+import { evaluatePremiumVehicle, vehicleKey } from "../../../../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { adminDb } from "@/lib/firebaseAdmin";
@@ -83,6 +85,7 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
 
   return (
     <div className="space-y-6">
+      <PremiumVehicleReview uid={params.uid} initial={JSON.parse(JSON.stringify((snap.data() ?? {}).premiumReview?.vehicleKey === vehicleKey((snap.data() ?? {}).vehicle) ? (snap.data() ?? {}).premiumReview : {}))} assessment={evaluatePremiumVehicle(snap.data())} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

@@ -32,7 +32,7 @@ export type VehicleBodyStyle =
   | "van"
   | "unknown";
 
-export const RYDR_RIDE_TYPES = ["Rydr Go", "Rydr Eco", "Rydr XL"] as const;
+export const RYDR_RIDE_TYPES = ["Rydr Go", "Rydr Eco", "Rydr XL", "Rydr Prestine", "Rydr Executive"] as const;
 export type RydrRideType = (typeof RYDR_RIDE_TYPES)[number];
 
 /** A single entry in the managed vehicle image library. One document per

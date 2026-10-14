@@ -1,3 +1,4 @@
+import { evaluatePremiumVehicle, availablePremiumRideTypes } from "./premiumVehiclePolicy";
 import type { RydrRideType } from "../types";
 
 const ORDERED_RIDE_TYPES = ["Rydr Go", "Rydr Eco", "Rydr XL", "Rydr Prestine", "Rydr Executive"] as const;
@@ -52,6 +53,10 @@ export function evaluateVehicleEligibility(input: {
   fuelType: unknown;
   libraryRideTypes?: RydrRideType[] | string[];
   approvedRideTypes?: unknown;
+  vehicle?: Record<string, unknown>;
+  premiumReview?: unknown;
+  rating?: unknown;
+  executiveConfig?: unknown;
 }) {
   const make = normalized(input.make);
   const model = normalized(input.model);
@@ -77,7 +82,8 @@ export function evaluateVehicleEligibility(input: {
     expanded.add("Rydr Go");
     if (xlEligible) expanded.add("Rydr XL");
   }
-  const rideTypes = ORDERED_RIDE_TYPES.filter((rideType) => expanded.has(rideType));
+  const premium = evaluatePremiumVehicle({ vehicle: input.vehicle, premiumReview: input.premiumReview, rating: input.rating });
+  const rideTypes = [...ORDERED_RIDE_TYPES.filter((rideType) => expanded.has(rideType) && !["Rydr Prestine", "Rydr Executive"].includes(rideType)), ...availablePremiumRideTypes(premium, input.executiveConfig)];
   const vehicleClass = rideTypes.includes("Rydr XL")
     ? "xl"
     : rideTypes.includes("Rydr Eco")
@@ -87,6 +93,7 @@ export function evaluateVehicleEligibility(input: {
         : "manual_review";
   return {
     rideTypes,
+    premium,
     vehicleClass,
     requiresManualReview: baseRideTypes.length === 0,
     source: libraryRideTypes.length > 0 ? "vehicleLibrary" : "backendRules"

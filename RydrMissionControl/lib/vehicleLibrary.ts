@@ -1,3 +1,4 @@
+import { evaluatePremiumVehicle, availablePremiumRideTypes } from "../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
 import "server-only";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb, adminStorage } from "./firebaseAdmin";
@@ -54,7 +55,7 @@ export const VEHICLE_BODY_STYLES: VehicleBodyStyle[] = [
   "unknown"
 ];
 
-export const RYDR_RIDE_TYPES = ["Rydr Go", "Rydr Eco", "Rydr XL"] as const;
+export const RYDR_RIDE_TYPES = ["Rydr Go", "Rydr Eco", "Rydr XL", "Rydr Prestine", "Rydr Executive"] as const;
 export type RydrRideType = (typeof RYDR_RIDE_TYPES)[number];
 
 export interface VehicleLibraryEntry {
@@ -424,6 +425,7 @@ export async function backfillDriverVehicleImagesForEntry(entry: VehicleLibraryE
     pendingWrites = 0;
   }
 
+  const executiveConfig = await adminDb.collection("platformConfig").doc("rydrExecutive").get();
   for (const doc of snap.docs) {
     const data = doc.data();
     const vehicle = data.vehicle && typeof data.vehicle === "object" && !Array.isArray(data.vehicle)
@@ -450,7 +452,8 @@ export async function backfillDriverVehicleImagesForEntry(entry: VehicleLibraryE
       libraryVehicleId: entry.vehicleId,
       libraryMatchedColor: match.matchedColor
     };
-    const libraryRideTypes = entry.eligibleRideTypes ?? [];
+    const premium = evaluatePremiumVehicle({ ...data, vehicle: nextVehicle });
+    const libraryRideTypes = [...(entry.eligibleRideTypes ?? []).filter(type => !/prestine|pristine|executive/i.test(type)), ...availablePremiumRideTypes(premium, executiveConfig.data() ?? {})];
     const driverUpdate: Record<string, unknown> = {
       vehicle: nextVehicle,
       vehicleImageStatus: "matched",

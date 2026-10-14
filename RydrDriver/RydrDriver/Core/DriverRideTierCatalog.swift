@@ -10,7 +10,7 @@ import Foundation
 
 enum RydrRideTierCatalog {
     nonisolated static var orderedRideTypes: [String] {
-        ["Rydr Go", "Rydr Eco", "Rydr XL", "Rydr Prestine", "Rydr Executive"]
+        ["Rydr Go", "Rydr Eco", "Rydr XL", "Rydr Prestine Sedan", "Rydr Prestine SUV", "Rydr Executive Sedan", "Rydr Executive SUV"]
     }
 
     nonisolated static func metadata(for rideType: String) -> RydrRideTierMetadata {
@@ -27,12 +27,12 @@ enum RydrRideTierCatalog {
             )
         case "prestine":
             return .init(
-                title: "Rydr Prestine",
+                title: rideType,
                 purpose: "Premium transportation with elevated vehicle standards."
             )
         case "executive":
             return .init(
-                title: "Rydr Executive",
+                title: rideType,
                 purpose: "More Than A Ride. An Arrival."
             )
         default:
@@ -48,6 +48,8 @@ enum RydrRideTierCatalog {
         if key == "rydr" || key == "rydr go" || key == "go" { return "go" }
         if key == "rydr eco" || key == "eco" { return "eco" }
         if key == "rydr xl" || key == "xl" { return "xl" }
+        if key.hasPrefix("rydr prestine ") || key.hasPrefix("rydr pristine ") { return "prestine" }
+        if key.hasPrefix("rydr executive ") { return "executive" }
         if key == "rydr prestine" || key == "rydr pristine" || key == "prestine" || key == "pristine" { return "prestine" }
         if key == "rydr executive" || key == "executive" { return "executive" }
         return key
@@ -55,7 +57,10 @@ enum RydrRideTierCatalog {
 
     nonisolated static func normalizedRideTypes(_ rideTypes: [String]) -> [String] {
         let canonical = Set(rideTypes.map(canonicalRideType))
-        return orderedRideTypes.filter { canonical.contains(canonicalRideType($0)) }
+        return orderedRideTypes.filter { option in
+            if option.hasSuffix(" Sedan") || option.hasSuffix(" SUV") { return rideTypes.contains(option) }
+            return canonical.contains(canonicalRideType(option))
+        }
     }
 
 }

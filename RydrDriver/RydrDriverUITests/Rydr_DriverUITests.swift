@@ -10,6 +10,22 @@ import XCTest
 final class Rydr_DriverUITests: XCTestCase {
 
     @MainActor
+    func testPremiumSedanAndSUVChoices() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-RydrWalletNavigationUITest"]
+        app.launch()
+        let menu = app.buttons["driverMenu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 15))
+        menu.tap()
+        app.buttons["Vehicle & Rydr Hub"].tap()
+        for title in ["Rydr Prestine Sedan", "Rydr Prestine SUV", "Rydr Executive Sedan", "Rydr Executive SUV"] {
+            let label = app.staticTexts[title]
+            for _ in 0..<5 where !label.isHittable { app.swipeUp() }
+            XCTAssertTrue(label.exists, app.debugDescription)
+        }
+    }
+
+    @MainActor
     func testWalletBackReturnsToDashboard() {
         let app = XCUIApplication()
         app.launchArguments = ["-RydrWalletNavigationUITest"]

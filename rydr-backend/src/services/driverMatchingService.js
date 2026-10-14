@@ -1,3 +1,4 @@
+const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
 const { tierFor } = require("./rideFinancialService");
 
 const DEFAULT_MAX_PICKUP_DISTANCE_MILES = 30;
@@ -142,6 +143,7 @@ function findBestDrivers({
     .filter((candidate) => candidate.id && candidate.profile && candidate.profile.standardDispatchEnabled !== false)
     .filter((candidate) => !requireOnline || candidate.profile.isOnline === true)
     .filter((candidate) => !requireOnline || ["available", "onCurrentRide"].includes(String(candidate.profile.availabilityStatus || "available")))
+    .filter((candidate) => premiumRideAllowed(candidate.profile, rideType))
     .filter((candidate) => {
       const types = canonicalRideTypes(candidate.profile);
       return (types.size === 0 || types.has(tierFor(rideType))) && !temporarilyDisabled(candidate.profile, rideType);

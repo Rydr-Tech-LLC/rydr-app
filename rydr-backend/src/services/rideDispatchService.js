@@ -1,3 +1,4 @@
+const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
 const { admin, getFirestore } = require("../config/firebase");
 const { tierFor } = require("./rideFinancialService");
 const { isApprovedDriver, hasCurrentOnlinePresence } = require("./driverPresenceService");
@@ -39,7 +40,7 @@ function canonicalRideTypes(profile) {
 }
 
 function isEligibleCandidate(profile, rideType) {
-  if (!profile || profile.isOnline !== true || profile.standardDispatchEnabled === false) return false;
+  if (!profile || !premiumRideAllowed(profile, rideType) || profile.isOnline !== true || profile.standardDispatchEnabled === false) return false;
   const availability = String(profile.availabilityStatus || "available");
   if (!["available", "onCurrentRide"].includes(availability)) return false;
   const types = canonicalRideTypes(profile);
@@ -64,7 +65,7 @@ async function selectNextCandidate({ db, request, attemptedDriverIds }) {
     db.getAll(...statusRefs)
   ]);
   const approvedIds = new Set(canonicalSnapshots
-    .filter((snapshot) => snapshot.exists && isApprovedDriver(snapshot.data()))
+    .filter((snapshot) => snapshot.exists && isApprovedDriver(snapshot.data()) && premiumRideAllowed(snapshot.data(), request.rideType))
     .map((snapshot) => snapshot.id));
   const nowMillis = Date.now();
   const onlineIds = new Set(statusSnapshots
@@ -100,7 +101,7 @@ async function initializeRideDispatch({ rideId, uid, candidateIds, requestId, db
     db.collection("driver_status").doc(request.driverId).get()
   ]);
   if (!initialCandidateSnap.exists || !isEligibleCandidate(initialCandidateSnap.data(), request.rideType)
-      || !canonicalCandidateSnap.exists || !isApprovedDriver(canonicalCandidateSnap.data())
+      || !canonicalCandidateSnap.exists || !isApprovedDriver(canonicalCandidateSnap.data()) || !premiumRideAllowed(canonicalCandidateSnap.data(), request.rideType)
       || !statusCandidateSnap.exists || !hasCurrentOnlinePresence(statusCandidateSnap.data())) {
     throw error("The selected driver is no longer eligible", 409);
   }

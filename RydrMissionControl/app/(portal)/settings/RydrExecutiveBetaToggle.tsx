@@ -44,7 +44,7 @@ export default function RydrExecutiveBetaToggle({ initialEnabled }: Props) {
           <h2 className="text-sm font-semibold text-ink">Rydr Executive Beta Gate</h2>
           <p className="mt-2 max-w-2xl text-sm text-muted">
             Controls whether Rydr Executive can be offered in rider booking during Phase 0 beta. Keep this off until the
-            Executive operating model, vehicle qualifications, and driver readiness are approved.
+            Executive funding, operating model, vehicle qualifications, and driver readiness are approved.
           </p>
         </div>
 

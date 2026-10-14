@@ -161,3 +161,10 @@ test("mobile clients cannot forge mode-specific Stripe account or verification s
     }));
   }
 });
+
+test("drivers cannot self-approve premium verification or forge public qualification", async () => {
+  const db = environment.authenticatedContext("driver-1", { phone_number: "+16783225555" }).firestore();
+  await assertFails(updateDoc(doc(db, "drivers/driver-1"), { premiumReview: { luxuryVehicleApproved: true } }));
+  await assertFails(updateDoc(doc(db, "drivers/driver-1"), { premiumServiceHold: false }));
+  await assertFails(setDoc(doc(db, "publicDriverProfiles/driver-1"), { uid: "driver-1", premiumEligibility: { executive: { eligible: true } } }, { merge: true }));
+});

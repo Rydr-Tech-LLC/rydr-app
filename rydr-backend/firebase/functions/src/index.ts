@@ -6,6 +6,8 @@ import { vehicleImageService } from "./services/vehicleImageService";
 import { VEHICLE_COLORS, type VehicleColor, type VehicleBodyStyle } from "./types";
 import { evaluateVehicleEligibility, mergeDefaultTierRates } from "./services/vehicleEligibilityService";
 
+export { maintainPremiumVehicleEligibility, onExecutiveAvailabilityChanged } from "./triggers/premiumVehicleMaintenance";
+
 // Push notification sender architecture (Part 9 of the beta hardening
 // sprint). Each trigger below listens to the same Firestore documents the
 // rider/driver apps and Mission Control already write/read, so every
@@ -194,12 +196,17 @@ export const submitVehicleVin = onCall(async (request) => {
   const libraryRideTypes = lookup.result?.eligibleRideTypes ?? [];
   const driverSnap = await driverRef.get();
   const driver = driverSnap.data() ?? {};
+  const executiveConfigSnap = await db.collection("platformConfig").doc("rydrExecutive").get();
   const eligibility = evaluateVehicleEligibility({
     make: decoded.make,
     model: decoded.model,
     fuelType: decoded.fuelTypePrimary,
     libraryRideTypes,
-    approvedRideTypes: driver.approvedRideTypes
+    approvedRideTypes: driver.approvedRideTypes,
+    vehicle: vehicleFields,
+    premiumReview: driver.premiumReview,
+    rating: driver.rating,
+    executiveConfig: executiveConfigSnap.data() ?? {}
   });
 
   await driverRef.set(
@@ -291,12 +298,17 @@ export const submitVehicleManual = onCall(async (request) => {
   const libraryRideTypes = lookup.result?.eligibleRideTypes ?? [];
   const driverSnap = await driverRef.get();
   const driver = driverSnap.data() ?? {};
+  const executiveConfigSnap = await db.collection("platformConfig").doc("rydrExecutive").get();
   const eligibility = evaluateVehicleEligibility({
     make,
     model,
     fuelType,
     libraryRideTypes,
-    approvedRideTypes: driver.approvedRideTypes
+    approvedRideTypes: driver.approvedRideTypes,
+    vehicle: vehicleFields,
+    premiumReview: driver.premiumReview,
+    rating: driver.rating,
+    executiveConfig: executiveConfigSnap.data() ?? {}
   });
 
   await driverRef.set(

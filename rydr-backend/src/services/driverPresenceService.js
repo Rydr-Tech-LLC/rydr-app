@@ -1,3 +1,4 @@
+const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
 const { admin, getFirestore } = require("../config/firebase");
 
 const ACTIVE_RIDE_STATUSES = new Set([
@@ -92,7 +93,7 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   }
 
   const requestedRideTypes = normalizedRideTypes(selectedRideTypes);
-  const storedQualifiedTypes = normalizedRideTypes(driver.qualifiedRideTypes ?? driver.supportedRideTypes ?? driver.eligibleRideTypes);
+  const storedQualifiedTypes = normalizedRideTypes(driver.qualifiedRideTypes ?? driver.supportedRideTypes ?? driver.eligibleRideTypes).filter(type => premiumRideAllowed(driver, type));
   const allowedTypes = new Set(storedQualifiedTypes);
   const effectiveRideTypes = requestedRideTypes.filter((type) => allowedTypes.size === 0 || allowedTypes.has(type));
   if (online && effectiveRideTypes.length === 0) {

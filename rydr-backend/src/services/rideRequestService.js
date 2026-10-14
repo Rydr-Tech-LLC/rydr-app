@@ -1,3 +1,5 @@
+const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
+const { requireExecutiveEnabled } = require("./premiumPlatformService");
 const crypto = require("node:crypto");
 const { admin, getFirestore } = require("../config/firebase");
 const { getDirections } = require("./appleMapsService");
@@ -180,6 +182,7 @@ async function createRideRequest({
   if (!selectedCandidateId || !pickupName || !dropoffName || !rideType) {
     throw error("pickup, dropoff, rideType, and selectedCandidateId are required", 422);
   }
+  await requireExecutiveEnabled(db, rideType);
   const pickup = coordinate(payload?.pickupCoordinate, "pickupCoordinate");
   const dropoff = coordinate(payload?.dropoffCoordinate, "dropoffCoordinate");
 
@@ -197,7 +200,7 @@ async function createRideRequest({
     if (matchSession.riderId !== riderId || matchSession.status !== "open") throw error("The driver match session is no longer valid", 409);
     const sessionExpiry = typeof matchSession.expiresAt?.toMillis === "function" ? matchSession.expiresAt.toMillis() : 0;
     if (sessionExpiry <= now.toMillis()) throw error("The driver match session expired. Refresh nearby drivers.", 409);
-    if (tierFor(matchSession.rideType) !== tierFor(rideType)) throw error("The ride type changed after matching", 409);
+    if (String(matchSession.rideType).toLowerCase() !== String(rideType).toLowerCase()) throw error("The ride type changed after matching", 409);
     const sameCoordinate = (left, right) => Math.abs(Number(left?.lat) - right.latitude) < 0.000001
       && Math.abs(Number(left?.lng) - right.longitude) < 0.000001;
     if (!sameCoordinate(matchSession.pickupCoordinate, pickup) || !sameCoordinate(matchSession.dropoffCoordinate, dropoff)) {
@@ -227,7 +230,7 @@ async function createRideRequest({
     throw error("This rider account cannot request rides", 403);
   }
   if (!publicDriverSnap.exists || !isEligibleCandidate(publicDriverSnap.data(), rideType)
-      || !canonicalDriverSnap.exists || !isApprovedDriver(canonicalDriverSnap.data())
+      || !canonicalDriverSnap.exists || !isApprovedDriver(canonicalDriverSnap.data()) || !premiumRideAllowed(canonicalDriverSnap.data(), rideType, now.toMillis())
       || !driverStatusSnap.exists || !hasCurrentOnlinePresence(driverStatusSnap.data(), now.toMillis())) {
     throw error("The selected driver is no longer available", 409);
   }

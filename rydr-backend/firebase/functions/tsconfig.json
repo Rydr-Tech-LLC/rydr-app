@@ -2,7 +2,9 @@
   "compilerOptions": {
     "module": "commonjs",
     "target": "es2020",
-    "lib": ["es2020"],
+    "lib": [
+      "es2020"
+    ],
     "moduleResolution": "node",
     "outDir": "lib",
     "rootDir": "src",
@@ -13,9 +15,16 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "noUnusedLocals": false,
-    "noUnusedParameters": false
+    "noUnusedParameters": false,
+    "allowJs": true
   },
   "compileOnSave": true,
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "lib"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "lib"
+  ]
 }

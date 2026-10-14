@@ -37,18 +37,32 @@ struct RideTypeSelectionView: View {
             vehicle: .suv
         ),
         .prestine(
-            title: "Rydr Prestine",
+            title: "Rydr Prestine Sedan",
             badge: "Premium",
             subtitle: "Luxury Rides",
             icon: "sparkles",
             vehicle: .prestine
         ),
+        .prestine(
+            title: "Rydr Prestine SUV",
+            badge: "Premium",
+            subtitle: "Luxury SUV Rides",
+            icon: "sparkles",
+            vehicle: .suv
+        ),
         .executive(
-            title: "Rydr Executive",
+            title: "Rydr Executive Sedan",
             badge: "Luxury",
             subtitle: "Black Car Service Rides",
             icon: "briefcase.fill",
             vehicle: .executive
+        ),
+        .executive(
+            title: "Rydr Executive SUV",
+            badge: "Professional",
+            subtitle: "Black SUV Service",
+            icon: "briefcase.fill",
+            vehicle: .suv
         ),
         .cashHub(
             title: "Cash Rydr Hub",

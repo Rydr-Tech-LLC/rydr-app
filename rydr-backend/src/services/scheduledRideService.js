@@ -1,3 +1,5 @@
+const { requireExecutiveEnabled } = require("./premiumPlatformService");
+const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
 const { admin, getFirestore } = require("../config/firebase");
 const { getDirections } = require("./appleMapsService");
 const { calculateOutcome, tierFor, PRICING_VERSION } = require("./rideFinancialService");
@@ -68,7 +70,7 @@ function coordinate(value, name) {
 }
 
 function scheduledCandidateEligible(profile, rideType) {
-  if (!profile || profile.standardDispatchEnabled === false) return false;
+  if (!profile || profile.standardDispatchEnabled === false || !premiumRideAllowed(profile, rideType)) return false;
   const approvalStatus = String(profile.driverApprovalStatus ?? profile.approvalStatus ?? "pending").toLowerCase();
   if (profile.isApproved !== true && approvalStatus !== "approved") return false;
   if (["suspended", "removed", "deletion_requested"].includes(String(profile.accountStatus || "").toLowerCase())
@@ -283,6 +285,7 @@ async function buildCandidateQuotes({
 async function previewScheduledRide({ riderId, authorization, payload, db = getFirestore(), routeProvider = getDirections, paymentVerifier = verifyPaymentReadiness, nowMillis = Date.now() }) {
   validateSchedule(payload?.scheduledPickupAt, nowMillis);
   const rideType = text(payload?.rideType, 80);
+  await requireExecutiveEnabled(db, rideType);
   const mode = payload?.mode;
   if (!rideType || !["quickSchedule", "chooseMyDriver"].includes(mode)) throw error("A valid rideType and mode are required", 422);
   await verifyRiderCanSchedule(db, riderId);
@@ -324,6 +327,7 @@ async function writeOpportunities({ db, requestRef, candidates, now }) {
 async function createScheduledRide({ riderId, authorization, payload, db = getFirestore(), routeProvider = getDirections, paymentVerifier = verifyPaymentReadiness, now = admin.firestore.Timestamp.now() }) {
   const pickupMillis = validateSchedule(payload?.scheduledPickupAt, now.toMillis());
   const rideType = text(payload?.rideType, 80);
+  await requireExecutiveEnabled(db, rideType);
   const mode = payload?.mode;
   const pickupName = text(payload?.pickup);
   const dropoffName = text(payload?.dropoff);

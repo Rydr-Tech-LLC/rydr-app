@@ -1,3 +1,4 @@
+const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
 const { admin, getFirestore } = require("../config/firebase");
 const {
   calculateOutcome,
@@ -214,6 +215,7 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     }
 
     const driverSnap = ride.driverId ? await tx.get(db.collection("drivers").doc(ride.driverId)) : null;
+    if (["driver_accept", "promote_queue", "start_navigation"].includes(action) && !premiumRideAllowed(driverSnap?.data() ?? {}, ride.rideType)) throw error("Premium vehicle verification is missing or expired", 409);
     let bookingCreditSourceRef = null;
     let bookingFeeCreditCents = 0;
     const replacementForRideId = typeof ride.replacementForRideId === "string" ? ride.replacementForRideId.trim() : "";

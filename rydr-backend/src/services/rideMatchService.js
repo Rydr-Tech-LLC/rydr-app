@@ -1,3 +1,4 @@
+const { requireExecutiveEnabled } = require("./premiumPlatformService");
 const { admin, getFirestore } = require("../config/firebase");
 const { getDirections } = require("./appleMapsService");
 const { findBestDrivers } = require("./driverMatchingService");
@@ -121,6 +122,7 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
   const dropoff = coordinate(payload?.dropoffCoordinate, "dropoffCoordinate");
   const rideType = typeof payload?.rideType === "string" ? payload.rideType.trim() : "";
   if (!rideType) throw error("rideType is required", 422);
+  await requireExecutiveEnabled(db, rideType);
   const routeResult = await routeProvider({ origin: pickup, destination: dropoff, departureDate: new Date().toISOString() });
   const route = routeResult.route;
   if (!route || route.distanceMeters <= 0 || route.durationSeconds <= 0) throw error("A route could not be calculated", 422);
