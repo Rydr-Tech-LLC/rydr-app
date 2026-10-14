@@ -2204,6 +2204,7 @@ private struct DriverSupportArticle: Identifiable {
 
 struct DrawerDestinationView: View {
     let item: SideMenuItem
+    let onDismiss: () -> Void
     @ObservedObject var vm: DriverDashboardVM
 
     var body: some View {
@@ -2219,7 +2220,7 @@ struct DrawerDestinationView: View {
             } else if item == .community {
                 DriverCommunityHubView()
             } else if item == .walletPayouts {
-                DriverWalletPayoutsView(vm: vm)
+                DriverWalletPayoutsView(vm: vm, onBack: onDismiss)
             } else if item == .documents {
                 DriverDocumentsView(vm: vm)
             } else if item == .settings {

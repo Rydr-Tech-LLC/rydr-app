@@ -2283,7 +2283,7 @@ struct DriverDashboardView: View {
             )
             .presentationDetents([.medium, .large])
         case .menu(let item):
-            DrawerDestinationView(item: item, vm: vm)
+            DrawerDestinationView(item: item, onDismiss: { activeSheet = nil }, vm: vm)
         }
     }
 

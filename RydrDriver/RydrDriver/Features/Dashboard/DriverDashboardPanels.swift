@@ -51,6 +51,7 @@ struct DriverTopBar: View {
                     .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("driverMenu")
 
             Spacer()
 

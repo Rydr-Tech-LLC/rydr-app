@@ -10,6 +10,26 @@ import XCTest
 final class Rydr_DriverUITests: XCTestCase {
 
     @MainActor
+    func testWalletBackReturnsToDashboard() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-RydrWalletNavigationUITest"]
+        app.launch()
+        for _ in 0..<2 {
+            let menu = app.buttons["driverMenu"]
+            XCTAssertTrue(menu.waitForExistence(timeout: 15))
+            menu.tap()
+            let wallet = app.buttons["Wallet & Payouts"]
+            XCTAssertTrue(wallet.waitForExistence(timeout: 5), app.debugDescription)
+            wallet.tap()
+            let back = app.buttons["walletBack"]
+            XCTAssertTrue(back.waitForExistence(timeout: 5), app.debugDescription)
+            back.tap()
+            XCTAssertTrue(back.waitForNonExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(menu.isHittable, app.debugDescription)
+        }
+    }
+
+    @MainActor
     func testRateCardPersistsAfterReopen() throws {
         let app = XCUIApplication()
         app.launch()

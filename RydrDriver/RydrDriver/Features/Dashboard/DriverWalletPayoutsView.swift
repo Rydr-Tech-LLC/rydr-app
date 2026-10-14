@@ -4,7 +4,7 @@ import FirebaseFirestore
 
 struct DriverWalletPayoutsView: View {
     @ObservedObject var vm: DriverDashboardVM
-    @Environment(\.dismiss) private var dismiss
+    let onBack: () -> Void
 
     @State private var wallet = DriverWalletSnapshot.empty
     @State private var message: String?
@@ -69,7 +69,7 @@ struct DriverWalletPayoutsView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Button {
-                    dismiss()
+                    onBack()
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.headline.weight(.bold))
@@ -77,7 +77,10 @@ struct DriverWalletPayoutsView: View {
                         .frame(width: 42, height: 42)
                         .background(Circle().fill(Color(.secondarySystemBackground)))
                 }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
                 .accessibilityLabel("Back")
+                .accessibilityIdentifier("walletBack")
 
                 Spacer()
 

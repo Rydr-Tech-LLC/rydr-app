@@ -135,9 +135,19 @@ private struct DriverRootView: View {
     @EnvironmentObject var session: DriverSessionManager
     @State private var didFinishSplash = false
 
+    private var simulatorWalletNavigationTest: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        return ProcessInfo.processInfo.arguments.contains("-RydrWalletNavigationUITest")
+        #else
+        return false
+        #endif
+    }
+
     var body: some View {
         Group {
-            if !didFinishSplash {
+            if simulatorWalletNavigationTest {
+                DriverDashboardView()
+            } else if !didFinishSplash {
                 SplashVideoView {
                     didFinishSplash = true
                 }
