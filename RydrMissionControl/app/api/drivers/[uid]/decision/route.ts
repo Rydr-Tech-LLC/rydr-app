@@ -1,3 +1,4 @@
+import { evaluateDriverCompliance } from "../../../../../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
@@ -35,6 +36,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
   if (!driverSnap.exists) {
     return NextResponse.json({ error: "Driver not found" }, { status: 404 });
   }
+
+  const policy = (await adminDb.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
+  const compliance = evaluateDriverCompliance(driverSnap.data() ?? {}, policy);
+  if (decision === "approved" && !compliance.drivingAllowed) return NextResponse.json({ error: "Current verified documents and required background screening are needed before enabling driving." }, { status: 409 });
 
   const update: Record<string, unknown> = {
     driverApprovalStatus: decision,

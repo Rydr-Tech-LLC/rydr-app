@@ -1,3 +1,4 @@
+const { evaluateDriverCompliance } = require("../../firebase/functions/src/services/driverCompliancePolicy");
 const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
 const { admin, getFirestore } = require("../config/firebase");
 const {
@@ -216,6 +217,10 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
 
     const driverSnap = ride.driverId ? await tx.get(db.collection("drivers").doc(ride.driverId)) : null;
     if (["driver_accept", "promote_queue", "start_navigation"].includes(action) && !premiumRideAllowed(driverSnap?.data() ?? {}, ride.rideType)) throw error("Premium vehicle verification is missing or expired", 409);
+    if (["driver_accept", "promote_queue", "start_navigation"].includes(action)) {
+      const compliancePolicy = (await tx.get(db.collection("platformConfig").doc("driverCompliance"))).data() ?? {};
+      if (!evaluateDriverCompliance(driverSnap?.data() ?? {}, compliancePolicy).drivingAllowed || driverSnap?.data()?.documentComplianceHold === true || driverSnap?.data()?.backgroundCheckHold === true) throw error("Current documents and required screening are needed before driving", 409);
+    }
     let bookingCreditSourceRef = null;
     let bookingFeeCreditCents = 0;
     const replacementForRideId = typeof ride.replacementForRideId === "string" ? ride.replacementForRideId.trim() : "";

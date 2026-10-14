@@ -159,6 +159,11 @@ private struct DriverRootView: View {
         }
         .onAppear {
             session.restoreSessionIfPossible()
+            #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("-RydrDocumentReminderUITest") {
+                DriverNotificationManager.shared.handleNotificationTap(["type": "driverDocumentReminder", "target": "documents"])
+            }
+            #endif
         }
     }
 }

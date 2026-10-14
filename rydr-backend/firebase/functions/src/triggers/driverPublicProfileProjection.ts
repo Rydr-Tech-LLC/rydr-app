@@ -1,3 +1,4 @@
+import { evaluateDriverCompliance } from "../services/driverCompliancePolicy";
 import { evaluatePremiumVehicle, availablePremiumRideTypes } from "../services/premiumVehiclePolicy";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { db, FieldValue } from "../admin";
@@ -48,7 +49,8 @@ export const onDriverPublicProfileProjection = onDocumentWritten("drivers/{uid}"
   const approvalStatus = String(driver.driverApprovalStatus ?? driver.approvalStatus ?? "pending").toLowerCase();
   const accountStatus = String(driver.accountStatus ?? "").toLowerCase();
   const safetyReviewStatus = String(driver.safetyReviewStatus ?? "").toLowerCase();
-  const approved = approvalStatus === "approved" || driver.isApproved === true;
+  const compliancePolicy = (await db.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
+  const approved = (approvalStatus === "approved" || driver.isApproved === true) && !["rejected", "needs_attention"].includes(approvalStatus) && evaluateDriverCompliance(driver, compliancePolicy).drivingAllowed && driver.documentComplianceHold !== true && driver.backgroundCheckHold !== true;
   const safe = !["suspended", "deletion_requested", "removed"].includes(accountStatus)
     && safetyReviewStatus !== "suspended"
     && driver.safetyHold !== true;

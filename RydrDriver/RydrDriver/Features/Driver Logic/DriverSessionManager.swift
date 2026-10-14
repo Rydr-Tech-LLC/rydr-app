@@ -20,7 +20,8 @@ enum DriverApprovalPolicy {
         let safetyReviewStatus = (data["safetyReviewStatus"] as? String)?.lowercased()
         let hasSafetyHold = (data["safetyHold"] as? Bool) ?? false
         let isSafetySuspended = accountStatus == "suspended" || safetyReviewStatus == "suspended" || hasSafetyHold
-        return approvedByMissionControl && !isSafetySuspended
+        let hasComplianceHold = (data["documentComplianceHold"] as? Bool) == true || (data["backgroundCheckHold"] as? Bool) == true
+        return approvedByMissionControl && !isSafetySuspended && !hasComplianceHold
     }
 }
 

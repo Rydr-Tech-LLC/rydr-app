@@ -7,11 +7,14 @@ import UIKit
 
 struct DriverDocumentsView: View {
     @ObservedObject var vm: DriverDashboardVM
+    let onBack: () -> Void
 
     @State private var snapshot = DriverDocumentsSnapshot.empty
     @State private var selectedDocument: DriverDocumentKind?
     @State private var isLoading = true
     @State private var message: String?
+    @State private var listener: ListenerRegistration?
+    @State private var complianceMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -19,6 +22,7 @@ struct DriverDocumentsView: View {
                 VStack(spacing: 18) {
                     hero
                     verificationNotice
+                    if let complianceMessage { Text(complianceMessage).font(.subheadline.weight(.semibold)).foregroundStyle(.orange).padding().background(cardBackground).accessibilityIdentifier("documentComplianceNotice") }
                     documentsSection
                 }
                 .padding(.horizontal, 18)
@@ -28,6 +32,8 @@ struct DriverDocumentsView: View {
             .navigationTitle("Documents")
             .navigationBarTitleDisplayMode(.inline)
             .task { loadDocuments() }
+            .onDisappear { listener?.remove(); listener = nil }
+            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Done", action: onBack).accessibilityIdentifier("documentsBack") } }
             .sheet(item: $selectedDocument) { kind in
                 DriverDocumentDetailView(kind: kind, snapshot: snapshot) {
                     loadDocuments()
@@ -125,9 +131,9 @@ struct DriverDocumentsView: View {
                 Text("Your Documents")
                     .font(.title3.weight(.black))
                 Spacer()
-                Label("\(snapshot.activeCount) of \(DriverDocumentKind.allCases.count) active", systemImage: "checkmark.circle.fill")
+                Label("\(snapshot.activeCount) of \(snapshot.requiredCount) active", systemImage: "checkmark.circle.fill")
                     .font(.subheadline.weight(.black))
-                    .foregroundStyle(snapshot.activeCount == DriverDocumentKind.allCases.count ? .green : .orange)
+                    .foregroundStyle(snapshot.activeCount == snapshot.requiredCount ? .green : .orange)
             }
 
             if isLoading {
@@ -169,6 +175,14 @@ struct DriverDocumentsView: View {
     }
 
     private func loadDocuments() {
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-RydrDocumentFixtureUITest") {
+            snapshot = DriverDocumentsSnapshot(data: ["documents": ["driverLicense": ["status": "approved", "extractedFields": ["expirationDate": "2026-11-13"]], "insurance": ["status": "expired", "extractedFields": ["expirationDate": "2026-10-13"]], "registration": ["status": "approved", "extractedFields": ["expirationDate": "2027-02-01"]]], "backgroundCheckStatus": "beta_deferred"] )
+            complianceMessage = "Driving is temporarily paused because a document expired. Upload a current replacement. Access returns after verification."
+            isLoading = false
+            return
+        }
+        #endif
         guard let uid = Auth.auth().currentUser?.uid else {
             isLoading = false
             message = "Sign in before managing documents."
@@ -176,14 +190,19 @@ struct DriverDocumentsView: View {
         }
 
         isLoading = true
-        Firestore.firestore().collection("drivers").document(uid).getDocument { doc, error in
+        listener?.remove()
+        listener = Firestore.firestore().collection("drivers").document(uid).addSnapshotListener { doc, error in
             Task { @MainActor in
                 isLoading = false
                 if let error {
                     message = error.localizedDescription
                     return
                 }
-                snapshot = DriverDocumentsSnapshot(data: doc?.data() ?? [:])
+                let data = doc?.data() ?? [:]
+                snapshot = DriverDocumentsSnapshot(data: data)
+                if (data["documentComplianceHold"] as? Bool) == true { complianceMessage = (data["documentComplianceExpiredKinds"] as? [String] ?? []).isEmpty ? "Driving is paused until your current documents and expiration dates are verified. Upload your license, insurance and registration." : "Driving is temporarily paused because a document expired. Upload a current replacement. Access returns after verification." }
+                else if (data["backgroundCheckHold"] as? Bool) == true { complianceMessage = "A verified background check is required before you can drive in the open pilot. Beta approval does not replace this requirement." }
+                else { complianceMessage = nil }
             }
         }
     }
@@ -377,13 +396,14 @@ private struct DriverDocumentDetailView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(record.status.isApproved ? "Background check cleared" : "Complete or check background status")
                 .font(.headline.weight(.black))
-            Text("During beta and the first live-production period, background checks are handled outside the app. Use the external background check flow to complete the check or review your status.")
+            Text(snapshot.backgroundChecksRequired ? "Complete screening through Rydr’s approved provider. Your report must be verified before driving in the open pilot. Contact support for screening instructions if you have not received them." : "Screening is deferred during beta. Before the open pilot, Rydr will require all drivers to complete a verified background check, including beta-approved drivers.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let backgroundCheckURL = snapshot.backgroundCheckURL {
             Button {
-                openURL(snapshot.backgroundCheckURL)
+                openURL(backgroundCheckURL)
             } label: {
                 Label(record.status.isApproved ? "View Background Check Status" : "Complete Background Check", systemImage: "arrow.up.right.square.fill")
                     .font(.headline.weight(.bold))
@@ -393,6 +413,7 @@ private struct DriverDocumentDetailView: View {
                     .foregroundStyle(.white)
             }
             .buttonStyle(.plain)
+            }
         }
         .padding(18)
         .background(detailCardBackground)
@@ -639,13 +660,15 @@ enum DriverDocumentUploadService {
 
 private struct DriverDocumentsSnapshot {
     var records: [DriverDocumentKind: DriverDocumentRecord]
-    var backgroundCheckURL: URL
+    var backgroundCheckURL: URL?
+    var backgroundChecksRequired: Bool
 
-    static let empty = DriverDocumentsSnapshot(records: [:], backgroundCheckURL: URL(string: "https://rydr.app/driver-background-check")!)
+    static let empty = DriverDocumentsSnapshot(records: [:], backgroundCheckURL: nil)
 
-    init(records: [DriverDocumentKind: DriverDocumentRecord], backgroundCheckURL: URL) {
+    init(records: [DriverDocumentKind: DriverDocumentRecord], backgroundCheckURL: URL?, backgroundChecksRequired: Bool = false) {
         self.records = records
         self.backgroundCheckURL = backgroundCheckURL
+        self.backgroundChecksRequired = backgroundChecksRequired
     }
 
     init(data: [String: Any]) {
@@ -653,19 +676,23 @@ private struct DriverDocumentsSnapshot {
         var parsed: [DriverDocumentKind: DriverDocumentRecord] = [:]
 
         for kind in DriverDocumentKind.allCases {
-            let raw = docs[kind.rawValue] as? [String: Any] ?? [:]
+            var raw = docs[kind.rawValue] as? [String: Any] ?? [:]
+            for field in ["status", "frontURL", "backURL", "documentURL", "extractedFields", "reviewedAt", "expirationDate"] where raw[field] == nil { raw[field] = data["documents.\(kind.rawValue).\(field)"] }
             parsed[kind] = DriverDocumentRecord(kind: kind, data: raw, driverData: data)
         }
 
         let rawURL = data["backgroundCheckURL"] as? String
             ?? data["backgroundCheckStatusURL"] as? String
-            ?? "https://rydr.app/driver-background-check"
+
         self.records = parsed
-        self.backgroundCheckURL = URL(string: rawURL) ?? URL(string: "https://rydr.app/driver-background-check")!
+        self.backgroundCheckURL = rawURL.flatMap { URL(string: $0) }.flatMap { $0.scheme == "https" ? $0 : nil }
+        self.backgroundChecksRequired = (data["complianceRequirements"] as? [String: Any])?["backgroundChecksRequired"] as? Bool == true
     }
 
+    var requiredCount: Int { backgroundChecksRequired ? 4 : 3 }
+
     var activeCount: Int {
-        DriverDocumentKind.allCases.filter { record(for: $0).status.isApproved }.count
+        DriverDocumentKind.allCases.filter { backgroundChecksRequired || $0 != .backgroundCheck }.filter { record(for: $0).status.isApproved }.count
     }
 
     func record(for kind: DriverDocumentKind) -> DriverDocumentRecord {
@@ -683,10 +710,10 @@ private struct DriverDocumentRecord {
     let documentURL: URL?
 
     init(kind: DriverDocumentKind, data: [String: Any], driverData: [String: Any]) {
-        status = DriverDocumentStatus(raw: data["status"] as? String ?? Self.legacyStatus(for: kind, driverData: driverData))
-        updatedAt = Self.date(data["updatedAt"])
-        expiresAt = Self.date(data["expiresAt"] ?? data["expirationDate"] ?? Self.legacyExpiry(for: kind, driverData: driverData))
-        completedAt = Self.date(data["completedAt"] ?? Self.legacyCompletedAt(for: kind, driverData: driverData))
+        status = DriverDocumentStatus(raw: kind == .backgroundCheck && (driverData["backgroundCheckHold"] as? Bool) == true ? "pending" : kind == .backgroundCheck ? (driverData["backgroundScreening"] as? [String: Any])?["status"] as? String ?? Self.legacyStatus(for: kind, driverData: driverData) : data["status"] as? String ?? Self.legacyStatus(for: kind, driverData: driverData))
+        updatedAt = Self.date(data["reviewedAt"] ?? data["updatedAt"])
+        expiresAt = Self.date((kind == .backgroundCheck ? (driverData["backgroundScreening"] as? [String: Any])?["validUntil"] : nil) ?? data["expiresAt"] ?? data["expirationDate"] ?? (data["extractedFields"] as? [String: Any])?["expirationDate"] ?? Self.legacyExpiry(for: kind, driverData: driverData))
+        completedAt = Self.date(data["completedAt"] ?? (kind == .backgroundCheck ? (driverData["backgroundScreening"] as? [String: Any])?["completedAt"] : nil) ?? Self.legacyCompletedAt(for: kind, driverData: driverData))
         frontURL = Self.url(data["frontURL"])
         backURL = Self.url(data["backURL"])
         documentURL = Self.url(data["documentURL"])
@@ -721,7 +748,7 @@ private struct DriverDocumentRecord {
         if let date = raw as? Date { return date }
         if let seconds = raw as? TimeInterval { return Date(timeIntervalSince1970: seconds) }
         if let string = raw as? String {
-            return isoFormatter.date(from: string) ?? dateFormatter.date(from: string)
+            return isoFormatter.date(from: string) ?? ISO8601DateFormatter().date(from: string) ?? dateOnlyFormatter.date(from: string) ?? dateFormatter.date(from: string)
         }
         return nil
     }
@@ -768,6 +795,15 @@ private struct DriverDocumentRecord {
         return formatter
     }()
 
+    private static let dateOnlyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "America/New_York")
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.isLenient = false
+        return formatter
+    }()
+
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -784,7 +820,7 @@ private enum DriverDocumentStatus: Equatable {
 
     init(raw: String) {
         switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "approved", "verified", "clear", "cleared", "complete", "completed":
+        case "passed", "approved", "verified", "clear", "cleared", "complete", "completed":
             self = .approved
         case "pending", "pending_review", "review", "in_review", "submitted", "beta_deferred":
             self = .pending

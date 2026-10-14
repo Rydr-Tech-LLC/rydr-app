@@ -1,3 +1,4 @@
+import { currentDocument, documentDeadline, nestedFields } from "./driverCompliancePolicy";
 import { createHash } from "crypto";
 import fetch from "node-fetch";
 import { db, FieldValue } from "../admin";
@@ -211,7 +212,7 @@ function decideDriverDocument(
 
   const expiration = fields.expirationDate ? parseDate(fields.expirationDate) : null;
   if (fields.expirationDate && expiration) {
-    checks.expirationValid = expiration.getTime() >= startOfToday().getTime();
+    checks.expirationValid = documentDeadline(fields.expirationDate) > Date.now();
     if (!checks.expirationValid) {
       return {
         status: "expired",
@@ -468,11 +469,16 @@ async function writePendingReview(
 
   if (parsed.ownerType === "driver") {
     const driverRef = db.collection("drivers").doc(parsed.uid);
-    const batch = db.batch();
-    batch.set(driverRef.collection("documentReviews").doc(reviewId), payload, { merge: true });
-    batch.set(
-      driverRef,
-      {
+    await db.runTransaction(async tx => {
+      const driver = (await tx.get(driverRef)).data() ?? {};
+      const current = driver.documents?.[parsed.kind] ?? {};
+      tx.set(driverRef.collection("documentReviews").doc(reviewId), payload, { merge: true });
+      if (generation && typeof current.latestGeneration === "string" && /^\d+$/.test(generation) && /^\d+$/.test(current.latestGeneration) && BigInt(generation) < BigInt(current.latestGeneration)) return;
+      const prior = currentDocument(driver, parsed.kind);
+      const previousApproved = prior.status === "approved" ? { status: "approved", extractedFields: prior.extractedFields ?? {}, expirationDate: prior.expirationDate ?? prior.extractedFields?.expirationDate ?? null, storagePath: prior.storagePath ?? null, reviewId: prior.reviewId ?? null, generation: prior.generation ?? null } : null;
+      tx.set(driverRef, nestedFields({
+        ...(previousApproved ? { [`documents.${parsed.kind}.approvedRecord`]: previousApproved } : {}),
+        [`documents.${parsed.kind}.latestGeneration`]: generation,
         [`documents.${parsed.kind}.status`]: "pending",
         [`documents.${parsed.kind}.reviewReason`]: "Document uploaded. OCR review pending.",
         [`documents.${parsed.kind}.reviewId`]: reviewId,
@@ -482,17 +488,15 @@ async function writePendingReview(
         ...sideSpecificDocumentPointers(parsed, downloadURL),
         ...legacyDriverDocumentImagePointers(parsed, downloadURL),
         updatedAt: now
-      },
-      { merge: true }
-    );
-    await batch.commit();
+      }), { merge: true });
+    });
   } else {
     const riderRef = db.collection("riders").doc(parsed.uid);
     const batch = db.batch();
     batch.set(riderRef.collection("documentReviews").doc(reviewId), payload, { merge: true });
     batch.set(
       riderRef,
-      {
+      nestedFields({
         documentReviewStatus: "pending",
         [`verificationDocuments.${parsed.kind}.status`]: "pending",
         [`verificationDocuments.${parsed.kind}.reviewReason`]: "Document uploaded. OCR review pending.",
@@ -500,7 +504,7 @@ async function writePendingReview(
         [`verificationDocuments.${parsed.kind}.storagePath`]: parsed.storagePath,
         [`verificationDocuments.${parsed.kind}.downloadURL`]: downloadURL,
         updatedAt: now
-      },
+      }),
       { merge: true }
     );
     await batch.commit();
@@ -543,30 +547,43 @@ async function writeFinalReview(
 
   if (parsed.ownerType === "driver") {
     const driverRef = db.collection("drivers").doc(parsed.uid);
-    batch.set(driverRef.collection("documentReviews").doc(options.reviewId), reviewPayload, { merge: true });
-    batch.set(
-      driverRef,
-      {
-        [`documents.${parsed.kind}.status`]: options.decision.status,
-        [`documents.${parsed.kind}.reviewReason`]: options.decision.reviewReason,
-        [`documents.${parsed.kind}.reviewId`]: options.reviewId,
-        [`documents.${parsed.kind}.lastUploadedSide`]: parsed.side,
-        [`documents.${parsed.kind}.storagePath`]: parsed.storagePath,
-        [`documents.${parsed.kind}.downloadURL`]: options.downloadURL,
-        ...sideSpecificDocumentPointers(parsed, options.downloadURL),
-        ...legacyDriverDocumentImagePointers(parsed, options.downloadURL),
-        [`documents.${parsed.kind}.extractedFields`]: options.extractedFields,
-        [`documents.${parsed.kind}.reviewedAt`]: now,
-        updatedAt: now
-      },
-      { merge: true }
-    );
+    await db.runTransaction(async tx => {
+      const driver = (await tx.get(driverRef)).data() ?? {};
+      const current = driver.documents?.[parsed.kind] ?? {};
+      const isAtLeast = (candidate: string | null, previous: unknown) => {
+        if (!candidate || typeof previous !== "string" || !/^\d+$/.test(candidate) || !/^\d+$/.test(previous)) return true;
+        return BigInt(candidate) >= BigInt(previous);
+      };
+      tx.set(driverRef.collection("documentReviews").doc(options.reviewId), reviewPayload, { merge: true });
+      const fields: Record<string, unknown> = {};
+      if (isAtLeast(options.generation, current.latestGeneration)) {
+        Object.assign(fields, {
+          [`documents.${parsed.kind}.status`]: options.decision.status,
+          [`documents.${parsed.kind}.reviewReason`]: options.decision.reviewReason,
+          [`documents.${parsed.kind}.reviewId`]: options.reviewId,
+          [`documents.${parsed.kind}.latestGeneration`]: options.generation,
+          [`documents.${parsed.kind}.lastUploadedSide`]: parsed.side,
+          [`documents.${parsed.kind}.storagePath`]: parsed.storagePath,
+          [`documents.${parsed.kind}.downloadURL`]: options.downloadURL,
+          ...sideSpecificDocumentPointers(parsed, options.downloadURL),
+          ...legacyDriverDocumentImagePointers(parsed, options.downloadURL),
+          [`documents.${parsed.kind}.extractedFields`]: options.extractedFields,
+          [`documents.${parsed.kind}.reviewedAt`]: now,
+          updatedAt: now
+        });
+      }
+      if (options.decision.status === "approved" && isAtLeast(options.generation, current.approvedRecord?.generation)) {
+        fields[`documents.${parsed.kind}.approvedRecord`] = { status: "approved", extractedFields: options.extractedFields, expirationDate: options.extractedFields.expirationDate ?? null, storagePath: parsed.storagePath, reviewId: options.reviewId, generation: options.generation, reviewedAt: now };
+      }
+      if (Object.keys(fields).length > 0) tx.set(driverRef, nestedFields(fields), { merge: true });
+    });
+    return;
   } else {
     const riderRef = db.collection("riders").doc(parsed.uid);
     batch.set(riderRef.collection("documentReviews").doc(options.reviewId), reviewPayload, { merge: true });
     batch.set(
       riderRef,
-      {
+      nestedFields({
         identityStatus: "pending_manual_review",
         documentReviewStatus: options.decision.status,
         verifiedRider: false,
@@ -578,7 +595,7 @@ async function writeFinalReview(
         [`verificationDocuments.${parsed.kind}.extractedFields`]: options.extractedFields,
         [`verificationDocuments.${parsed.kind}.reviewedAt`]: now,
         updatedAt: now
-      },
+      }),
       { merge: true }
     );
   }

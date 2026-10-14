@@ -12,6 +12,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
   }
 
   const { reason } = (await request.json().catch(() => ({}))) as { reason?: string };
+  const policy = (await adminDb.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
+  if (policy.backgroundChecksRequired === true) return NextResponse.json({ error: "Background screening is required for the open pilot; beta deferral is unavailable." }, { status: 409 });
   const driverRef = adminDb.collection("drivers").doc(params.uid);
   const driverSnap = await driverRef.get();
   if (!driverSnap.exists) {

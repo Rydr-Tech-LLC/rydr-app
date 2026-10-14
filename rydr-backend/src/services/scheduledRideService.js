@@ -1,3 +1,4 @@
+const { evaluateDriverCompliance } = require("../../firebase/functions/src/services/driverCompliancePolicy");
 const { requireExecutiveEnabled } = require("./premiumPlatformService");
 const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
 const { admin, getFirestore } = require("../config/firebase");
@@ -69,13 +70,14 @@ function coordinate(value, name) {
   return { latitude, longitude };
 }
 
-function scheduledCandidateEligible(profile, rideType) {
+function scheduledCandidateEligible(profile, rideType, policy = profile?.complianceRequirements ?? {}, nowMillis = Date.now()) {
   if (!profile || profile.standardDispatchEnabled === false || !premiumRideAllowed(profile, rideType)) return false;
   const approvalStatus = String(profile.driverApprovalStatus ?? profile.approvalStatus ?? "pending").toLowerCase();
   if (profile.isApproved !== true && approvalStatus !== "approved") return false;
   if (["suspended", "removed", "deletion_requested"].includes(String(profile.accountStatus || "").toLowerCase())
       || String(profile.safetyReviewStatus || "").toLowerCase() === "suspended"
       || profile.safetyHold === true) return false;
+  if (!evaluateDriverCompliance(profile, policy, nowMillis).drivingAllowed || profile.documentComplianceHold === true || profile.backgroundCheckHold === true) return false;
   const supported = profile.eligibleRideTypes ?? profile.selectedRideTypes ?? profile.rideTypes ?? profile.supportedRideTypes ?? [];
   return !Array.isArray(supported) || supported.length === 0 || supported.some((value) => tierFor(value) === tierFor(rideType));
 }
@@ -139,6 +141,7 @@ async function eligibleCandidates({
   requireOnline = false,
   nowMillis = Date.now()
 }) {
+  const compliancePolicy = (await db.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
   const excluded = new Set(excludedDriverIds);
   const candidates = [];
   const publicSnapshots = await candidateSnapshots(db);
@@ -155,7 +158,7 @@ async function eligibleCandidates({
   for (const snapshot of publicSnapshots) {
     if (excluded.has(snapshot.id)) continue;
     const canonical = canonicalById.get(snapshot.id);
-    if (!scheduledCandidateEligible(canonical, rideType)) continue;
+    if (!scheduledCandidateEligible(canonical, rideType, compliancePolicy, scheduledPickupMillis)) continue;
     if (requireOnline && !statusById.has(snapshot.id)) continue;
     const presence = snapshot.data();
     const liveStatus = statusById.get(snapshot.id);
@@ -478,7 +481,8 @@ async function respondToScheduledRide({ driverId, requestId, response, db = getF
     await batch.commit();
     return { status: request.status };
   }
-  if (!driverSnap.exists || !scheduledCandidateEligible(driverSnap.data(), request.rideType)) {
+  const compliancePolicy = (await db.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
+  if (!driverSnap.exists || !scheduledCandidateEligible(driverSnap.data(), request.rideType, compliancePolicy, timestampMillis(request.scheduledPickupAt) || now.toMillis())) {
     throw error("This driver is no longer eligible for the scheduled ride", 403);
   }
   const opportunity = opportunitySnap.data();
@@ -494,16 +498,17 @@ async function respondToScheduledRide({ driverId, requestId, response, db = getF
   }
 
   const result = await db.runTransaction(async (tx) => {
-    const [currentSnap, currentOpportunitySnap, currentDriverSnap] = await Promise.all([
+    const [currentSnap, currentOpportunitySnap, currentDriverSnap, policySnap] = await Promise.all([
       tx.get(requestRef),
       tx.get(opportunityRef),
-      tx.get(driverRef)
+      tx.get(driverRef),
+      tx.get(db.collection("platformConfig").doc("driverCompliance"))
     ]);
     const current = currentSnap.data();
     if (!currentOpportunitySnap.exists || currentOpportunitySnap.data().status !== "available") {
       throw error("This scheduled opportunity is no longer open", 409);
     }
-    if (!currentDriverSnap.exists || !scheduledCandidateEligible(currentDriverSnap.data(), current.rideType)) {
+    if (!currentDriverSnap.exists || !scheduledCandidateEligible(currentDriverSnap.data(), current.rideType, policySnap.data() ?? {}, timestampMillis(current.scheduledPickupAt) || now.toMillis())) {
       throw error("This driver is no longer eligible for the scheduled ride", 403);
     }
     const currentOpportunity = currentOpportunitySnap.data();
@@ -552,10 +557,13 @@ function onlineReadinessDeadlineMillis({ pickupMillis, etaSeconds }) {
 async function assignedDriverReadiness({ db, request, nowMillis, routeProvider = getDirections }) {
   const driverId = request.assignedDriverId;
   if (!driverId) return { online: false, etaSeconds: null };
-  const [statusSnap, publicSnap] = await Promise.all([
+  const [statusSnap, publicSnap, driverSnap, policySnap] = await Promise.all([
     db.collection("driver_status").doc(driverId).get(),
-    db.collection("publicDriverProfiles").doc(driverId).get()
+    db.collection("publicDriverProfiles").doc(driverId).get(),
+    db.collection("drivers").doc(driverId).get(),
+    db.collection("platformConfig").doc("driverCompliance").get()
   ]);
+  if (!driverSnap.exists || !scheduledCandidateEligible(driverSnap.data(), request.rideType, policySnap.data() ?? {}, timestampMillis(request.scheduledPickupAt) || nowMillis)) return { online: false, etaSeconds: null };
   const status = statusSnap.exists ? statusSnap.data() : {};
   const online = hasCurrentOnlinePresence(status, nowMillis);
   const location = status.location || (publicSnap.exists ? publicSnap.data().approximateLocation : null);
@@ -649,14 +657,15 @@ async function selectScheduledDriver({ riderId, requestId, driverId, db = getFir
   const offerRef = requestRef.collection("offers").doc(driverId);
   const driverRef = db.collection("drivers").doc(driverId);
   const result = await db.runTransaction(async (tx) => {
-    const [requestSnap, offerSnap, driverSnap] = await Promise.all([
+    const [requestSnap, offerSnap, driverSnap, policySnap] = await Promise.all([
       tx.get(requestRef),
       tx.get(offerRef),
-      tx.get(driverRef)
+      tx.get(driverRef),
+      tx.get(db.collection("platformConfig").doc("driverCompliance"))
     ]);
     if (!requestSnap.exists || requestSnap.data().riderId !== riderId) throw error("Scheduled ride not found", 404);
     const request = requestSnap.data();
-    if (!driverSnap.exists || !scheduledCandidateEligible(driverSnap.data(), request.rideType)) {
+    if (!driverSnap.exists || !scheduledCandidateEligible(driverSnap.data(), request.rideType, policySnap.data() ?? {}, timestampMillis(request.scheduledPickupAt) || now.toMillis())) {
       throw error("That driver is no longer eligible for this scheduled ride", 409);
     }
     if (!["awaitingRiderSelection", "replacementApprovalRequired"].includes(request.status)) throw error("This ride is not awaiting a driver selection", 409);

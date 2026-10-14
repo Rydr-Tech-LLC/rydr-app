@@ -10,6 +10,8 @@ const {
 const {
   collection,
   collectionGroup,
+  getDoc,
+  Timestamp,
   doc,
   getDocs,
   query,
@@ -167,4 +169,34 @@ test("drivers cannot self-approve premium verification or forge public qualifica
   await assertFails(updateDoc(doc(db, "drivers/driver-1"), { premiumReview: { luxuryVehicleApproved: true } }));
   await assertFails(updateDoc(doc(db, "drivers/driver-1"), { premiumServiceHold: false }));
   await assertFails(setDoc(doc(db, "publicDriverProfiles/driver-1"), { uid: "driver-1", premiumEligibility: { executive: { eligible: true } } }, { merge: true }));
+});
+
+test("drivers cannot clear compliance holds or forge verified screening", async () => {
+  const db = environment.authenticatedContext("driver-1").firestore();
+  for (const field of ["documentComplianceHold", "backgroundCheckHold", "documentComplianceVerified", "documentComplianceDeadlines", "backgroundScreening", "complianceRequirements"]) {
+    await assertFails(updateDoc(doc(db, "drivers/driver-1"), { [field]: false }));
+  }
+});
+test("marketplace access rejects expired documents and beta screening bypass after pilot gate", async () => {
+  const uid = "compliance-driver";
+  const future = Timestamp.fromMillis(Date.now() + 86400000);
+  const profile = { isApproved: true, driverApprovalStatus: "approved", cashHubTermsAccepted: true, cashHubTermsVersion: "fixture-v1", documentComplianceVerified: { driverLicense: true, insurance: true, registration: true }, documentComplianceDeadlines: { driverLicense: future, insurance: future, registration: future } };
+  const db = environment.authenticatedContext(uid).firestore();
+  async function seed(policy, fields) {
+    await environment.withSecurityRulesDisabled(async context => {
+      const admin = context.firestore();
+      await setDoc(doc(admin, "platformConfig/cashRydrHub"), { cashHubTermsVersion: "fixture-v1" });
+      await setDoc(doc(admin, "platformConfig/driverCompliance"), policy);
+      await setDoc(doc(admin, `drivers/${uid}`), { ...profile, ...fields });
+      await setDoc(doc(admin, "cashHubDriverProfiles/example"), { uid: "example" });
+    });
+  }
+  await seed({}, {});
+  await assertSucceeds(getDoc(doc(db, "cashHubDriverProfiles/example")));
+  await seed({}, { documentComplianceDeadlines: { ...profile.documentComplianceDeadlines, insurance: Timestamp.fromMillis(Date.now() - 1000) } });
+  await assertFails(getDoc(doc(db, "cashHubDriverProfiles/example")));
+  await seed({ backgroundChecksRequired: true }, { betaBackgroundCheckBypassEnabled: true });
+  await assertFails(getDoc(doc(db, "cashHubDriverProfiles/example")));
+  await seed({ backgroundChecksRequired: true }, { backgroundScreening: { status: "passed", reviewedBy: "admin", reportReference: "provider/report", requirementVersion: "open-pilot-v1", validUntil: future } });
+  await assertSucceeds(getDoc(doc(db, "cashHubDriverProfiles/example")));
 });

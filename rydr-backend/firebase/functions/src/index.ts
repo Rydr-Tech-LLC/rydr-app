@@ -1,3 +1,4 @@
+export { maintainDriverDocumentCompliance, onDriverCompliancePolicyChanged, onDriverComplianceChanged } from "./triggers/driverCompliance";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { db, FieldValue } from "./admin";

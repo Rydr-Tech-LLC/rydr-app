@@ -64,8 +64,9 @@ async function selectNextCandidate({ db, request, attemptedDriverIds }) {
     db.getAll(...canonicalRefs),
     db.getAll(...statusRefs)
   ]);
+  const compliancePolicy = (await db.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
   const approvedIds = new Set(canonicalSnapshots
-    .filter((snapshot) => snapshot.exists && isApprovedDriver(snapshot.data()) && premiumRideAllowed(snapshot.data(), request.rideType))
+    .filter((snapshot) => snapshot.exists && isApprovedDriver(snapshot.data(), compliancePolicy) && premiumRideAllowed(snapshot.data(), request.rideType))
     .map((snapshot) => snapshot.id));
   const nowMillis = Date.now();
   const onlineIds = new Set(statusSnapshots
@@ -100,8 +101,9 @@ async function initializeRideDispatch({ rideId, uid, candidateIds, requestId, db
     db.collection("drivers").doc(request.driverId).get(),
     db.collection("driver_status").doc(request.driverId).get()
   ]);
+  const compliancePolicy = (await db.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
   if (!initialCandidateSnap.exists || !isEligibleCandidate(initialCandidateSnap.data(), request.rideType)
-      || !canonicalCandidateSnap.exists || !isApprovedDriver(canonicalCandidateSnap.data()) || !premiumRideAllowed(canonicalCandidateSnap.data(), request.rideType)
+      || !canonicalCandidateSnap.exists || !isApprovedDriver(canonicalCandidateSnap.data(), compliancePolicy) || !premiumRideAllowed(canonicalCandidateSnap.data(), request.rideType)
       || !statusCandidateSnap.exists || !hasCurrentOnlinePresence(statusCandidateSnap.data())) {
     throw error("The selected driver is no longer eligible", 409);
   }

@@ -1,3 +1,4 @@
+import DriverComplianceSettings from "./DriverComplianceSettings";
 import { redirect } from "next/navigation";
 import { getMissionControlSession } from "@/lib/session";
 import { adminDb } from "@/lib/firebaseAdmin";
@@ -51,6 +52,7 @@ export default async function SettingsPage() {
   const cashHubTermsVersion = typeof cashHubConfig.cashHubTermsVersion === "string" ? cashHubConfig.cashHubTermsVersion : null;
   const cashHubBillingEnabled = cashHubConfig.cashHubBillingEnabled === true;
   const rydrExecutiveEnabled = executiveConfig.enabled === true;
+  const driverCompliancePolicy = (await adminDb.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
 
   return (
     <div className="space-y-6">
@@ -64,6 +66,8 @@ export default async function SettingsPage() {
       <PasswordChangeForm />
 
       <CashHubBetaToggle initialEnabled={cashHubTermsAcceptanceEnabled} initialTermsVersion={cashHubTermsVersion} initialBillingEnabled={cashHubBillingEnabled} />
+
+      <DriverComplianceSettings initialRequired={driverCompliancePolicy.backgroundChecksRequired === true} />
 
       <RydrExecutiveBetaToggle initialEnabled={rydrExecutiveEnabled} />
 

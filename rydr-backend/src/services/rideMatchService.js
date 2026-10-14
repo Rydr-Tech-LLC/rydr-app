@@ -135,8 +135,9 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
   const statusSnapshots = publicSnapshots.length > 0
     ? await db.getAll(...publicSnapshots.map((doc) => db.collection("driver_status").doc(doc.id)))
     : [];
+  const compliancePolicy = (await db.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
   const canonicalById = new Map(canonicalSnapshots
-    .filter((doc) => doc.exists && isApprovedDriver(doc.data()))
+    .filter((doc) => doc.exists && isApprovedDriver(doc.data(), compliancePolicy))
     .map((doc) => [doc.id, doc.data()]));
   const statusById = new Map(statusSnapshots
     .filter((doc) => doc.exists && hasCurrentOnlinePresence(doc.data(), now.toMillis()))

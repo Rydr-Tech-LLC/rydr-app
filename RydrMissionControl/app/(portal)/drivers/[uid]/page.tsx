@@ -1,3 +1,5 @@
+import DriverComplianceReview from "./DriverComplianceReview";
+import { evaluateDriverCompliance, currentDocument } from "../../../../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
 import PremiumVehicleReview from "./PremiumVehicleReview";
 import { evaluatePremiumVehicle, vehicleKey } from "../../../../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
 import { notFound } from "next/navigation";
@@ -41,7 +43,10 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
   };
 
   const driver = { ...(snap.data() as DriverRecord), uid: snap.id };
-  const { checks, missing } = evaluateDriverRequirements(driver);
+  const compliancePolicy = (await adminDb.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
+  const compliance = evaluateDriverCompliance(snap.data() ?? {}, compliancePolicy);
+  const complianceRecords = Object.fromEntries(compliance.documents.map(doc => [doc.kind, (snap.data() ?? {}).documents?.[doc.kind] ?? currentDocument(snap.data() ?? {}, doc.kind)]));
+  const { checks, missing } = evaluateDriverRequirements(driver, compliancePolicy);
   const createdAt = toDateSafe(driver.createdAt);
   const dob = toDateSafe(driver.dob);
   const licenseUrl = driverDocumentUrl(driver, "license");
@@ -85,7 +90,8 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
 
   return (
     <div className="space-y-6">
-      <PremiumVehicleReview uid={params.uid} initial={JSON.parse(JSON.stringify((snap.data() ?? {}).premiumReview?.vehicleKey === vehicleKey((snap.data() ?? {}).vehicle) ? (snap.data() ?? {}).premiumReview : {}))} assessment={evaluatePremiumVehicle(snap.data())} />
+      <DriverComplianceReview uid={params.uid} assessment={compliance} records={JSON.parse(JSON.stringify(complianceRecords))} reportDate={dateInputValue(toDateSafe((snap.data() ?? {}).backgroundScreening?.completedAt))} />
+      <details><summary className="cursor-pointer text-sm text-muted">Premium vehicle verification — Executive remains paused</summary><PremiumVehicleReview uid={params.uid} initial={JSON.parse(JSON.stringify((snap.data() ?? {}).premiumReview?.vehicleKey === vehicleKey((snap.data() ?? {}).vehicle) ? (snap.data() ?? {}).premiumReview : {}))} assessment={evaluatePremiumVehicle(snap.data())} /></details>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -278,7 +284,7 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
           </Section>
 
           <Section title="Approval Requirements">
-            <RequirementChecklist checks={checks} />
+            <RequirementChecklist checks={checks} backgroundChecksRequired={compliance.backgroundChecksRequired} />
           </Section>
 
           <DriverProfileAdminTools uid={driver.uid} initial={adminProfileInitial} />

@@ -1799,8 +1799,8 @@ struct DriverNotificationsView: View {
                         ForEach(vm.driverNotifications) { notification in
                             DriverNotificationRow(notification: notification) {
                                 vm.markNotificationRead(notification)
-                                if notification.target == "cashHub" {
-                                    var route: [AnyHashable: Any] = ["type": notification.type, "target": "cashHub"]
+                                if let target = notification.target, ["cashHub", "documents", "scheduledRides"].contains(target) {
+                                    var route: [AnyHashable: Any] = ["type": notification.type, "target": target]
                                     if let requestId = notification.relatedId { route["requestId"] = requestId }
                                     NotificationCenter.default.post(name: .driverNotificationRouteRequested, object: nil, userInfo: route)
                                 }
@@ -2222,7 +2222,7 @@ struct DrawerDestinationView: View {
             } else if item == .walletPayouts {
                 DriverWalletPayoutsView(vm: vm, onBack: onDismiss)
             } else if item == .documents {
-                DriverDocumentsView(vm: vm)
+                DriverDocumentsView(vm: vm, onBack: onDismiss)
             } else if item == .settings {
                 DriverSettingsView(vm: vm)
             } else if item == .safety {

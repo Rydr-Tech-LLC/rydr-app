@@ -34,6 +34,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published private(set) var hasReceivedDriverLocation = false
     @Published var locationPermissionDenied: Bool = false
     @Published var canGoOnline: Bool = false
+    @Published var complianceHoldReason: String?
     @Published var selectedRideTypes: Set<String> = []
     @Published var eligibleRideTypes: [String] = ["Rydr Go"]
     @Published var tierRates: [String: DriverRateSetting] = [:]
@@ -203,7 +204,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     var goOnlineBlockReason: String? {
-        if !canGoOnline { return "Driver approval is still pending." }
+        if !canGoOnline { return complianceHoldReason ?? "Driver approval is still pending." }
         if !hasSavedRateSettings { return "Save your rate before going online." }
         if selectedRideTypes.isEmpty { return "Select at least one approved ride type." }
         if locationPermissionDenied { return "Allow location access before going online." }
@@ -505,7 +506,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     func toggleOnline() {
         guard canGoOnline else {
-            statusMessage = "Go Online unlocks after your driver approval is complete."
+            statusMessage = complianceHoldReason ?? "Go Online unlocks after your driver approval is complete."
             return
         }
         guard hasSavedRateSettings else {
@@ -1037,6 +1038,8 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
             DispatchQueue.main.async {
                 self.canGoOnline = DriverApprovalPolicy.isApproved(data: data)
+                self.complianceHoldReason = (data["documentComplianceHold"] as? Bool) == true ? "Upload current documents to restore driving access." : (data["backgroundCheckHold"] as? Bool) == true ? "Complete your required background screening before driving." : nil
+                if self.complianceHoldReason != nil { self.isOnline = false; self.pendingRequests = [] }
                 self.driverDisplayName = Self.publicDisplayName(from: data, authUser: Auth.auth().currentUser)
                 self.driverRating = Self.doubleValue(data["rating"]) ?? self.driverRating
                 self.driverRatingCount = Self.intValue(data["ratingCount"]) ?? self.driverRatingCount
@@ -2168,6 +2171,7 @@ struct DriverDashboardView: View {
         .sheet(item: $activeSheet, content: sheetContent(_:))
         .onReceive(NotificationCenter.default.publisher(for: .driverNotificationRouteRequested)) { notification in
             switch notification.userInfo?["target"] as? String {
+            case "documents": activeSheet = .menu(.documents)
             case "cashHub": activeSheet = .menu(.cashRydrHub)
             case "scheduledRides": activeSheet = .menu(.scheduledRides)
             default: break

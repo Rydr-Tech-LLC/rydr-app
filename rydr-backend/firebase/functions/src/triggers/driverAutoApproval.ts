@@ -1,3 +1,4 @@
+import { evaluateDriverCompliance } from "../services/driverCompliancePolicy";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { db, FieldValue } from "../admin";
 
@@ -125,6 +126,8 @@ export const onDriverAutoApprovalEligibility = onDocumentWritten("drivers/{uid}"
 
   if (after.driverApprovalStatus === "approved" || after.driverApprovalStatus === "rejected") return;
   if (isSafetyBlocked(after)) return;
+  const compliancePolicy = (await db.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
+  if (!evaluateDriverCompliance(after, compliancePolicy).drivingAllowed) return;
 
   const missing = missingAutoApprovalRequirements(after);
   if (missing.length > 0) return;
@@ -141,7 +144,7 @@ export const onDriverAutoApprovalEligibility = onDocumentWritten("drivers/{uid}"
       autoApprovedBy: "driver-signup-completion",
       autoApprovalReason: "Closed beta driver completed all required onboarding steps.",
       betaInviteVerifiedForAutoApproval: true,
-      backgroundCheckStatus: "beta_deferred",
+      backgroundCheckStatus: compliancePolicy.backgroundChecksRequired === true ? "passed" : "beta_deferred",
       updatedAt: FieldValue.serverTimestamp()
     },
     { merge: true }

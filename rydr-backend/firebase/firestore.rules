@@ -181,6 +181,16 @@ service cloud.firestore {
         "supportedRideTypes",
         "tierRates",
         "vehicleEligibility",
+        "documentComplianceHold",
+        "documentComplianceDeadlines",
+        "documentComplianceVerificationKinds",
+        "documentComplianceVerified",
+        "documentComplianceExpiredKinds",
+        "backgroundCheckHold",
+        "backgroundScreening",
+        "complianceRequirements",
+        "documentComplianceSummary",
+        "complianceEvaluatedAt",
         "premiumReview",
         "premiumServiceHold",
         "premiumEligibility",
@@ -310,6 +320,32 @@ service cloud.firestore {
         );
     }
 
+    function driverComplianceAllowsWork(driverData) {
+      let policyPath = /databases/$(database)/documents/platformConfig/driverCompliance;
+      let policy = exists(policyPath) ? get(policyPath).data : {};
+      let screening = driverData.get("backgroundScreening", {});
+      let deadlines = driverData.get("documentComplianceDeadlines", {});
+      let verified = driverData.get("documentComplianceVerified", {});
+      return driverData.get("documentComplianceHold", false) != true
+        && driverData.get("backgroundCheckHold", false) != true
+        && driverData.get("safetyHold", false) != true
+        && driverData.get("safetyReviewStatus", "") != "suspended"
+        && !(driverData.get("accountStatus", "") in ["suspended", "removed", "deletion_requested"])
+        && (deadlines.get("driverLicense", null) == null || request.time < deadlines.driverLicense)
+        && (deadlines.get("insurance", null) == null || request.time < deadlines.insurance)
+        && (deadlines.get("registration", null) == null || request.time < deadlines.registration)
+        && (deadlines.get("vehicleInspection", null) == null || request.time < deadlines.vehicleInspection)
+        && ((policy.get("backgroundChecksRequired", false) != true && policy.get("requireVerifiedDocumentExpirations", false) != true) || (verified.get("driverLicense", false) == true && verified.get("insurance", false) == true && verified.get("registration", false) == true))
+        && (policy.get("backgroundChecksRequired", false) != true || (
+          screening.get("status", "") == "passed"
+          && screening.get("reviewedBy", "") != ""
+          && screening.get("reportReference", "") != ""
+          && screening.get("requirementVersion", "") == policy.get("backgroundCheckRequirementVersion", "open-pilot-v1")
+          && screening.get("validUntil", null) != null
+          && request.time < screening.validUntil
+        ));
+    }
+
     function cashHubAuthorizedMarketplaceAccess() {
       let riderPath = /databases/$(database)/documents/riders/$(request.auth.uid);
       let driverPath = /databases/$(database)/documents/drivers/$(request.auth.uid);
@@ -320,7 +356,8 @@ service cloud.firestore {
         && cashHubCurrentTermsAcceptedIn(driverPath)
         && (!("cashHubOptedOut" in get(driverPath).data) || get(driverPath).data.cashHubOptedOut != true)
         && (!("cashHubAccessStatus" in get(driverPath).data) || !(get(driverPath).data.cashHubAccessStatus in ["delinquent", "past_due", "review_required", "suspended", "revoked", "optedout", "opted_out"]))
-        && (get(driverPath).data.isApproved == true || get(driverPath).data.driverApprovalStatus == "approved" || get(driverPath).data.approvalStatus == "approved");
+        && (get(driverPath).data.isApproved == true || get(driverPath).data.driverApprovalStatus == "approved" || get(driverPath).data.approvalStatus == "approved")
+        && driverComplianceAllowsWork(get(driverPath).data);
       return signedIn() && (riderAllowed || driverAllowed);
     }
 
@@ -331,7 +368,8 @@ service cloud.firestore {
         && cashHubCurrentTermsAcceptedIn(driverPath)
         && (!("cashHubOptedOut" in get(driverPath).data) || get(driverPath).data.cashHubOptedOut != true)
         && (!("cashHubAccessStatus" in get(driverPath).data) || !(get(driverPath).data.cashHubAccessStatus in ["delinquent", "past_due", "review_required", "suspended", "revoked", "optedout", "opted_out"]))
-        && (get(driverPath).data.isApproved == true || get(driverPath).data.driverApprovalStatus == "approved" || get(driverPath).data.approvalStatus == "approved");
+        && (get(driverPath).data.isApproved == true || get(driverPath).data.driverApprovalStatus == "approved" || get(driverPath).data.approvalStatus == "approved")
+        && driverComplianceAllowsWork(get(driverPath).data);
     }
 
     function noCashHubTermsAcceptanceOnCreateWhenDisabled() {

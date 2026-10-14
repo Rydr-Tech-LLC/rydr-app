@@ -1,3 +1,4 @@
+const { evaluateDriverCompliance } = require("../../firebase/functions/src/services/driverCompliancePolicy");
 const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
 const { admin, getFirestore } = require("../config/firebase");
 
@@ -19,15 +20,15 @@ function error(message, statusCode) {
   return err;
 }
 
-function isApprovedDriver(driver) {
+function isApprovedDriver(driver, compliancePolicy = driver?.complianceRequirements ?? {}) {
   const approvalStatus = String(driver?.driverApprovalStatus ?? driver?.approvalStatus ?? "pending").toLowerCase();
-  const approved = approvalStatus === "approved" || driver?.isApproved === true;
+  const approved = (approvalStatus === "approved" || driver?.isApproved === true) && !["rejected", "needs_attention"].includes(approvalStatus);
   const accountStatus = String(driver?.accountStatus ?? "").toLowerCase();
   const safetyReviewStatus = String(driver?.safetyReviewStatus ?? "").toLowerCase();
   const safetySuspended = ["suspended", "deletion_requested", "removed"].includes(accountStatus)
     || safetyReviewStatus === "suspended"
     || driver?.safetyHold === true;
-  return approved && !safetySuspended;
+  return approved && !safetySuspended && driver?.documentComplianceHold !== true && driver?.backgroundCheckHold !== true && evaluateDriverCompliance(driver ?? {}, compliancePolicy).drivingAllowed;
 }
 
 function normalizedRideTypes(value) {
@@ -81,14 +82,15 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   const publicRef = db.collection("publicDriverProfiles").doc(uid);
   const cashHubRef = db.collection("cashHubDriverProfiles").doc(uid);
   const cashHubEligibilityRef = db.collection("cashHubDriverEligibility").doc(uid);
-  const [driverSnap, cashHubConfigSnap] = await Promise.all([
+  const [driverSnap, cashHubConfigSnap, compliancePolicySnap] = await Promise.all([
     driverRef.get(),
-    db.collection("platformConfig").doc("cashRydrHub").get()
+    db.collection("platformConfig").doc("cashRydrHub").get(),
+    db.collection("platformConfig").doc("driverCompliance").get()
   ]);
   if (!driverSnap.exists) throw error("Driver profile not found", 404);
 
   const driver = driverSnap.data();
-  if (online && !isApprovedDriver(driver)) {
+  if (online && !isApprovedDriver(driver, compliancePolicySnap.data() ?? {})) {
     throw error("Driver approval and safety eligibility are required to go online", 403);
   }
 

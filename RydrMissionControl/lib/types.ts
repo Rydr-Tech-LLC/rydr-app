@@ -1,3 +1,4 @@
+import { evaluateDriverCompliance } from "../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
 // Shared types matching the real Firestore schema already written by
 // RydrDriver / RydrPlayground (see DriverSignupCoordinator.swift,
 // DriverDashboardVM.swift). Mission Control reads this schema as-is and
@@ -72,6 +73,7 @@ export interface DriverVehicle {
 }
 
 export interface DriverRecord {
+  complianceRequirements?: Record<string, unknown>;
   uid: string;
   firstName?: string;
   lastName?: string;
@@ -393,7 +395,7 @@ export function driverConnectStatus(driver: DriverRecord): "not_started" | "pend
   return "not_started";
 }
 
-export function evaluateDriverRequirements(driver: DriverRecord) {
+export function evaluateDriverRequirements(driver: DriverRecord, policy = driver.complianceRequirements ?? {}) {
   const checks: Record<string, boolean> = {
     profileComplete: Boolean(driver.firstName && driver.lastName && driver.email && driver.phoneNumber),
     licenseUploaded: Boolean(driverDocumentUrl(driver, "license")),
@@ -401,7 +403,7 @@ export function evaluateDriverRequirements(driver: DriverRecord) {
     registrationUploaded: Boolean(driverDocumentUrl(driver, "registration")),
     stripeIdentityVerified: driverIdentityStatus(driver) === "verified",
     stripeConnectCompleted: driverConnectStatus(driver) === "completed",
-    backgroundCheckDeferred:
+    backgroundCheckDeferred: policy.backgroundChecksRequired === true ? evaluateDriverCompliance(driver, policy).backgroundPassed :
       driver.betaBackgroundCheckBypassEnabled === true ||
       driver.backgroundCheckAcknowledged === true ||
       driver.backgroundCheckStatus === "beta_deferred" ||

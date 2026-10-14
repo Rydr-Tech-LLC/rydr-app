@@ -302,11 +302,12 @@ function cashHubAccessAllowed(profile, config, role) {
 }
 
 async function requireAccess(db, uid, role) {
-  const [profileSnap, configSnap] = await Promise.all([
+  const [profileSnap, configSnap, compliancePolicySnap] = await Promise.all([
     db.collection(role === "driver" ? "drivers" : "riders").doc(uid).get(),
-    db.collection("platformConfig").doc("cashRydrHub").get()
+    db.collection("platformConfig").doc("cashRydrHub").get(),
+    db.collection("platformConfig").doc("driverCompliance").get()
   ]);
-  const profile = profileSnap.exists ? profileSnap.data() : null;
+  const profile = profileSnap.exists ? { ...profileSnap.data(), complianceRequirements: compliancePolicySnap.data() ?? {} } : null;
   const config = configSnap.exists ? configSnap.data() : null;
   if (!cashHubAccessAllowed(profile, config, role)) {
     throw error(role === "driver" ? "Cash Rydr Hub driver access is not active" : "Current Cash Rydr Hub terms must be accepted", 403);

@@ -229,8 +229,9 @@ async function createRideRequest({
   if (["deletion_requested", "removed", "suspended"].includes(String(rider.accountStatus || ""))) {
     throw error("This rider account cannot request rides", 403);
   }
+  const compliancePolicy = (await db.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
   if (!publicDriverSnap.exists || !isEligibleCandidate(publicDriverSnap.data(), rideType)
-      || !canonicalDriverSnap.exists || !isApprovedDriver(canonicalDriverSnap.data()) || !premiumRideAllowed(canonicalDriverSnap.data(), rideType, now.toMillis())
+      || !canonicalDriverSnap.exists || !isApprovedDriver(canonicalDriverSnap.data(), compliancePolicy) || !premiumRideAllowed(canonicalDriverSnap.data(), rideType, now.toMillis())
       || !driverStatusSnap.exists || !hasCurrentOnlinePresence(driverStatusSnap.data(), now.toMillis())) {
     throw error("The selected driver is no longer available", 409);
   }

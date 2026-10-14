@@ -10,6 +10,23 @@ import XCTest
 final class Rydr_DriverUITests: XCTestCase {
 
     @MainActor
+    func testDocumentReminderOpensDocumentsAndReturnsToDashboard() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-RydrWalletNavigationUITest", "-RydrDocumentReminderUITest", "-RydrDocumentFixtureUITest"]
+        app.launch()
+        let done = app.buttons["documentsBack"]
+        XCTAssertTrue(done.waitForExistence(timeout: 15), app.debugDescription)
+        let signInAlert = app.alerts["Documents"].buttons["OK"]
+        if signInAlert.exists { signInAlert.tap() }
+        XCTAssertTrue(app.navigationBars["Documents"].exists)
+        XCTAssertTrue(app.staticTexts["documentComplianceNotice"].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Nov 13, 2026")).firstMatch.exists, app.debugDescription)
+        done.tap()
+        XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["driverMenu"].isHittable)
+    }
+
+    @MainActor
     func testPremiumSedanAndSUVChoices() {
         let app = XCUIApplication()
         app.launchArguments = ["-RydrWalletNavigationUITest"]

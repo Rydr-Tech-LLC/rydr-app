@@ -1,6 +1,6 @@
 import { DRIVER_APPROVAL_REQUIREMENTS } from "@/lib/types";
 
-export default function RequirementChecklist({ checks }: { checks: Record<string, boolean> }) {
+export default function RequirementChecklist({ checks, backgroundChecksRequired = false }: { checks: Record<string, boolean>; backgroundChecksRequired?: boolean }) {
   return (
     <ul className="space-y-1.5">
       {DRIVER_APPROVAL_REQUIREMENTS.map((req) => {
@@ -14,7 +14,7 @@ export default function RequirementChecklist({ checks }: { checks: Record<string
             >
               {met ? "✓" : ""}
             </span>
-            <span className={met ? "text-ink" : "text-muted"}>{req.label}</span>
+            <span className={met ? "text-ink" : "text-muted"}>{req.key === "backgroundCheckDeferred" && backgroundChecksRequired ? "Background screening verified (open pilot)" : req.label}</span>
           </li>
         );
       })}

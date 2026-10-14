@@ -33,6 +33,8 @@ export type NotificationType =
   | "scheduledRideUpdate"
   | "supportReply"
   | "driverApprovalDecision"
+  | "driverDocumentReminder"
+  | "driverScreeningRequired"
   | "rydrBankCode"
   | "rydrBankCompleted"
   | "betaAnnouncement"
@@ -47,6 +49,7 @@ export interface NotificationRouteData {
 }
 
 export interface SendPushArgs {
+  notificationId?: string;
   audience: NotificationAudience;
   uid: string;
   title: string;
@@ -71,23 +74,20 @@ function dataPayload(route: NotificationRouteData): Record<string, string> {
   return data;
 }
 
-async function writeInboxRecord(args: SendPushArgs): Promise<void> {
+async function writeInboxRecord(args: SendPushArgs): Promise<{ ref: FirebaseFirestore.DocumentReference; shouldSendPush: boolean }> {
   const { audience, uid, title, body, route } = args;
-  await db
-    .collection(collectionFor(audience))
-    .doc(uid)
-    .collection("notifications")
-    .add({
-      title,
-      body,
-      type: route.type,
-      target: route.target,
-      rideId: route.rideId ?? null,
-      requestId: route.requestId ?? null,
-      chatId: route.chatId ?? null,
-      isRead: false,
-      createdAt: FieldValue.serverTimestamp()
-    });
+  const inbox = db.collection(collectionFor(audience)).doc(uid).collection("notifications");
+  const payload = { title, body, type: route.type, target: route.target, rideId: route.rideId ?? null, requestId: route.requestId ?? null, chatId: route.chatId ?? null, isRead: false, createdAt: FieldValue.serverTimestamp() };
+  if (args.notificationId) {
+    const ref = inbox.doc(args.notificationId);
+    try { await ref.create({ ...payload, pushStatus: "pending" }); }
+    catch (error: any) { if (error.code !== 6 && error.code !== "already-exists") throw error; }
+    const existing = (await ref.get()).data() ?? {};
+    if (existing.isRead === true || existing.isDismissed === true) { await ref.set({ pushStatus: "acknowledged" }, { merge: true }); return { ref, shouldSendPush: false }; }
+    return { ref, shouldSendPush: !["sent", "superseded", "acknowledged"].includes(existing.pushStatus) };
+  }
+  const ref = await inbox.add(payload);
+  return { ref, shouldSendPush: true };
 }
 
 /**
@@ -101,8 +101,11 @@ async function writeInboxRecord(args: SendPushArgs): Promise<void> {
 export async function sendPushToUser(args: SendPushArgs): Promise<void> {
   const { audience, uid, title, body, route } = args;
 
+  let inboxRef: FirebaseFirestore.DocumentReference | undefined;
   try {
-    await writeInboxRecord(args);
+    const inbox = await writeInboxRecord(args);
+    inboxRef = inbox.ref;
+    if (!inbox.shouldSendPush) return;
 
     const tokensSnap = await db
       .collection(collectionFor(audience))
@@ -112,6 +115,7 @@ export async function sendPushToUser(args: SendPushArgs): Promise<void> {
       .get();
 
     if (tokensSnap.empty) {
+      await inboxRef.set({ pushStatus: "awaiting_device", lastPushAttemptAt: FieldValue.serverTimestamp() }, { merge: true });
       console.log(`[notificationSender] no enabled tokens for ${audience}/${uid} (${route.type})`);
       return;
     }
@@ -136,7 +140,9 @@ export async function sendPushToUser(args: SendPushArgs): Promise<void> {
       }
     };
 
+    if (args.notificationId) message.apns = { ...message.apns, headers: { ...message.apns?.headers, "apns-collapse-id": args.notificationId.slice(0, 64) } };
     const response = await messaging.sendEachForMulticast(message);
+    await inboxRef.set({ pushStatus: response.successCount > 0 ? "sent" : "retry_pending", pushAcceptedDevices: response.successCount, pushFailedDevices: response.failureCount, lastPushAttemptAt: FieldValue.serverTimestamp() }, { merge: true });
 
     const staleTokenDocs: FirebaseFirestore.DocumentReference[] = [];
     response.responses.forEach((result, index) => {
@@ -163,6 +169,7 @@ export async function sendPushToUser(args: SendPushArgs): Promise<void> {
       `[notificationSender] sent ${route.type} to ${audience}/${uid}: ${response.successCount}/${tokens.length} succeeded`
     );
   } catch (err) {
+    if (inboxRef) await inboxRef.set({ pushStatus: "retry_pending", lastPushAttemptAt: FieldValue.serverTimestamp() }, { merge: true }).catch(() => undefined);
     console.error(`[notificationSender] unexpected failure sending ${route.type} to ${audience}/${uid}`, err);
   }
 }
