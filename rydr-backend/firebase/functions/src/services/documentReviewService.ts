@@ -315,7 +315,7 @@ function inferDocumentType(kind: DocumentKind, text: string): string {
     score: keywords.filter((keyword) => normalizedText.includes(normalizeText(keyword))).length
   }));
   const best = matches.sort((a, b) => b.score - a.score)[0];
-  return best && best.score > 0 ? best.documentType : kind;
+  return best && best.score > 0 ? best.documentType : "unknown";
 }
 
 function inferredTypeMatches(expected: DriverDocumentKind, inferred: string | undefined): boolean {
@@ -370,10 +370,6 @@ function vehicleFieldsMatch(
       matched: expectedPlate === extractedPlate,
       reason: "Extracted plate number does not match the driver vehicle profile."
     };
-  }
-
-  if (kind === "insurance" && !expectedVin && !expectedPlate) {
-    return { matched: true, reason: "" };
   }
 
   return {
