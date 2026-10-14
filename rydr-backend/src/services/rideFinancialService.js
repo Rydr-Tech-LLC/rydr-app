@@ -6,8 +6,8 @@ const DEFAULT_MINIMUM_FARE_CENTS = 700;
 // Booking fees remain platform-owned and mileage-based. Driver-controlled
 // minimum, mile, and minute rates are intentionally not capped in v2.
 const TIERS = {
-  eco: { under5: 300, over5: 500, suggestedMile: 110, suggestedMinute: 25 },
-  go: { under5: 300, over5: 500, suggestedMile: 100, suggestedMinute: 25 },
+  eco: { under5: 200, over5: 500, suggestedMile: 110, suggestedMinute: 25 },
+  go: { under5: 200, over5: 500, suggestedMile: 100, suggestedMinute: 25 },
   xl: { under5: 400, over5: 800, suggestedMile: 125, suggestedMinute: 25 },
   prestine: { under5: 500, over5: 1000, suggestedMile: 150, suggestedMinute: 35 },
   executive: { under5: 800, over5: 1500, suggestedMile: 200, suggestedMinute: 50 }
