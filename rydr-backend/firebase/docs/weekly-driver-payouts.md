@@ -48,7 +48,7 @@ state (or repairs the manual interval for a policy issue) and records an audit.
 3. Using the existing internal service token, page through
    `POST /internal/payout-policy/prepare` (`{cursor}`; first call `{}`) until
    `nextCursor` is null. Review setup failures. This moves no money.
-4. Configure the existing connected-account Stripe webhook to include
+4. If a connected-account Stripe webhook is configured, include
    `payout.created`, `payout.updated`, `payout.paid`, `payout.failed`, and
    `payout.canceled`. The background reconciler covers new tracked payouts
    even when webhook events are delayed or not yet subscribed.
@@ -68,3 +68,17 @@ covers Eastern dates and DST. App payout history remains backed by Stripe.
 Queued jobs outside the current Eastern calendar week are flagged rather than
 withdrawing a later week’s balance. Dispatch retries within the scheduled week
 can initiate late if the backend was unavailable on Monday.
+
+## Activated October 14, 2026
+
+Render runs payout revision `94a7652`. Auto-Deploy is disabled with the owner's
+approval until the branch is merged. Mission Control's payout queue and all
+three Firebase functions are deployed. Cloud Scheduler confirms the next weekly
+run is October 19, 2026, at 09:00 America/New_York. Status reconciliation runs
+every 30 minutes. Account preparation scanned 12 drivers: none had a linked
+Stripe Connect account, so no existing Stripe payout interval was changed.
+
+The current live Stripe webhook receives platform-account events, not Connect
+events. New driver payout status and failure detection therefore use the
+30-minute reconciler. Immediate Connect event delivery can be added separately
+with a connected-account webhook; it is not required for the deployed flow.
