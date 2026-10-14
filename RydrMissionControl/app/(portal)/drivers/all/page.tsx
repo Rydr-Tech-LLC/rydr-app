@@ -1,3 +1,4 @@
+import { evaluateDriverCompliance } from "../../../../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
 import Link from "next/link";
 import { adminDb } from "@/lib/firebaseAdmin";
 import type { DriverRecord } from "@/lib/types";
@@ -8,9 +9,10 @@ import { cashHubBillingDisplay, getCurrentCashHubBilling } from "@/lib/cashHubBi
 export const dynamic = "force-dynamic";
 
 export default async function AllDriversPage() {
-  const [snap, configSnap] = await Promise.all([
+  const [snap, configSnap, complianceSnap] = await Promise.all([
     adminDb.collection("drivers").limit(500).get(),
-    adminDb.collection("platformConfig").doc("cashRydrHub").get().catch(() => null)
+    adminDb.collection("platformConfig").doc("cashRydrHub").get().catch(() => null),
+    adminDb.collection("platformConfig").doc("driverCompliance").get()
   ]);
   const configData = configSnap?.data() ?? {};
   const cashHubGateConfig = {
@@ -38,6 +40,7 @@ export default async function AllDriversPage() {
               <th className="px-4 py-2.5">Email</th>
               <th className="px-4 py-2.5">Vehicle</th>
               <th className="px-4 py-2.5">Status</th>
+              <th className="px-4 py-2.5">Compliance</th>
               <th className="px-4 py-2.5">Cash Hub</th>
               <th className="px-4 py-2.5" />
             </tr>
@@ -46,6 +49,7 @@ export default async function AllDriversPage() {
             {drivers.map((driver) => {
               const cashHub = cashHubBillingDisplay(driver, billingByUid.get(driver.uid) ?? null, cashHubGateConfig);
 
+              const compliance = evaluateDriverCompliance(driver, complianceSnap.data() ?? {});
               return (
                 <tr key={driver.uid} className="hover:bg-grouped/60">
                   <td className="px-4 py-2.5">
@@ -60,6 +64,9 @@ export default async function AllDriversPage() {
                   </td>
                   <td className="px-4 py-2.5">
                     <StatusPill status={driver.driverApprovalStatus ?? "pending"} />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <StatusPill status={!compliance.drivingAllowed ? "suspended" : compliance.needsReviewKinds.length ? "needs_attention" : compliance.expiringKinds.length ? "pending" : "approved"} label={!compliance.drivingAllowed ? "Driving hold" : compliance.needsReviewKinds.length ? "Dates need review" : compliance.expiringKinds.length ? "Expiring soon" : "Current"} />
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="space-y-1">
@@ -77,7 +84,7 @@ export default async function AllDriversPage() {
             })}
             {drivers.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted">
+                <td colSpan={7} className="px-4 py-8 text-center text-muted">
                   No drivers yet.
                 </td>
               </tr>

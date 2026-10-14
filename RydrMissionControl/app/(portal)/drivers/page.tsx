@@ -1,3 +1,4 @@
+import { evaluateDriverCompliance } from "../../../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
 import Link from "next/link";
 import { adminDb } from "@/lib/firebaseAdmin";
 import { evaluateDriverRequirements, type DriverRecord } from "@/lib/types";
@@ -7,13 +8,15 @@ import StatusPill from "@/components/StatusPill";
 export const dynamic = "force-dynamic";
 
 export default async function DriverVerificationQueuePage() {
-  const snap = await adminDb.collection("drivers").limit(300).get();
+  const [snap, policySnap] = await Promise.all([adminDb.collection("drivers").limit(300).get(), adminDb.collection("platformConfig").doc("driverCompliance").get()]);
+  const policy = policySnap.data() ?? {};
 
   const queue = snap.docs
     .map((doc) => ({ ...(doc.data() as DriverRecord), uid: doc.id }))
     .filter((d) => {
       const status = d.driverApprovalStatus ?? "pending";
-      return status === "pending" || status === "needs_attention";
+      const compliance = evaluateDriverCompliance(d, policy);
+      return status === "pending" || status === "needs_attention" || (status === "approved" && (!compliance.drivingAllowed || compliance.needsReviewKinds.length > 0 || compliance.expiringKinds.length > 0));
     })
     .sort((a, b) => {
       const aDate = toDateSafe(a.createdAt)?.getTime() ?? 0;
@@ -32,12 +35,13 @@ export default async function DriverVerificationQueuePage() {
 
       {queue.length === 0 ? (
         <div className="rounded-lg border border-dashed border-line bg-white p-10 text-center text-sm text-muted">
-          Queue is empty — every driver has been reviewed.
+          No onboarding or document compliance items need review.
         </div>
       ) : (
         <div className="space-y-2">
           {queue.map((driver) => {
-            const { checks, missing } = evaluateDriverRequirements(driver);
+            const { checks, missing } = evaluateDriverRequirements(driver, policy);
+            const compliance = evaluateDriverCompliance(driver, policy);
             const submitted = toDateSafe(driver.createdAt);
             return (
               <div
@@ -49,6 +53,7 @@ export default async function DriverVerificationQueuePage() {
                     <p className="font-medium text-ink">{driverFullName(driver)}</p>
                     <StatusPill status={driver.driverApprovalStatus ?? "pending"} />
                   </div>
+                  <p className="mt-1 text-xs text-amber-700">{!compliance.drivingAllowed ? "Driving paused: current verified documents or screening required." : compliance.needsReviewKinds.length ? "Document expiration dates need review." : compliance.expiringKinds.length ? "Documents expire within 30 days." : "Onboarding review"}</p>
                   {!driverNameCollected(driver) && (
                     <p className="mt-0.5 text-xs text-amber-700">Name/DOB onboarding step has not been completed.</p>
                   )}
