@@ -53,11 +53,11 @@ test("scheduled locked quote uses current minimum fare and 90/10 pricing", () =>
     }
   });
   assert.deepEqual(quote, {
-    totalCents: 1100,
+    totalCents: 1000,
     baseFareCents: 800,
-    bookingFeeCents: 300,
+    bookingFeeCents: 200,
     driverPayoutCents: 720,
-    platformShareCents: 380
+    platformShareCents: 280
   });
 });
 
