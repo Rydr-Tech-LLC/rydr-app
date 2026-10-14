@@ -653,8 +653,8 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         if key == "rydr" || key == "rydr go" { return "go" }
         if key == "rydr eco" { return "eco" }
         if key == "rydr xl" { return "xl" }
-        if key == "rydr prestine" || key == "rydr pristine" { return "prestine" }
-        if key == "rydr executive" { return "executive" }
+        if key.hasPrefix("rydr prestine") || key.hasPrefix("rydr pristine") { return "prestine" }
+        if key.hasPrefix("rydr executive") { return "executive" }
         return key
     }
 

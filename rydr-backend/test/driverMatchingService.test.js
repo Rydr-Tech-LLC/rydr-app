@@ -93,3 +93,16 @@ test("scheduled matching may include offline drivers while preserving ranking an
   assert.equal(results[0].id, "a");
   assert.equal(typeof results[0].matchScore, "number");
 });
+
+test("Prestine body choices filter actual matches by premium eligibility and selected vehicle", () => {
+  const validUntil = Date.now() + 86400000;
+  const premium = bodyType => ({ bodyType, prestine: { eligible: true, validUntil } });
+  const candidates = [
+    candidate("premium-suv", { eligibleRideTypes: ["Rydr Prestine SUV"], premiumEligibility: premium("suv") }),
+    candidate("premium-sedan", { eligibleRideTypes: ["Rydr Prestine Sedan"], premiumEligibility: premium("sedan") }),
+    candidate("ordinary-suv", { eligibleRideTypes: ["Rydr Prestine SUV"], vehicle: { make: "Toyota", model: "RAV4", year: 2025 } }),
+    candidate("expired-premium", { eligibleRideTypes: ["Rydr Prestine SUV"], premiumEligibility: { bodyType: "suv", prestine: { eligible: true, validUntil: Date.now() - 1 } } })
+  ];
+  assert.deepEqual(match(candidates, { rideType: "Rydr Prestine SUV" }).map(row => row.id), ["premium-suv"]);
+  assert.deepEqual(match(candidates, { rideType: "Rydr Prestine Sedan" }).map(row => row.id), ["premium-sedan"]);
+});

@@ -23,6 +23,39 @@ final class RydrPlaygroundUITests: XCTestCase {
     }
 
     @MainActor
+    func testPrestineSUVContinuesToBooking() throws {
+        try verifyPrestineFlow(choice: "SUV")
+    }
+
+    @MainActor
+    func testPrestineSedanContinuesToBooking() throws {
+        try verifyPrestineFlow(choice: "Sedan")
+    }
+
+    @MainActor
+    private func verifyPrestineFlow(choice: String) throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-PrestineBookingUITest", "-appAppearance", choice == "SUV" ? "dark" : "light"]
+        app.launch()
+        let prestine = app.buttons["rideTypePrestine"]
+        XCTAssertTrue(prestine.waitForExistence(timeout: 15))
+        if !prestine.isHittable { app.swipeUp() }
+        prestine.tap()
+        let option = app.buttons["prestineChoice\(choice)"]
+        XCTAssertTrue(option.waitForExistence(timeout: 5))
+        option.tap()
+        let next = app.buttons["prestineContinue"]
+        if !next.isHittable { app.swipeUp() }
+        XCTAssertTrue(next.label.contains(choice))
+        next.tap()
+        let selectedType = app.staticTexts["bookingSelectedRideType"]
+        XCTAssertTrue(selectedType.waitForExistence(timeout: 10))
+        XCTAssertEqual(selectedType.label, "Rydr Prestine \(choice)")
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.buttons["prestineChoice\(choice)"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testExample() throws {
         // UI tests must launch the application that they test.
         let app = XCUIApplication()

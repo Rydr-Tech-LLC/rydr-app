@@ -37,18 +37,11 @@ struct RideTypeSelectionView: View {
             vehicle: .suv
         ),
         .prestine(
-            title: "Rydr Prestine Sedan",
+            title: "Rydr Prestine",
             badge: "Premium",
-            subtitle: "Luxury Rides",
+            subtitle: "Luxury Sedan & SUV Rides",
             icon: "sparkles",
             vehicle: .prestine
-        ),
-        .prestine(
-            title: "Rydr Prestine SUV",
-            badge: "Premium",
-            subtitle: "Luxury SUV Rides",
-            icon: "sparkles",
-            vehicle: .suv
         ),
         .executive(
             title: "Rydr Executive Sedan",
@@ -95,6 +88,12 @@ struct RideTypeSelectionView: View {
                                     RideOptionCard(option: option)
                                 }
                                 .buttonStyle(.plain)
+                            } else if option.kind == .prestine {
+                                NavigationLink(destination: PrestineVehicleSelectionView(userName: userName)) {
+                                    RideOptionCard(option: option)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("rideTypePrestine")
                             } else {
                                 NavigationLink(destination: BookingView(rideType: option.title, userName: userName)) {
                                     RideOptionCard(option: option)
@@ -204,6 +203,103 @@ struct RideTypeSelectionView: View {
     }
 }
 
+struct PrestineVehicleSelectionView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selected: VehicleChoice = .sedan
+    let userName: String
+
+    private enum VehicleChoice: String, CaseIterable {
+        case sedan = "Sedan", suv = "SUV"
+        var rideType: String { "Rydr Prestine \(rawValue)" }
+        var subtitle: String { self == .sedan ? "Refined comfort, every mile." : "Luxury with room to stretch out." }
+        var detail: String { self == .sedan ? "A premium sedan for your everyday upgrade." : "A premium SUV for a more spacious ride." }
+        var style: RideVehicleStyle { self == .sedan ? .prestine : .suv }
+    }
+    private var darkMode: Bool { colorScheme == .dark }
+    private var accent: Color { PrestineTheme.ink }
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("RYDR PRESTINE", systemImage: "sparkles")
+                        .font(.caption.weight(.heavy)).tracking(2).foregroundStyle(accent)
+                    Text("Luxury, your way.")
+                        .font(.system(size: 32, weight: .heavy, design: .rounded))
+                    Text("Choose your vehicle, then plan your ride.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                VStack(spacing: 12) {
+                    HStack {
+                        Text("PREMIUM COMFORT").font(.caption2.weight(.bold)).tracking(1.5)
+                        Spacer()
+                        Image(systemName: "sparkles")
+                    }.foregroundStyle(darkMode ? Color.white.opacity(0.8) : accent)
+                    RideVehicleArt(style: selected.style, kind: .prestine)
+                        .frame(width: 180, height: 150)
+                        .id(selected)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                    Text(selected.rawValue).font(.title.weight(.heavy))
+                    Text(selected.subtitle).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity).padding(24)
+                .background(LinearGradient(colors: darkMode ? [Color(red: 0.21, green: 0.16, blue: 0.08), Color(red: 0.12, green: 0.10, blue: 0.07)] : [Color(red: 1, green: 0.96, blue: 0.89), Color(red: 0.97, green: 0.88, blue: 0.68)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .clipShape(RoundedRectangle(cornerRadius: 28))
+                .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color(red: 0.85, green: 0.65, blue: 0.38).opacity(0.35)))
+                .shadow(color: accent.opacity(0.08), radius: 20, y: 10)
+                .accessibilityIdentifier("prestineVehiclePreview")
+
+                HStack(spacing: 12) {
+                    ForEach(VehicleChoice.allCases, id: \.self) { choice in
+                        Button {
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)) { selected = choice }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Image(systemName: choice == .sedan ? "car.side.fill" : "suv.side.fill")
+                                    Spacer()
+                                    Image(systemName: selected == choice ? "checkmark.circle.fill" : "circle")
+                                }
+                                Text(choice.rawValue).font(.headline.weight(.bold))
+                                Text(choice == .sedan ? "Refined & comfortable" : "Spacious & elevated")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(darkMode ? Color.white : accent)
+                            .background(selected == choice ? accent.opacity(darkMode ? 0.3 : 0.08) : Color(.secondarySystemGroupedBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 22))
+                            .overlay(RoundedRectangle(cornerRadius: 22).stroke(selected == choice ? accent : Color.gray.opacity(0.15), lineWidth: selected == choice ? 2 : 1))
+                            .scaleEffect(selected == choice ? 1 : 0.98)
+                        }.buttonStyle(.plain)
+                        .accessibilityIdentifier("prestineChoice\(choice.rawValue)")
+                        .accessibilityLabel("Prestine \(choice.rawValue)")
+                        .accessibilityAddTraits(selected == choice ? .isSelected : [])
+                    }
+                }
+                Text(selected.detail).font(.subheadline).foregroundStyle(.secondary)
+                NavigationLink(destination: BookingView(rideType: selected.rideType, userName: userName)
+                    .environment(\.rydrRideGradient, PrestineTheme.gradient)
+                    .environment(\.rydrRideAccent, PrestineTheme.gold)
+                    .environment(\.rydrRideSurface, PrestineTheme.cream)) {
+                    HStack {
+                        Text("Continue with \(selected.rawValue)").font(.headline.weight(.bold))
+                        Spacer()
+                        Image(systemName: "arrow.right")
+                    }.foregroundStyle(.white).padding(20).frame(maxWidth: .infinity)
+                    .background(PrestineTheme.gradient)
+                    .clipShape(RoundedRectangle(cornerRadius: 22))
+                    .shadow(color: accent.opacity(0.2), radius: 12, y: 6)
+                }.buttonStyle(.plain).accessibilityIdentifier("prestineContinue")
+            }.padding(24)
+        }
+        .background(PrestineTheme.cream.ignoresSafeArea())
+        .tint(PrestineTheme.ink)
+        .navigationTitle("Rydr Prestine")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 private struct RideTypeOption: Identifiable {
     enum Kind {
         case standard
@@ -293,7 +389,9 @@ private struct RideOptionCard: View {
 
     private var cardBackground: some View {
         Group {
-            if isExecutive {
+            if isPrestine {
+                PrestineTheme.cream
+            } else if isExecutive {
                 if darkMode {
                     LinearGradient(
                         colors: [
@@ -326,12 +424,13 @@ private struct RideOptionCard: View {
             .stroke(
                 isExecutive
                 ? LinearGradient(colors: [darkMode ? Color.black.opacity(0.72) : executiveGold, Color.white.opacity(darkMode ? 0.32 : 0.12)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                : LinearGradient(colors: [Color.white.opacity(darkMode ? 0.14 : 0.9), Color.red.opacity(isPrestine ? 0.22 : 0.10)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                : LinearGradient(colors: [Color.white.opacity(darkMode ? 0.14 : 0.9), (isPrestine ? PrestineTheme.gold : Color.red).opacity(0.22)], startPoint: .topLeading, endPoint: .bottomTrailing),
                 lineWidth: isExecutive ? 1.2 : 1
             )
     }
 
     private var titleColor: Color {
+        if isPrestine { return PrestineTheme.ink }
         if isExecutive {
             return darkMode ? .black : .white
         }
@@ -350,7 +449,7 @@ private struct RideOptionCard: View {
             return AnyShapeStyle(darkMode ? Color.black : executiveGold)
         }
         if isPrestine {
-            return AnyShapeStyle(LinearGradient(colors: [Color.red, Color(red: 0.93, green: 0.68, blue: 0.22)], startPoint: .leading, endPoint: .trailing))
+            return AnyShapeStyle(PrestineTheme.ink)
         }
         return AnyShapeStyle(Styles.rydrGradient)
     }
@@ -370,7 +469,7 @@ private struct RideOptionCard: View {
             return AnyShapeStyle(darkMode ? Color.black : executiveGold)
         }
         if isPrestine {
-            return AnyShapeStyle(LinearGradient(colors: [Color.red, Color(red: 0.93, green: 0.68, blue: 0.22)], startPoint: .leading, endPoint: .trailing))
+            return AnyShapeStyle(PrestineTheme.ink)
         }
         return AnyShapeStyle(Styles.rydrGradient)
     }
@@ -379,11 +478,11 @@ private struct RideOptionCard: View {
         if isExecutive {
             return AnyShapeStyle(darkMode ? Color.black.opacity(0.14) : executiveGold.opacity(0.14))
         }
-        return AnyShapeStyle(Color.red.opacity(0.08))
+        return AnyShapeStyle((isPrestine ? PrestineTheme.gold : Color.red).opacity(0.08))
     }
 
     private var shadowColor: Color {
-        isExecutive ? Color.black.opacity(0.20) : Color.red.opacity(0.08)
+        isExecutive ? Color.black.opacity(0.20) : (isPrestine ? PrestineTheme.gold : Color.red).opacity(0.08)
     }
 }
 
@@ -430,7 +529,7 @@ private struct RideVehicleArt: View {
         case .executive:
             return AnyShapeStyle(LinearGradient(colors: [Color.black, Color(red: 0.23, green: 0.18, blue: 0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
         case .prestine:
-            return AnyShapeStyle(LinearGradient(colors: [Color.red.opacity(0.10), Color(red: 0.98, green: 0.78, blue: 0.36).opacity(0.20)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            return AnyShapeStyle(LinearGradient(colors: [PrestineTheme.gold.opacity(0.12), PrestineTheme.cream], startPoint: .topLeading, endPoint: .bottomTrailing))
         case .cashHub:
             return AnyShapeStyle(LinearGradient(colors: [Color.red.opacity(0.12), Color.white], startPoint: .topLeading, endPoint: .bottomTrailing))
         default:
@@ -465,7 +564,7 @@ private struct RideVehicleArt: View {
             return AnyShapeStyle(Color(red: 0.98, green: 0.80, blue: 0.42))
         }
         if kind == .prestine {
-            return AnyShapeStyle(LinearGradient(colors: [Color.red, Color(red: 0.93, green: 0.68, blue: 0.22)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            return AnyShapeStyle(PrestineTheme.ink)
         }
         return AnyShapeStyle(Styles.rydrGradient)
     }

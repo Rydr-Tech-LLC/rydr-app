@@ -10,6 +10,9 @@ private struct RoutePreview {
 }
 
 struct BookingView: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     // Inputs
     let rideType: String
     let userName: String
@@ -408,6 +411,11 @@ struct BookingView: View {
                     .foregroundColor(.secondary)
                     .padding(.top, 8)
 
+                Label(rideType, systemImage: bookingRideIcon)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(rideGradient)
+                    .accessibilityIdentifier("bookingSelectedRideType")
+
                 if isCompactSheet {
                     compactBookingSummary
                         .onTapGesture {
@@ -433,7 +441,7 @@ struct BookingView: View {
                                 }
                             }
                             .font(.caption.weight(.bold))
-                            .foregroundStyle(Styles.rydrGradient)
+                            .foregroundStyle(rideGradient)
                         }
 
                         HStack(spacing: 12) {
@@ -483,7 +491,7 @@ struct BookingView: View {
                                     showAllRecents = true
                                 }
                                     .font(.caption.weight(.bold))
-                                    .foregroundStyle(Styles.rydrGradient)
+                                    .foregroundStyle(rideGradient)
                             }
                             VStack(spacing: 8) {
                                 ForEach(recentDropoffs.prefix(2), id: \.self) { addr in
@@ -506,7 +514,7 @@ struct BookingView: View {
             .padding(.horizontal)
             .padding(.bottom, 18)
         }
-        .background(Color(.systemBackground).opacity(0.94))
+        .background(rideSurface.opacity(0.94))
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(Color.white.opacity(0.72), lineWidth: 1))
         .shadow(color: Color.black.opacity(0.12), radius: 24, y: 10)
@@ -577,9 +585,9 @@ struct BookingView: View {
                 HStack(spacing: 12) {
                     Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
                         .font(.title3.weight(.semibold))
-                        .foregroundStyle(Styles.rydrGradient)
+                        .foregroundStyle(rideGradient)
                         .frame(width: 54, height: 54)
-                        .background(Styles.rydrGradient.opacity(0.08))
+                        .background(rideGradient.opacity(0.08))
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -601,7 +609,7 @@ struct BookingView: View {
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.headline.weight(.bold))
-                        .foregroundStyle(Styles.rydrGradient)
+                        .foregroundStyle(rideGradient)
                 }
             }
             .buttonStyle(.plain)
@@ -615,9 +623,9 @@ struct BookingView: View {
                 HStack(spacing: 12) {
                     Image(systemName: isResolvingLocations ? "hourglass" : "point.topleft.down.curvedto.point.bottomright.up")
                         .font(.title3.weight(.semibold))
-                        .foregroundStyle(Styles.rydrGradient)
+                        .foregroundStyle(rideGradient)
                         .frame(width: 54, height: 54)
-                        .background(Styles.rydrGradient.opacity(0.08))
+                        .background(rideGradient.opacity(0.08))
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -638,7 +646,7 @@ struct BookingView: View {
                     } else {
                         Image(systemName: "chevron.right")
                             .font(.headline.weight(.bold))
-                            .foregroundStyle(Styles.rydrGradient)
+                            .foregroundStyle(rideGradient)
                     }
                 }
             }
@@ -897,7 +905,7 @@ struct BookingView: View {
                         Spacer()
                     }
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Styles.rydrGradient)
+                    .foregroundStyle(rideGradient)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 }
@@ -1041,7 +1049,7 @@ struct BookingView: View {
                         .font(.caption.weight(.black))
                 }
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Styles.rydrGradient)
+                .foregroundStyle(rideGradient)
                 .padding(.vertical, 4)
             }
             .buttonStyle(.plain)
@@ -1167,7 +1175,7 @@ struct BookingView: View {
                 .padding(.vertical, 10)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(Styles.rydrGradient)
+            .foregroundStyle(rideGradient)
             .disabled(!canRequestRide)
             .opacity(canRequestRide ? 1 : 0.45)
 
@@ -1643,6 +1651,9 @@ struct BookingView: View {
 }
 
 private struct ShortcutTile: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     let shortcut: BookingView.Shortcut
 
     var body: some View {
@@ -1696,13 +1707,16 @@ private struct ShortcutTile: View {
 }
 
 private struct BookingGradientButtonStyle: ButtonStyle {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(.white)
             .padding(.horizontal, 18)
             .frame(height: 60)
-            .background(Styles.rydrGradient, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-            .shadow(color: Color.red.opacity(configuration.isPressed ? 0.12 : 0.24), radius: 16, x: 0, y: 9)
+            .background(rideGradient, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .shadow(color: rideAccent.opacity(configuration.isPressed ? 0.12 : 0.24), radius: 16, x: 0, y: 9)
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
     }
 }
@@ -1729,6 +1743,9 @@ private extension MKPolyline {
 }
 
 private struct RecentAddressesSheet: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     @Environment(\.dismiss) private var dismiss
 
     let recentDropoffs: [String]
@@ -1779,7 +1796,7 @@ private struct RecentAddressesSheet: View {
                         VStack(spacing: 12) {
                             Image(systemName: "clock.arrow.circlepath")
                                 .font(.system(size: 34, weight: .bold))
-                                .foregroundStyle(Styles.rydrGradient)
+                                .foregroundStyle(rideGradient)
                             Text("No recent addresses")
                                 .font(.headline.weight(.bold))
                             Text("Addresses appear here after you request rides.")
@@ -1818,6 +1835,9 @@ private struct RecentAddressesSheet: View {
 }
 
 private struct RecentAddressSection: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     let title: String
     let items: [String]
     let onSelect: (String) -> Void
@@ -1858,6 +1878,9 @@ private struct RecentAddressSection: View {
 }
 
 private struct RecentAddressRow: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     let address: String
     let onSelect: () -> Void
     let onClear: () -> Void
@@ -1913,6 +1936,9 @@ private struct RecentAddressRow: View {
 }
 
 private struct RoutePreviewSheet: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     @Environment(\.dismiss) private var dismiss
 
     let rideType: String
@@ -2043,8 +2069,8 @@ private struct RoutePreviewSheet: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 18)
                 .frame(height: 58)
-                .background(Styles.rydrGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .shadow(color: Color.red.opacity(0.25), radius: 16, x: 0, y: 8)
+                .background(rideGradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: rideAccent.opacity(0.25), radius: 16, x: 0, y: 8)
             }
             .buttonStyle(.plain)
             .disabled(!canRequestRide || isResolving)
@@ -2059,7 +2085,7 @@ private struct RoutePreviewSheet: View {
                     Spacer()
                     Image(systemName: "plus.circle")
                         .font(.title3.weight(.semibold))
-                        .foregroundStyle(Styles.rydrGradient)
+                        .foregroundStyle(rideGradient)
                     Text(stop.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add stop" : "Edit stop")
                         .font(.subheadline.weight(.semibold))
                     Spacer()
@@ -2115,7 +2141,7 @@ private struct RoutePreviewSheet: View {
         .padding(12)
         .background(
             LinearGradient(
-                colors: [Color(.secondarySystemBackground), Color.red.opacity(0.08)],
+                colors: [Color(.secondarySystemBackground), rideAccent.opacity(0.08)],
                 startPoint: .leading,
                 endPoint: .trailing
             ),
@@ -2131,11 +2157,11 @@ private struct RoutePreviewSheet: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(Styles.rydrGradient.opacity(0.12))
+                    .fill(rideGradient.opacity(0.12))
                     .frame(width: 42, height: 42)
                 Image(systemName: "person.crop.circle.fill")
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(Styles.rydrGradient)
+                    .foregroundStyle(rideGradient)
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -2172,7 +2198,7 @@ private struct RoutePreviewSheet: View {
             .foregroundStyle(.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.red.opacity(0.08), in: Capsule())
+            .background(rideAccent.opacity(0.08), in: Capsule())
             .accessibilityLabel(value)
     }
 

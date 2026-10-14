@@ -8,6 +8,9 @@ import SwiftUI
 import MapKit
 
 struct DriverSelectionView: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     @ObservedObject var rideManager: RideManager
 
     let rideType: String
@@ -40,10 +43,10 @@ struct DriverSelectionView: View {
 
                     HStack(spacing: 8) {
                         Image(systemName: "hand.draw.fill")
-                            .foregroundStyle(Styles.rydrGradient)
+                            .foregroundStyle(rideGradient)
                         Text("Swipe")
                             .font(.subheadline.weight(.bold))
-                            .foregroundStyle(Styles.rydrGradient)
+                            .foregroundStyle(rideGradient)
                         Text("to view nearby drivers")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -161,6 +164,9 @@ struct DriverSelectionView: View {
 }
 
 private struct DriverMatchmakingCard: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     let slotNumber: Int
 
     @State private var shimmer = false
@@ -170,10 +176,10 @@ private struct DriverMatchmakingCard: View {
             HStack {
                 Label("Match \(slotNumber)", systemImage: "sparkles")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(Styles.rydrGradient)
+                    .foregroundStyle(rideGradient)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Capsule().fill(Color.red.opacity(0.08)))
+                    .background(Capsule().fill(rideAccent.opacity(0.08)))
                 Spacer()
                 ProgressView()
                     .tint(.red)
@@ -192,7 +198,7 @@ private struct DriverMatchmakingCard: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [Color.red.opacity(0.10), Color(.secondarySystemGroupedBackground)],
+                            colors: [rideAccent.opacity(0.10), Color(.secondarySystemGroupedBackground)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -254,6 +260,9 @@ private struct DriverMatchmakingCard: View {
 }
 
 private struct RydrPulseIndicator: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     let size: CGFloat
     let markSize: CGFloat
     let ringWidth: CGFloat
@@ -264,23 +273,23 @@ private struct RydrPulseIndicator: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.red.opacity(0.12), lineWidth: ringWidth)
+                .stroke(rideAccent.opacity(0.12), lineWidth: ringWidth)
                 .frame(width: size, height: size)
                 .scaleEffect(pulse ? 1.10 : 0.94)
                 .opacity(pulse ? 0.35 : 0.18)
 
             Circle()
                 .trim(from: 0.08, to: 0.78)
-                .stroke(Styles.rydrGradient, style: StrokeStyle(lineWidth: ringWidth, lineCap: .round))
+                .stroke(rideGradient, style: StrokeStyle(lineWidth: ringWidth, lineCap: .round))
                 .frame(width: size, height: size)
                 .rotationEffect(.degrees(spin ? 360 : 0))
                 .scaleEffect(pulse ? 1.02 : 0.96)
-                .shadow(color: Color.red.opacity(0.24), radius: 10, y: 0)
+                .shadow(color: rideAccent.opacity(0.24), radius: 10, y: 0)
 
             Circle()
                 .fill(Color(.systemBackground))
                 .frame(width: markSize + 14, height: markSize + 14)
-                .shadow(color: Color.red.opacity(0.14), radius: 8, y: 2)
+                .shadow(color: rideAccent.opacity(0.14), radius: 8, y: 2)
 
             Image("RydrBankWalletR")
                 .resizable()
@@ -299,6 +308,9 @@ private struct RydrPulseIndicator: View {
 }
 
 private struct DriverCard: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var brandAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     @ObservedObject var rideManager: RideManager
     let driver: Driver
     let rideType: String
@@ -422,7 +434,7 @@ private struct DriverCard: View {
         }
         .frame(width: 64, height: 64)
         .clipShape(Circle())
-        .overlay(Circle().stroke(Styles.rydrGradient, lineWidth: 3))
+        .overlay(Circle().stroke(rideGradient, lineWidth: 3))
     }
 
     private var driverHeader: some View {
@@ -467,10 +479,10 @@ private struct DriverCard: View {
             fareText
             Text(rideTypeDisplay)
                 .font(.caption2.weight(.bold))
-                .foregroundStyle(Styles.rydrGradient)
+                .foregroundStyle(rideGradient)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(Capsule().fill(Color.red.opacity(0.08)))
+                .background(Capsule().fill(rideAccent.opacity(0.08)))
         }
     }
 
@@ -555,7 +567,7 @@ private struct DriverCard: View {
         VStack(spacing: 3) {
             Image(systemName: systemName)
                 .font(.subheadline.weight(.bold))
-                .foregroundStyle(Styles.rydrGradient)
+                .foregroundStyle(rideGradient)
             Text(value)
                 .font(.subheadline.weight(.black))
             Text(label)
@@ -586,6 +598,7 @@ private struct DriverCard: View {
 
     private var rideAccent: Color {
         let lower = rideTypeDisplay.lowercased()
+        if lower.contains("prestine") || lower.contains("pristine") { return brandAccent }
         if lower.contains("xl") { return .purple }
         if lower.contains("eco") { return .green }
         if lower.contains("executive") { return .black }
@@ -603,7 +616,7 @@ private struct DriverCard: View {
         if lower.contains("executive") {
             return LinearGradient(colors: [Color.black.opacity(0.16), Color.yellow.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
-        return LinearGradient(colors: [Color.red.opacity(0.12), Color.white], startPoint: .topLeading, endPoint: .bottomTrailing)
+        return LinearGradient(colors: [rideAccent.opacity(0.12), Color.white], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     private var rideBadgeIcon: String {
@@ -653,10 +666,13 @@ private struct DriverCard: View {
 // MARK: - Helpers
 
 private struct RydrGradientButton: ButtonStyle {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .padding(.vertical, 14)
-            .background(Styles.rydrGradient)
+            .background(rideGradient)
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
@@ -664,6 +680,9 @@ private struct RydrGradientButton: ButtonStyle {
 }
 
 private struct ConnectingOverlay: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     let title: String
     let subtitle: String
 
@@ -694,11 +713,14 @@ private struct ConnectingOverlay: View {
 }
 
 private struct UnavailableBanner: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     let text: String
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Styles.rydrGradient)
+                .foregroundStyle(rideGradient)
             Text(text)
                 .font(.subheadline)
                 .foregroundStyle(.primary)
@@ -718,6 +740,9 @@ private struct UnavailableBanner: View {
 }
 
 private struct EmptyDriverState: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
+    @Environment(\.rydrRideSurface) private var rideSurface
     let message: String
     let onRetry: () -> Void
 

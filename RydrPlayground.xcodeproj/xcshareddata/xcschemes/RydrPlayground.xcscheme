@@ -50,6 +50,9 @@
                ReferencedContainer = "container:RydrPlayground.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference skipped = "NO" parallelizable = "NO">
+            <BuildableReference BuildableIdentifier = "primary" BlueprintIdentifier = "D9A571FB2DF9C6AB00C04006" BuildableName = "RydrPlaygroundUITests.xctest" BlueprintName = "RydrPlaygroundUITests" ReferencedContainer = "container:RydrPlayground.xcodeproj" />
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

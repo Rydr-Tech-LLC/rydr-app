@@ -19,6 +19,25 @@ struct RydrApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
+                #if DEBUG && targetEnvironment(simulator)
+                if ProcessInfo.processInfo.arguments.contains("-PrestineBookingUITest") {
+                    NavigationStack { RideTypeSelectionView(userName: "Test Rider") }
+                        .environmentObject(session)
+                        .environmentObject(RideManager())
+                } else {
+                    appContent
+                }
+                #else
+                appContent
+                #endif
+            }
+            .preferredColorScheme(RydrAppAppearance(rawValue: appAppearance)?.colorScheme)
+            .hideKeyboardOnTap()
+        }
+    }
+
+    private var appContent: some View {
+        Group {
                 if showSplash {
                     SplashVideoView { showSplash = false }
                 } else {
@@ -28,9 +47,6 @@ struct RydrApp: App {
                         WelcomeView().environmentObject(session)
                     }
                 }
-            }
-            .preferredColorScheme(RydrAppAppearance(rawValue: appAppearance)?.colorScheme)
-            .hideKeyboardOnTap()
         }
     }
 }
