@@ -55,10 +55,12 @@ class PromotionEngine {
       );
     const prior = await this.hasPriorPaidRide(uid, audience);
     return this.db.runTransaction(async (tx) => {
-      const [s, old, indexNow] = await Promise.all([
+      const [s, old, indexNow, usage, progress] = await Promise.all([
         tx.get(ref),
         tx.get(enrollment),
         tx.get(index.ref),
+        tx.get(this.db.collection("promotionUsage").doc(promotionId)),
+        tx.get(this.db.collection("promotionProgress").doc(key(promotionId, uid))),
       ]);
       const p = s.data();
       if (
@@ -68,6 +70,8 @@ class PromotionEngine {
         indexNow.data()?.promotionId !== promotionId ||
         p.audience !== audience ||
         !["active", "scheduled"].includes(p.status) ||
+        !Number.isFinite(policy.millis(p.startsAt)) ||
+        !Number.isFinite(policy.millis(p.endsAt)) ||
         this.now() < policy.millis(p.startsAt) ||
         this.now() >= policy.millis(p.endsAt)
       )
@@ -82,6 +86,7 @@ class PromotionEngine {
         )
       )
         throw new Error("This account is not eligible for this code.");
+      if (atCapacity(p, number(usage.data()?.issuedCount), number(progress.data()?.issuedCount))) throw new Error("This promotion has reached its reward limit.");
       if (!old.exists)
         tx.create(enrollment, {
           promotionId,

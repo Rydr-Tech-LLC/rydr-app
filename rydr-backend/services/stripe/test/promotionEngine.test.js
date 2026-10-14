@@ -385,3 +385,10 @@ test("delayed paid-ride delivery honors the original schedule but excludes a pau
     0,
   );
 });
+
+test('code validation rejects exhausted global and account capacity before enrollment',async()=>{
+ const s=setup();Object.assign(s.docs.get('promotions/promo'),{applicationMode:'code',promoCode:'CAPPED',maxRedemptions:1});s.docs.set('promotionCodes/CAPPED',{promotionId:'promo'});s.docs.set('promotionUsage/promo',{issuedCount:1});
+ await assert.rejects(s.engine.enroll('rider','CAPPED'),/reward limit/);
+ assert.equal(s.docs.has(`promotionEnrollments/${key('promo','rider')}`),false);
+ s.docs.set('promotionUsage/promo',{issuedCount:0});s.docs.set(`promotionProgress/${key('promo','rider')}`,{issuedCount:1});await assert.rejects(s.engine.enroll('rider','CAPPED'),/reward limit/);
+});
