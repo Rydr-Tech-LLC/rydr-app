@@ -1,3 +1,5 @@
+import VehicleSpecifications from "./VehicleSpecifications";
+import { exactLibraryEntry, resolveSpecifications } from "../../../../../rydr-backend/firebase/functions/src/services/vehicleSpecificationPolicy";
 import DriverVehicles from "./DriverVehicles";
 import DriverComplianceReview from "./DriverComplianceReview";
 import { evaluateDriverCompliance, currentDocument } from "../../../../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
@@ -45,6 +47,8 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
 
   const history = await adminDb.collection("drivers").doc(params.uid).collection("vehicleArchive").orderBy("recordedAt", "desc").get();
   const rawDriver = snap.data() ?? {};
+  const specificationLibrary = await adminDb.collection("vehicleLibrary").limit(1000).get();
+  const vehicleSpecs = resolveSpecifications(rawDriver.vehicle ?? {}, exactLibraryEntry(specificationLibrary.docs.map(doc => doc.data()), rawDriver.vehicle ?? {}));
   const vehicles = [ ...(rawDriver.vehicle ? [{ ...rawDriver.vehicle, id: "current" }] : []), ...Object.entries(rawDriver.savedVehicles ?? {}).map(([id, vehicle]: [string, any]) => ({ ...vehicle, id })) ];
   const vehicleArchive = history.docs.map(doc => { const data = doc.data(); return { id: doc.id, vehicle: data.vehicle ?? {}, action: data.action ?? "recorded", date: toDateSafe(data.recordedAt)?.toISOString() ?? "Unknown", actor: data.actorUid, reason: data.reason }; });
   const driver = { ...(snap.data() as DriverRecord), uid: snap.id };
@@ -95,9 +99,10 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
 
   return (
     <div className="space-y-6">
+      <VehicleSpecifications uid={params.uid} specs={JSON.parse(JSON.stringify(vehicleSpecs))} vehicle={JSON.parse(JSON.stringify(rawDriver.vehicle ?? {}))} />
       <DriverVehicles uid={params.uid} vehicles={JSON.parse(JSON.stringify(vehicles))} archive={JSON.parse(JSON.stringify(vehicleArchive))} />
       <DriverComplianceReview uid={params.uid} assessment={compliance} records={JSON.parse(JSON.stringify(complianceRecords))} reportDate={dateInputValue(toDateSafe((snap.data() ?? {}).backgroundScreening?.completedAt))} />
-      <details><summary className="cursor-pointer text-sm text-muted">Premium vehicle verification — Executive remains paused</summary><PremiumVehicleReview uid={params.uid} initial={JSON.parse(JSON.stringify((snap.data() ?? {}).premiumReview?.vehicleKey === vehicleKey((snap.data() ?? {}).vehicle) ? (snap.data() ?? {}).premiumReview : {}))} assessment={evaluatePremiumVehicle(snap.data())} /></details>
+      <details><summary className="cursor-pointer text-sm text-muted">Premium vehicle verification — Executive remains paused</summary><PremiumVehicleReview uid={params.uid} initial={JSON.parse(JSON.stringify((snap.data() ?? {}).premiumReview?.vehicleKey === vehicleKey((snap.data() ?? {}).vehicle) ? (snap.data() ?? {}).premiumReview : {}))} assessment={evaluatePremiumVehicle(snap.data())} specifications={vehicleSpecs} /></details>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

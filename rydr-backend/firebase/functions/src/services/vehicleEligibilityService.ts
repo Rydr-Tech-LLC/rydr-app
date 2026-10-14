@@ -1,3 +1,4 @@
+import { xlCapacityAllowed } from "./vehicleSpecificationPolicy";
 import { evaluatePremiumVehicle, availablePremiumRideTypes } from "./premiumVehiclePolicy";
 import type { RydrRideType } from "../types";
 
@@ -83,7 +84,7 @@ export function evaluateVehicleEligibility(input: {
     if (xlEligible) expanded.add("Rydr XL");
   }
   const premium = evaluatePremiumVehicle({ vehicle: input.vehicle, premiumReview: input.premiumReview, rating: input.rating });
-  const rideTypes = [...ORDERED_RIDE_TYPES.filter((rideType) => expanded.has(rideType) && !["Rydr Prestine", "Rydr Executive"].includes(rideType)), ...availablePremiumRideTypes(premium, input.executiveConfig)];
+  const rideTypes = [...ORDERED_RIDE_TYPES.filter((rideType) => expanded.has(rideType) && !["Rydr Prestine", "Rydr Executive"].includes(rideType) && (rideType !== "Rydr XL" || xlCapacityAllowed(input.vehicle?.specifications))), ...availablePremiumRideTypes(premium, input.executiveConfig)];
   const vehicleClass = rideTypes.includes("Rydr XL")
     ? "xl"
     : rideTypes.includes("Rydr Eco")

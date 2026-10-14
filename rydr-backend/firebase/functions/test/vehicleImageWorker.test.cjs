@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const records = new Map(), files = new Map();
+let editCount=0, editFails=false;
 let searchCount=0, aiCount=0, license='CC0', whiteBackground=true, aiFails=false, noCredits=false;
 function assign(path, update, merge) {
   const data=merge ? structuredClone(records.get(path) ?? {}) : {};
@@ -35,6 +36,8 @@ require.cache[fetchPath]={id:fetchPath,filename:fetchPath,loaded:true,exports:as
  }
  throw new Error(`Unexpected URL ${url}`);
 }};
+const editingPath=require.resolve('../lib/services/vehicleImageEditing');
+require.cache[editingPath]={id:editingPath,filename:editingPath,loaded:true,exports:{editVehicleBackground:async image=>{editCount++;if(editFails)throw new Error('Background editing unavailable');whiteBackground=true;return image;}}};
 const {enqueueImageJob,processImageJob,imageJobId,updateWaitingDrivers}=require('../lib/services/vehicleImageAcquisition');
 const {buildVehicleId}=require('../lib/services/vehicleLibraryService');
 const query={make:'LAND ROVER',model:'Range Rover Sport',year:2024,trim:'P360 SE',color:'Black',bodyStyle:'suv'};
@@ -53,7 +56,7 @@ test('imports once and propagates to matching waiters, including later registrat
  records.set('drivers/c',{vehicle:{...query}});await enqueueImageJob(query,'c');assert.equal(records.get('drivers/c').vehicle.imageUrl,job.imageUrl);
 });
 test('uncertain images become reviews without publication',async()=>{
- reset();whiteBackground=false;await enqueueImageJob(query);await processImageJob(jobId,'test-key');
+ reset();whiteBackground=false;editFails=true;await enqueueImageJob(query);await processImageJob(jobId,'test-key');
  const job=records.get(`vehicleImageJobs/${jobId}`);assert.equal(job.status,'needs_review');assert.equal(job.candidates[0].assessment.whiteBackground,false);assert.equal(files.size,0);
 });
 test('attribution licenses are flagged before AI charges',async()=>{
@@ -101,4 +104,10 @@ test('image delivery updates saved vehicles without replacing the current vehicl
  records.set('drivers/b',{vehicle:{...query,color:'White'},savedVehicles:{}});
  await enqueueImageJob(query,'b');
  assert.deepEqual(records.get('drivers/b').savedVehicles,{});
+});
+
+test('licensed matching vehicles get a white background edit and are rechecked before import',async()=>{
+ reset();editCount=0;editFails=false;whiteBackground=false;
+ await enqueueImageJob(query);await processImageJob(jobId,'test-key');
+ assert.equal(editCount,1);assert.equal(records.get(`vehicleImageJobs/${jobId}`).status,'completed');assert.ok(aiCount>=2);
 });

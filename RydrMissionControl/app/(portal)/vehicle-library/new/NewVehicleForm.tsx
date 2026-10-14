@@ -1,6 +1,7 @@
 "use client";
 import { vehicleImageSearchUrl } from "@/lib/vehicleImageSearch";
 
+import VehicleSpecificationFields from "@/components/VehicleSpecificationFields";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -15,6 +16,7 @@ export default function NewVehicleForm() {
   const [yearEnd, setYearEnd] = useState("");
   const [trim, setTrim] = useState("");
   const [bodyStyle, setBodyStyle] = useState("sedan");
+  const [specifications, setSpecifications] = useState<any>({});
   const [eligibleRideTypes, setEligibleRideTypes] = useState<string[]>(["Rydr Go"]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +41,8 @@ export default function NewVehicleForm() {
           yearEnd: Number(yearEnd || yearStart),
           trim: trim || undefined,
           bodyStyle,
-          eligibleRideTypes
+          eligibleRideTypes,
+          specifications
         })
       });
       const body = await res.json().catch(() => ({}));
@@ -81,6 +84,8 @@ export default function NewVehicleForm() {
           </select>
         </Field>
       </div>
+
+      <VehicleSpecificationFields value={specifications} onChange={setSpecifications} />
 
       <div>
         <p className="mb-2 text-[11px] font-medium text-muted">Ride type eligibility</p>

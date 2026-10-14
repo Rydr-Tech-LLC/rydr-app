@@ -50,7 +50,8 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ veh
     return NextResponse.json({ error: "`yearStart`/`yearEnd` must be valid years between 1980 and 2100 with yearEnd >= yearStart." }, { status: 400 });
   }
 
-  const entry = await upsertVehicleLibraryEntry(
+  let entry;
+  try { entry = await upsertVehicleLibraryEntry(
     {
       vehicleId: params.vehicleId,
       make: typeof body.make === "string" && body.make.trim() ? body.make.trim() : existing.make,
@@ -59,10 +60,12 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ veh
       yearEnd,
       trim: typeof body.trim === "string" ? (body.trim.trim() || null) : existing.trim,
       bodyStyle,
+      specifications: body.specifications,
       eligibleRideTypes: Array.isArray(body.eligibleRideTypes) ? body.eligibleRideTypes : existing.eligibleRideTypes
     },
     session.uid
   );
+  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Could not save vehicle specifications." }, { status: 422 }); }
 
   await writeAuditLog({
     adminUid: session.uid,

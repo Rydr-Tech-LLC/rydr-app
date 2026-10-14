@@ -1,3 +1,4 @@
+import { getVehicleSpecificationMatch } from "./services/vehicleSpecificationsService";
 import { addSavedDriverVehicle, deleteSavedDriverVehicle } from "./services/driverGarageService";
 export { maintainDriverDocumentCompliance, onDriverCompliancePolicyChanged, onDriverComplianceChanged } from "./triggers/driverCompliance";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
@@ -181,6 +182,8 @@ export const submitVehicleVin = onCall(async (request) => {
 
   const vehicleFields = {
     vin: decoded.vin,
+    vinReportedSeatCapacity: decoded.seatCapacity ?? null,
+    vinReportedSeatRows: decoded.seatRows ?? null,
     make: decoded.make,
     model: decoded.model,
     year: decoded.modelYear,
@@ -195,7 +198,9 @@ export const submitVehicleVin = onCall(async (request) => {
     libraryVehicleId: lookup.result?.matchedVehicleId ?? null,
     libraryMatchedColor: lookup.result?.matchedColor ?? null
   };
-  const libraryRideTypes = lookup.result?.eligibleRideTypes ?? [];
+  const specificationMatch = await getVehicleSpecificationMatch(vehicleFields);
+  Object.assign(vehicleFields, { specifications: specificationMatch.specifications });
+  const libraryRideTypes = specificationMatch.eligibleRideTypes;
   const driverSnap = await driverRef.get();
   const driver = driverSnap.data() ?? {};
   const executiveConfigSnap = await db.collection("platformConfig").doc("rydrExecutive").get();
@@ -303,7 +308,9 @@ export const submitVehicleManual = onCall(async (request) => {
     libraryVehicleId: lookup.result?.matchedVehicleId ?? null,
     libraryMatchedColor: lookup.result?.matchedColor ?? null
   };
-  const libraryRideTypes = lookup.result?.eligibleRideTypes ?? [];
+  const specificationMatch = await getVehicleSpecificationMatch(vehicleFields);
+  Object.assign(vehicleFields, { specifications: specificationMatch.specifications });
+  const libraryRideTypes = specificationMatch.eligibleRideTypes;
   const driverSnap = await driverRef.get();
   const driver = driverSnap.data() ?? {};
   const executiveConfigSnap = await db.collection("platformConfig").doc("rydrExecutive").get();
@@ -357,3 +364,5 @@ export const deleteDriverVehicle = onCall(async request => {
 });
 
 export { onDriverVehicleHistoryChanged } from "./triggers/driverVehicleHistory";
+
+export { editVehicleLibraryBackground } from "./triggers/vehicleImageEditing";

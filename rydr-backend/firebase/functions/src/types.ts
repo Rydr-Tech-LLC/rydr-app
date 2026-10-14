@@ -50,6 +50,7 @@ export interface VehicleLibraryEntry {
   trim: string | null;
   bodyStyle: VehicleBodyStyle;
   /** Optional Mission Control override for the ride types this vehicle may support. */
+  specifications?: Record<string, any>;
   eligibleRideTypes?: RydrRideType[];
   /** Colors that actually have an uploaded image in `colorImages`. */
   availableColors: VehicleColor[];
@@ -70,6 +71,9 @@ export interface VehicleLibraryEntry {
  * this cache has no TTL/expiry — once decoded, always reused. */
 export interface VinDecodeCacheEntry {
   vin: string;
+  specificationVersion?: number;
+  seatCapacity?: number | null;
+  seatRows?: number | null;
   decodedAt: unknown;
   source: "nhtsa";
   make: string | null;

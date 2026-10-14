@@ -14,7 +14,7 @@ const documents = [
   ["professionalService", "Professional service training and conduct review", false],
   ["airportAuthorization", "ATL permit / decal / transponder (airport pickups only)", true]
 ] as const;
-export default function PremiumVehicleReview({ uid, initial, assessment }: { uid: string; initial: any; assessment: any }) {
+export default function PremiumVehicleReview({ uid, initial, assessment, specifications }: { uid: string; initial: any; assessment: any; specifications?: any }) {
   const router = useRouter();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -27,7 +27,7 @@ export default function PremiumVehicleReview({ uid, initial, assessment }: { uid
       event.preventDefault(); setBusy(true); setMessage("");
       const form = new FormData(event.currentTarget);
       const checked = (key: string) => form.get(key) === "on";
-      const payload: any = { bodyType: form.get("bodyType"), seatCapacity: Number(form.get("seatCapacity")), conditionEvidence: form.get("conditionEvidence"), conditionExpiresAt: form.get("conditionExpiresAt"), documents: {} };
+      const payload: any = { bodyType: form.get("bodyType"), specificationEvidence: String(form.get("specificationEvidence") ?? ""), seatCapacity: Number(form.get("seatCapacity")), conditionEvidence: form.get("conditionEvidence"), conditionExpiresAt: form.get("conditionExpiresAt"), documents: {} };
       for (const key of ["luxuryVehicleApproved", "conditionApproved", "blackLeatherInteriorApproved", "insuranceCoversRydr", "carrierIdentityMatched", "temporaryLimoRegistration", "approvePrestine"]) payload[key] = checked(key);
       for (const [key] of documents) payload.documents[key] = { verified: checked(`${key}.verified`), reference: form.get(`${key}.reference`), expiresAt: form.get(`${key}.expiresAt`), completedAt: form.get(`${key}.completedAt`) };
       for (const field of ["combinedLimit", "bodilyPerPerson", "bodilyPerAccident", "propertyDamage"]) payload.documents.commercialInsurance[field] = Number(form.get(field) ?? 0);
@@ -39,7 +39,9 @@ export default function PremiumVehicleReview({ uid, initial, assessment }: { uid
       finally { setBusy(false); }
     }}>
       <label className="block">Vehicle category <select name="bodyType" defaultValue={initial.bodyType ?? "sedan"} className="border rounded p-2 ml-2"><option value="sedan">Sedan</option><option value="suv">SUV</option></select></label>
-      <label className="block text-sm">Seats including driver <input className="border rounded p-2 ml-2" name="seatCapacity" type="number" min="5" max="8" required defaultValue={initial.seatCapacity ?? 5} /></label>
+      <p className="text-xs text-muted">VIN / library seats: {specifications?.seatCategory ?? "Unknown"}; luxury classification: {specifications?.luxuryClassification ?? "unverified"}. Verify the exact configuration; do not infer capacity from SUV body style.</p>
+      <label className="block text-sm">Seating and luxury evidence reference<input name="specificationEvidence" className="border rounded p-2 w-full" defaultValue={initial.specificationEvidence ?? specifications?.evidenceReference ?? ""} placeholder="Reviewed manufacturer / VIN configuration evidence" /></label>
+      <label className="block text-sm">Seats including driver <input className="border rounded p-2 ml-2" name="seatCapacity" type="number" min="5" max="8" required defaultValue={initial.seatCapacity ?? specifications?.seatCapacity ?? ""} /></label>
       {([ ["luxuryVehicleApproved", "Approved luxury make/model"], ["conditionApproved", "Vehicle condition verified"], ["blackLeatherInteriorApproved", "Black leather / vegan-leather interior verified (Executive)"], ["insuranceCoversRydr", "Commercial insurance expressly covers Rydr Executive operations"], ["carrierIdentityMatched", "Carrier certificate, insured name and reviewed vehicle/plate match"], ["temporaryLimoRegistration", "Valid temporary limousine registration verified (only if no LM plate yet)"], ["approvePrestine", "Approve vehicle for Prestine"] ] as const).map(([key, label]) => <label className="block text-sm" key={key}><input type="checkbox" name={key} defaultChecked={key === "approvePrestine" ? Boolean(initial.prestineApprovedAt) : initial[key] === true} /> {label}</label>)}
       <label className="block text-sm">Condition evidence reference <input className="border rounded p-2 w-full" name="conditionEvidence" defaultValue={initial.conditionReview?.reference ?? ""} placeholder="Reviewed document, inspection or photo reference" /></label>
       <label className="block text-sm">Condition approval expires <input className="border rounded p-2 ml-2" name="conditionExpiresAt" type="date" defaultValue={date(initial.conditionReview?.expiresAt)} /></label>

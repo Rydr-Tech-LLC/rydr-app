@@ -20,6 +20,7 @@ export default function VehicleLibraryClient({
   const [make, setMake] = useState(initialMake);
   const [model, setModel] = useState(initialModel);
   const [year, setYear] = useState("");
+  const [unverifiedSpecsOnly, setUnverifiedSpecsOnly] = useState(false);
   const [missingOnly, setMissingOnly] = useState(false);
   const [incompleteOnly, setIncompleteOnly] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -29,7 +30,7 @@ export default function VehicleLibraryClient({
     const missing = entries.filter((entry) => imageCount(entry) === 0).length;
     const incomplete = entries.filter((entry) => imageCount(entry) > 0 && imageCount(entry) < VEHICLE_COLORS.length + 1).length;
     const coveredColors = entries.reduce((sum, entry) => sum + (entry.availableColors?.length ?? 0), 0);
-    return { total: entries.length, missing, incomplete, coveredColors };
+    return { total: entries.length, missing, incomplete, coveredColors, reviewedSpecs: entries.filter(entry => entry.specifications?.verified === true).length };
   }, [entries]);
 
   function runSearch() {
@@ -56,6 +57,7 @@ export default function VehicleLibraryClient({
     setMake("");
     setModel("");
     setYear("");
+    setUnverifiedSpecsOnly(false);
     setMissingOnly(false);
     setIncompleteOnly(false);
     setEntries(initialEntries);
@@ -69,6 +71,8 @@ export default function VehicleLibraryClient({
         <StatCard label="Missing images" value={stats.missing} tone={stats.missing > 0 ? "warn" : "ok"} />
         <StatCard label="Needs color coverage" value={stats.incomplete} tone={stats.incomplete > 0 ? "warn" : "ok"} />
         <StatCard label="Color images stored" value={stats.coveredColors} />
+        <StatCard label="Specifications reviewed" value={stats.reviewedSpecs} />
+        <StatCard label="Specifications need review" value={stats.total - stats.reviewedSpecs} tone={stats.total > stats.reviewedSpecs ? "warn" : "ok"} />
       </div>
 
       <div className="rounded-lg border border-line bg-white p-4 shadow-sm">
@@ -79,6 +83,7 @@ export default function VehicleLibraryClient({
           <Field label="Model">
             <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="Search model" className={inputClass} />
           </Field>
+          <label className="flex items-center gap-2 text-xs text-muted"><input type="checkbox" checked={unverifiedSpecsOnly} onChange={event => setUnverifiedSpecsOnly(event.target.checked)} /> Needs specification review</label>
           <Field label="Year">
             <input value={year} onChange={(event) => setYear(event.target.value)} inputMode="numeric" placeholder="Optional" className={inputClass} />
           </Field>
@@ -118,10 +123,10 @@ export default function VehicleLibraryClient({
       </div>
 
       <div className="grid gap-3 xl:grid-cols-2">
-        {entries.map((entry) => (
+        {entries.filter(entry => !unverifiedSpecsOnly || entry.specifications?.verified !== true).map((entry) => (
           <VehicleCard key={entry.vehicleId} entry={entry} />
         ))}
-        {entries.length === 0 && (
+        {entries.filter(entry => !unverifiedSpecsOnly || entry.specifications?.verified !== true).length === 0 && (
           <div className="rounded-lg border border-dashed border-line bg-white p-8 text-center text-sm text-muted">
             No vehicle library entries match these filters.
           </div>
@@ -163,6 +168,9 @@ function VehicleCard({ entry }: { entry: VehicleLibraryEntry }) {
             <Badge tone={statusTone}>{status}</Badge>
           </div>
 
+          <p className="mt-2 text-xs text-muted">
+            Seats including driver: {entry.specifications?.seatCapacity != null ? entry.specifications.seatCapacity >= 8 ? `8+ (${entry.specifications.seatCapacity} total)` : entry.specifications.seatCapacity : "Unknown"} · {entry.specifications?.luxuryClassification === "luxury" ? "Luxury" : entry.specifications?.luxuryClassification === "standard" ? "Standard" : "Classification pending"} · {entry.specifications?.verified ? "Source reviewed" : "Needs specification review"}
+          </p>
           <div className="mt-3">
             <div className="flex items-center justify-between text-[11px] text-muted">
               <span>Color coverage</span>

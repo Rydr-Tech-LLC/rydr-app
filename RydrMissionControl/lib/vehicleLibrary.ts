@@ -1,3 +1,4 @@
+import { normalizeSpecifications, xlCapacityAllowed } from "../../rydr-backend/firebase/functions/src/services/vehicleSpecificationPolicy";
 import { evaluatePremiumVehicle, availablePremiumRideTypes } from "../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
 import "server-only";
 import { FieldValue } from "firebase-admin/firestore";
@@ -66,6 +67,7 @@ export interface VehicleLibraryEntry {
   yearEnd: number;
   trim: string | null;
   bodyStyle: VehicleBodyStyle;
+  specifications?: Record<string, any>;
   eligibleRideTypes?: RydrRideType[];
   availableColors: VehicleColor[];
   defaultImage: string | null;
@@ -194,6 +196,7 @@ function normalizeVehicleLibraryEntry(data: unknown, fallbackVehicleId?: string)
     trim: optionalString(record.trim),
     bodyStyle: normalizeBodyStyle(record.bodyStyle),
     eligibleRideTypes: normalizeRideTypes(record.eligibleRideTypes),
+    specifications: record.specifications ?? {},
     availableColors: VEHICLE_COLORS.filter((color) => colors.has(color)),
     defaultImage: optionalString(record.defaultImage),
     colorImages
@@ -303,6 +306,7 @@ export async function upsertVehicleLibraryEntry(
     trim?: string | null;
     bodyStyle: VehicleBodyStyle;
     eligibleRideTypes?: unknown;
+    specifications?: any;
   },
   adminUid: string
 ): Promise<VehicleLibraryEntry> {
@@ -313,6 +317,10 @@ export async function upsertVehicleLibraryEntry(
   const vehicleId = input.vehicleId ?? buildVehicleId(make, model, input.yearStart, input.yearEnd, trim);
   const ref = collection().doc(vehicleId);
   const existing = await ref.get();
+  const specifications = input.specifications === undefined ? existing.data()?.specifications ?? normalizeSpecifications({}, adminUid) : normalizeSpecifications(input.specifications, adminUid);
+  if (eligibleRideTypes.includes("Rydr XL") && !xlCapacityAllowed({ ...specifications, source: specifications.verified ? "reviewed_library" : "unknown" })) throw new Error("XL requires verified seating for six riders plus the driver (7–8 total seats).");
+  if (eligibleRideTypes.includes("Rydr Prestine") && !(specifications.verified && specifications.luxuryClassification === "luxury")) throw new Error("Prestine library eligibility requires a verified luxury classification and evidence.");
+
 
   if (!existing.exists) {
     const entry: VehicleLibraryEntry = {
@@ -324,6 +332,7 @@ export async function upsertVehicleLibraryEntry(
       trim,
       bodyStyle: input.bodyStyle,
       eligibleRideTypes,
+      specifications,
       availableColors: [],
       defaultImage: null,
       colorImages: {},
@@ -344,6 +353,7 @@ export async function upsertVehicleLibraryEntry(
     trim,
     bodyStyle: input.bodyStyle,
     eligibleRideTypes,
+    specifications,
     updatedAt: FieldValue.serverTimestamp(),
     updatedBy: adminUid
   });

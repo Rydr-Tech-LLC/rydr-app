@@ -27,6 +27,11 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
       const [snap, executiveConfig] = await Promise.all([tx.get(ref), tx.get(adminDb.collection("platformConfig").doc("rydrExecutive"))]);
       if (!snap.exists) throw new Error("Driver not found");
       const driver = snap.data() ?? {};
+      const specificationEvidence = String(input.specificationEvidence ?? "").trim().slice(0, 1000);
+      if (driver.vehicle?.specifications?.conflict === true) throw new Error("Resolve conflicting VIN and library seating before premium approval.");
+      const reportedSeats = Number(driver.vehicle?.vinReportedSeatCapacity ?? driver.vehicle?.specifications?.seatCapacity);
+      if (reportedSeats > 0 && reportedSeats !== Number(input.seatCapacity)) throw new Error("Reviewed seat capacity conflicts with the VIN-reported capacity.");
+      if ((input.approvePrestine === true || input.luxuryVehicleApproved === true) && !specificationEvidence) throw new Error("Seating and luxury classification evidence is required for premium approval.");
       const key = vehicleKey(driver.vehicle);
       const previous = driver.premiumReview?.vehicleKey === key ? driver.premiumReview : {};
       const documents: Record<string, unknown> = {};
@@ -42,7 +47,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
         insurance[field] = Number.isFinite(value) && value >= 0 ? value : 0;
       }
       const review = {
-        vehicleKey: key, bodyType: input.bodyType, seatCapacity: Number(input.seatCapacity) || 0, operatingState: "GA", reviewedBy: session.uid, reviewedAt: now.toISOString(),
+        specificationEvidence, vehicleKey: key, bodyType: input.bodyType, seatCapacity: Number(input.seatCapacity) || 0, operatingState: "GA", reviewedBy: session.uid, reviewedAt: now.toISOString(),
         luxuryVehicleApproved: input.luxuryVehicleApproved === true,
         conditionApproved: input.conditionApproved === true,
         conditionReview: { status: input.conditionApproved === true ? "verified" : "missing", reference: String(input.conditionEvidence ?? "").trim().slice(0, 500), verifiedBy: session.uid, verifiedAt: now.toISOString(), expiresAt: expiry(input.conditionExpiresAt) },

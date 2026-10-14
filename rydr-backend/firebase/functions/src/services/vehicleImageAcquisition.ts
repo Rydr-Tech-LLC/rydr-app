@@ -1,3 +1,4 @@
+import { editVehicleBackground } from "./vehicleImageEditing";
 import { createHash, randomUUID } from "crypto";
 import fetch from "node-fetch";
 import { db, FieldValue, storage } from "../admin";
@@ -209,6 +210,7 @@ export async function processImageJob(jobId: string, apiKey: string): Promise<vo
     return data;
   });
   if (!job) return;
+  let backgroundEditAttempted = false;
   const evaluations: Array<Candidate & { assessment?: Assessment; issue?: string }> = [];
   const finish = async (data: Record<string, unknown>) => {
     await db.runTransaction(async tx => {
@@ -223,8 +225,15 @@ export async function processImageJob(jobId: string, apiKey: string): Promise<vo
     for (const candidate of candidates) {
       if (!candidate.autoImportAllowed) { evaluations.push({ ...candidate, issue: "License requires review or attribution" }); continue; }
       try {
-        const image = await downloadCandidate(candidate);
-        const assessment = await assess(job.query, candidate, image, apiKey);
+        let image = await downloadCandidate(candidate);
+        let assessment = await assess(job.query, candidate, image, apiKey);
+        if (!assessment.whiteBackground && acceptsAssessment({ ...assessment, whiteBackground: true }) && !backgroundEditAttempted) {
+          evaluations.push({ ...candidate, assessment });
+          backgroundEditAttempted = true;
+          image = await editVehicleBackground(image, apiKey);
+          assessment = await assess(job.query, { ...candidate, description: `${candidate.description} Background edited to white; verify the vehicle is unchanged.` }, image, apiKey);
+          candidate.description += " [Background edited to white using OpenAI; vehicle rechecked before import.]";
+        }
         evaluations.push({ ...candidate, assessment });
         if (!acceptsAssessment(assessment)) continue;
         const result = await importCandidate(jobId, job.query, candidate, image, assessment);

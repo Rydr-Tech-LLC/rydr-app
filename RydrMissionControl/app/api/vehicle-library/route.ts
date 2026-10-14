@@ -67,7 +67,8 @@ export async function POST(request: NextRequest) {
 
   const bodyStyle: VehicleBodyStyle = VEHICLE_BODY_STYLES.includes(body.bodyStyle) ? body.bodyStyle : "unknown";
 
-  const entry = await upsertVehicleLibraryEntry(
+  let entry;
+  try { entry = await upsertVehicleLibraryEntry(
     {
       vehicleId: typeof body.vehicleId === "string" && body.vehicleId.trim() ? body.vehicleId.trim() : undefined,
       make: body.make.trim(),
@@ -76,10 +77,12 @@ export async function POST(request: NextRequest) {
       yearEnd,
       trim: typeof body.trim === "string" && body.trim.trim() ? body.trim.trim() : null,
       bodyStyle,
+      specifications: body.specifications,
       eligibleRideTypes: body.eligibleRideTypes
     },
     session.uid
   );
+  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Could not save vehicle specifications." }, { status: 422 }); }
 
   await writeAuditLog({
     adminUid: session.uid,

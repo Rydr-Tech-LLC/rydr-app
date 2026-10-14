@@ -1,5 +1,6 @@
 "use client";
 
+import VehicleSpecificationFields from "@/components/VehicleSpecificationFields";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { VehicleBodyStyle, VehicleLibraryEntry } from "@/lib/vehicleLibrary";
@@ -15,6 +16,7 @@ export default function VehicleMetadataEditor({ entry }: { entry: VehicleLibrary
   const [yearEnd, setYearEnd] = useState(String(entry.yearEnd));
   const [trim, setTrim] = useState(entry.trim ?? "");
   const [bodyStyle, setBodyStyle] = useState(entry.bodyStyle);
+  const [specifications, setSpecifications] = useState<any>(entry.specifications ?? {});
   const [eligibleRideTypes, setEligibleRideTypes] = useState<string[]>(entry.eligibleRideTypes ?? []);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -41,7 +43,8 @@ export default function VehicleMetadataEditor({ entry }: { entry: VehicleLibrary
           yearEnd: Number(yearEnd),
           trim,
           bodyStyle,
-          eligibleRideTypes
+          eligibleRideTypes,
+          specifications
         })
       });
       const body = await res.json().catch(() => ({}));
@@ -100,6 +103,8 @@ export default function VehicleMetadataEditor({ entry }: { entry: VehicleLibrary
           </select>
         </Field>
       </div>
+
+      <VehicleSpecificationFields value={specifications} onChange={setSpecifications} />
 
       <div className="mt-4">
         <p className="mb-2 text-[11px] font-medium text-muted">Ride type eligibility</p>

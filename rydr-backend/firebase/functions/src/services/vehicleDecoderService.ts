@@ -1,3 +1,4 @@
+import { seatCount } from "./vehicleSpecificationPolicy";
 import fetch from "node-fetch";
 import { db, Timestamp } from "../admin";
 import type { VehicleBodyStyle, VinDecodeCacheEntry } from "../types";
@@ -47,6 +48,8 @@ function extractRaw(result: Record<string, unknown>): Record<string, string> {
     "Trim2",
     "Series",
     "BodyClass",
+    "Seats",
+    "SeatRows",
     "VehicleType",
     "DriveType",
     "FuelTypePrimary",
@@ -76,6 +79,9 @@ function toEntry(vin: string, raw: Record<string, string>): VinDecodeCacheEntry 
   return {
     vin,
     decodedAt: Timestamp.now(),
+    specificationVersion: 2,
+    seatCapacity: seatCount(raw.Seats),
+    seatRows: seatCount(raw.SeatRows),
     source: "nhtsa",
     make: raw.Make ?? null,
     model: raw.Model ?? null,
@@ -110,7 +116,7 @@ export class VehicleDecoderService {
 
     if (!opts.forceRefresh) {
       const cached = await cacheRef.get();
-      if (cached.exists) {
+      if (cached.exists && cached.data()?.specificationVersion === 2) {
         return cached.data() as VinDecodeCacheEntry;
       }
     }

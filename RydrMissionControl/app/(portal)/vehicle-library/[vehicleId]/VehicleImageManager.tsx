@@ -10,6 +10,24 @@ export default function VehicleImageManager({ entry: initialEntry }: { entry: Ve
   const [entry, setEntry] = useState(initialEntry);
   const [busySlot, setBusySlot] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editSlot, setEditSlot] = useState<{ key: string; color?: string; url: string } | null>(null);
+  const [editPrompt, setEditPrompt] = useState("Remove the existing background and place the vehicle on a clean, pure white studio background with a subtle natural ground shadow.");
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  async function generatePreview() {
+    if (!editSlot) return;
+    setEditing(true); setError(null);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null); setPreviewFile(null);
+    try {
+      const response = await fetch(`/api/vehicle-library/${entry.vehicleId}/edit-background`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ color: editSlot.color, prompt: editPrompt }) });
+      if (!response.ok) { const body = await response.json(); setError(body.error ?? "Could not edit background."); return; }
+      const blob = await response.blob(); const file = new File([blob], "vehicle-white-background.jpg", { type: "image/jpeg" });
+      setPreviewFile(file); setPreviewUrl(URL.createObjectURL(file));
+    } catch { setError("Image editing is unavailable. Your image has not changed."); }
+    finally { setEditing(false); }
+  }
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
   async function upload(slot: string, color: string | undefined, file: File) {
@@ -71,6 +89,19 @@ export default function VehicleImageManager({ entry: initialEntry }: { entry: Ve
           Search Google Images
         </a>
       </div>
+      {editSlot && <div role="dialog" aria-label="Edit vehicle image background" className="rounded-lg border border-line bg-grouped p-4 space-y-3">
+        <h3 className="text-sm font-semibold">Edit {editSlot.color ?? "default"} image background</h3>
+        <p className="text-xs text-muted">Background changes preserve the vehicle and its exterior color. Review the preview before replacing the image. Uses your OpenAI API credits.</p>
+        <textarea aria-label="Image editing prompt" maxLength={1500} value={editPrompt} onChange={event => setEditPrompt(event.target.value)} className="w-full rounded border border-line p-2 text-xs" />
+        <div className="grid grid-cols-2 gap-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={editSlot.url} alt="Original vehicle" className="max-h-56 w-full object-contain" />
+          {previewUrl && <img src={previewUrl} alt="Edited vehicle preview" className="max-h-56 w-full object-contain" />}
+        </div>
+        <div className="flex gap-2"><button disabled={editing} onClick={generatePreview} className="rounded bg-ink px-3 py-2 text-xs text-white disabled:opacity-40">{editing ? "Editing…" : "Generate preview"}</button>
+          {previewFile && <button disabled={editing || busySlot !== null} onClick={async () => { await upload(editSlot.key, editSlot.color, previewFile); }} className="rounded bg-rydr-burgundy px-3 py-2 text-xs text-white disabled:opacity-40">Use edited image</button>}
+          <button disabled={editing} onClick={() => { if (previewUrl) URL.revokeObjectURL(previewUrl); setEditSlot(null); setPreviewFile(null); setPreviewUrl(null); }} className="rounded border border-line px-3 py-2 text-xs">Close</button></div>
+      </div>}
       {error && <p className="text-xs text-rydr-red">{error}</p>}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
         {slots.map((slot) => (
@@ -121,6 +152,7 @@ export default function VehicleImageManager({ entry: initialEntry }: { entry: Ve
                   </button>
                 )}
               </div>
+              {slot.url && <button onClick={() => { if (previewUrl) URL.revokeObjectURL(previewUrl); setPreviewFile(null); setPreviewUrl(null); setEditSlot({ key: slot.key, color: slot.color, url: slot.url! }); }} className="mt-1.5 w-full rounded-md border border-line py-1 text-center text-[11px] font-medium text-muted hover:bg-grouped">Edit background / prompt</button>}
               {!slot.url && (
                 <a
                   href={vehicleImageSearchUrl(entry, slot.color)}
