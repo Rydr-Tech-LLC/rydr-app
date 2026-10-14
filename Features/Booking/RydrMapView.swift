@@ -11,6 +11,8 @@ enum RydrMapDefaults {
 }
 
 struct RydrMapView: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
     @Binding var position: MapCameraPosition
 
     let pickupCoordinate: CLLocationCoordinate2D?
@@ -30,7 +32,7 @@ struct RydrMapView: View {
                     .stroke(Color.black.opacity(0.14), style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
 
                 MapPolyline(routePolyline)
-                    .stroke(Styles.rydrGradient, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                    .stroke(rideGradient, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
             }
 
             if let pickupCoordinate {
@@ -54,7 +56,7 @@ struct RydrMapView: View {
         .overlay(alignment: .topLeading) {
             Label("Rydr Map", systemImage: "location.north.line.fill")
                 .font(.caption2.weight(.black))
-                .foregroundStyle(Styles.rydrGradient)
+                .foregroundStyle(rideGradient)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .background(.ultraThinMaterial, in: Capsule())
@@ -73,7 +75,7 @@ struct RydrMapView: View {
         Button(action: onRecenter) {
             Image(systemName: "location.fill")
                 .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(Color.red)
+                .foregroundStyle(rideAccent)
                 .frame(width: 52, height: 52)
                 .background(.ultraThinMaterial, in: Circle())
                 .overlay(Circle().stroke(Color.white.opacity(0.8), lineWidth: 1))
@@ -90,6 +92,8 @@ private enum RydrMapPinKind {
 }
 
 private struct RydrMapPin: View {
+    @Environment(\.rydrRideGradient) private var rideGradient
+    @Environment(\.rydrRideAccent) private var rideAccent
     let kind: RydrMapPinKind
 
     private var symbol: String {
@@ -117,7 +121,7 @@ private struct RydrMapPin: View {
 
                 Image(systemName: symbol)
                     .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(kind == .pickup ? Color.red : Color.white)
+                    .foregroundStyle(kind == .pickup ? rideAccent : Color.white)
             }
 
             Triangle()
@@ -133,7 +137,7 @@ private struct RydrMapPin: View {
         case .pickup:
             return AnyShapeStyle(Color.white)
         case .dropoff:
-            return AnyShapeStyle(Styles.rydrGradient)
+            return AnyShapeStyle(rideGradient)
         }
     }
 }

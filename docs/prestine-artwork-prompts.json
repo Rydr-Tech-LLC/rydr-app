@@ -1,0 +1,15 @@
+{
+  "mode": "built-in image_gen",
+  "transparent_background": true,
+  "style_reference": "RydrPlayground/Assets.xcassets/RydrPrestineVehicle.imageset/RydrPrestineVehicle.png",
+  "assets": [
+    {
+      "path": "RydrPlayground/Assets.xcassets/RydrPrestineSUVVehicle.imageset/RydrPrestineSUVVehicle.png",
+      "prompt": "Use case: stylized-concept. Asset type: transparent vehicle illustration for the Rydr Prestine SUV iOS ride-choice screen. The provided sedan is a STYLE REFERENCE ONLY; create a NEW luxury SUV asset, do not edit the sedan. Subject: a refined full-size flagship luxury SUV, elegant proportions, tall premium grille, sophisticated LED headlights, large polished multi-spoke wheels. Pearl ivory/cream exterior with subtle champagne-gold grille, window, lower-body and wheel trim, dark tinted windows. Style: polished high-detail 3D vehicle render matching the reference\u2019s crisp premium product illustration and realistic materials. Composition: front three-quarter view, nose facing left, entire SUV visible with all wheels, wide centered vehicle, modest transparent padding around silhouette. Soft clean studio lighting and understated highlights. Output must have genuine alpha transparency, no background panel, no ground, no environment, no text, no logos, no watermark. Keep the luxury SUV unmistakably distinct from an everyday red XL crossover."
+    },
+    {
+      "path": "RydrPlayground/Assets.xcassets/RydrPrestineSedanVehicle.imageset/RydrPrestineSedanVehicle.png",
+      "prompt": "Use case: stylized-concept. Asset type: transparent luxury sedan illustration for the cream-and-white Rydr Prestine iOS UI. Reference image is the existing sedan style and silhouette. Create a new sibling illustration of a refined flagship luxury sedan in the same polished realistic 3D product-render style and front three-quarter viewpoint, nose facing left. Change the body paint to pearl ivory/cream WHITE, with subtle champagne-gold grille, thin window and lower-body trim and restrained gold wheel details. Dark tinted windows, precise headlights, clean premium surfaces. Whole car fully visible, all wheels, centered wide vehicle with modest transparent padding. GENUINE alpha transparency, no background, no floor, no environment, no red reflections, no black exterior paint, no text, no logos, no watermark. This illustration must complement a cream-white luxury SUV and remain clearly visible on a light cream interface."
+    }
+  ]
+}

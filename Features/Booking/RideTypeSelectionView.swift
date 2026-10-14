@@ -89,8 +89,9 @@ struct RideTypeSelectionView: View {
                                 }
                                 .buttonStyle(.plain)
                             } else if option.kind == .prestine {
-                                NavigationLink(destination: PrestineVehicleSelectionView(userName: userName)) {
+                                NavigationLink(destination: PrestineVehicleSelectionView(userName: userName).environment(\.colorScheme, .light)) {
                                     RideOptionCard(option: option)
+                                        .environment(\.colorScheme, .light)
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityIdentifier("rideTypePrestine")
@@ -214,7 +215,7 @@ struct PrestineVehicleSelectionView: View {
         var rideType: String { "Rydr Prestine \(rawValue)" }
         var subtitle: String { self == .sedan ? "Refined comfort, every mile." : "Luxury with room to stretch out." }
         var detail: String { self == .sedan ? "A premium sedan for your everyday upgrade." : "A premium SUV for a more spacious ride." }
-        var style: RideVehicleStyle { self == .sedan ? .prestine : .suv }
+        var style: RideVehicleStyle { self == .sedan ? .prestine : .prestineSUV }
     }
     private var darkMode: Bool { colorScheme == .dark }
     private var accent: Color { PrestineTheme.ink }
@@ -281,7 +282,11 @@ struct PrestineVehicleSelectionView: View {
                 NavigationLink(destination: BookingView(rideType: selected.rideType, userName: userName)
                     .environment(\.rydrRideGradient, PrestineTheme.gradient)
                     .environment(\.rydrRideAccent, PrestineTheme.gold)
-                    .environment(\.rydrRideSurface, PrestineTheme.cream)) {
+                    .environment(\.rydrRideSurface, PrestineTheme.cream)
+                    .environment(\.colorScheme, .light)
+                    .toolbarColorScheme(.light, for: .navigationBar)
+                    .toolbarBackground(PrestineTheme.cream, for: .navigationBar)
+                    .toolbarBackground(.visible, for: .navigationBar)) {
                     HStack {
                         Text("Continue with \(selected.rawValue)").font(.headline.weight(.bold))
                         Spacer()
@@ -295,6 +300,9 @@ struct PrestineVehicleSelectionView: View {
         }
         .background(PrestineTheme.cream.ignoresSafeArea())
         .tint(PrestineTheme.ink)
+        .toolbarColorScheme(.light, for: .navigationBar)
+        .toolbarBackground(PrestineTheme.cream, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .navigationTitle("Rydr Prestine")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -491,6 +499,7 @@ private enum RideVehicleStyle {
     case eco
     case suv
     case prestine
+    case prestineSUV
     case executive
     case cash
 }
@@ -542,7 +551,7 @@ private struct RideVehicleArt: View {
         case .sedan: return "car.fill"
         case .eco: return "leaf.fill"
         case .suv: return "bus.fill"
-        case .prestine: return "sparkles"
+        case .prestine, .prestineSUV: return "sparkles"
         case .executive: return "briefcase.fill"
         case .cash: return "banknote.fill"
         }
@@ -553,7 +562,8 @@ private struct RideVehicleArt: View {
         case .sedan: return "RydrGoVehicle"
         case .eco: return "RydrEcoVehicle"
         case .suv: return "RydrXLVehicle"
-        case .prestine: return "RydrPrestineVehicle"
+        case .prestine: return "RydrPrestineSedanVehicle"
+        case .prestineSUV: return "RydrPrestineSUVVehicle"
         case .executive: return "RydrExecutiveVehicle"
         case .cash: return "CashRydrFleet"
         }

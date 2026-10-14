@@ -687,7 +687,7 @@ struct BookingView: View {
         HStack(spacing: 12) {
             Image(systemName: "mappin.circle.fill")
                 .font(.title3)
-                .foregroundStyle(Color.red)
+                .foregroundStyle(rideAccent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(addr)
                     .lineLimit(1)
@@ -834,7 +834,7 @@ struct BookingView: View {
                     Spacer()
                 }
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.red)
+                .foregroundStyle(rideAccent)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             }
@@ -1679,22 +1679,23 @@ private struct ShortcutTile: View {
         if shortcut.kind == .custom {
             Image(systemName: shortcut.icon)
                 .font(.title2.weight(.bold))
-                .foregroundStyle(shortcut.tint)
+                .foregroundStyle(rideAccent == PrestineTheme.gold ? PrestineTheme.ink : shortcut.tint)
                 .frame(width: 46, height: 46)
                 .overlay(
                     Circle()
                         .stroke(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
-                        .foregroundStyle(Color.purple.opacity(0.35))
+                        .foregroundStyle((rideAccent == PrestineTheme.gold ? PrestineTheme.gold : Color.purple).opacity(0.35))
                 )
         } else {
             Image(systemName: shortcut.icon)
                 .font(.title2.weight(.bold))
-                .foregroundStyle(shortcut.tint)
+                .foregroundStyle(rideAccent == PrestineTheme.gold ? PrestineTheme.ink : shortcut.tint)
                 .frame(width: 46, height: 46)
         }
     }
 
     private var tileBackground: LinearGradient {
+        if rideAccent == PrestineTheme.gold { return LinearGradient(colors: [PrestineTheme.gold.opacity(0.12), PrestineTheme.cream], startPoint: .topLeading, endPoint: .bottomTrailing) }
         switch shortcut.kind {
         case .work:
             return LinearGradient(colors: [Color.blue.opacity(0.18), Color.blue.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -2243,7 +2244,7 @@ private struct RoutePreviewSheet: View {
         case let value where value.contains("executive"):
             return "RydrExecutiveVehicle"
         case let value where value.contains("prestine"):
-            return "RydrPrestineVehicle"
+            return value.contains("suv") ? "RydrPrestineSUVVehicle" : "RydrPrestineSedanVehicle"
         case let value where value.contains("cash"):
             return "CashRydrFleet"
         default:
