@@ -150,3 +150,14 @@ test("admin clients can manage rides but canonical profile fields remain service
   await assertSucceeds(setDoc(doc(db, "rides/admin-created"), { riderId: "rider-1", status: "pending" }));
   await assertFails(updateDoc(doc(db, "drivers/driver-1"), { vehicle: { make: "Toyota", model: "Camry", year: 2026 } }));
 });
+
+
+test("mobile clients cannot forge mode-specific Stripe account or verification state", async () => {
+  for (const [collectionName, uid] of [["riders", "rider-1"], ["drivers", "driver-1"]]) {
+    const db = environment.authenticatedContext(uid).firestore();
+    await assertFails(updateDoc(doc(db, collectionName, uid), { stripeMode: "live" }));
+    await assertFails(updateDoc(doc(db, collectionName, uid), {
+      stripeProfiles: { live: { stripeAccountId: "acct_forged", identityVerified: true } }
+    }));
+  }
+});

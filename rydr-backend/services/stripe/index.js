@@ -11,6 +11,7 @@ const Stripe = require("stripe");
 const { randomInt, timingSafeEqual } = require("crypto");
 const { DriverPayoutService, PayoutError } = require("./driverPayouts");
 const { walletSnapshot, accountSessionComponents, instantEligibility, allExternalAccounts, payoutSummary } = require("./driverWallet");
+const { runtimeConfig, modeProfile, canChargeRide, verifyWebhook, StripeModeState } = require("./stripeMode");
 const { rideWithFinancialOutcome } = require("./financialOutcome");
 const { reserveCashHubFee, finalizeCashHubFee, releaseCashHubFee, applyCashHubWithholding } = require("./cashHubBilling");
 
@@ -33,12 +34,11 @@ if (!process.env.STRIPE_SECRET_KEY) {
 }
 
 const app = express();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
-const driverPayoutService = new DriverPayoutService({ stripe, getDb: () => { initializeFirebase(); return admin.firestore(); } });
-const identityFlows = {
-  driver: process.env.STRIPE_DRIVER_VERIFICATION_FLOW_ID,
-  verified_rider: process.env.STRIPE_RIDER_VERIFICATION_FLOW_ID,
-};
+const stripeConfig = runtimeConfig(process.env);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: stripeConfig.apiVersion });
+const stripeModeState = new StripeModeState({ mode: stripeConfig.mode, fieldValue: FieldValue, getDb: () => { initializeFirebase(); return admin.firestore(); } });
+const driverPayoutService = new DriverPayoutService({ stripe, mode: stripeConfig.mode, getDb: () => { initializeFirebase(); return admin.firestore(); } });
+const identityFlows = stripeConfig.identityFlows;
 
 function secureStringEquals(supplied, expected) {
   if (!supplied || !expected) return false;
@@ -162,6 +162,7 @@ async function requireFirebaseUid(req, res) {
       res.status(401).json({ error: "unauthorized" });
       return null;
     }
+    try { await stripeModeState.ensure(); } catch { res.status(503).json({error:"stripe_mode_preparation_failed"}); return null; }
     return uid;
   } catch (err) {
     console.warn("⚠️ Firebase auth failed", err.message);
@@ -223,25 +224,13 @@ async function requireAdminUid(req, res) {
 async function persistStripeCustomerId(uid, customerId) {
   if (!uid || !customerId) return;
   initializeFirebase();
-  await admin.firestore().collection("riders").doc(uid).set(
-    {
-      stripeCustomerId: customerId,
-      stripeCustomerUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
-    },
-    { merge: true }
-  );
+  await updateRider(uid, { stripeCustomerId: customerId, stripeCustomerUpdatedAt: FieldValue.serverTimestamp() });
 }
 
 async function updateRider(uid, payload) {
   if (!uid) return;
   initializeFirebase();
-  await admin.firestore().collection("riders").doc(uid).set(
-    {
-      ...payload,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
+  await stripeModeState.updateProfile("riders", uid, { ...payload, updatedAt: FieldValue.serverTimestamp() });
 }
 
 async function authUserProfile(uid) {
@@ -265,13 +254,7 @@ function appBaseURL() {
 async function updateDriver(uid, payload) {
   if (!uid) return;
   initializeFirebase();
-  await admin.firestore().collection("drivers").doc(uid).set(
-    {
-      ...payload,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
+  await stripeModeState.updateProfile("drivers", uid, { ...payload, updatedAt: FieldValue.serverTimestamp() });
 }
 
 function missionControlIdentityStatus(status) {
@@ -289,6 +272,7 @@ function missionControlConnectStatus(account) {
 function driverConnectStatusUpdate(account) {
   const update = {
     stripeAccountId: account.id,
+    payoutsStepCompleted: !!account.payouts_enabled,
     stripeConnectStatus: missionControlConnectStatus(account),
     stripeChargesEnabled: !!account.charges_enabled,
     stripePayoutsEnabled: !!account.payouts_enabled,
@@ -305,7 +289,7 @@ async function driverData(uid) {
   if (!uid) return null;
   initializeFirebase();
   const snapshot = await admin.firestore().collection("drivers").doc(uid).get();
-  return snapshot.exists ? snapshot.data() : null;
+  return snapshot.exists ? modeProfile(snapshot.data(), stripeConfig.mode) : null;
 }
 
 async function identityProfile(uid, role) {
@@ -325,7 +309,7 @@ async function identityProfile(uid, role) {
 async function updateIdentityStatus(session, status) {
   const uid = session.metadata?.uid;
   const role = session.metadata?.role;
-  if (!uid || !role) return;
+  if (!uid || !role || session.livemode !== (stripeConfig.mode === "live")) return;
 
   const timestamp = admin.firestore.FieldValue.serverTimestamp();
   const base = {
@@ -384,6 +368,7 @@ async function updatePublicDriverConnectStatus(uid, { stripeAccountId, stripeCha
   initializeFirebase();
   await admin.firestore().collection("publicDriverProfiles").doc(uid).set(
     {
+      stripeMode: stripeConfig.mode,
       stripeAccountId,
       stripeChargesEnabled: !!stripeChargesEnabled,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -405,7 +390,7 @@ async function ownedCustomerId(uid) {
   if (!uid) return null;
   initializeFirebase();
   const snap = await admin.firestore().collection("riders").doc(uid).get();
-  return snap.exists ? (snap.data().stripeCustomerId || null) : null;
+  return snap.exists ? (modeProfile(snap.data(), stripeConfig.mode).stripeCustomerId || null) : null;
 }
 
 function suppliedValue(req, key) {
@@ -475,6 +460,8 @@ async function ownedRide(uid, rideId) {
   if (!snap.exists) return null;
   const data = snap.data();
   if (data.riderId !== uid) return null;
+  const runtime=await stripeModeState.ensure();
+  if(!canChargeRide(data,stripeConfig.mode,runtime.activatedAt?.toMillis?.()||0))return null;
   return { ref: snap.ref, data };
 }
 
@@ -978,6 +965,7 @@ async function recordPaymentStatus(rideRef, status, fields = {}) {
   initializeFirebase();
   await rideRef.set(
     {
+      stripeMode: stripeConfig.mode,
       paymentStatus: status,
       lastPaymentAttempt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -992,7 +980,7 @@ async function rideByPaymentIntentMetadata(rideId) {
   initializeFirebase();
   const ref = admin.firestore().collection("rides").doc(rideId);
   const snap = await ref.get();
-  return snap.exists ? ref : null;
+  return snap.exists && (snap.data().stripeMode || "test") === stripeConfig.mode ? ref : null;
 }
 
 // --- CORS (optional; iOS native calls don't need it, web would) ---
@@ -1013,8 +1001,9 @@ app.get("/health", (_req, res) => res.json({ status: "healthy", service: "rydr-s
 // The publishable key is intentionally safe to send to apps. Keep the
 // STRIPE_SECRET_KEY backend-only; use STRIPE_PUBLISHABLE_KEY here so mobile
 // builds can switch test/live mode by backend environment instead of source.
-app.get("/config", (_req, res) => {
-  const publishableKey = String(process.env.STRIPE_PUBLISHABLE_KEY || "").trim();
+app.get("/config", async (_req, res) => {
+  try { await stripeModeState.ensure(); } catch { return res.status(503).json({ error: "stripe_mode_preparation_failed" }); }
+  const publishableKey = stripeConfig.publishableKey;
   if (!/^pk_(test|live)_/.test(publishableKey)) {
     return res.status(500).json({ error: "stripe_publishable_key_not_configured" });
   }
@@ -1026,14 +1015,26 @@ app.get("/config", (_req, res) => {
 });
 
 // --- Webhook (RAW body; mount BEFORE json parser) ---
-app.post("/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+async function stripeWebhookHandler(req,res,scope) {
   const sig = req.headers["stripe-signature"];
   try {
-    const event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
+    const verified=verifyWebhook(stripe,req.body,sig,scope==="connect"?stripeConfig.connectSecrets:stripeConfig.platformSecrets,scope,stripeConfig.mode);
+    if(!verified.active)return res.status(200).json({ignored:true,reason:"inactive_stripe_mode"});
+    await stripeModeState.ensure();
+    const event=verified.event;
+    // Snapshot webhooks can use the dashboard's newer schema. Retrieve current
+    // objects with our pinned API version before applying financial state.
+    if(["payment_intent.succeeded","payment_intent.payment_failed"].includes(event.type)){
+      const current=await stripe.paymentIntents.retrieve(event.data.object.id);
+      if(current.status==="succeeded")event.type="payment_intent.succeeded";
+      else if(current.status==="requires_payment_method")event.type="payment_intent.payment_failed";
+      else return res.sendStatus(200);
+      event.data.object=current;
+    }
+    if(event.type.startsWith("identity.verification_session.")){
+      const current=await stripe.identity.verificationSessions.retrieve(event.data.object.id);
+      event.data.object=current;event.type=`identity.verification_session.${current.status}`;
+    }
 
     switch (event.type) {
       case "payout.created":
@@ -1123,8 +1124,18 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
         }
         break;
       }
+      case "account.external_account.created":
+      case "account.external_account.updated":
+      case "account.external_account.deleted": {
+        const account=await stripe.accounts.retrieve(event.account);
+        const driver=await driverData(account.metadata?.uid);
+        if(driver?.stripeAccountId===account.id)await updateDriver(account.metadata.uid,driverConnectStatusUpdate(account));
+        break;
+      }
       case "account.updated": {
-        const acct = event.data.object;
+        const acct = await stripe.accounts.retrieve(event.data.object.id);
+        const owner=await driverData(acct.metadata?.uid);
+        if(owner?.stripeAccountId!==acct.id)break;
         console.log("ℹ️ account.updated", acct.id, {
           charges_enabled: acct.charges_enabled,
           payouts_enabled: acct.payouts_enabled,
@@ -1156,7 +1167,9 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
     console.error("❌ Webhook verify failed:", err.message);
     res.status(400).send(`Webhook Error: ${err.message}`);
   }
-});
+ }
+app.post("/webhook", express.raw({ type: "application/json" }), (req,res)=>stripeWebhookHandler(req,res,"platform"));
+app.post("/webhook/connect", express.raw({ type: "application/json" }), (req,res)=>stripeWebhookHandler(req,res,"connect"));
 
 // --- JSON parser for all OTHER routes ---
 app.use(express.json());
@@ -1228,7 +1241,7 @@ app.get("/identity/status", async (req, res) => {
     initializeFirebase();
     const collection = role === "driver" ? "drivers" : "riders";
     const snapshot = await admin.firestore().collection(collection).doc(uid).get();
-    const data = snapshot.exists ? snapshot.data() : {};
+    const data = modeProfile(snapshot.exists ? snapshot.data() : {}, stripeConfig.mode);
     res.json({
       identityVerified: !!data.identityVerified,
       verifiedRider: !!data.verifiedRider,
@@ -1755,9 +1768,17 @@ function validInternalServiceToken(req) {
   return secureStringEquals(supplied, expected);
 }
 
+// Read-only mode endpoint also completes any pending mode projection migration.
+app.get("/internal/stripe-mode",async(req,res)=>{
+  if(!validInternalServiceToken(req))return res.status(401).json({error:"invalid_internal_service_token"});
+  try {const state=await stripeModeState.ensure();res.set("Cache-Control","no-store").json({mode:stripeConfig.mode,status:state.status,apiVersion:stripeConfig.apiVersion,platformWebhookConfigured:!!stripeConfig.platformWebhookSecret,connectWebhookConfigured:!!stripeConfig.connectWebhookSecret,driverIdentityConfigured:!!identityFlows.driver,riderIdentityConfigured:!!identityFlows.verified_rider,livePreparation:stripeConfig.livePreparation});}
+  catch {res.status(503).json({error:"stripe_mode_preparation_failed"});}
+});
+
 // Migration changes payout timing only; it never calls stripe.payouts.create.
 app.post("/internal/payout-policy/prepare", async (req, res) => {
   if (!validInternalServiceToken(req)) return res.status(401).json({ error: "invalid_internal_service_token" });
+  try { await stripeModeState.ensure(); } catch { return res.status(503).json({error:"stripe_mode_preparation_failed"}); }
   try {
     initializeFirebase();
     let query=admin.firestore().collection("drivers").orderBy("__name__").limit(100);
@@ -1772,6 +1793,7 @@ app.post("/internal/payout-policy/prepare", async (req, res) => {
 // Dispatch never accepts payout amounts or bank destinations from the caller.
 app.post("/internal/payout-jobs/:jobId/process", async (req, res) => {
   if (!validInternalServiceToken(req)) return res.status(401).json({ error: "invalid_internal_service_token" });
+  try { await stripeModeState.ensure(); } catch { return res.status(503).json({error:"stripe_mode_preparation_failed"}); }
   if (!/^[a-f0-9]{64}$/.test(req.params.jobId)) return res.status(400).json({ error: "invalid_payout_job" });
   try {
     return res.json({ status: await driverPayoutService.processWeekly(req.params.jobId) });
@@ -1782,6 +1804,7 @@ app.post("/internal/payout-jobs/:jobId/process", async (req, res) => {
 
 app.post("/internal/payout-jobs/:jobId/reconcile", async (req, res) => {
   if (!validInternalServiceToken(req)) return res.status(401).json({ error: "invalid_internal_service_token" });
+  try { await stripeModeState.ensure(); } catch { return res.status(503).json({error:"stripe_mode_preparation_failed"}); }
   if (!/^(?:[a-f0-9]{64}|legacy_po_[A-Za-z0-9]+)$/.test(req.params.jobId)) return res.status(400).json({ error: "invalid_payout_job" });
   try {
     return res.json({ status: await driverPayoutService.reconcile(req.params.jobId) });
@@ -1795,6 +1818,7 @@ app.post("/internal/payout-jobs/:jobId/reconcile", async (req, res) => {
 app.post("/internal/rides/:rideId/charge", async (req, res) => {
   try {
     if (!validInternalServiceToken(req)) return res.status(401).json({ error: "invalid_internal_service_token" });
+  try { await stripeModeState.ensure(); } catch { return res.status(503).json({error:"stripe_mode_preparation_failed"}); }
     initializeFirebase();
     const rideId = String(req.params.rideId || "");
     const rideSnap = await admin.firestore().collection("rides").doc(rideId).get();
@@ -2208,7 +2232,7 @@ app.post("/connect/accounts", async (req, res) => {
           dob, // { day, month, year }
           address, // { line1, city, state, postal_code, line2? }
         },
-        metadata: { uid: driverUid },
+        metadata: { uid: driverUid, stripeMode: stripeConfig.mode },
       },
       { idempotencyKey: `connect_account_create_${driverUid}` }
     );
