@@ -1464,6 +1464,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Money movement, locks, Stripe links, and scheduled-run ledgers are server-only.
+    match /driverPayouts/{doc} { allow read, write: if false; }
+    match /driverPayoutLocks/{doc} { allow read, write: if false; }
+    match /driverPayoutStripeLinks/{doc} { allow read, write: if false; }
+    match /weeklyPayoutRuns/{doc} { allow read, write: if false; }
+
     match /vinDecodeCache/{vin} {
       allow read, write: if false;
     }

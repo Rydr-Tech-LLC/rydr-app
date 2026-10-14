@@ -9,6 +9,7 @@ const { FieldValue, getFirestore } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
 const Stripe = require("stripe");
 const { randomInt, timingSafeEqual } = require("crypto");
+const { DriverPayoutService, PayoutError } = require("./driverPayouts");
 const { rideWithFinancialOutcome } = require("./financialOutcome");
 const { reserveCashHubFee, finalizeCashHubFee, releaseCashHubFee, applyCashHubWithholding } = require("./cashHubBilling");
 
@@ -32,6 +33,7 @@ if (!process.env.STRIPE_SECRET_KEY) {
 
 const app = express();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
+const driverPayoutService = new DriverPayoutService({ stripe, getDb: () => { initializeFirebase(); return admin.firestore(); } });
 const identityFlows = {
   driver: process.env.STRIPE_DRIVER_VERIFICATION_FLOW_ID,
   verified_rider: process.env.STRIPE_RIDER_VERIFICATION_FLOW_ID,
@@ -1033,6 +1035,13 @@ app.post("/webhook", express.raw({ type: "application/json" }), async (req, res)
     );
 
     switch (event.type) {
+      case "payout.created":
+      case "payout.updated":
+      case "payout.paid":
+      case "payout.failed":
+      case "payout.canceled":
+        await driverPayoutService.webhook(event);
+        break;
       case "setup_intent.succeeded":
         console.log("💳 setup_intent.succeeded:", event.data.object.id);
         break;
@@ -1745,6 +1754,41 @@ function validInternalServiceToken(req) {
   return secureStringEquals(supplied, expected);
 }
 
+// Migration changes payout timing only; it never calls stripe.payouts.create.
+app.post("/internal/payout-policy/prepare", async (req, res) => {
+  if (!validInternalServiceToken(req)) return res.status(401).json({ error: "invalid_internal_service_token" });
+  try {
+    initializeFirebase();
+    let query=admin.firestore().collection("drivers").orderBy("__name__").limit(100);
+    if(typeof req.body?.cursor==="string")query=query.startAfter(req.body.cursor);
+    const page=await query.get();
+    const counts={configured:0,needs_review:0,skipped:0};
+    for(const driver of page.docs) { const result=await driverPayoutService.preparePolicy(driver.id);counts[result.status]++; }
+    return res.json({...counts,nextCursor:page.size===100?page.docs[page.size-1].id:null});
+  } catch { return res.status(500).json({error:"payout_policy_configuration_failed"}); }
+});
+
+// Dispatch never accepts payout amounts or bank destinations from the caller.
+app.post("/internal/payout-jobs/:jobId/process", async (req, res) => {
+  if (!validInternalServiceToken(req)) return res.status(401).json({ error: "invalid_internal_service_token" });
+  if (!/^[a-f0-9]{64}$/.test(req.params.jobId)) return res.status(400).json({ error: "invalid_payout_job" });
+  try {
+    return res.json({ status: await driverPayoutService.processWeekly(req.params.jobId) });
+  } catch (error) {
+    return res.status(error instanceof PayoutError ? error.status : 500).json({ error: error instanceof PayoutError ? error.code : "payout_dispatch_failed" });
+  }
+});
+
+app.post("/internal/payout-jobs/:jobId/reconcile", async (req, res) => {
+  if (!validInternalServiceToken(req)) return res.status(401).json({ error: "invalid_internal_service_token" });
+  if (!/^(?:[a-f0-9]{64}|legacy_po_[A-Za-z0-9]+)$/.test(req.params.jobId)) return res.status(400).json({ error: "invalid_payout_job" });
+  try {
+    return res.json({ status: await driverPayoutService.reconcile(req.params.jobId) });
+  } catch (error) {
+    return res.status(error instanceof PayoutError ? error.status : 500).json({ error: error instanceof PayoutError ? error.code : "payout_reconciliation_failed" });
+  }
+});
+
 // Called only by the payment-job Cloud Function. The rider identity and all
 // charge inputs are derived from Firestore; no client credentials are used.
 app.post("/internal/rides/:rideId/charge", async (req, res) => {
@@ -2148,6 +2192,7 @@ app.post("/connect/accounts", async (req, res) => {
       {
         type: "express",
         country: "US",
+        settings: { payouts: { schedule: { interval: "manual" } } },
         email,
         business_type: "individual",
         capabilities: {
@@ -2374,27 +2419,11 @@ app.post("/connect/instant-payout", async (req, res) => {
     const { amount, currency = "usd" } = req.body || {};
     const payoutRequestId = requireRequestId(req, res, "connect_instant_payout");
     if (!payoutRequestId) return;
-    if (!Number.isInteger(amount) || amount <= 0) {
+    if (!Number.isSafeInteger(amount) || amount <= 0 || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) {
       return res.status(400).json({ error: "invalid_amount" });
     }
 
-    const acct = await stripe.accounts.retrieve(accountId);
-    if (!acct.payouts_enabled) {
-      return res.status(400).json({ error: "payouts_not_enabled" });
-    }
-
-    const payout = await stripe.payouts.create(
-      {
-        amount,
-        currency,
-        method: "instant",
-        metadata: {
-          uid,
-          source: "driver_wallet_instant_pay",
-        },
-      },
-      { stripeAccount: accountId, idempotencyKey: `instant_payout_${accountId}_${payoutRequestId}` }
-    );
+    const payout = await driverPayoutService.instant({ driverId: uid, accountId, amount, currency, requestId: payoutRequestId });
 
     res.json({
       payoutId: payout.id,
@@ -2404,7 +2433,7 @@ app.post("/connect/instant-payout", async (req, res) => {
     });
   } catch (err) {
     console.error("❌ connect/instant-payout error", err);
-    res.status(500).json({ error: "instant_payout_failed", detail: err.message });
+    res.status(err instanceof PayoutError ? err.status : 500).json({ error: err instanceof PayoutError ? err.code : "instant_payout_failed", detail: err.message });
   }
 });
 

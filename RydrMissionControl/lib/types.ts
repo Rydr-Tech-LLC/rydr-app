@@ -228,6 +228,7 @@ export interface AuditLogEntry {
     | "report"
     | "vehicleLibrary"
     | "vehicleImageJobs"
+    | "driverPayout"
     | "accountDeletion"
     | "payment"
     | "promotion"
