@@ -22,6 +22,7 @@ struct VehicleInfoView: View {
     @Binding var registrationDoc: PhotosPickerItem?
     @Binding var insuranceCard: PhotosPickerItem?
 
+    var addToGarage = false
     var currentStep: Int = 5
     var totalSteps: Int = 8
 
@@ -53,8 +54,7 @@ struct VehicleInfoView: View {
         decoded != nil
         && selectedColor != nil
         && !plate.trimmingCharacters(in: .whitespaces).isEmpty
-        && registrationDoc != nil
-        && insuranceCard != nil
+        && (addToGarage || (registrationDoc != nil && insuranceCard != nil))
         && !isDecoding && !isSubmitting
         && (isManualVehicle || decodedMatchesCurrentVin)
     }
@@ -93,10 +93,10 @@ struct VehicleInfoView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 22) {
-                DriverOnboardingStepIndicator(currentStep: currentStep, totalSteps: totalSteps, stepTitle: "Vehicle & Documents")
+                if !addToGarage { DriverOnboardingStepIndicator(currentStep: currentStep, totalSteps: totalSteps, stepTitle: "Vehicle & Documents") }
 
                 VStack(spacing: 8) {
-                    Text("Vehicle & Documents")
+                    Text(addToGarage ? "Add a Vehicle" : "Vehicle & Documents")
                         .font(.system(size: 26, weight: .heavy, design: .rounded))
                         .foregroundStyle(Styles.rydrGradient)
                     Text("Enter your VIN and we'll pull the details automatically — no vehicle photo needed.")
@@ -129,6 +129,7 @@ struct VehicleInfoView: View {
                     .cornerRadius(14)
                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.gray.opacity(0.3), lineWidth: 1))
 
+                    if !addToGarage {
                     HStack(spacing: 14) {
                         PhotosPicker(selection: $registrationDoc, matching: .images) {
                             UploadBox(label: registrationDoc == nil ? "Upload Registration" : "Registration ✓", systemImage: registrationDoc == nil ? "doc.fill" : "checkmark.circle.fill")
@@ -137,14 +138,18 @@ struct VehicleInfoView: View {
                             UploadBox(label: insuranceCard == nil ? "Upload Insurance" : "Insurance ✓", systemImage: insuranceCard == nil ? "doc.fill" : "checkmark.circle.fill")
                         }
                     }
+                    } else {
+                        Text("This saves a separate vehicle card. Your current vehicle stays selected. Documents and approval are required before this vehicle can be used for rides.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
 
-                SignupContinueButton(title: isSubmitting ? "Saving…" : "Continue", isEnabled: isValid, action: handleContinue)
+                SignupContinueButton(title: isSubmitting ? "Saving…" : (addToGarage ? "Save Vehicle" : "Continue"), isEnabled: isValid, action: handleContinue)
 
                 SignupInfoCard(
                     icon: "lock.shield.fill",
                     title: "Your information is secure",
-                    message: "Vehicle documents are encrypted and used only to confirm your eligibility to drive."
+                    message: addToGarage ? "Saving a vehicle does not change your current vehicle or transfer its document approval." : "Vehicle documents are encrypted and used only to confirm your eligibility to drive."
                 )
 
                 Spacer(minLength: 8)
@@ -526,9 +531,9 @@ struct VehicleInfoView: View {
                         trim: decoded.trim,
                         fuelType: decoded.fuelType
                     )
-                    result = try await VehicleLibraryClient.submitVehicleManual(manualInfo, color: selectedColor, plate: plate)
+                    result = try await VehicleLibraryClient.submitVehicleManual(manualInfo, color: selectedColor, plate: plate, addToGarage: addToGarage)
                 } else {
-                    result = try await VehicleLibraryClient.submitVehicleVin(vin: normalizedVin, color: selectedColor, plate: plate)
+                    result = try await VehicleLibraryClient.submitVehicleVin(vin: normalizedVin, color: selectedColor, plate: plate, addToGarage: addToGarage)
                 }
                 await MainActor.run {
                     imageInfo = result

@@ -1,3 +1,4 @@
+import { addSavedDriverVehicle, deleteSavedDriverVehicle } from "./services/driverGarageService";
 export { maintainDriverDocumentCompliance, onDriverCompliancePolicyChanged, onDriverComplianceChanged } from "./triggers/driverCompliance";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { setGlobalOptions } from "firebase-functions/v2";
@@ -150,7 +151,7 @@ export const submitVehicleVin = onCall(async (request) => {
   try {
     decoded = await vehicleDecoderService.decode(vin);
   } catch (err) {
-    await driverRef.set(
+    if (request.data?.addToGarage !== true) await driverRef.set(
       { vinDecodeStatus: "failed", vehicleImageStatus: "missing", updatedAt: FieldValue.serverTimestamp() },
       { merge: true }
     );
@@ -162,7 +163,7 @@ export const submitVehicleVin = onCall(async (request) => {
   }
 
   if (!decoded.make || !decoded.model || !decoded.modelYear) {
-    await driverRef.set(
+    if (request.data?.addToGarage !== true) await driverRef.set(
       { vinDecodeStatus: "failed", vehicleImageStatus: "missing", updatedAt: FieldValue.serverTimestamp() },
       { merge: true }
     );
@@ -209,6 +210,12 @@ export const submitVehicleVin = onCall(async (request) => {
     rating: driver.rating,
     executiveConfig: executiveConfigSnap.data() ?? {}
   });
+
+  if (request.data?.addToGarage === true) {
+    const vehicle = { ...vehicleFields, plate, class: eligibility.vehicleClass };
+    const vehicleId = await addSavedDriverVehicle(auth.uid, vehicle, { eligibleRideTypes: eligibility.rideTypes, vinDecodeStatus: "decoded", vehicleImageStatus: lookup.status });
+    return { vehicle, vehicleId, eligibleRideTypes: eligibility.rideTypes, vinDecodeStatus: "decoded", vehicleImageStatus: lookup.status };
+  }
 
   await driverRef.set(
     {
@@ -312,6 +319,12 @@ export const submitVehicleManual = onCall(async (request) => {
     executiveConfig: executiveConfigSnap.data() ?? {}
   });
 
+  if (request.data?.addToGarage === true) {
+    const vehicle = { ...vehicleFields, plate, class: eligibility.vehicleClass };
+    const vehicleId = await addSavedDriverVehicle(auth.uid, vehicle, { eligibleRideTypes: eligibility.rideTypes, vinDecodeStatus: "manual", vehicleImageStatus: lookup.status });
+    return { vehicle, vehicleId, eligibleRideTypes: eligibility.rideTypes, vinDecodeStatus: "manual", vehicleImageStatus: lookup.status };
+  }
+
   await driverRef.set(
     {
       vehicle: { ...vehicleFields, plate, class: eligibility.vehicleClass },
@@ -333,4 +346,12 @@ export const submitVehicleManual = onCall(async (request) => {
   );
 
   return { vehicle: { ...vehicleFields, plate, class: eligibility.vehicleClass }, eligibleRideTypes: eligibility.rideTypes, vinDecodeStatus: "manual", vehicleImageStatus: lookup.status };
+});
+
+export const deleteDriverVehicle = onCall(async request => {
+  const auth = requireAuth(request.auth);
+  const vehicleId = request.data?.vehicleId;
+  if (typeof vehicleId !== "string") throw new HttpsError("invalid-argument", "A vehicle identifier is required.");
+  await deleteSavedDriverVehicle(auth.uid, vehicleId, request.data?.vin, request.data?.plate);
+  return { deleted: true };
 });

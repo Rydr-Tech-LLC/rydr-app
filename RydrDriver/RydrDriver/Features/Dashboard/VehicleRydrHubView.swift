@@ -3,9 +3,31 @@ import PhotosUI
 import FirebaseAuth
 import FirebaseFirestore
 
+struct SavedDriverVehicle: Identifiable {
+    let id: String
+    let summary: String
+    let color: String
+    let plate: String
+    let vin: String?
+    let imageURL: String?
+    init(id: String, data: [String: Any]) {
+        self.id = id
+        summary = [String(describing: data["year"] ?? ""), data["make"] as? String ?? "", data["model"] as? String ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
+        color = data["color"] as? String ?? "Not set"
+        plate = data["plate"] as? String ?? "Not set"
+        vin = data["vin"] as? String
+        imageURL = data["imageUrl"] as? String ?? data["imageURL"] as? String
+    }
+}
+
 struct VehicleRydrHubView: View {
     @ObservedObject var vm: DriverDashboardVM
+    @State private var fixtureSeeded = false
     @State private var showAddVehicle = false
+    @State private var showDeleteConfirmation = false
+    @State private var vehicleToDelete: SavedDriverVehicle?
+    @State private var deleteError: String?
+    @State private var deletingVehicleID: String?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -33,49 +55,68 @@ struct VehicleRydrHubView: View {
         }
         .sheet(isPresented: $showAddVehicle) {
             AddDriverVehicleSheet {
+                #if DEBUG && targetEnvironment(simulator)
+                if ProcessInfo.processInfo.arguments.contains("-RydrGarageUITest") {
+                    vm.savedVehicles.append(SavedDriverVehicle(id: "fixture-saved", data: ["year": 2024, "make": "Land Rover", "model": "Range Rover", "color": "Black", "plate": "SECOND"]))
+                }
+                #endif
                 showAddVehicle = false
             }
+        }
+        .onAppear {
+            #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("-RydrGarageUITest") && !fixtureSeeded {
+                fixtureSeeded = true
+                vm.vehicleSummaryText = "2020 Honda Accord"
+                vm.vehicleColor = "White"
+                vm.vehiclePlateText = "CURRENT"
+                vm.currentVehicleVin = "CURRENTVIN0000001"
+            }
+            #endif
+        }
+        .alert(deleteError == nil ? "Delete vehicle?" : "Could not delete vehicle", isPresented: Binding(
+            get: { showDeleteConfirmation || deleteError != nil },
+            set: { if !$0 { showDeleteConfirmation = false; deleteError = nil } }
+        )) {
+            if deleteError != nil {
+                Button("OK", role: .cancel) { deleteError = nil }
+            } else if let vehicle = vehicleToDelete {
+                Button("Delete Vehicle", role: .destructive) { delete(vehicle) }
+                Button("Cancel", role: .cancel) { vehicleToDelete = nil }
+            }
+        } message: {
+            Text(deleteError ?? (vehicleToDelete?.id == "current" ? "Removing your current vehicle stops driving access until another vehicle is approved. Saved vehicles remain on your account." : "Remove this saved vehicle from your account?"))
+        }
+    }
+
+    private func delete(_ vehicle: SavedDriverVehicle) {
+        deletingVehicleID = vehicle.id
+        vehicleToDelete = nil
+        Task { @MainActor in
+            do {
+                #if DEBUG && targetEnvironment(simulator)
+                if ProcessInfo.processInfo.arguments.contains("-RydrGarageUITest") {
+                    if vehicle.id == "current" { vm.vehicleSummaryText = nil; vm.canGoOnline = false }
+                    else { vm.savedVehicles.removeAll { $0.id == vehicle.id } }
+                } else { try await VehicleLibraryClient.deleteVehicle(vehicle) }
+                #else
+                try await VehicleLibraryClient.deleteVehicle(vehicle)
+                #endif
+            }
+            catch { deleteError = error.localizedDescription }
+            deletingVehicleID = nil
         }
     }
 
     private var vehicleSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(icon: "car.fill", title: "My Vehicle", trailingIcon: "trash")
-
-            HStack(alignment: .center, spacing: 14) {
-                vehicleImage
-                    .frame(width: 188, height: 118)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(vm.vehicleSummaryText ?? "Add your vehicle")
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-
-                    if let detail = vm.vehicleDetailText {
-                        Text(detail)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    vehicleFact(icon: "paintpalette", title: "Color", value: vm.vehicleColor ?? "Not set")
-                    vehicleFact(icon: "rectangle.and.text.magnifyingglass", title: "License Plate", value: vm.vehiclePlateText ?? "Not set")
-                    vehicleFact(icon: "checkmark.shield", title: "Insurance", value: statusText(vm.insuranceStatus), tint: statusTint(vm.insuranceStatus))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            sectionHeader(icon: "car.fill", title: "My Vehicles")
+            if vm.vehicleSummaryText != nil {
+                vehicleCard(SavedDriverVehicle(id: "current", data: ["make": vm.vehicleSummaryText ?? "", "color": vm.vehicleColor ?? "", "plate": vm.vehiclePlateText ?? "", "vin": vm.currentVehicleVin ?? "", "imageUrl": vm.vehicleImageURL ?? ""]))
             }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemGroupedBackground)))
-            .overlay(alignment: .topLeading) {
-                if vm.vehicleSummaryText != nil {
-                    Label("Current", systemImage: "checkmark.circle")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.green)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(Color.green.opacity(0.12)))
-                        .padding(10)
-                }
+            ForEach(vm.savedVehicles) { vehicle in vehicleCard(vehicle) }
+            if vm.vehicleSummaryText == nil && vm.savedVehicles.isEmpty {
+                Text("Add a vehicle to your account.").font(.subheadline).foregroundStyle(.secondary)
             }
 
             Button {
@@ -100,6 +141,39 @@ struct VehicleRydrHubView: View {
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color(.systemBackground)))
     }
 
+    private func vehicleCard(_ vehicle: SavedDriverVehicle) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label(vehicle.id == "current" ? "Current" : "Saved — not current", systemImage: vehicle.id == "current" ? "checkmark.circle" : "car.fill")
+                    .font(.caption.weight(.bold)).foregroundStyle(vehicle.id == "current" ? Color.green : Color.secondary)
+                Spacer()
+                Button(role: .destructive) { vehicleToDelete = vehicle; showDeleteConfirmation = true } label: {
+                    Image(systemName: "trash").frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Delete \(vehicle.summary)")
+                .accessibilityIdentifier("deleteVehicle-\(vehicle.id)")
+                .disabled(deletingVehicleID != nil)
+            }
+            HStack(spacing: 14) {
+                AsyncImage(url: vehicle.imageURL.flatMap(URL.init(string:))) { image in
+                    image.resizable().scaledToFit()
+                } placeholder: { vehicleFallbackImage }
+                .frame(width: 140, height: 95)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(vehicle.summary).font(.headline).accessibilityIdentifier("vehicleCard-\(vehicle.id)")
+                    vehicleFact(icon: "paintpalette", title: "Color", value: vehicle.color)
+                    vehicleFact(icon: "number", title: "License Plate", value: vehicle.plate)
+                }
+            }
+            if vehicle.id != "current" {
+                Text("Documents and approval required before driving with this vehicle.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemGroupedBackground)))
+    }
+
     private var rideQualificationsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
@@ -121,26 +195,6 @@ struct VehicleRydrHubView: View {
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color(.systemBackground)))
     }
 
-    @ViewBuilder
-    private var vehicleImage: some View {
-        if let rawURL = vm.vehicleImageURL,
-           let url = URL(string: rawURL),
-           !rawURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFit()
-                default:
-                    vehicleFallbackImage
-                }
-            }
-        } else {
-            vehicleFallbackImage
-        }
-    }
-
     private var vehicleFallbackImage: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -151,7 +205,7 @@ struct VehicleRydrHubView: View {
         }
     }
 
-    private func sectionHeader(icon: String, title: String, trailingIcon: String? = nil) -> some View {
+    private func sectionHeader(icon: String, title: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .foregroundStyle(Styles.rydrGradient)
@@ -159,13 +213,7 @@ struct VehicleRydrHubView: View {
             Text(title)
                 .font(.headline.weight(.bold))
             Spacer()
-            if let trailingIcon {
-                Image(systemName: trailingIcon)
-                    .foregroundStyle(Styles.rydrGradient)
-                    .frame(width: 34, height: 34)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(.secondarySystemGroupedBackground)))
-                    .accessibilityHidden(true)
-            }
+
         }
     }
 
@@ -357,9 +405,20 @@ private struct AddDriverVehicleSheet: View {
                 imageInfo: $imageInfo,
                 plate: $plate,
                 registrationDoc: $registrationDoc,
-                insuranceCard: $insuranceCard
+                insuranceCard: $insuranceCard,
+                addToGarage: true
             ) {
                 saveVehicleEligibility()
+            }
+            .onAppear {
+                #if DEBUG && targetEnvironment(simulator)
+                if ProcessInfo.processInfo.arguments.contains("-RydrGarageUITest") {
+                    vin = "SAL1P9EU0RA170245"
+                    decodedVehicle = DecodedVehicleInfo(vin: vin, make: "Land Rover", model: "Range Rover", year: "2024", fuelType: .gas)
+                    selectedColor = .black
+                    plate = "SECOND"
+                }
+                #endif
             }
             .navigationTitle("Add Vehicle")
             .navigationBarTitleDisplayMode(.inline)
@@ -382,25 +441,8 @@ private struct AddDriverVehicleSheet: View {
     }
 
     private func saveVehicleEligibility() {
-        guard let uid = Auth.auth().currentUser?.uid else {
-            saveError = "Sign in before adding a vehicle."
-            return
-        }
-        guard decodedVehicle != nil else {
-            onComplete()
-            dismiss()
-            return
-        }
-
-        _ = uid
-        Task { @MainActor in
-            do {
-                try await RydrBackendService.updateVehiclePlate(plate.trimmingCharacters(in: .whitespacesAndNewlines))
-                onComplete()
-                dismiss()
-            } catch {
-                saveError = error.localizedDescription
-            }
-        }
+        // VehicleInfoView has already saved a separate garage record through the backend.
+        onComplete()
+        dismiss()
     }
 }

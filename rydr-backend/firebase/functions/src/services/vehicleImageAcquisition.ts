@@ -149,18 +149,22 @@ export async function updateWaitingDrivers(jobId: string, job: any): Promise<voi
   for (const waiter of waiters.docs) {
     const ref = db.collection("drivers").doc(waiter.id);
     await db.runTransaction(async tx => {
-      const snap = await tx.get(ref); const vehicle = snap.data()?.vehicle;
+      const snap = await tx.get(ref); const driver = snap.data();
       const library = (await tx.get(db.collection("vehicleLibrary").doc(job.vehicleId))).data();
       const currentPath = library?.colorImages?.[job.query.color];
-      // Delivery progress is durable, so a retried large fan-out resumes
-      // remaining waiters instead of revisiting every updated driver.
       tx.delete(waiter.ref);
-      if (typeof currentPath !== "string" || !matchesVehicle(vehicle, job.query) || ((vehicle.imageUrl || vehicle.imageURL) && !(vehicle.imageMatchTier > 1))) return;
+      if (!driver || typeof currentPath !== "string") return;
       const imageUrl = `https://storage.googleapis.com/${storage.bucket().name}/${encodeURI(currentPath)}`;
-      tx.update(ref, { "vehicle.imageUrl": imageUrl, "vehicle.imageURL": imageUrl,
-        "vehicle.imagePath": currentPath, "vehicle.libraryVehicleId": job.vehicleId,
-        "vehicle.libraryMatchedColor": job.query.color, "vehicle.imageMatchTier": 1,
-        vehicleImageStatus: "matched", updatedAt: FieldValue.serverTimestamp() });
+      const records: Array<[string, any]> = [["vehicle", driver.vehicle], ...Object.entries(driver.savedVehicles ?? {}).map(([id, v]): [string, any] => [`savedVehicles.${id}`, v])];
+      const updates: Record<string, any> = {};
+      for (const [prefix, vehicle] of records) {
+        if (!matchesVehicle(vehicle, job.query) || ((vehicle.imageUrl || vehicle.imageURL) && !(vehicle.imageMatchTier > 1))) continue;
+        Object.assign(updates, { [`${prefix}.imageUrl`]: imageUrl, [`${prefix}.imageURL`]: imageUrl,
+          [`${prefix}.imagePath`]: currentPath, [`${prefix}.libraryVehicleId`]: job.vehicleId,
+          [`${prefix}.libraryMatchedColor`]: job.query.color, [`${prefix}.imageMatchTier`]: 1,
+          [prefix === "vehicle" ? "vehicleImageStatus" : `${prefix}.vehicleImageStatus`]: "matched" });
+      }
+      if (Object.keys(updates).length) tx.update(ref, { ...updates, updatedAt: FieldValue.serverTimestamp() });
     });
   }
 }

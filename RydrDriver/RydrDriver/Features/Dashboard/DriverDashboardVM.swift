@@ -72,6 +72,8 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     // in sync from drivers/{uid}.vehicle so it can be republished onto
     // publicDriverProfiles/{uid} for the rider app to display. Never a photo
     // of the driver's actual vehicle.
+    @Published var savedVehicles: [SavedDriverVehicle] = []
+    @Published var currentVehicleVin: String?
     @Published var vehicleImageURL: String?
     @Published var vehicleColor: String?
     @Published var vehicleSummaryText: String?
@@ -1868,6 +1870,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func applyVehicleEligibility(from data: [String: Any]) {
+        let saved = data["savedVehicles"] as? [String: [String: Any]] ?? [:]
+        savedVehicles = saved.map { SavedDriverVehicle(id: $0.key, data: $0.value) }.sorted { $0.id < $1.id }
+        currentVehicleVin = (data["vehicle"] as? [String: Any])?["vin"] as? String
         let vehicle = data["vehicle"] as? [String: Any]
 
         // Vehicle Library System fields, written server-side by the

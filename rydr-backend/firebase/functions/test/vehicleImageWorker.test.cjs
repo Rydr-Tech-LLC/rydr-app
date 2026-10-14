@@ -88,3 +88,17 @@ test('exhausted API credits stop evaluation and give an actionable review reason
  const job=records.get(`vehicleImageJobs/${jobId}`);
  assert.equal(job.status,'needs_review');assert.match(job.reason,/credits exhausted/);assert.equal(aiCount,1);assert.equal(files.size,0);
 });
+test('image delivery updates saved vehicles without replacing the current vehicle or reviving deleted cards',async()=>{
+ reset();
+ const id='abc123';
+ records.set('drivers/a',{vehicle:{...query,color:'White',imageUrl:'https://custom/current.jpg'},savedVehicles:{[id]:{...query,imageMatchTier:2}}});
+ await enqueueImageJob(query,'a');await processImageJob(jobId,'test-key');
+ await updateWaitingDrivers(jobId,records.get(`vehicleImageJobs/${jobId}`));
+ const driver=records.get('drivers/a');
+ assert.equal(driver.vehicle.imageUrl,'https://custom/current.jpg');
+ assert.equal(driver.savedVehicles[id].imageMatchTier,1);
+ assert.equal(driver.savedVehicles[id].libraryMatchedColor,query.color);
+ records.set('drivers/b',{vehicle:{...query,color:'White'},savedVehicles:{}});
+ await enqueueImageJob(query,'b');
+ assert.deepEqual(records.get('drivers/b').savedVehicles,{});
+});

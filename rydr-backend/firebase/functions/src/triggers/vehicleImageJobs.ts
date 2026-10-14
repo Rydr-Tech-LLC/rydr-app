@@ -20,7 +20,7 @@ export const onVehicleImageJobWritten = onDocumentWritten({
   }
 });
 
-async function requestDriverImage(uid: string, vehicle: any): Promise<void> {
+async function requestDriverImage(uid: string, vehicle: any, savedId?: string): Promise<void> {
   if (!vehicle || ((vehicle.imageUrl || vehicle.imageURL) && !(vehicle.imageMatchTier > 1))) return;
   const query: VehicleImageQuery = { make: vehicle.make, model: vehicle.model, year: Number(vehicle.year),
     trim: vehicle.trim ?? null, color: vehicle.color, bodyStyle: vehicle.bodyStyle ?? "unknown" };
@@ -32,17 +32,20 @@ async function requestDriverImage(uid: string, vehicle: any): Promise<void> {
   }
   const ref = db.collection("drivers").doc(uid);
   await db.runTransaction(async tx => {
-    const snap = await tx.get(ref); const current = snap.data()?.vehicle;
+    const snap = await tx.get(ref); const current = savedId ? snap.data()?.savedVehicles?.[savedId] : snap.data()?.vehicle;
+    const prefix = savedId ? `savedVehicles.${savedId}` : "vehicle";
     if (!matchesVehicle(current, query) || ((current.imageUrl || current.imageURL) && !(current.imageMatchTier > 1))) return;
-    tx.update(ref, { "vehicle.imageUrl": lookup.result!.imageUrl, "vehicle.imageURL": lookup.result!.imageUrl,
-      "vehicle.imagePath": lookup.result!.storagePath, "vehicle.libraryVehicleId": lookup.result!.matchedVehicleId,
-      "vehicle.libraryMatchedColor": query.color, "vehicle.imageMatchTier": 1,
-      vehicleImageStatus: "matched", updatedAt: FieldValue.serverTimestamp() });
+    tx.update(ref, { [`${prefix}.imageUrl`]: lookup.result!.imageUrl, [`${prefix}.imageURL`]: lookup.result!.imageUrl,
+      [`${prefix}.imagePath`]: lookup.result!.storagePath, [`${prefix}.libraryVehicleId`]: lookup.result!.matchedVehicleId,
+      [`${prefix}.libraryMatchedColor`]: query.color, [`${prefix}.imageMatchTier`]: 1,
+      [savedId ? `${prefix}.vehicleImageStatus` : "vehicleImageStatus"]: "matched", updatedAt: FieldValue.serverTimestamp() });
   });
 }
 
 export const onDriverVehicleImageNeeded = onDocumentWritten({ document: "drivers/{uid}", retry: true }, async event => {
-  await requestDriverImage(event.params.uid, event.data?.after.data()?.vehicle);
+  const driver = event.data?.after.data();
+  await requestDriverImage(event.params.uid, driver?.vehicle);
+  for (const [id, vehicle] of Object.entries(driver?.savedVehicles ?? {})) await requestDriverImage(event.params.uid, vehicle, id);
 });
 
 // Repairs interrupted workers and backfills existing drivers in bounded pages.

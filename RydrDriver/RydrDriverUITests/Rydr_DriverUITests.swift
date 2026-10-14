@@ -10,6 +10,36 @@ import XCTest
 final class Rydr_DriverUITests: XCTestCase {
 
     @MainActor
+    func testGarageAddAndDeletePreservesCurrentVehicle() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-RydrWalletNavigationUITest", "-RydrGarageUITest"]
+        app.launch()
+        let menu = app.buttons["driverMenu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 15))
+        menu.tap()
+        app.buttons["Vehicle & Rydr Hub"].tap()
+        let current = app.staticTexts["vehicleCard-current"]
+        XCTAssertTrue(current.waitForExistence(timeout: 5))
+        app.buttons["Add a new vehicle"].tap()
+        let save = app.buttons["Save Vehicle"]
+        for _ in 0..<8 where !save.isHittable { app.swipeUp() }
+        XCTAssertTrue(save.isHittable, app.debugDescription)
+        save.tap()
+        let saved = app.staticTexts["vehicleCard-fixture-saved"]
+        XCTAssertTrue(saved.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(current.exists)
+        let delete = app.buttons["deleteVehicle-fixture-saved"]
+        for _ in 0..<5 where !delete.isHittable { app.swipeUp() }
+        delete.tap()
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(saved.exists)
+        delete.tap()
+        app.buttons["Delete Vehicle"].tap()
+        XCTAssertTrue(saved.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(current.exists)
+    }
+
+    @MainActor
     func testDocumentReminderOpensDocumentsAndReturnsToDashboard() {
         let app = XCUIApplication()
         app.launchArguments = ["-RydrWalletNavigationUITest", "-RydrDocumentReminderUITest", "-RydrDocumentFixtureUITest"]
