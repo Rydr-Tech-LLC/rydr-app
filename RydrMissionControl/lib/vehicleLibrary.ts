@@ -68,6 +68,7 @@ export interface VehicleLibraryEntry {
   trim: string | null;
   bodyStyle: VehicleBodyStyle;
   specifications?: Record<string, any>;
+  prestineRideType?: "Rydr Prestine SUV" | "Rydr Prestine Sedan" | null;
   eligibleRideTypes?: RydrRideType[];
   availableColors: VehicleColor[];
   defaultImage: string | null;
@@ -195,6 +196,7 @@ function normalizeVehicleLibraryEntry(data: unknown, fallbackVehicleId?: string)
     yearEnd,
     trim: optionalString(record.trim),
     bodyStyle: normalizeBodyStyle(record.bodyStyle),
+    prestineRideType: normalizeRideTypes(record.eligibleRideTypes).includes("Rydr Prestine") ? record.bodyStyle === "suv" ? "Rydr Prestine SUV" : record.bodyStyle === "sedan" ? "Rydr Prestine Sedan" : null : null,
     eligibleRideTypes: normalizeRideTypes(record.eligibleRideTypes),
     specifications: record.specifications ?? {},
     availableColors: VEHICLE_COLORS.filter((color) => colors.has(color)),
@@ -314,6 +316,8 @@ export async function upsertVehicleLibraryEntry(
   const model = normalizedText(input.model);
   const trim = typeof input.trim === "string" && input.trim.trim() ? normalizedText(input.trim) : null;
   const eligibleRideTypes = normalizeRideTypes(input.eligibleRideTypes);
+  if (eligibleRideTypes.includes("Rydr Prestine") && !["suv", "sedan"].includes(input.bodyStyle)) throw new Error("Prestine requires an SUV or Sedan body style; seating capacity does not determine body style.");
+  const prestineRideType = eligibleRideTypes.includes("Rydr Prestine") ? input.bodyStyle === "suv" ? "Rydr Prestine SUV" as const : "Rydr Prestine Sedan" as const : null;
   const vehicleId = input.vehicleId ?? buildVehicleId(make, model, input.yearStart, input.yearEnd, trim);
   const ref = collection().doc(vehicleId);
   const existing = await ref.get();
@@ -332,6 +336,7 @@ export async function upsertVehicleLibraryEntry(
       trim,
       bodyStyle: input.bodyStyle,
       eligibleRideTypes,
+      prestineRideType,
       specifications,
       availableColors: [],
       defaultImage: null,
@@ -353,6 +358,7 @@ export async function upsertVehicleLibraryEntry(
     trim,
     bodyStyle: input.bodyStyle,
     eligibleRideTypes,
+    prestineRideType,
     specifications,
     updatedAt: FieldValue.serverTimestamp(),
     updatedBy: adminUid

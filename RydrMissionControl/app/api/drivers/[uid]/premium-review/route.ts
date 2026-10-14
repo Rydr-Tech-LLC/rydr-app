@@ -64,7 +64,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
       if (input.approvePrestine === true && !evaluation.prestine.eligible) throw new Error(evaluation.prestine.issues.join("; "));
       const standard = (driver.qualifiedRideTypes ?? driver.supportedRideTypes ?? []).filter((value: string) => !/prestine|pristine|executive/i.test(value));
       const qualified = [...standard, ...availablePremiumRideTypes(evaluation, executiveConfig.data() ?? {})];
-      tx.update(ref, { premiumReview: review, qualifiedRideTypes: qualified, supportedRideTypes: qualified, updatedAt: now });
+      tx.update(ref, { premiumReview: review, premiumEligibility: evaluation, vehicleEligibility: { ...(driver.vehicleEligibility ?? {}), rideTypes: qualified, source: "vehicleReview", evaluatedAt: now }, qualifiedRideTypes: qualified, supportedRideTypes: qualified, updatedAt: now });
       return evaluation;
     });
   } catch (error) {

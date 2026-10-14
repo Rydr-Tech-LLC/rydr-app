@@ -100,9 +100,10 @@ export default function NewVehicleForm() {
                 eligibleRideTypes.includes(rideType) ? "border-rydr-burgundy bg-red-50 text-ink" : "border-line bg-grouped text-muted"
               }`}
             >
-              <span>{rideType}</span>
+              <span>{rideType === "Rydr Prestine" ? `Rydr Prestine ${bodyStyle === "suv" ? "SUV" : bodyStyle === "sedan" ? "Sedan" : "— choose SUV or Sedan"}` : rideType}</span>
               <input
                 type="checkbox"
+                disabled={rideType === "Rydr Prestine" && !["sedan", "suv"].includes(bodyStyle)}
                 checked={eligibleRideTypes.includes(rideType)}
                 onChange={() => toggleRideType(rideType)}
                 className="h-4 w-4"

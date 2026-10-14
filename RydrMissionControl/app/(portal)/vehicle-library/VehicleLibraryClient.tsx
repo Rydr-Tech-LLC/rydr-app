@@ -394,7 +394,7 @@ function VehicleCard({ entry }: { entry: VehicleLibraryEntry }) {
             {(entry.eligibleRideTypes ?? []).length > 0 ? (
               entry.eligibleRideTypes?.map((rideType) => (
                 <Badge key={rideType} tone="neutral">
-                  {rideType}
+                  {rideType === "Rydr Prestine" ? `Rydr Prestine ${entry.bodyStyle === "suv" ? "SUV" : entry.bodyStyle === "sedan" ? "Sedan" : "— body review needed"}` : rideType}
                 </Badge>
               ))
             ) : (

@@ -102,7 +102,7 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
       <VehicleSpecifications uid={params.uid} specs={JSON.parse(JSON.stringify(vehicleSpecs))} vehicle={JSON.parse(JSON.stringify(rawDriver.vehicle ?? {}))} />
       <DriverVehicles uid={params.uid} vehicles={JSON.parse(JSON.stringify(vehicles))} archive={JSON.parse(JSON.stringify(vehicleArchive))} />
       <DriverComplianceReview uid={params.uid} assessment={compliance} records={JSON.parse(JSON.stringify(complianceRecords))} reportDate={dateInputValue(toDateSafe((snap.data() ?? {}).backgroundScreening?.completedAt))} />
-      <details><summary className="cursor-pointer text-sm text-muted">Premium vehicle verification — Executive remains paused</summary><PremiumVehicleReview uid={params.uid} initial={JSON.parse(JSON.stringify((snap.data() ?? {}).premiumReview?.vehicleKey === vehicleKey((snap.data() ?? {}).vehicle) ? (snap.data() ?? {}).premiumReview : {}))} assessment={evaluatePremiumVehicle(snap.data())} specifications={vehicleSpecs} /></details>
+      <PremiumVehicleReview uid={params.uid} initial={JSON.parse(JSON.stringify((snap.data() ?? {}).premiumReview?.vehicleKey === vehicleKey((snap.data() ?? {}).vehicle) ? (snap.data() ?? {}).premiumReview : {}))} assessment={evaluatePremiumVehicle(snap.data())} specifications={vehicleSpecs} vehicleBodyStyle={exactLibraryEntry(specificationLibrary.docs.map(doc => doc.data()), rawDriver.vehicle ?? {})?.bodyStyle} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

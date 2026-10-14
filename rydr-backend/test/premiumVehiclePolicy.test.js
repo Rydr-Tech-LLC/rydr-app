@@ -98,3 +98,17 @@ test('document readiness never exposes Executive to drivers during the funding h
   assert.deepEqual(availablePremiumRideTypes(result, { enabled: false, fundingApproved: false }), ['Rydr Prestine SUV']);
   assert.deepEqual(availablePremiumRideTypes(result, { enabled: true, fundingApproved: true, betaPaused: false }), ['Rydr Prestine SUV', 'Rydr Executive SUV']);
 });
+
+test('five-seat Range Rover SUV qualifies for Prestine SUV without XL capacity', () => {
+  const d = driver(2024, 'Silver', 'suv');
+  d.vehicle = { ...d.vehicle, vin: 'SAL1P9EU0RA170245', make: 'LAND ROVER', model: 'Range Rover Sport' };
+  d.premiumReview.vehicleKey = vehicleKey(d.vehicle);
+  d.premiumReview.seatCapacity = 5;
+  const result = evaluatePremiumVehicle(d, now);
+  assert.equal(result.prestine.eligible, true);
+  assert.ok(result.rideTypes.includes('Rydr Prestine SUV'));
+  assert.equal(result.rideTypes.includes('Rydr Prestine Sedan'), false);
+  assert.equal(result.rideTypes.includes('Rydr XL'), false);
+  assert.equal(premiumRideAllowed(d, 'Rydr Prestine SUV', now), true);
+  assert.equal(premiumRideAllowed(d, 'Rydr Prestine Sedan', now), false);
+});
