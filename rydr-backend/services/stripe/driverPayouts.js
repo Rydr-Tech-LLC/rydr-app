@@ -1,6 +1,7 @@
 "use strict";
 const { createHash, randomUUID } = require("node:crypto");
 const { FieldValue, Timestamp } = require("firebase-admin/firestore");
+const { modeProfile, jobMode } = require("./stripeMode");
 const COLLECTION = "driverPayouts";
 const LOCKS = "driverPayoutLocks";
 const LOCK_WARNING_MS = 10 * 60 * 1000;
@@ -8,8 +9,8 @@ const LOCK_WARNING_MS = 10 * 60 * 1000;
 class PayoutError extends Error {
   constructor(code, status = 409) { super(code); this.code = code; this.status = status; }
 }
-function payoutJobId(accountId, kind, requestId) {
-  return createHash("sha256").update(`${accountId}:${kind}:${requestId}`).digest("hex");
+function payoutJobId(accountId, kind, requestId, mode = "test") {
+  return createHash("sha256").update(`${mode === "live" ? "live:" : ""}${accountId}:${kind}:${requestId}`).digest("hex");
 }
 function easternWeekDate(instant) {
   const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(instant));
@@ -46,23 +47,23 @@ function summary(parts) {
 }
 
 class DriverPayoutService {
-  constructor({ stripe, getDb, now = () => Date.now() }) { this.stripe = stripe; this.getDb = getDb; this.now = now; }
+  constructor({ stripe, getDb, now = () => Date.now(), mode = "test" }) { this.stripe = stripe; this.getDb = getDb; this.now = now; this.mode = mode; }
   jobs() { return this.getDb().collection(COLLECTION); }
   async preparePolicy(driverId) {
-    const driver=(await this.getDb().collection("drivers").doc(driverId).get()).data();
+    const driver=modeProfile((await this.getDb().collection("drivers").doc(driverId).get()).data(),this.mode);
     const accountId=driver?.stripeAccountId;
     if(!accountId)return {status:"skipped"};
-    const id=payoutJobId(accountId,"policy","weekly-monday");
+    const id=payoutJobId(accountId,"policy","weekly-monday",this.mode);
     const ref=this.jobs().doc(id);
     try {
       const account=await this.stripe.accounts.retrieve(accountId);
       if(account.country!=="US" || account.type!=="express")throw new PayoutError("unsupported_connect_account",400);
       if(account.metadata?.uid && account.metadata.uid!==driverId)throw new PayoutError("payout_account_owner_mismatch",400);
       if(account.settings?.payouts?.schedule?.interval!=="manual")await this.stripe.accounts.update(accountId,{settings:{payouts:{schedule:{interval:"manual"}}}});
-      await ref.set({kind:"policy",driverId,accountId,status:"configured",needsReview:false,reason:null,reasonCode:null,updatedAt:FieldValue.serverTimestamp()},{merge:true});
+      await ref.set({kind:"policy",stripeMode:this.mode,driverId,accountId,status:"configured",needsReview:false,reason:null,reasonCode:null,updatedAt:FieldValue.serverTimestamp()},{merge:true});
       return {status:"configured"};
     } catch(error) {
-      await ref.set({kind:"policy",driverId,accountId,status:"needs_review",needsReview:true,reasonCode:safeError(error),reason:`Weekly payout schedule setup failed: ${safeError(error)}`,updatedAt:FieldValue.serverTimestamp()},{merge:true});
+      await ref.set({kind:"policy",stripeMode:this.mode,driverId,accountId,status:"needs_review",needsReview:true,reasonCode:safeError(error),reason:`Weekly payout schedule setup failed: ${safeError(error)}`,updatedAt:FieldValue.serverTimestamp()},{merge:true});
       return {status:"needs_review"};
     }
   }
@@ -74,9 +75,10 @@ class DriverPayoutService {
         throw new PayoutError("payout_request_parameters_changed");
       }
       const job = existing ?? initial;
+      if (job && jobMode(job) !== this.mode) throw new PayoutError("stripe_mode_mismatch",409);
       if (!job) throw new PayoutError("payout_job_not_found",404);
       if (existing && existing.status !== "queued") return { job, acquired: false };
-      const driver = (await tx.get(db.collection("drivers").doc(job.driverId))).data();
+      const driver = modeProfile((await tx.get(db.collection("drivers").doc(job.driverId))).data(),this.mode);
       if (!job.accountId || driver?.stripeAccountId !== job.accountId) {
         tx.set(ref, { ...job, status: "needs_review", needsReview: true, reason: "Driver has no matching Stripe Connect account", reasonCode: "connect_account_missing", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
         return { job: { ...job, status: "needs_review" }, acquired: false };
@@ -185,7 +187,7 @@ class DriverPayoutService {
     const db=this.getDb(),ref=this.jobs().doc(jobId);
     await db.runTransaction(async tx=>{
       const job=(await tx.get(ref)).data();
-      if (!job || job.accountId!==accountId) return;
+      if (!job || job.accountId!==accountId || jobMode(job)!==this.mode) return;
       const i=job.kind==="instant"?0:Number(payout.metadata?.payoutPart);
       const part=job.parts?.[i];
       if (!Number.isInteger(i) || !part || part.amount!==payout.amount || part.currency!==payout.currency || (payout.method && payout.method!==(job.kind==="instant"?"instant":"standard")) || (job.kind==="weekly" && payout.source_type && payout.source_type!==part.sourceType) || (part.destination && part.destination!==payout.destination) || (job.kind!=="instant" && payout.metadata?.payoutJobId!==jobId) || (job.kind==="instant" && payout.metadata?.uid!==job.driverId)) throw new PayoutError("payout_reconciliation_mismatch");
@@ -197,8 +199,8 @@ class DriverPayoutService {
     });
   }
   async instant({driverId,accountId,amount,currency,requestId,destination}) {
-    const jobId=payoutJobId(accountId,"instant",requestId);
-    const claim=await this.claim(jobId,{driverId,accountId,kind:"instant",amount,currency,requestId,...(destination?{destination}:{}),status:"queued",createdAt:Timestamp.fromMillis(this.now())});
+    const jobId=payoutJobId(accountId,"instant",requestId,this.mode);
+    const claim=await this.claim(jobId,{driverId,accountId,kind:"instant",stripeMode:this.mode,amount,currency,requestId,...(destination?{destination}:{}),status:"queued",createdAt:Timestamp.fromMillis(this.now())});
     if (!claim.acquired) {
       const job=(await claim.ref.get()).data();
       if (job.parts?.[0]?.payoutId) {
@@ -237,6 +239,7 @@ class DriverPayoutService {
   async reconcile(jobId) {
     const ref=this.jobs().doc(jobId),job=(await ref.get()).data();
     if (!job) throw new PayoutError("payout_job_not_found",404);
+    if(jobMode(job)!==this.mode)return "mode_inactive";
     if(job.kind==="policy")return (await this.preparePolicy(job.driverId)).status;
     if(job.kind==="legacy" && job.payoutId) {
       const payout=await this.stripe.payouts.retrieve(job.payoutId,{stripeAccount:job.accountId});
@@ -285,10 +288,10 @@ class DriverPayoutService {
     if(jobId) {
       await this.recordPayout(jobId,accountId,payout);
       const job=(await this.jobs().doc(jobId).get()).data();
-      if(job && !job.parts?.some(part=>["submitting","prepared"].includes(part.status))) await this.release(jobId,accountId);
+      if(job && jobMode(job)===this.mode && !job.parts?.some(part=>["submitting","prepared"].includes(part.status))) await this.release(jobId,accountId);
     } else if(["failed","canceled"].includes(payout.status)) {
       const drivers=await this.getDb().collection("drivers").where("stripeAccountId","==",accountId).limit(1).get();
-      await this.jobs().doc(`legacy_${payout.id}`).set({kind:"legacy",driverId:drivers.docs[0]?.id??null,accountId,status:"needs_review",needsReview:true,amount:payout.amount,currency:payout.currency,reasonCode:payout.failure_code??"payout_canceled",reason:"Stripe reported a failed or canceled payout outside the new weekly job flow",payoutId:payout.id,updatedAt:FieldValue.serverTimestamp()},{merge:true});
+      await this.jobs().doc(`legacy_${payout.id}`).set({kind:"legacy",stripeMode:this.mode,driverId:drivers.docs[0]?.id??null,accountId,status:"needs_review",needsReview:true,amount:payout.amount,currency:payout.currency,reasonCode:payout.failure_code??"payout_canceled",reason:"Stripe reported a failed or canceled payout outside the new weekly job flow",payoutId:payout.id,updatedAt:FieldValue.serverTimestamp()},{merge:true});
     }
   }
 }

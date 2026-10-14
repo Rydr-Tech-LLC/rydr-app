@@ -138,6 +138,8 @@ service cloud.firestore {
         "suggestedPricingResolvedAt",
         "stripeAccountId",
         "stripeCustomerId",
+        "stripeMode",
+        "stripeProfiles",
         "trustScore",
         "verificationStatus",
         "verificationDocuments",
