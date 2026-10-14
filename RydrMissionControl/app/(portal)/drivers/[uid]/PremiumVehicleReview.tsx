@@ -35,7 +35,7 @@ export default function PremiumVehicleReview({ uid, initial, assessment, specifi
       try {
         const response = await fetch(`/api/drivers/${uid}/premium-review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
         const data = await response.json(); if (!response.ok) throw new Error(data.error);
-        setMessage("Vehicle approval saved. The driver app receives the approved Prestine SUV or Sedan ride type."); router.refresh();
+        setMessage(data.prestine?.eligible ? `Approved for Rydr Prestine ${data.bodyType === "suv" ? "SUV" : "Sedan"}. The driver app receives this ride type.` : "Review saved. Prestine remains unavailable until the vehicle requirements are approved."); router.refresh();
       } catch (error) { setMessage(error instanceof Error ? error.message : "Review failed"); }
       finally { setBusy(false); }
     }}>
