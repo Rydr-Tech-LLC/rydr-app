@@ -1,10 +1,10 @@
 "use client";
+import { vehicleImageSearchUrl } from "@/lib/vehicleImageSearch";
 
 import { useRef, useState } from "react";
 import type { VehicleLibraryEntry } from "@/lib/vehicleLibrary";
 
 const VEHICLE_COLORS = ["Black", "White", "Silver", "Gray", "Blue", "Red", "Green", "Brown", "Gold", "Yellow", "Orange"] as const;
-const OPENART_URL = "https://openart.ai/suite/create-image/";
 
 export default function VehicleImageManager({ entry: initialEntry }: { entry: VehicleLibraryEntry }) {
   const [entry, setEntry] = useState(initialEntry);
@@ -63,12 +63,12 @@ export default function VehicleImageManager({ entry: initialEntry }: { entry: Ve
           </p>
         </div>
         <a
-          href={OPENART_URL}
+          href={vehicleImageSearchUrl(entry)}
           target="_blank"
           rel="noreferrer"
           className="rounded-md border border-rydr-burgundy px-3 py-1.5 text-xs font-semibold text-rydr-burgundy hover:bg-red-50"
         >
-          Create image
+          Search Google Images
         </a>
       </div>
       {error && <p className="text-xs text-rydr-red">{error}</p>}
@@ -123,12 +123,12 @@ export default function VehicleImageManager({ entry: initialEntry }: { entry: Ve
               </div>
               {!slot.url && (
                 <a
-                  href={OPENART_URL}
+                  href={vehicleImageSearchUrl(entry, slot.color)}
                   target="_blank"
                   rel="noreferrer"
                   className="mt-1.5 block rounded-md border border-line py-1 text-center text-[11px] font-medium text-muted hover:bg-grouped"
                 >
-                  Create image
+                  Search Google Images
                 </a>
               )}
             </div>

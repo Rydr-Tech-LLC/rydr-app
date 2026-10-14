@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { VehicleBodyStyle, VehicleLibraryEntry } from "@/lib/vehicleLibrary";
 
 const BODY_STYLES: VehicleBodyStyle[] = ["sedan", "suv", "truck", "coupe", "hatchback", "minivan", "crossover", "wagon", "convertible", "van", "unknown"];
-const RIDE_TYPES = ["Rydr Go", "Rydr Eco", "Rydr XL"];
+const RIDE_TYPES = ["Rydr Go", "Rydr Eco", "Rydr XL", "Rydr Prestine"];
 
 export default function VehicleMetadataEditor({ entry }: { entry: VehicleLibraryEntry }) {
   const router = useRouter();

@@ -1,11 +1,11 @@
 "use client";
+import { vehicleImageSearchUrl } from "@/lib/vehicleImageSearch";
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import type { VehicleLibraryEntry } from "@/lib/vehicleLibrary";
 
 const VEHICLE_COLORS = ["Black", "White", "Silver", "Gray", "Blue", "Red", "Green", "Brown", "Gold", "Yellow", "Orange"] as const;
-const OPENART_URL = "https://openart.ai/suite/create-image/";
 
 export default function VehicleLibraryClient({
   initialEntries,
@@ -102,12 +102,12 @@ export default function VehicleLibraryClient({
           </button>
           <div className="flex w-full flex-wrap gap-2 sm:ml-auto sm:w-auto">
             <a
-              href={OPENART_URL}
+              href={vehicleImageSearchUrl({ make, model, yearStart: year })}
               target="_blank"
               rel="noreferrer"
               className="rounded-md border border-rydr-burgundy px-4 py-2 text-xs font-semibold text-rydr-burgundy hover:bg-red-50"
             >
-              Create image
+              Search Google Images
             </a>
             <Link href="/vehicle-library/new" className="rounded-md bg-rydr-burgundy px-4 py-2 text-xs font-semibold text-white">
               Add vehicle
@@ -192,12 +192,12 @@ function VehicleCard({ entry }: { entry: VehicleLibraryEntry }) {
               Manage
             </Link>
             <a
-              href={OPENART_URL}
+              href={vehicleImageSearchUrl(entry)}
               target="_blank"
               rel="noreferrer"
               className="rounded-md border border-line px-3 py-1.5 text-xs font-medium text-muted hover:bg-grouped"
             >
-              Create image
+              Search Google Images
             </a>
           </div>
         </div>

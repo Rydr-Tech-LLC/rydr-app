@@ -1,10 +1,11 @@
 "use client";
+import { vehicleImageSearchUrl } from "@/lib/vehicleImageSearch";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 const BODY_STYLES = ["sedan", "suv", "truck", "coupe", "hatchback", "minivan", "crossover", "wagon", "convertible", "van", "unknown"];
-const RIDE_TYPES = ["Rydr Go", "Rydr Eco", "Rydr XL"];
+const RIDE_TYPES = ["Rydr Go", "Rydr Eco", "Rydr XL", "Rydr Prestine"];
 
 export default function NewVehicleForm() {
   const router = useRouter();
@@ -114,12 +115,12 @@ export default function NewVehicleForm() {
           entries are used.
         </p>
         <a
-          href="https://openart.ai/suite/create-image/"
+          href={vehicleImageSearchUrl({ make, model, yearStart, trim })}
           target="_blank"
           rel="noreferrer"
           className="mt-3 inline-flex rounded-md border border-rydr-burgundy px-3 py-1.5 text-xs font-semibold text-rydr-burgundy hover:bg-red-50"
         >
-          Create image
+          Search Google Images
         </a>
       </div>
 
