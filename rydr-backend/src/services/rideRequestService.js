@@ -1,3 +1,4 @@
+const { assertLiveBetaAccess } = require("../../firebase/functions/src/services/liveBetaAccessPolicy");
 const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
 const { requireExecutiveEnabled } = require("./premiumPlatformService");
 const crypto = require("node:crypto");
@@ -214,6 +215,8 @@ async function createRideRequest({
     }
   }
 
+  await assertLiveBetaAccess({db,uid:riderId,getUser:authUserProvider});
+  await assertLiveBetaAccess({db,uid:selectedCandidateId,getUser:authUserProvider});
   const riderRef = db.collection("riders").doc(riderId);
   const publicDriverRef = db.collection("publicDriverProfiles").doc(selectedCandidateId);
   const canonicalDriverRef = db.collection("drivers").doc(selectedCandidateId);

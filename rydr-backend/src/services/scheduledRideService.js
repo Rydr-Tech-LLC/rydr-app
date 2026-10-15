@@ -1,3 +1,4 @@
+const {filterLiveBetaCandidates} = require("../../firebase/functions/src/services/liveBetaAccessPolicy");
 const { evaluateDriverCompliance } = require("../../firebase/functions/src/services/driverCompliancePolicy");
 const { requireExecutiveEnabled } = require("./premiumPlatformService");
 const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
@@ -185,7 +186,7 @@ async function eligibleCandidates({
     if (conflicts) continue;
     candidates.push({ id: snapshot.id, profile });
   }
-  return findBestDrivers({
+  return filterLiveBetaCandidates(db, findBestDrivers({
     rideType,
     pickupCoordinate: pickup,
     dropoffCoordinate: dropoff,
@@ -193,7 +194,7 @@ async function eligibleCandidates({
     candidates,
     requireOnline,
     maxResults: OPPORTUNITY_LIMIT
-  });
+  }));
 }
 
 async function verifyRiderCanSchedule(db, riderId) {

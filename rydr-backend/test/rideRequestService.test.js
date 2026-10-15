@@ -78,6 +78,7 @@ function createPayload(overrides = {}) {
 
 function readyDb() {
   return new FakeDb({
+    "platformConfig/stripeRuntime": {mode:"test",status:"ready"},
     "riders/rider-1": { accountStatus: "active", verifiedRider: true },
     "drivers/driver-1": {
       isApproved: true,

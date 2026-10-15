@@ -1,3 +1,4 @@
+const { requireLiveBetaAccess } = require("../middleware/liveBetaAccess");
 const express = require("express");
 const driverService = require("../services/driverService");
 const { createAccountDeletionRequest } = require("../services/accountDeletionService");
@@ -18,7 +19,7 @@ const router = express.Router();
 // then checked per-route below — the body is never trusted on its own.
 router.use(requireFirebaseAuth);
 
-router.post("/presence", async (req, res, next) => {
+router.post("/presence", (req,res,next) => req.body?.online === true ? requireLiveBetaAccess(req,res,next) : next(), async (req, res, next) => {
   try {
     const result = await updateDriverPresence({
       uid: req.firebaseUid,
@@ -44,7 +45,7 @@ router.post("/demand", async (req, res, next) => {
   }
 });
 
-router.post("/queue/promote-next", async (req, res, next) => {
+router.post("/queue/promote-next", requireLiveBetaAccess, async (req, res, next) => {
   try {
     const result = await promoteNextQueuedRide({
       driverId: req.firebaseUid,

@@ -1,3 +1,4 @@
+const { filterLiveBetaCandidates, assertLiveBetaAccess } = require("../../firebase/functions/src/services/liveBetaAccessPolicy");
 const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
 const { admin, getFirestore } = require("../config/firebase");
 const { tierFor } = require("./rideFinancialService");
@@ -77,7 +78,7 @@ async function selectNextCandidate({ db, request, attemptedDriverIds }) {
       && snapshot.exists
       && isEligibleCandidate(snapshot.data(), request.rideType))
     .map((snapshot) => ({ id: snapshot.id, profile: snapshot.data() }));
-  return candidates[0] || null;
+  return (await filterLiveBetaCandidates(db, candidates))[0] || null;
 }
 
 function offerExpiration(now) {
@@ -94,6 +95,7 @@ async function initializeRideDispatch({ rideId, uid, candidateIds, requestId, db
   if (request.riderId !== uid) throw error("Only the rider may initialize dispatch", 403);
   if (typeof request.driverId !== "string" || !request.driverId) throw error("Selected driver is required", 400);
 
+  await assertLiveBetaAccess({db,uid:request.driverId,getUser:id=>admin.auth().getUser(id)});
   const hints = normalizedCandidateIds(request.dispatchCandidateIds);
   if (hints.length === 0) hints.push(request.driverId);
   const [initialCandidateSnap, canonicalCandidateSnap, statusCandidateSnap] = await Promise.all([

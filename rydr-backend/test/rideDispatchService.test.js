@@ -62,6 +62,7 @@ test("backend eligibility rejects offline and wrong-tier candidates", () => {
 
 test("decline advances to the next backend-validated candidate and records the attempt", async () => {
   const db = new FakeDb({
+    "platformConfig/stripeRuntime": {mode:"test",status:"ready"},
     "rideRequests/ride-1": {
       riderId: "rider-1",
       driverId: "driver-1",
@@ -112,6 +113,7 @@ test("decline advances to the next backend-validated candidate and records the a
 
 test("exhausting the candidate pool creates a terminal backend state", async () => {
   const db = new FakeDb({
+    "platformConfig/stripeRuntime": {mode:"test",status:"ready"},
     "rideRequests/ride-2": {
       riderId: "rider-1",
       driverId: "driver-1",

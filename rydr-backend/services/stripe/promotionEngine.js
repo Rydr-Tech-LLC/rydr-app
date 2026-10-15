@@ -1,3 +1,5 @@
+const { getAuth } = require("firebase-admin/auth");
+const { assertLiveBetaAccess } = require("../../firebase/functions/src/services/liveBetaAccessPolicy");
 const { createHash } = require("node:crypto");
 const policy = require("./promotionPolicy");
 const { modeProfile } = require("./stripeMode");
@@ -509,6 +511,7 @@ class PromotionEngine {
         account.details_submitted !== true
       )
         throw new Error("Driver payout ownership or setup needs review.");
+      await assertLiveBetaAccess({db:this.db,uid:reward.driverId,mode:this.mode,getUser:uid=>getAuth().getUser(uid)});
       const transfer = await this.stripe.transfers.create(
         {
           amount: reward.rewardCents,

@@ -1,5 +1,7 @@
 "use strict";
 const { createHash, randomUUID } = require("node:crypto");
+const { getAuth } = require("firebase-admin/auth");
+const { assertLiveBetaAccess } = require("../../firebase/functions/src/services/liveBetaAccessPolicy");
 const { FieldValue, Timestamp } = require("firebase-admin/firestore");
 const { modeProfile, jobMode } = require("./stripeMode");
 const COLLECTION = "driverPayouts";
@@ -49,7 +51,12 @@ function summary(parts) {
 class DriverPayoutService {
   constructor({ stripe, getDb, now = () => Date.now(), mode = "test" }) { this.stripe = stripe; this.getDb = getDb; this.now = now; this.mode = mode; }
   jobs() { return this.getDb().collection(COLLECTION); }
+  async checkLiveAccess(uid) {
+    try {await assertLiveBetaAccess({db:this.getDb(),uid,mode:this.mode,getUser:id=>getAuth().getUser(id)});}
+    catch(error) {throw new PayoutError(error.code || "live_beta_protection_unavailable",error.statusCode || 503);}
+  }
   async preparePolicy(driverId) {
+    await this.checkLiveAccess(driverId);
     const driver=modeProfile((await this.getDb().collection("drivers").doc(driverId).get()).data(),this.mode);
     const accountId=driver?.stripeAccountId;
     if(!accountId)return {status:"skipped"};
@@ -69,6 +76,8 @@ class DriverPayoutService {
   }
   async claim(jobId, initial) {
     const db = this.getDb(), ref = this.jobs().doc(jobId), owner = randomUUID();
+    const proposed = initial || (await ref.get()).data();
+    await this.checkLiveAccess(proposed?.driverId);
     const result = await db.runTransaction(async tx => {
       const snap = await tx.get(ref); const existing = snap.data();
       if (existing && initial && (existing.amount !== initial.amount || existing.currency !== initial.currency || existing.accountId !== initial.accountId || existing.driverId !== initial.driverId || existing.destination !== initial.destination)) {

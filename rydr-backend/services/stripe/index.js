@@ -1,3 +1,4 @@
+const { assertLiveBetaAccess } = require("../../firebase/functions/src/services/liveBetaAccessPolicy");
 // index.js
 "use strict";
 
@@ -168,6 +169,8 @@ async function requireFirebaseUid(req, res) {
       return null;
     }
     try { await stripeModeState.ensure(); } catch { res.status(503).json({error:"stripe_mode_preparation_failed"}); return null; }
+    try { await assertLiveBetaAccess({db:admin.firestore(),uid,mode:stripeConfig.mode,getUser:id=>admin.auth().getUser(id)}); }
+    catch(error) {res.status(error.statusCode || 503).json({error:error.code || "live_beta_protection_unavailable"});return null;}
     return uid;
   } catch (err) {
     console.warn("⚠️ Firebase auth failed", err.message);
@@ -472,6 +475,7 @@ async function ownedRide(uid, rideId) {
 
 /** Driver's Connect account, looked up server-side from the ride's driverId — never from the client. */
 async function driverAccountForRide(rideData) {
+  if (rideData?.driverId) await assertLiveBetaAccess({db:admin.firestore(),uid:rideData.driverId,mode:stripeConfig.mode,getUser:id=>admin.auth().getUser(id)});
   if (!rideData?.driverId) return null;
   const driver = await driverData(rideData.driverId);
   if (!driver?.stripeAccountId || !driver?.stripeChargesEnabled) return null;
@@ -1413,6 +1417,7 @@ async function chargeRideAttempt({
   suppliedCustomerId,
   suppliedDriverAccountId,
 }) {
+  await assertLiveBetaAccess({db:admin.firestore(),uid,mode:stripeConfig.mode,getUser:id=>admin.auth().getUser(id)});
   const owned = await ownedRide(uid, rideId);
   if (!owned) {
     return { httpStatus: 404, body: { error: "ride_not_found_or_not_owned" } };

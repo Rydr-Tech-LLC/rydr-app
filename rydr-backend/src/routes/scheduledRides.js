@@ -1,3 +1,4 @@
+const { requireLiveBetaAccess } = require("../middleware/liveBetaAccess");
 const express = require("express");
 const { requireFirebaseAuth } = require("../middleware/firebaseAuth");
 const { requireFirebaseAppCheck } = require("../middleware/appCheck");
@@ -27,6 +28,7 @@ router.post("/internal/sweep", async (req, res, next) => {
 
 router.use(requireFirebaseAuth);
 router.use(requireFirebaseAppCheck);
+router.use(requireLiveBetaAccess);
 
 router.post("/preview", async (req, res, next) => {
   try {

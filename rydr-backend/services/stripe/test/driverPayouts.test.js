@@ -79,3 +79,15 @@ test('new instant requests check actual eligible funds and destination under the
  const blocked=fixture();blocked.stripe.balance.retrieve=async()=>({available:[{currency:'usd',amount:50000}]});
  await assert.rejects(blocked.service.instant({...input,requestId:'invalid'}),e=>e.code==='instant_payout_not_eligible');assert.equal(blocked.creates().length,0);
 });
+
+test('live test-account guard blocks weekly and instant payouts before Stripe calls', async()=>{
+ const {phoneHash}=require('../../../firebase/functions/src/services/liveBetaAccessPolicy');
+ const f=fixture();f.service.mode='live';
+ f.records.set('operationalSecurity/liveBetaAccess',{version:1,configured:true,blockedAuthUids:['driver'],blockedPhoneHashes:[phoneHash('+15555550101')]});
+ await assert.rejects(f.service.processWeekly(f.id),e=>e instanceof Error&&e.code==='firebase_test_account_live_access_blocked'&&e.status===403);
+ await assert.rejects(f.service.instant({driverId:'driver',accountId:'acct_driver',amount:100,currency:'usd',requestId:'blocked'}),e=>e.code==='firebase_test_account_live_access_blocked');
+ assert.equal(f.calls.length,0);assert.equal(f.creates().length,0);assert.equal(f.records.has('driverPayoutLocks/acct_driver'),false);
+});
+test('live payouts fail closed when protection configuration is missing',async()=>{
+ const f=fixture();f.service.mode='live';await assert.rejects(f.service.processWeekly(f.id),e=>e.code==='live_beta_protection_unavailable'&&e.status===503);assert.equal(f.calls.length,0);
+});

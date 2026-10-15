@@ -1,3 +1,4 @@
+const { requireLiveBetaAccess } = require("../middleware/liveBetaAccess");
 const express = require("express");
 const { timingSafeEqual } = require("node:crypto");
 const { requireFirebaseAuth } = require("../middleware/firebaseAuth");
@@ -58,6 +59,7 @@ router.post("/internal/:rideId/payment-resolution", async (req, res, next) => {
 
 router.use(requireFirebaseAuth);
 router.use(requireFirebaseAppCheck);
+router.use(requireLiveBetaAccess);
 router.post("/match-session", async (req, res, next) => {
   try {
     res.status(201).json({ ok: true, ...(await createRideMatchSession({ riderId: req.firebaseUid, payload: req.body })) });

@@ -1,3 +1,4 @@
+const { filterLiveBetaCandidates } = require("../../firebase/functions/src/services/liveBetaAccessPolicy");
 const { requireExecutiveEnabled } = require("./premiumPlatformService");
 const { admin, getFirestore } = require("../config/firebase");
 const { getDirections } = require("./appleMapsService");
@@ -142,7 +143,7 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
   const statusById = new Map(statusSnapshots
     .filter((doc) => doc.exists && hasCurrentOnlinePresence(doc.data(), now.toMillis()))
     .map((doc) => [doc.id, doc.data()]));
-  const eligible = findBestDrivers({
+  const eligible = await filterLiveBetaCandidates(db, findBestDrivers({
     rideType,
     pickupCoordinate: pickup,
     dropoffCoordinate: dropoff,
@@ -165,7 +166,7 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
         };
       }),
     requireOnline: true
-  });
+  }));
   if (eligible.length === 0) throw error("No nearby drivers are available", 409);
 
   const onTimeEligible = await protectScheduledCommitments({
