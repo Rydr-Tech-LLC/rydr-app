@@ -19,8 +19,9 @@ export default function PremiumVehicleReview({ uid, initial, assessment, specifi
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const date = (value: unknown) => typeof value === "string" ? value.slice(0, 10) : "";
-  return <section className="rounded-2xl border border-line bg-white p-5 space-y-4">
+  return <section id="prestine-approval" className="scroll-mt-6 rounded-2xl border border-line bg-white p-5 space-y-4">
     <h2 className="text-lg font-semibold">Prestine vehicle approval</h2>
+    <p className="rounded-xl border border-line bg-grouped p-3 text-sm">To approve: confirm the luxury classification and vehicle condition, add the condition evidence and expiry, select “Approve vehicle for Prestine,” then choose “Save verification.” Saving or syncing the Vehicle Library does not submit this form.</p>
     <p className="text-sm text-muted">Prestine accepts any color. New approvals require model year {assessment.minimumYear} or newer; existing vehicle approvals receive two additional years. Executive requires black exterior, black leather or vegan-leather interior, professional service and verified commercial documents. Executive uses a five-year vehicle age limit and remains paused until funding approval.</p>
     <p className="rounded-xl bg-amber-50 p-3 text-sm">SUV and Sedan describe the vehicle body, not its passenger capacity. A five-seat luxury SUV can serve Prestine SUV. XL separately requires six rider seats plus the driver. Library eligibility is a model recommendation; approve this specific vehicle here to enable its Prestine ride type in the driver app.</p>
     <div className="text-sm">Prestine: {assessment.prestine.eligible ? "Qualified" : assessment.prestine.issues.join(" · ")}<br />Executive: {assessment.executive.eligible ? "Verification ready (service remains paused)" : assessment.executive.issues.join(" · ")}</div>
@@ -52,7 +53,7 @@ export default function PremiumVehicleReview({ uid, initial, assessment, specifi
       <fieldset className="border rounded-xl p-3"><legend>Commercial insurance limits (USD)</legend>{([ ["combinedLimit", "Combined single limit"], ["bodilyPerPerson", "Bodily injury per person"], ["bodilyPerAccident", "Bodily injury per accident"], ["propertyDamage", "Property damage"] ] as const).map(([key, label]) => <label key={key} className="block text-sm">{label}<input name={key} type="number" min="0" className="border rounded p-2 ml-2" defaultValue={initial.documents?.commercialInsurance?.[key] ?? 0} /></label>)}</fieldset>
       </details>
       <button disabled={busy} className="rounded bg-rydr-burgundy text-white px-4 py-2">{busy ? "Saving…" : "Save verification"}</button>
-      {message && <p role="status" className="text-sm">{message}</p>}
+      {message && <p role="status" className="rounded-xl border border-line bg-grouped p-3 text-sm">{message}</p>}
     </form>
   </section>;
 }

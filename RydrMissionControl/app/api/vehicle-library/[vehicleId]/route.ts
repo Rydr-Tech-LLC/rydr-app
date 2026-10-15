@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { adminDb } from "@/lib/firebaseAdmin";
+import { evaluatePremiumVehicle } from "../../../../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
 import { getAdminSession } from "@/lib/session";
 import { writeAuditLog } from "@/lib/auditLog";
 import {
@@ -105,7 +107,16 @@ export async function POST(request: NextRequest, props: { params: Promise<{ vehi
     targetId: params.vehicleId
   });
 
-  return NextResponse.json({ entry, matchedDriverCount });
+  const pendingPrestine: { uid: string; name: string; issues: string[] }[] = [];
+  if (entry.eligibleRideTypes?.includes("Rydr Prestine")) {
+    const drivers = await adminDb.collection("drivers").where("vehicle.libraryVehicleId", "==", entry.vehicleId).limit(1000).get();
+    for (const doc of drivers.docs) {
+      const driver = doc.data();
+      const assessment = evaluatePremiumVehicle(driver);
+      if (!assessment.prestine.eligible) pendingPrestine.push({ uid: doc.id, name: [driver.firstName, driver.lastName].filter(Boolean).join(" ").trim() || driver.displayName || "Driver", issues: assessment.prestine.issues });
+    }
+  }
+  return NextResponse.json({ entry, matchedDriverCount, pendingPrestine });
 }
 
 export async function DELETE(_request: NextRequest, props: { params: Promise<{ vehicleId: string }> }) {
