@@ -2,14 +2,7 @@
 
 import { useState } from "react";
 
-/**
- * Thumbnail + full-screen zoomable/downloadable preview for driver
- * documents (license, insurance, registration). Renders a clean
- * "not uploaded yet" placeholder when no URL exists — true today for
- * every driver until the upload pipeline is wired up (see beta
- * readiness audit P0 #10), so this should not look broken in the
- * meantime.
- */
+/** Authenticated or legacy document thumbnail with zoom/download preview. */
 export default function ImageViewer({ label, url }: { label: string; url?: string | null }) {
   const [open, setOpen] = useState(false);
   const [zoom, setZoom] = useState(1);

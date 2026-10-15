@@ -1,3 +1,4 @@
+import { uploadedDocumentPath } from "./driverDocumentReview";
 import { evaluateDriverCompliance } from "../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
 // Shared types matching the real Firestore schema already written by
 // RydrDriver / RydrPlayground (see DriverSignupCoordinator.swift,
@@ -329,6 +330,8 @@ export const DRIVER_APPROVAL_REQUIREMENTS: { key: string; label: string }[] = [
 ];
 
 export function driverDocumentUrl(driver: DriverRecord, kind: "license" | "insurance" | "registration"): string | null {
+  const canonicalKind = kind === "license" ? "driverLicense" : kind;
+  if (driver.uid && uploadedDocumentPath(driver, driver.uid, canonicalKind, "front")) return `/api/drivers/${encodeURIComponent(driver.uid)}/documents/${canonicalKind}/front`;
   const document =
     kind === "license"
       ? driver.documents?.driverLicense ?? driver.documents?.license
@@ -342,10 +345,12 @@ export function driverDocumentUrl(driver: DriverRecord, kind: "license" | "insur
         ? driver.vehicle?.insuranceImageUrl
         : driver.vehicle?.registrationImageUrl;
 
-  return firstPresent(legacyUrl, document?.frontURL, document?.documentURL, document?.downloadURL, document?.backURL);
+  return firstPresent(document?.frontURL, document?.documentURL, document?.downloadURL, document?.backURL, legacyUrl);
 }
 
 export function driverDocumentBackUrl(driver: DriverRecord, kind: "license" | "insurance" | "registration"): string | null {
+  const canonicalKind = kind === "license" ? "driverLicense" : kind;
+  if (driver.uid && uploadedDocumentPath(driver, driver.uid, canonicalKind, "back")) return `/api/drivers/${encodeURIComponent(driver.uid)}/documents/${canonicalKind}/back`;
   const document =
     kind === "license"
       ? driver.documents?.driverLicense ?? driver.documents?.license

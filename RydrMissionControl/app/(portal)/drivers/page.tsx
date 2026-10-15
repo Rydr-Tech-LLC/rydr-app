@@ -1,3 +1,4 @@
+import { driverDocumentReviewItems } from "@/lib/driverDocumentReview";
 import { evaluateDriverCompliance } from "../../../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
 import Link from "next/link";
 import { adminDb } from "@/lib/firebaseAdmin";
@@ -16,7 +17,7 @@ export default async function DriverVerificationQueuePage() {
     .filter((d) => {
       const status = d.driverApprovalStatus ?? "pending";
       const compliance = evaluateDriverCompliance(d, policy);
-      return status === "pending" || status === "needs_attention" || (status === "approved" && (!compliance.drivingAllowed || compliance.needsReviewKinds.length > 0 || compliance.expiringKinds.length > 0));
+      return driverDocumentReviewItems(d).some(item => item.attention || item.processing) || status === "pending" || status === "needs_attention" || (status === "approved" && (!compliance.drivingAllowed || compliance.needsReviewKinds.length > 0 || compliance.expiringKinds.length > 0));
     })
     .sort((a, b) => {
       const aDate = toDateSafe(a.createdAt)?.getTime() ?? 0;
@@ -53,12 +54,13 @@ export default async function DriverVerificationQueuePage() {
                     <p className="font-medium text-ink">{driverFullName(driver)}</p>
                     <StatusPill status={driver.driverApprovalStatus ?? "pending"} />
                   </div>
-                  <p className="mt-1 text-xs text-amber-700">{!compliance.drivingAllowed ? "Driving paused: current verified documents or screening required." : compliance.needsReviewKinds.length ? "Document expiration dates need review." : compliance.expiringKinds.length ? "Documents expire within 30 days." : "Onboarding review"}</p>
+                  <p className="mt-1 text-xs text-amber-700">{!compliance.drivingAllowed ? "Driving paused: current verified documents or screening required." : driverDocumentReviewItems(driver).some(item => item.attention) ? "Uploaded document requires review." : driverDocumentReviewItems(driver).some(item => item.processing) ? "Automated document review is processing." : compliance.needsReviewKinds.length ? "Document expiration dates need review." : compliance.expiringKinds.length ? "Documents expire within 30 days." : "Onboarding review"}</p>
                   {!driverNameCollected(driver) && (
                     <p className="mt-0.5 text-xs text-amber-700">Name/DOB onboarding step has not been completed.</p>
                   )}
                   <p className="mt-0.5 text-xs text-muted">Submitted: {timeAgo(submitted)}</p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
+                    {driverDocumentReviewItems(driver).filter(item => item.attention || item.processing).map(item => <Link key={item.kind} href={`/drivers/${driver.uid}#document-review`} className="rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-900">{item.label}: {item.processing ? "automated review processing" : "document review needed"}</Link>)}
                     {Object.entries(checks).map(([key, met]) => (
                       <span
                         key={key}

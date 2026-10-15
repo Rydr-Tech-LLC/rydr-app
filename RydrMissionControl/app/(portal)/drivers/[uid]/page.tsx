@@ -1,3 +1,5 @@
+import DriverDocumentReviewPanel from "./DriverDocumentReviewPanel";
+import { latestDriverDocument, type DriverDocumentKind } from "@/lib/driverDocumentReview";
 import { bindPrestineLibrary } from "../../../../../rydr-backend/firebase/functions/src/services/prestineLibraryPolicy";
 import VehicleSpecifications from "./VehicleSpecifications";
 import { exactLibraryEntry, resolveSpecifications } from "../../../../../rydr-backend/firebase/functions/src/services/vehicleSpecificationPolicy";
@@ -48,6 +50,7 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
 
   const history = await adminDb.collection("drivers").doc(params.uid).collection("vehicleArchive").orderBy("recordedAt", "desc").get();
   const rawDriver = snap.data() ?? {};
+  const documentHistory = await adminDb.collection("drivers").doc(params.uid).collection("documentReviews").orderBy("createdAt", "desc").limit(20).get();
   const specificationLibrary = await adminDb.collection("vehicleLibrary").limit(1000).get();
   const vehicleSpecs = resolveSpecifications(rawDriver.vehicle ?? {}, exactLibraryEntry(specificationLibrary.docs.map(doc => doc.data()), rawDriver.vehicle ?? {}));
   const prestineVehicle = { ...rawDriver.vehicle, libraryEligibility: bindPrestineLibrary(rawDriver.vehicle ?? {}, exactLibraryEntry(specificationLibrary.docs.map(doc => doc.data()), rawDriver.vehicle ?? {})) };
@@ -57,7 +60,7 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
   const driver = { ...(snap.data() as DriverRecord), uid: snap.id };
   const compliancePolicy = (await adminDb.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
   const compliance = evaluateDriverCompliance(snap.data() ?? {}, compliancePolicy);
-  const complianceRecords = Object.fromEntries(compliance.documents.map(doc => [doc.kind, (snap.data() ?? {}).documents?.[doc.kind] ?? currentDocument(snap.data() ?? {}, doc.kind)]));
+  const complianceRecords = Object.fromEntries(compliance.documents.map(doc => [doc.kind, latestDriverDocument(rawDriver, doc.kind as DriverDocumentKind)]));
   const { checks, missing } = evaluateDriverRequirements(driver, compliancePolicy);
   const createdAt = toDateSafe(driver.createdAt);
   const dob = toDateSafe(driver.dob);
@@ -104,6 +107,7 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
     <div className="space-y-6">
       <VehicleSpecifications uid={params.uid} specs={JSON.parse(JSON.stringify(vehicleSpecs))} vehicle={JSON.parse(JSON.stringify(rawDriver.vehicle ?? {}))} />
       <DriverVehicles uid={params.uid} vehicles={JSON.parse(JSON.stringify(vehicles))} archive={JSON.parse(JSON.stringify(vehicleArchive))} />
+      <DriverDocumentReviewPanel uid={params.uid} driver={rawDriver} history={documentHistory.docs.map(doc => ({ id: doc.id, documentType: doc.data().documentType, status: doc.data().status, reviewReason: doc.data().reviewReason, checks: doc.data().checks ?? null }))} />
       <DriverComplianceReview uid={params.uid} assessment={compliance} records={JSON.parse(JSON.stringify(complianceRecords))} reportDate={dateInputValue(toDateSafe((snap.data() ?? {}).backgroundScreening?.completedAt))} />
       <section id="prestine-approval" className="rounded-2xl border border-line bg-white p-5 space-y-2"><h2 className="font-semibold">Prestine eligibility · selected vehicle</h2><p>{premiumAssessment.prestine.eligible ? `Eligible for Rydr Prestine ${premiumAssessment.prestine.bodyType === "suv" ? "SUV" : "Sedan"}` : premiumAssessment.prestine.issues.join(" · ")}</p><p className="text-sm text-muted">Determined automatically by the selected vehicle’s library eligibility, body style and model year. No separate Prestine review is required. XL capacity is checked independently.</p></section>
       <details><summary className="cursor-pointer font-medium">Executive verification — service disabled</summary><PremiumVehicleReview uid={params.uid} initial={JSON.parse(JSON.stringify((snap.data() ?? {}).premiumReview?.vehicleKey === vehicleKey((snap.data() ?? {}).vehicle) ? (snap.data() ?? {}).premiumReview : {}))} assessment={premiumAssessment} specifications={vehicleSpecs} vehicleBodyStyle={exactLibraryEntry(specificationLibrary.docs.map(doc => doc.data()), rawDriver.vehicle ?? {})?.bodyStyle} /></details>
