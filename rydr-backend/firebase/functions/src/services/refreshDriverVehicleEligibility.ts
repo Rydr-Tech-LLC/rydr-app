@@ -16,7 +16,7 @@ export async function refreshDriverVehicleEligibility(ref: FirebaseFirestore.Doc
     // A replacement vehicle gets its own trigger; never publish the old one's qualification.
     if (!data?.vehicle || selectedVehicleKey(data.vehicle) !== selectedVehicleKey(driver.vehicle)) return null;
     const vehicle = { ...data.vehicle, specifications: match.specifications, libraryEligibility: match.libraryEligibility };
-    const eligibility = evaluateVehicleEligibility({ ...vehicle, vehicle, libraryRideTypes: match.eligibleRideTypes, premiumReview: data.premiumReview, executiveConfig: config.data() ?? {}, rating: data.rating });
+    const eligibility = evaluateVehicleEligibility({ ...vehicle, vehicle, libraryRideTypes: match.eligibleRideTypes, approvedRideTypes: data.approvedRideTypes, premiumReview: data.premiumReview, executiveConfig: config.data() ?? {}, rating: data.rating });
     const selected = (data.selectedRideTypes ?? []).filter((type: string) => eligibility.rideTypes.includes(type));
     const updated = { ...data, vehicle, qualifiedRideTypes: eligibility.rideTypes, supportedRideTypes: eligibility.rideTypes, selectedRideTypes: selected,
       vehicleEligibility: { ...data.vehicleEligibility, ...eligibility, matchedVehicleId: match.libraryEligibility.libraryVehicleId }, premiumEligibility: eligibility.premium };
