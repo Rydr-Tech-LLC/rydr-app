@@ -32,3 +32,168 @@ textarea {
   background: rgba(17, 17, 17, 0.15);
   border-radius: 999px;
 }
+
+/* Mission Control workspace design system. */
+.mc-workspace {
+  --mc-gradient: linear-gradient(
+    115deg,
+    #f22b47 0%,
+    #cd286d 45%,
+    #7654db 75%,
+    #4264e8 100%
+  );
+  background:
+    radial-gradient(ellipse at 90% 0%, #f0edff 0, transparent 38%), #f7f8fc;
+  font-size: 14px;
+}
+.mc-sidebar {
+  background: linear-gradient(180deg, #fff 70%, #fff5f7);
+  border-color: #e9eaf1;
+}
+.mc-sidebar nav {
+  padding-top: 12px;
+}
+.mc-nav-link {
+  min-height: 39px;
+  margin-bottom: 3px;
+}
+.mc-nav-active {
+  background: linear-gradient(100deg, #ffedf0, #f3efff);
+  box-shadow: inset 3px 0 #ed2949;
+  font-weight: 650;
+}
+.mc-topbar {
+  backdrop-filter: blur(16px);
+}
+.mc-content > div > div:first-child h1,
+.mc-content > div > h1 {
+  font-size: clamp(24px, 2.2vw, 32px);
+  letter-spacing: -0.035em;
+  font-weight: 750;
+  line-height: 1.2;
+}
+.mc-content > div > div:first-child:has(h1) {
+  padding-bottom: 8px;
+}
+.mc-workspace section.rounded-lg,
+.mc-workspace div.rounded-lg.border.bg-white {
+  border-radius: 20px;
+  border-color: #e7e9f1;
+  box-shadow: 0 4px 22px #24234804;
+}
+.mc-workspace input:not([type="checkbox"]):not([type="radio"]),
+.mc-workspace select,
+.mc-workspace textarea {
+  border-radius: 11px;
+  min-height: 40px;
+  border-color: #dfe2ed;
+  background-color: #fcfcfe;
+}
+.mc-workspace input:focus,
+.mc-workspace textarea:focus,
+.mc-workspace select:focus {
+  outline: 2px solid #f03b6855;
+  outline-offset: 2px;
+}
+.mc-workspace :is(a, button):focus-visible {
+  outline: 3px solid #9b6fe9;
+  outline-offset: 3px;
+}
+.mc-workspace button {
+  transition:
+    background 0.15s,
+    box-shadow 0.15s,
+    transform 0.15s;
+}
+.mc-workspace button:disabled {
+  cursor: not-allowed;
+}
+.mc-workspace .bg-rydr-red {
+  background: var(--mc-gradient);
+}
+.mc-workspace table {
+  font-size: 13px;
+}
+.mc-workspace th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-top: 16px;
+  padding-bottom: 16px;
+  background: #f9fafe;
+  color: #687089;
+}
+.mc-workspace td {
+  padding-top: 15px;
+  padding-bottom: 15px;
+}
+.mc-workspace tbody tr:hover {
+  background: #faf7ff;
+}
+.mc-panel {
+  border: 1px solid #e7e9f1;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 5px 24px #24234804;
+  padding: 24px;
+  min-width: 0;
+}
+.mc-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: #777e96;
+}
+.mc-gradient-text {
+  background: var(--mc-gradient);
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.mc-segment {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: #f3f4f9;
+  border-radius: 12px;
+  flex-wrap: wrap;
+}
+.mc-segment button {
+  padding: 8px 13px;
+  border-radius: 9px;
+  font-size: 12px;
+  color: #667085;
+}
+.mc-segment button[aria-pressed="true"] {
+  background: white;
+  color: #b51c46;
+  box-shadow: 0 2px 7px #2020400b;
+  font-weight: 650;
+}
+.mc-empty {
+  padding: 48px 16px;
+  text-align: center;
+  color: #71788c;
+}
+.mc-empty svg {
+  margin: 0 auto 14px;
+  color: #c3b7d9;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mc-workspace * {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (max-width: 767px) {
+  .mc-panel {
+    padding: 18px;
+  }
+  .mc-search-link {
+    font-size: 0;
+  }
+  .mc-content {
+    padding-bottom: 40px;
+  }
+}

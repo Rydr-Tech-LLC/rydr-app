@@ -1,3 +1,4 @@
+import DataTable from "@/components/DataTable";
 import Link from "next/link";
 import { adminDb } from "@/lib/firebaseAdmin";
 import type { RiderRecord } from "@/lib/types";
@@ -8,66 +9,74 @@ export const dynamic = "force-dynamic";
 
 export default async function RidersPage() {
   const snap = await adminDb.collection("riders").limit(500).get();
-  const riders = snap.docs.map((doc) => ({ ...(doc.data() as RiderRecord), uid: doc.id }));
+  const riders = snap.docs.map((doc) => ({
+    ...(doc.data() as RiderRecord),
+    uid: doc.id,
+  }));
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-ink">Riders</h1>
-        <p className="mt-1 text-sm text-muted">{riders.length} total riders.</p>
+        <p className="mt-1 text-sm text-muted">
+          {riders.length} riders loaded · Search, sort, and open a profile.
+        </p>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-line bg-white shadow-sm">
-        <table className="w-full min-w-[720px] text-sm">
-          <thead className="border-b border-line bg-grouped text-left text-xs font-medium text-muted">
-            <tr>
-              <th className="px-4 py-2.5">Name</th>
-              <th className="px-4 py-2.5">Contact</th>
-              <th className="px-4 py-2.5">Rides</th>
-              <th className="px-4 py-2.5">Verified</th>
-              <th className="px-4 py-2.5">Badges</th>
-              <th className="px-4 py-2.5">Account Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
-            {riders.map((rider) => (
-              <tr key={rider.uid} className="hover:bg-grouped/60">
-                <td className="px-4 py-2.5 font-medium text-ink">
-                  <Link href={`/riders/${rider.uid}`} className="hover:underline">
-                    {fullName(rider.firstName, rider.lastName)}
-                  </Link>
-                </td>
-                <td className="px-4 py-2.5 text-muted">{rider.email ?? rider.phoneNumber ?? "—"}</td>
-                <td className="px-4 py-2.5 text-muted">{rider.rideCount ?? 0}</td>
-                <td className="px-4 py-2.5">
-                  {rider.verifiedRider ? (
-                    <StatusPill status="verified" label="Verified" />
-                  ) : (
-                    <span className="text-xs text-muted">Unverified</span>
-                  )}
-                </td>
-                <td className="px-4 py-2.5">
-                  {rider.badges?.studentAmbassador?.active ? (
-                    <StatusPill status="active" label="Student Ambassador" />
-                  ) : (
-                    <span className="text-xs text-muted">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-2.5">
-                  <StatusPill status={rider.accountStatus ?? "active"} />
-                </td>
-              </tr>
-            ))}
-            {riders.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted">
-                  No riders yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        label="riders"
+        columns={[
+          "Rider",
+          "Contact",
+          "Rides",
+          "Verification",
+          "Badges",
+          "Account status",
+        ]}
+        rows={riders.map((r) => {
+          const name = fullName(r.firstName, r.lastName);
+          return {
+            id: r.uid,
+            search: [name, r.email, r.phoneNumber, r.uid, r.accountStatus].join(
+              " ",
+            ),
+            values: [
+              name,
+              r.email ?? r.phoneNumber ?? "",
+              r.rideCount ?? 0,
+              r.verifiedRider ? "Verified" : "Unverified",
+              r.badges?.studentAmbassador?.active ? "Ambassador" : "",
+              r.accountStatus ?? "active",
+            ],
+            cells: [
+              <Link
+                key="name"
+                href={`/riders/${r.uid}`}
+                className="font-semibold hover:text-rydr-red"
+              >
+                {name}
+              </Link>,
+              r.email ?? r.phoneNumber ?? "—",
+              r.rideCount ?? 0,
+              <StatusPill
+                key="verification"
+                status={r.verifiedRider ? "verified" : "pending"}
+                label={r.verifiedRider ? "Verified" : "Unverified"}
+              />,
+              r.badges?.studentAmbassador?.active ? (
+                <StatusPill
+                  key="badge"
+                  status="active"
+                  label="Student Ambassador"
+                />
+              ) : (
+                "—"
+              ),
+              <StatusPill key="status" status={r.accountStatus ?? "active"} />,
+            ],
+          };
+        })}
+      />
     </div>
   );
 }

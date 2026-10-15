@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { adminDb } from "@/lib/firebaseAdmin";
 import type { SafetyReport } from "@/lib/types";
 import { toDateSafe } from "@/lib/format";
@@ -7,43 +8,92 @@ import ReportActions from "./ReportActions";
 export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
-  const snap = await adminDb.collection("safetyReports").orderBy("createdAt", "desc").limit(200).get().catch(() => null);
-  const reports = snap ? snap.docs.map((doc) => ({ ...(doc.data() as SafetyReport), id: doc.id })) : [];
+  const snap = await adminDb
+    .collection("safetyReports")
+    .orderBy("createdAt", "desc")
+    .limit(200)
+    .get()
+    .catch(() => null);
+  const reports = snap
+    ? snap.docs.map((doc) => ({ ...(doc.data() as SafetyReport), id: doc.id }))
+    : [];
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold text-ink">Safety Reports</h1>
-        <p className="mt-1 text-sm text-muted">Open reports from riders and drivers awaiting Mission Control investigation.</p>
+        <p className="mt-1 text-sm text-muted">
+          Open reports from riders and drivers awaiting Mission Control
+          investigation.
+        </p>
       </div>
 
       {reports.length === 0 ? (
         <div className="rounded-lg border border-dashed border-line bg-white p-10 text-center text-sm text-muted">
-          No reports yet. Rider, driver, and Cash Hub safety cases will appear here.
+          No reports yet. Rider, driver, and Cash Hub safety cases will appear
+          here.
         </div>
       ) : (
         <div className="space-y-2">
           {reports.map((report) => {
             const created = toDateSafe(report.createdAt);
             return (
-              <div key={report.id} className="rounded-lg border border-line bg-white p-4 shadow-sm">
+              <div
+                key={report.id}
+                className="rounded-lg border border-line bg-white p-4 shadow-sm"
+              >
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="flex items-center gap-2">
-                      <p className="font-medium text-ink">{report.reportType ?? "Report"}</p>
+                      <p className="font-medium text-ink">
+                        {report.reportType ?? "Report"}
+                      </p>
                       <StatusPill status={report.status} />
-                      {report.investigationStatus === "pending_review" && <StatusPill status="pending review" />}
+                      {report.investigationStatus === "pending_review" && (
+                        <StatusPill status="pending review" />
+                      )}
                     </div>
                     <p className="mt-0.5 text-xs text-muted">
-                      {report.cashHubRequestId ? `Cash Hub ${report.cashHubRequestId}` : `Ride ${report.rideId ?? "—"}`} · Driver{" "}
-                      {report.driverName ?? report.driverId ?? "—"} · Rider {report.riderName ?? report.riderId ?? "—"} ·{" "}
-                      {created ? created.toLocaleString() : "—"}
+                      {report.cashHubRequestId
+                        ? `Cash Hub ${report.cashHubRequestId}`
+                        : `Ride ${report.rideId ?? "—"}`}{" "}
+                      · Driver{" "}
+                      {report.driverId ? (
+                        <Link
+                          href={`/drivers/${report.driverId}`}
+                          className="text-rydr-burgundy hover:underline"
+                        >
+                          {report.driverName ?? report.driverId}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}{" "}
+                      · Rider{" "}
+                      {report.riderId ? (
+                        <Link
+                          href={`/riders/${report.riderId}`}
+                          className="text-rydr-burgundy hover:underline"
+                        >
+                          {report.riderName ?? report.riderId}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}{" "}
+                      · {created ? created.toLocaleString() : "—"}
                     </p>
-                    {report.description && <p className="mt-2 text-sm text-ink">{report.description}</p>}
+                    {report.description && (
+                      <p className="mt-2 text-sm text-ink">
+                        {report.description}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="mt-3">
-                  <ReportActions id={report.id} hasDriver={Boolean(report.driverId)} hasRider={Boolean(report.riderId)} />
+                  <ReportActions
+                    id={report.id}
+                    hasDriver={Boolean(report.driverId)}
+                    hasRider={Boolean(report.riderId)}
+                  />
                 </div>
               </div>
             );

@@ -1,13 +1,25 @@
 import DriverDocumentReviewPanel from "./DriverDocumentReviewPanel";
-import { latestDriverDocument, type DriverDocumentKind } from "@/lib/driverDocumentReview";
+import {
+  latestDriverDocument,
+  type DriverDocumentKind,
+} from "@/lib/driverDocumentReview";
 import { bindPrestineLibrary } from "../../../../../rydr-backend/firebase/functions/src/services/prestineLibraryPolicy";
 import VehicleSpecifications from "./VehicleSpecifications";
-import { exactLibraryEntry, resolveSpecifications } from "../../../../../rydr-backend/firebase/functions/src/services/vehicleSpecificationPolicy";
+import {
+  exactLibraryEntry,
+  resolveSpecifications,
+} from "../../../../../rydr-backend/firebase/functions/src/services/vehicleSpecificationPolicy";
 import DriverVehicles from "./DriverVehicles";
 import DriverComplianceReview from "./DriverComplianceReview";
-import { evaluateDriverCompliance, currentDocument } from "../../../../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
+import {
+  evaluateDriverCompliance,
+  currentDocument,
+} from "../../../../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
 import PremiumVehicleReview from "./PremiumVehicleReview";
-import { evaluatePremiumVehicle, vehicleKey } from "../../../../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
+import {
+  evaluatePremiumVehicle,
+  vehicleKey,
+} from "../../../../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { adminDb } from "@/lib/firebaseAdmin";
@@ -17,7 +29,7 @@ import {
   driverDocumentUrl,
   driverIdentityStatus,
   evaluateDriverRequirements,
-  type DriverRecord
+  type DriverRecord,
 } from "@/lib/types";
 import { driverFullName, driverNameCollected, toDateSafe } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
@@ -25,43 +37,120 @@ import ImageViewer from "@/components/ImageViewer";
 import RequirementChecklist from "@/components/RequirementChecklist";
 import TripSafetyAnalytics from "@/components/TripSafetyAnalytics";
 import { findActiveRideForDriver } from "@/lib/activeRides";
-import { cashHubBillingDisplay, formatCents, getCurrentCashHubBilling } from "@/lib/cashHubBilling";
+import {
+  cashHubBillingDisplay,
+  formatCents,
+  getCurrentCashHubBilling,
+} from "@/lib/cashHubBilling";
 import { buildDriverOnboardingProgress } from "@/lib/driverOnboardingProgress";
 import DriverActions from "./DriverActions";
 import DriverOnboardingProgressLive from "./DriverOnboardingProgressLive";
-import DriverProfileAdminTools, { type DriverProfileAdminInitial } from "./DriverProfileAdminTools";
+import DriverProfileAdminTools, {
+  type DriverProfileAdminInitial,
+} from "./DriverProfileAdminTools";
 
 export const dynamic = "force-dynamic";
 
-export default async function DriverReviewPage(props: { params: Promise<{ uid: string }> }) {
+export default async function DriverReviewPage(props: {
+  params: Promise<{ uid: string }>;
+}) {
   const params = await props.params;
-  const [snap, activeRide, cashHubBilling, cashHubConfigSnap] = await Promise.all([
-    adminDb.collection("drivers").doc(params.uid).get(),
-    findActiveRideForDriver(params.uid),
-    getCurrentCashHubBilling(params.uid),
-    adminDb.collection("platformConfig").doc("cashRydrHub").get().catch(() => null)
-  ]);
+  const [snap, activeRide, cashHubBilling, cashHubConfigSnap] =
+    await Promise.all([
+      adminDb.collection("drivers").doc(params.uid).get(),
+      findActiveRideForDriver(params.uid),
+      getCurrentCashHubBilling(params.uid),
+      adminDb
+        .collection("platformConfig")
+        .doc("cashRydrHub")
+        .get()
+        .catch(() => null),
+    ]);
   if (!snap.exists) notFound();
   const cashHubConfigData = cashHubConfigSnap?.data() ?? {};
   const cashHubGateConfig = {
     termsAcceptanceEnabled: cashHubConfigData.termsAcceptanceEnabled === true,
-    cashHubTermsVersion: typeof cashHubConfigData.cashHubTermsVersion === "string" ? cashHubConfigData.cashHubTermsVersion : null
+    cashHubTermsVersion:
+      typeof cashHubConfigData.cashHubTermsVersion === "string"
+        ? cashHubConfigData.cashHubTermsVersion
+        : null,
   };
 
-  const history = await adminDb.collection("drivers").doc(params.uid).collection("vehicleArchive").orderBy("recordedAt", "desc").get();
+  const history = await adminDb
+    .collection("drivers")
+    .doc(params.uid)
+    .collection("vehicleArchive")
+    .orderBy("recordedAt", "desc")
+    .get();
   const rawDriver = snap.data() ?? {};
-  const documentHistory = await adminDb.collection("drivers").doc(params.uid).collection("documentReviews").orderBy("createdAt", "desc").limit(20).get();
-  const specificationLibrary = await adminDb.collection("vehicleLibrary").limit(1000).get();
-  const vehicleSpecs = resolveSpecifications(rawDriver.vehicle ?? {}, exactLibraryEntry(specificationLibrary.docs.map(doc => doc.data()), rawDriver.vehicle ?? {}));
-  const prestineVehicle = { ...rawDriver.vehicle, libraryEligibility: bindPrestineLibrary(rawDriver.vehicle ?? {}, exactLibraryEntry(specificationLibrary.docs.map(doc => doc.data()), rawDriver.vehicle ?? {})) };
-  const premiumAssessment = evaluatePremiumVehicle({ ...rawDriver, vehicle: prestineVehicle });
-  const vehicles = [ ...(rawDriver.vehicle ? [{ ...rawDriver.vehicle, id: "current" }] : []), ...Object.entries(rawDriver.savedVehicles ?? {}).map(([id, vehicle]: [string, any]) => ({ ...vehicle, id })) ];
-  const vehicleArchive = history.docs.map(doc => { const data = doc.data(); return { id: doc.id, vehicle: data.vehicle ?? {}, action: data.action ?? "recorded", date: toDateSafe(data.recordedAt)?.toISOString() ?? "Unknown", actor: data.actorUid, reason: data.reason }; });
+  const documentHistory = await adminDb
+    .collection("drivers")
+    .doc(params.uid)
+    .collection("documentReviews")
+    .orderBy("createdAt", "desc")
+    .limit(20)
+    .get();
+  const specificationLibrary = await adminDb
+    .collection("vehicleLibrary")
+    .limit(1000)
+    .get();
+  const vehicleSpecs = resolveSpecifications(
+    rawDriver.vehicle ?? {},
+    exactLibraryEntry(
+      specificationLibrary.docs.map((doc) => doc.data()),
+      rawDriver.vehicle ?? {},
+    ),
+  );
+  const prestineVehicle = {
+    ...rawDriver.vehicle,
+    libraryEligibility: bindPrestineLibrary(
+      rawDriver.vehicle ?? {},
+      exactLibraryEntry(
+        specificationLibrary.docs.map((doc) => doc.data()),
+        rawDriver.vehicle ?? {},
+      ),
+    ),
+  };
+  const premiumAssessment = evaluatePremiumVehicle({
+    ...rawDriver,
+    vehicle: prestineVehicle,
+  });
+  const vehicles = [
+    ...(rawDriver.vehicle ? [{ ...rawDriver.vehicle, id: "current" }] : []),
+    ...Object.entries(rawDriver.savedVehicles ?? {}).map(
+      ([id, vehicle]: [string, any]) => ({ ...vehicle, id }),
+    ),
+  ];
+  const vehicleArchive = history.docs.map((doc) => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      vehicle: data.vehicle ?? {},
+      action: data.action ?? "recorded",
+      date: toDateSafe(data.recordedAt)?.toISOString() ?? "Unknown",
+      actor: data.actorUid,
+      reason: data.reason,
+    };
+  });
   const driver = { ...(snap.data() as DriverRecord), uid: snap.id };
-  const compliancePolicy = (await adminDb.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
-  const compliance = evaluateDriverCompliance(snap.data() ?? {}, compliancePolicy);
-  const complianceRecords = Object.fromEntries(compliance.documents.map(doc => [doc.kind, latestDriverDocument(rawDriver, doc.kind as DriverDocumentKind)]));
-  const { checks, missing } = evaluateDriverRequirements(driver, compliancePolicy);
+  const compliancePolicy =
+    (
+      await adminDb.collection("platformConfig").doc("driverCompliance").get()
+    ).data() ?? {};
+  const compliance = evaluateDriverCompliance(
+    snap.data() ?? {},
+    compliancePolicy,
+  );
+  const complianceRecords = Object.fromEntries(
+    compliance.documents.map((doc) => [
+      doc.kind,
+      latestDriverDocument(rawDriver, doc.kind as DriverDocumentKind),
+    ]),
+  );
+  const { checks, missing } = evaluateDriverRequirements(
+    driver,
+    compliancePolicy,
+  );
   const createdAt = toDateSafe(driver.createdAt);
   const dob = toDateSafe(driver.dob);
   const licenseUrl = driverDocumentUrl(driver, "license");
@@ -72,7 +161,11 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
   const registrationBackUrl = driverDocumentBackUrl(driver, "registration");
   const identityStatus = driverIdentityStatus(driver);
   const connectStatus = driverConnectStatus(driver);
-  const cashHubDisplay = cashHubBillingDisplay(driver, cashHubBilling, cashHubGateConfig);
+  const cashHubDisplay = cashHubBillingDisplay(
+    driver,
+    cashHubBilling,
+    cashHubGateConfig,
+  );
   const onboardingProgress = buildDriverOnboardingProgress(driver);
   const adminProfileInitial: DriverProfileAdminInitial = {
     firstName: driver.firstName ?? driver.legalFirstName ?? "",
@@ -85,11 +178,11 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
       line2: driver.address?.line2 ?? "",
       city: driver.address?.city ?? "",
       state: driver.address?.state ?? "",
-      zip: driver.address?.zip ?? ""
+      zip: driver.address?.zip ?? "",
     },
     license: {
       number: driver.license?.number ?? "",
-      state: driver.license?.state ?? ""
+      state: driver.license?.state ?? "",
     },
     vehicle: {
       year: driver.vehicle?.year ? String(driver.vehicle.year) : "",
@@ -99,46 +192,154 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
       color: driver.vehicle?.color ?? "",
       plate: driver.vehicle?.plate ?? "",
       vin: driver.vehicle?.vin ?? "",
-      class: driver.vehicle?.class ?? ""
-    }
+      class: driver.vehicle?.class ?? "",
+    },
   };
 
   return (
     <div className="space-y-6">
-      <VehicleSpecifications uid={params.uid} specs={JSON.parse(JSON.stringify(vehicleSpecs))} vehicle={JSON.parse(JSON.stringify(rawDriver.vehicle ?? {}))} />
-      <DriverVehicles uid={params.uid} vehicles={JSON.parse(JSON.stringify(vehicles))} archive={JSON.parse(JSON.stringify(vehicleArchive))} />
-      <DriverDocumentReviewPanel uid={params.uid} driver={rawDriver} history={documentHistory.docs.map(doc => ({ id: doc.id, documentType: doc.data().documentType, status: doc.data().status, reviewReason: doc.data().reviewReason, checks: doc.data().checks ?? null }))} />
-      <DriverComplianceReview uid={params.uid} assessment={compliance} records={JSON.parse(JSON.stringify(complianceRecords))} reportDate={dateInputValue(toDateSafe((snap.data() ?? {}).backgroundScreening?.completedAt))} />
-      <section id="prestine-approval" className="rounded-2xl border border-line bg-white p-5 space-y-2"><h2 className="font-semibold">Prestine eligibility · selected vehicle</h2><p>{premiumAssessment.prestine.eligible ? `Eligible for Rydr Prestine ${premiumAssessment.prestine.bodyType === "suv" ? "SUV" : "Sedan"}` : premiumAssessment.prestine.issues.join(" · ")}</p><p className="text-sm text-muted">Determined automatically by the selected vehicle’s library eligibility, body style and model year. No separate Prestine review is required. XL capacity is checked independently.</p></section>
-      <details><summary className="cursor-pointer font-medium">Executive verification — service disabled</summary><PremiumVehicleReview uid={params.uid} initial={JSON.parse(JSON.stringify((snap.data() ?? {}).premiumReview?.vehicleKey === vehicleKey((snap.data() ?? {}).vehicle) ? (snap.data() ?? {}).premiumReview : {}))} assessment={premiumAssessment} specifications={vehicleSpecs} vehicleBodyStyle={exactLibraryEntry(specificationLibrary.docs.map(doc => doc.data()), rawDriver.vehicle ?? {})?.bodyStyle} /></details>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold text-ink">{driverFullName(driver)}</h1>
+            <h1 className="text-xl font-semibold text-ink">
+              {driverFullName(driver)}
+            </h1>
             <StatusPill status={driver.driverApprovalStatus ?? "pending"} />
           </div>
           {!driverNameCollected(driver) && (
-            <p className="mt-1 text-sm font-medium text-amber-700">Name/DOB onboarding step has not been completed.</p>
+            <p className="mt-1 text-sm font-medium text-amber-700">
+              Name/DOB onboarding step has not been completed.
+            </p>
           )}
           <p className="mt-1 text-sm text-muted">
-            {driver.email ?? "no email"} · {driver.phoneNumber ?? "no phone"} · Applied{" "}
-            {createdAt ? createdAt.toLocaleDateString() : "—"}
+            {driver.email ?? "no email"} · {driver.phoneNumber ?? "no phone"} ·
+            Applied {createdAt ? createdAt.toLocaleDateString() : "—"}
           </p>
         </div>
       </div>
+      <nav
+        aria-label="Driver profile sections"
+        className="flex flex-wrap gap-2 rounded-2xl border border-line bg-white p-3 text-xs font-medium text-rydr-burgundy"
+      >
+        {[
+          ["profile-overview", "Overview"],
+          ["vehicle-specifications", "Vehicle & eligibility"],
+          ["garage-section", "Garage & archive"],
+          ["document-review", "Document review"],
+          ["compliance-section", "Compliance"],
+        ].map(([id, label]) => (
+          <a
+            key={id}
+            href={`#${id}`}
+            className="rounded-lg bg-grouped px-3 py-2 hover:bg-red-50"
+          >
+            {label}
+          </a>
+        ))}
+      </nav>
+      <div id="vehicle-specifications" className="scroll-mt-5">
+        <VehicleSpecifications
+          uid={params.uid}
+          specs={JSON.parse(JSON.stringify(vehicleSpecs))}
+          vehicle={JSON.parse(JSON.stringify(rawDriver.vehicle ?? {}))}
+        />
+      </div>
+      <div id="garage-section" className="scroll-mt-5">
+        <DriverVehicles
+          uid={params.uid}
+          vehicles={JSON.parse(JSON.stringify(vehicles))}
+          archive={JSON.parse(JSON.stringify(vehicleArchive))}
+        />
+      </div>
+      <DriverDocumentReviewPanel
+        uid={params.uid}
+        driver={rawDriver}
+        history={documentHistory.docs.map((doc) => ({
+          id: doc.id,
+          documentType: doc.data().documentType,
+          status: doc.data().status,
+          reviewReason: doc.data().reviewReason,
+          checks: doc.data().checks ?? null,
+        }))}
+      />
+      <div id="compliance-section" className="scroll-mt-5">
+        <DriverComplianceReview
+          uid={params.uid}
+          assessment={compliance}
+          records={JSON.parse(JSON.stringify(complianceRecords))}
+          reportDate={dateInputValue(
+            toDateSafe((snap.data() ?? {}).backgroundScreening?.completedAt),
+          )}
+        />
+      </div>
+      <section
+        id="prestine-approval"
+        className="rounded-2xl border border-line bg-white p-5 space-y-2"
+      >
+        <h2 className="font-semibold">
+          Prestine eligibility · selected vehicle
+        </h2>
+        <p>
+          {premiumAssessment.prestine.eligible
+            ? `Eligible for Rydr Prestine ${premiumAssessment.prestine.bodyType === "suv" ? "SUV" : "Sedan"}`
+            : premiumAssessment.prestine.issues.join(" · ")}
+        </p>
+        <p className="text-sm text-muted">
+          Determined automatically by the selected vehicle’s library
+          eligibility, body style and model year. No separate Prestine review is
+          required. XL capacity is checked independently.
+        </p>
+      </section>
+      <details>
+        <summary className="cursor-pointer font-medium">
+          Executive verification — service disabled
+        </summary>
+        <PremiumVehicleReview
+          uid={params.uid}
+          initial={JSON.parse(
+            JSON.stringify(
+              (snap.data() ?? {}).premiumReview?.vehicleKey ===
+                vehicleKey((snap.data() ?? {}).vehicle)
+                ? (snap.data() ?? {}).premiumReview
+                : {},
+            ),
+          )}
+          assessment={premiumAssessment}
+          specifications={vehicleSpecs}
+          vehicleBodyStyle={
+            exactLibraryEntry(
+              specificationLibrary.docs.map((doc) => doc.data()),
+              rawDriver.vehicle ?? {},
+            )?.bodyStyle
+          }
+        />
+      </details>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
+          <div id="profile-overview" className="scroll-mt-5" />
           <Section title="Driver Profile">
             <Grid>
               <Field label="Full name" value={driverFullName(driver)} />
-              <Field label="Date of birth" value={dob ? dob.toLocaleDateString() : "—"} />
+              <Field
+                label="Date of birth"
+                value={dob ? dob.toLocaleDateString() : "—"}
+              />
               <Field label="Email" value={driver.email} />
-              <Field label="Phone" value={driver.phoneNumber ?? driver.phoneE164} />
+              <Field
+                label="Phone"
+                value={driver.phoneNumber ?? driver.phoneE164}
+              />
               <Field
                 label="Address"
                 value={
-                  [driver.address?.street, driver.address?.line2, driver.address?.city, driver.address?.state, driver.address?.zip]
+                  [
+                    driver.address?.street,
+                    driver.address?.line2,
+                    driver.address?.city,
+                    driver.address?.state,
+                    driver.address?.zip,
+                  ]
                     .filter(Boolean)
                     .join(", ") || "—"
                 }
@@ -153,7 +354,9 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
             </Grid>
             <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
               <ImageViewer label="License front" url={licenseUrl} />
-              {licenseBackUrl && licenseBackUrl !== licenseUrl && <ImageViewer label="License back" url={licenseBackUrl} />}
+              {licenseBackUrl && licenseBackUrl !== licenseUrl && (
+                <ImageViewer label="License back" url={licenseBackUrl} />
+              )}
             </div>
           </Section>
 
@@ -190,7 +393,9 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
             </Grid>
 
             <div className="mt-3">
-              <p className="mb-1.5 text-[11px] font-medium text-muted">Generic Vehicle Image</p>
+              <p className="mb-1.5 text-[11px] font-medium text-muted">
+                Generic Vehicle Image
+              </p>
               {driver.vehicle?.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -200,7 +405,9 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
                 />
               ) : (
                 <div className="flex h-32 w-48 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-line bg-grouped text-center">
-                  <p className="text-xs font-medium text-muted">Vehicle image not yet available.</p>
+                  <p className="text-xs font-medium text-muted">
+                    Vehicle image not yet available.
+                  </p>
                   {driver.vehicle?.make && driver.vehicle?.model && (
                     <Link
                       href={`/vehicle-library?make=${encodeURIComponent(driver.vehicle.make)}&model=${encodeURIComponent(driver.vehicle.model)}`}
@@ -217,14 +424,22 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
           <Section title="Insurance Information">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <ImageViewer label="Insurance card" url={insuranceUrl} />
-              {insuranceBackUrl && insuranceBackUrl !== insuranceUrl && <ImageViewer label="Insurance back" url={insuranceBackUrl} />}
+              {insuranceBackUrl && insuranceBackUrl !== insuranceUrl && (
+                <ImageViewer label="Insurance back" url={insuranceBackUrl} />
+              )}
             </div>
           </Section>
 
           <Section title="Registration Information">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <ImageViewer label="Registration" url={registrationUrl} />
-              {registrationBackUrl && registrationBackUrl !== registrationUrl && <ImageViewer label="Registration back" url={registrationBackUrl} />}
+              {registrationBackUrl &&
+                registrationBackUrl !== registrationUrl && (
+                  <ImageViewer
+                    label="Registration back"
+                    url={registrationBackUrl}
+                  />
+                )}
             </div>
           </Section>
 
@@ -232,28 +447,47 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
             <Grid>
               <Field
                 label="Status"
-                value={driver.backgroundCheckStatus === "beta_deferred" ? "Beta Deferred" : driver.backgroundCheckStatus ?? "Not started"}
+                value={
+                  driver.backgroundCheckStatus === "beta_deferred"
+                    ? "Beta Deferred"
+                    : (driver.backgroundCheckStatus ?? "Not started")
+                }
               />
               <Field
                 label="Mission Control deferral"
-                value={driver.betaBackgroundCheckBypassEnabled ? "Enabled" : "Not enabled"}
+                value={
+                  driver.betaBackgroundCheckBypassEnabled
+                    ? "Enabled"
+                    : "Not enabled"
+                }
               />
               <Field
                 label="Beta agreement"
-                value={driver.betaAgreementAccepted ? "Accepted" : "Not accepted"}
+                value={
+                  driver.betaAgreementAccepted ? "Accepted" : "Not accepted"
+                }
               />
               <Field
                 label="Acknowledged at"
-                value={toDateSafe(driver.backgroundCheckAcknowledgedAt)?.toLocaleString() ?? "—"}
+                value={
+                  toDateSafe(
+                    driver.backgroundCheckAcknowledgedAt,
+                  )?.toLocaleString() ?? "—"
+                }
               />
               <Field
                 label="Deferred at"
-                value={toDateSafe(driver.betaBackgroundCheckBypassedAt)?.toLocaleString() ?? "—"}
+                value={
+                  toDateSafe(
+                    driver.betaBackgroundCheckBypassedAt,
+                  )?.toLocaleString() ?? "—"
+                }
               />
             </Grid>
             <p className="mt-2 text-[11px] text-muted">
-              Mission Control may defer the background check for this 60-day beta. Final driver approval still requires
-              the Approve Driver action.
+              Mission Control may defer the background check for this 60-day
+              beta. Final driver approval still requires the Approve Driver
+              action.
             </p>
           </Section>
 
@@ -262,51 +496,136 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
 
         <div className="space-y-6">
           <Section title="Onboarding Progress">
-            <DriverOnboardingProgressLive uid={driver.uid} initial={onboardingProgress} />
+            <DriverOnboardingProgressLive
+              uid={driver.uid}
+              initial={onboardingProgress}
+            />
           </Section>
 
           <Section title="Verification Status">
             <Grid cols={1}>
-              <Field label="Stripe Identity" value={formatStatus(identityStatus)} />
-              <Field label="Stripe Connect" value={formatStatus(connectStatus)} />
-              <Field label="Charges enabled" value={driver.stripeChargesEnabled ? "Yes" : "No"} />
-              <Field label="Payouts enabled" value={driver.stripePayoutsEnabled ? "Yes" : "No"} />
-              <Field label="Beta Agreement" value={driver.betaAgreementAccepted ? "Accepted" : "Not accepted"} />
+              <Field
+                label="Stripe Identity"
+                value={formatStatus(identityStatus)}
+              />
+              <Field
+                label="Stripe Connect"
+                value={formatStatus(connectStatus)}
+              />
+              <Field
+                label="Charges enabled"
+                value={driver.stripeChargesEnabled ? "Yes" : "No"}
+              />
+              <Field
+                label="Payouts enabled"
+                value={driver.stripePayoutsEnabled ? "Yes" : "No"}
+              />
+              <Field
+                label="Beta Agreement"
+                value={
+                  driver.betaAgreementAccepted ? "Accepted" : "Not accepted"
+                }
+              />
             </Grid>
           </Section>
 
           <Section title="CashRydr Hub">
             <div className="space-y-3">
               <div className="flex items-center gap-2">
-                <StatusPill status={cashHubDisplay.status} label={cashHubDisplay.label} />
+                <StatusPill
+                  status={cashHubDisplay.status}
+                  label={cashHubDisplay.label}
+                />
               </div>
               <p className="text-xs text-muted">{cashHubDisplay.detail}</p>
               <Grid cols={1}>
+                <Field label="Access" value={cashHubDisplay.label} />
                 <Field
-                  label="Access"
-                  value={cashHubDisplay.label}
+                  label="Monthly fee"
+                  value={formatCents(
+                    cashHubBilling?.feeCents ??
+                      driver.cashHubDriverAccessFeeCents ??
+                      499,
+                  )}
                 />
-                <Field label="Monthly fee" value={formatCents(cashHubBilling?.feeCents ?? driver.cashHubDriverAccessFeeCents ?? 499)} />
-                <Field label="Collected" value={cashHubBilling ? formatCents(cashHubBilling.collectedCents) : "—"} />
-                <Field label="Remaining" value={cashHubBilling ? formatCents(cashHubBilling.remainingCents) : "—"} />
-                <Field label="Last collection ride" value={cashHubBilling?.lastCollectionRideId} />
-                <Field label="Terms accepted" value={toDateSafe(driver.cashHubTermsAcceptedAt)?.toLocaleString() ?? "—"} />
-                <Field label="Opted out" value={toDateSafe(driver.cashHubOptedOutAt)?.toLocaleString() ?? "—"} />
-                <Field label="Accepted terms version" value={driver.cashHubTermsVersion} />
-                <Field label="Fee terms version" value={driver.cashHubDriverAccessFeeVersion} />
-                <Field label="Late releases" value={driver.cashHubLateReleaseCount ?? 0} />
-                <Field label="Total penalties" value={driver.cashHubPenaltyCount ?? 0} />
-                <Field label="Review reason" value={driver.cashHubAccessReviewReason} />
-                <Field label="Access paused at" value={toDateSafe(driver.cashHubAccessSuspendedAt)?.toLocaleString() ?? "—"} />
+                <Field
+                  label="Collected"
+                  value={
+                    cashHubBilling
+                      ? formatCents(cashHubBilling.collectedCents)
+                      : "—"
+                  }
+                />
+                <Field
+                  label="Remaining"
+                  value={
+                    cashHubBilling
+                      ? formatCents(cashHubBilling.remainingCents)
+                      : "—"
+                  }
+                />
+                <Field
+                  label="Last collection ride"
+                  value={cashHubBilling?.lastCollectionRideId}
+                />
+                <Field
+                  label="Terms accepted"
+                  value={
+                    toDateSafe(
+                      driver.cashHubTermsAcceptedAt,
+                    )?.toLocaleString() ?? "—"
+                  }
+                />
+                <Field
+                  label="Opted out"
+                  value={
+                    toDateSafe(driver.cashHubOptedOutAt)?.toLocaleString() ??
+                    "—"
+                  }
+                />
+                <Field
+                  label="Accepted terms version"
+                  value={driver.cashHubTermsVersion}
+                />
+                <Field
+                  label="Fee terms version"
+                  value={driver.cashHubDriverAccessFeeVersion}
+                />
+                <Field
+                  label="Late releases"
+                  value={driver.cashHubLateReleaseCount ?? 0}
+                />
+                <Field
+                  label="Total penalties"
+                  value={driver.cashHubPenaltyCount ?? 0}
+                />
+                <Field
+                  label="Review reason"
+                  value={driver.cashHubAccessReviewReason}
+                />
+                <Field
+                  label="Access paused at"
+                  value={
+                    toDateSafe(
+                      driver.cashHubAccessSuspendedAt,
+                    )?.toLocaleString() ?? "—"
+                  }
+                />
               </Grid>
             </div>
           </Section>
 
           <Section title="Approval Requirements">
-            <RequirementChecklist checks={checks} backgroundChecksRequired={compliance.backgroundChecksRequired} />
+            <RequirementChecklist
+              checks={checks}
+              backgroundChecksRequired={compliance.backgroundChecksRequired}
+            />
           </Section>
 
-          <DriverProfileAdminTools uid={driver.uid} initial={adminProfileInitial} />
+          <DriverProfileAdminTools
+            uid={driver.uid}
+            initial={adminProfileInitial}
+          />
 
           <DriverActions
             uid={driver.uid}
@@ -320,7 +639,13 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="rounded-lg border border-line bg-white p-5 shadow-sm">
       <h2 className="mb-3 text-sm font-semibold text-ink">{title}</h2>
@@ -329,11 +654,29 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Grid({ children, cols = 2 }: { children: React.ReactNode; cols?: number }) {
-  return <div className={`grid gap-3 ${cols === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"}`}>{children}</div>;
+function Grid({
+  children,
+  cols = 2,
+}: {
+  children: React.ReactNode;
+  cols?: number;
+}) {
+  return (
+    <div
+      className={`grid gap-3 ${cols === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"}`}
+    >
+      {children}
+    </div>
+  );
 }
 
-function Field({ label, value }: { label: string; value?: string | number | null }) {
+function Field({
+  label,
+  value,
+}: {
+  label: string;
+  value?: string | number | null;
+}) {
   return (
     <div>
       <p className="text-[11px] font-medium text-muted">{label}</p>

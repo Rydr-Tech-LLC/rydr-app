@@ -13,17 +13,30 @@ export default function SearchClient() {
   const [q, setQ] = useState("");
   const [drivers, setDrivers] = useState<Result[]>([]);
   const [riders, setRiders] = useState<Result[]>([]);
+  const [error, setError] = useState("");
+  const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
     if (!q.trim()) return;
     setLoading(true);
+    setError("");
+    setSearched(false);
     try {
       const response = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      if (!response.ok)
+        throw new Error("Search is unavailable. Please try again.");
       const body = await response.json();
+      setSearched(true);
       setDrivers(body.drivers ?? []);
       setRiders(body.riders ?? []);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Search failed. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -33,6 +46,7 @@ export default function SearchClient() {
     <div className="space-y-6">
       <form onSubmit={handleSearch} className="flex gap-2">
         <input
+          aria-label="Search people, vehicles, and plates"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Name, email, phone, driver ID, license number, VIN, plate…"
@@ -47,7 +61,12 @@ export default function SearchClient() {
         </button>
       </form>
 
-      {(drivers.length > 0 || riders.length > 0) && (
+      {error && (
+        <p role="alert" className="text-sm text-red-700">
+          {error}
+        </p>
+      )}
+      {searched && (
         <div className="grid gap-6 sm:grid-cols-2">
           <ResultGroup title="Drivers" results={drivers} hrefBase="/drivers" />
           <ResultGroup title="Riders" results={riders} hrefBase="/riders" />
@@ -57,7 +76,15 @@ export default function SearchClient() {
   );
 }
 
-function ResultGroup({ title, results, hrefBase }: { title: string; results: Result[]; hrefBase: string }) {
+function ResultGroup({
+  title,
+  results,
+  hrefBase,
+}: {
+  title: string;
+  results: Result[];
+  hrefBase: string;
+}) {
   return (
     <div className="rounded-lg border border-line bg-white shadow-sm">
       <div className="border-b border-line px-4 py-2.5">
@@ -70,10 +97,12 @@ function ResultGroup({ title, results, hrefBase }: { title: string; results: Res
           results.map((r) => (
             <Link
               key={r.uid}
-              href={hrefBase === "/drivers" ? `/drivers/${r.uid}` : hrefBase}
+              href={`${hrefBase}/${r.uid}`}
               className="flex items-center justify-between px-4 py-2.5 text-sm hover:bg-grouped/60"
             >
-              <span className="font-medium text-ink">{r.name || "Unnamed"}</span>
+              <span className="font-medium text-ink">
+                {r.name || "Unnamed"}
+              </span>
               <span className="text-xs text-muted">{r.email ?? "—"}</span>
             </Link>
           ))

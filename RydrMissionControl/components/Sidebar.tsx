@@ -2,9 +2,27 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { signOut } from "firebase/auth";
-import { useEffect, useState } from "react";
-import { clientAuth } from "@/lib/firebaseClient";
+import {
+  LayoutDashboard,
+  Users,
+  Car,
+  ShieldCheck,
+  Gift,
+  GraduationCap,
+  Flag,
+  ChartNoAxesCombined,
+  CreditCard,
+  Wallet,
+  Inbox,
+  Archive,
+  Clock,
+  FlaskConical,
+  Search,
+  Settings,
+  LogOut,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
 import type { MissionControlRole } from "@/lib/missionControlAccess";
 
 const CAMPUS_GROWTH_ITEMS = [
@@ -13,9 +31,28 @@ const CAMPUS_GROWTH_ITEMS = [
   { href: "/campus-growth/organizations", label: "Organizations" },
   { href: "/campus-growth/events", label: "Events" },
   { href: "/campus-growth/ambassadors", label: "Ambassadors" },
-  { href: "/campus-growth/campuses", label: "Campuses" }
+  { href: "/campus-growth/campuses", label: "Campuses" },
 ];
 
+const NAV_ICONS = [
+  LayoutDashboard,
+  ShieldCheck,
+  Users,
+  Users,
+  Gift,
+  GraduationCap,
+  Flag,
+  ChartNoAxesCombined,
+  CreditCard,
+  Wallet,
+  Inbox,
+  Archive,
+  Car,
+  Clock,
+  FlaskConical,
+  Search,
+  Settings,
+];
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/drivers", label: "Driver Verification" },
@@ -33,16 +70,27 @@ const NAV_ITEMS = [
   { href: "/waitlist", label: "Waitlist" },
   { href: "/beta-testers", label: "Beta Testers" },
   { href: "/search", label: "Search" },
-  { href: "/settings", label: "Settings" }
+  { href: "/settings", label: "Settings" },
 ];
 
-export default function Sidebar({ email, role }: { email: string | null; role: MissionControlRole }) {
+export default function Sidebar({
+  email,
+  role,
+}: {
+  email: string | null;
+  role: MissionControlRole;
+}) {
   const pathname = usePathname();
   const router = useRouter();
+  const drawer = useRef<HTMLElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const navItems = role === "marketing"
-    ? NAV_ITEMS.filter((item) => item.href === "/campus-growth" || item.href === "/settings")
-    : NAV_ITEMS;
+  const navItems =
+    role === "marketing"
+      ? NAV_ITEMS.filter(
+          (item) => item.href === "/campus-growth" || item.href === "/settings",
+        )
+      : NAV_ITEMS;
 
   useEffect(() => {
     setMobileOpen(false);
@@ -50,20 +98,44 @@ export default function Sidebar({ email, role }: { email: string | null; role: M
 
   useEffect(() => {
     if (!mobileOpen) return;
+    const focusables = () =>
+      Array.from(
+        drawer.current?.querySelectorAll<HTMLElement>(
+          "a[href],button:not([disabled])",
+        ) ?? [],
+      );
+    focusables()[0]?.focus();
     const previousOverflow = document.body.style.overflow;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setMobileOpen(false);
+      if (event.key === "Tab") {
+        const items = focusables();
+        const first = items[0],
+          last = items[items.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
     };
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", closeOnEscape);
     return () => {
       document.body.style.overflow = previousOverflow;
+      opener.current?.focus();
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [mobileOpen]);
 
   async function handleSignOut() {
     await fetch("/api/session", { method: "DELETE" });
+    const [{ signOut }, { clientAuth }] = await Promise.all([
+      import("firebase/auth"),
+      import("@/lib/firebaseClient"),
+    ]);
     await signOut(clientAuth).catch(() => {});
     router.push("/login");
     router.refresh();
@@ -76,22 +148,35 @@ export default function Sidebar({ email, role }: { email: string | null; role: M
           R
         </div>
         <div>
-          <p className="text-sm font-semibold leading-none text-ink">Mission Control</p>
+          <p className="text-sm font-semibold leading-none text-ink">
+            Mission Control
+          </p>
           <p className="text-[11px] leading-none text-muted">Rydr Internal</p>
         </div>
       </div>
 
       <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pb-3">
         {navItems.map((item) => {
-          const active = pathname === item.href || (item.href !== "/dashboard" && pathname?.startsWith(item.href));
+          const active =
+            pathname === item.href ||
+            (item.href === "/drivers"
+              ? pathname?.startsWith("/drivers/") &&
+                !pathname?.startsWith("/drivers/all")
+              : item.href !== "/dashboard" &&
+                pathname?.startsWith(item.href + "/"));
+          const Icon = NAV_ICONS[NAV_ITEMS.indexOf(item)];
           return (
             <div key={item.href}>
               <Link
                 href={item.href}
-                className={`block rounded-md px-3 py-2 text-sm font-medium transition ${
-                  active ? "bg-ink text-white" : "text-muted hover:bg-grouped hover:text-ink"
+                aria-current={active ? "page" : undefined}
+                className={`mc-nav-link flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition ${
+                  active
+                    ? "mc-nav-active text-rydr-burgundy"
+                    : "text-muted hover:bg-grouped hover:text-ink"
                 }`}
               >
+                <Icon size={18} strokeWidth={1.7} aria-hidden="true" />
                 {item.label}
               </Link>
               {item.href === "/campus-growth" && active && (
@@ -103,7 +188,9 @@ export default function Sidebar({ email, role }: { email: string | null; role: M
                         key={child.href}
                         href={child.href}
                         className={`block rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                          childActive ? "bg-red-50 text-rydr-red" : "text-muted hover:bg-grouped hover:text-ink"
+                          childActive
+                            ? "bg-red-50 text-rydr-red"
+                            : "text-muted hover:bg-grouped hover:text-ink"
                         }`}
                       >
                         {child.label}
@@ -119,7 +206,9 @@ export default function Sidebar({ email, role }: { email: string | null; role: M
 
       <div className="border-t border-line px-3 py-3">
         <p className="truncate px-2 text-[11px] text-muted">{email}</p>
-        <p className="px-2 pt-0.5 text-[10px] font-medium uppercase text-muted">{role}</p>
+        <p className="px-2 pt-0.5 text-[10px] font-medium uppercase text-muted">
+          {role}
+        </p>
         <button
           onClick={handleSignOut}
           className="mt-1 w-full rounded-md px-2 py-1.5 text-left text-xs font-medium text-muted hover:bg-grouped hover:text-ink"
@@ -132,7 +221,7 @@ export default function Sidebar({ email, role }: { email: string | null; role: M
 
   return (
     <>
-      <aside className="hidden h-screen w-56 flex-shrink-0 flex-col border-r border-line bg-white md:flex">
+      <aside className="mc-sidebar sticky top-0 hidden h-screen w-64 flex-shrink-0 flex-col border-r border-line bg-white md:flex">
         {navigation}
       </aside>
 
@@ -142,12 +231,17 @@ export default function Sidebar({ email, role }: { email: string | null; role: M
             R
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold leading-tight text-ink">Mission Control</p>
-            <p className="truncate text-[11px] leading-tight text-muted">Rydr Internal</p>
+            <p className="truncate text-sm font-semibold leading-tight text-ink">
+              Mission Control
+            </p>
+            <p className="truncate text-[11px] leading-tight text-muted">
+              Rydr Internal
+            </p>
           </div>
         </div>
         <button
           type="button"
+          ref={opener}
           onClick={() => setMobileOpen(true)}
           className="flex h-11 w-11 flex-shrink-0 flex-col items-center justify-center gap-1.5 rounded-md border border-line bg-white"
           aria-label="Open navigation menu"
@@ -163,16 +257,25 @@ export default function Sidebar({ email, role }: { email: string | null; role: M
       <button
         type="button"
         aria-label="Close navigation menu"
+        aria-hidden={!mobileOpen}
+        tabIndex={-1}
         onClick={() => setMobileOpen(false)}
         className={`fixed inset-0 z-40 bg-black/35 transition-opacity md:hidden ${
-          mobileOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+          mobileOpen
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0"
         }`}
       />
       <aside
+        ref={drawer}
+        role="dialog"
+        aria-modal={mobileOpen || undefined}
+        aria-label="Navigation"
         id="mobile-navigation"
         className={`fixed inset-y-0 left-0 z-50 flex w-[min(20rem,88vw)] flex-col border-r border-line bg-white shadow-lg transition-transform duration-200 md:hidden ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
+        inert={!mobileOpen}
         aria-hidden={!mobileOpen}
       >
         <div className="absolute right-3 top-3 z-10">
