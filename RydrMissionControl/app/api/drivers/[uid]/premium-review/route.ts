@@ -31,7 +31,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
       if (driver.vehicle?.specifications?.conflict === true) throw new Error("Resolve conflicting VIN and library seating before premium approval.");
       const reportedSeats = Number(driver.vehicle?.vinReportedSeatCapacity ?? driver.vehicle?.specifications?.seatCapacity);
       if (reportedSeats > 0 && reportedSeats !== Number(input.seatCapacity)) throw new Error("Reviewed seat capacity conflicts with the VIN-reported capacity.");
-      if ((input.approvePrestine === true || input.luxuryVehicleApproved === true) && !specificationEvidence) throw new Error("Seating and luxury classification evidence is required for premium approval.");
+      if ((input.luxuryVehicleApproved === true) && !specificationEvidence) throw new Error("Seating and luxury classification evidence is required for premium approval.");
       const key = vehicleKey(driver.vehicle);
       const previous = driver.premiumReview?.vehicleKey === key ? driver.premiumReview : {};
       const documents: Record<string, unknown> = {};
@@ -57,11 +57,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
         temporaryLimoRegistration: input.temporaryLimoRegistration === true,
         carrierIdentityMatched: input.carrierIdentityMatched === true,
         insuranceCoversRydr: input.insuranceCoversRydr === true,
-        prestineApprovedAt: input.approvePrestine === true ? previous.prestineApprovedAt ?? now.toISOString() : null,
+        prestineApprovedAt: previous.prestineApprovedAt ?? null,
         documents
       };
       const evaluation = evaluatePremiumVehicle({ ...driver, premiumReview: review }, now.getTime());
-      if (input.approvePrestine === true && !evaluation.prestine.eligible) throw new Error(evaluation.prestine.issues.join("; "));
       const standard = (driver.qualifiedRideTypes ?? driver.supportedRideTypes ?? []).filter((value: string) => !/prestine|pristine|executive/i.test(value));
       const qualified = [...standard, ...availablePremiumRideTypes(evaluation, executiveConfig.data() ?? {})];
       tx.update(ref, { premiumReview: review, premiumEligibility: evaluation, vehicleEligibility: { ...(driver.vehicleEligibility ?? {}), rideTypes: qualified, source: "vehicleReview", evaluatedAt: now }, qualifiedRideTypes: qualified, supportedRideTypes: qualified, updatedAt: now });

@@ -1,3 +1,4 @@
+const { evaluatePrestineLibrary } = require('./prestineLibraryPolicy');
 // Shared by Firebase, the dispatch backend, and Mission Control. Premium
 // qualification is vehicle-bound, admin-owned, and reevaluated at dispatch.
 const { createHash } = require('node:crypto');
@@ -52,14 +53,7 @@ function evaluatePremiumVehicle(driver, now = Date.now()) {
   if (!Number.isInteger(seats) || seats < 5 || seats > 8) baseIssues.push('Verified seating capacity of 5–8 including the driver required');
   if (!bound || review.luxuryVehicleApproved !== true) baseIssues.push('Luxury make/model approval required');
   if (!bound || review.conditionApproved !== true || !verified({ ...review.conditionReview, completedAt: review.conditionReview?.verifiedAt }, now, true, 366)) baseIssues.push('Current vehicle condition review required');
-  const prestineIssues = [...baseIssues];
-  const approvedAt = millis(review.prestineApprovedAt);
-  const approvedYear = Number.isFinite(approvedAt)
-    ? Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric' }).format(new Date(approvedAt))) : NaN;
-  const grandfathered = bound && Number.isFinite(approvedAt) && approvedAt <= now
-    && year >= approvedYear - 8 && currentYear <= year + 10;
-  if (!Number.isInteger(year) || year < 1900 || year > currentYear + 1 || (year < minimumYear && !grandfathered)) prestineIssues.push(`Minimum model year ${minimumYear}; existing vehicle grace ends December 31, ${year + 10}`);
-  if (!Number.isFinite(approvedAt) || approvedAt > now) prestineIssues.push('Prestine approval required');
+  const prestine = evaluatePrestineLibrary(vehicle, now);
   const executiveIssues = [...baseIssues];
   if (bodyType === "suv" && seats < 7) executiveIssues.push("Executive SUV requires seating for six riders plus the driver");
   if (!Number.isInteger(year) || year < currentYear - 5 || year > currentYear + 1) executiveIssues.push(`Executive minimum model year ${currentYear - 5}`);
@@ -80,10 +74,10 @@ function evaluatePremiumVehicle(driver, now = Date.now()) {
   if (!Number.isFinite(Number(driver?.rating ?? 5)) || Number(driver?.rating ?? 5) < 4.95) executiveIssues.push('Executive minimum driver rating is 4.95');
   const suffix = bodyType === 'suv' ? 'SUV' : 'Sedan';
   return {
-    policyVersion: 'ga-premium-2026-v1', bodyType, minimumYear,
-    prestine: { validUntil: Math.min((millis(review.conditionReview?.verifiedAt) || 0) + 366 * 86400000, Number.isFinite(millis(review.conditionReview?.expiresAt)) ? millis(review.conditionReview?.expiresAt) : 0, Number.isInteger(year) ? Date.parse(`${year + 11}-01-01T00:00:00-05:00`) : 0), eligible: prestineIssues.length === 0, issues: prestineIssues, grandfathered: year < minimumYear && grandfathered, lastEligibleYear: year + 10 },
-    executive: { validUntil: Math.min((millis(review.conditionReview?.verifiedAt) || 0) + 366 * 86400000, (millis(review.documents?.safetyInspection?.completedAt) || 0) + 366 * 86400000, (millis(review.documents?.backgroundScreening?.completedAt) || 0) + 366 * 86400000, Number.isFinite(millis(review.conditionReview?.expiresAt)) ? millis(review.conditionReview?.expiresAt) : 0, Number.isInteger(year) ? Date.parse(`${year + 6}-01-01T00:00:00-05:00`) : 0, ...DOCUMENTS.filter(doc => doc.expires).map(doc => (Number.isFinite(millis(review.documents?.[doc.key]?.expiresAt)) ? millis(review.documents?.[doc.key]?.expiresAt) : 0))), eligible: executiveIssues.length === 0, issues: executiveIssues, airportEligible: executiveIssues.length === 0 && verified(review.documents?.airportAuthorization, now, true) },
-    rideTypes: [...(prestineIssues.length === 0 ? [`Rydr Prestine ${suffix}`] : []), ...(executiveIssues.length === 0 ? [`Rydr Executive ${suffix}`] : [])]
+    policyVersion: 'ga-premium-2026-v2', bodyType: prestine.bodyType ?? bodyType, minimumYear,
+    prestine,
+    executive: { bodyType, validUntil: Math.min((millis(review.conditionReview?.verifiedAt) || 0) + 366 * 86400000, (millis(review.documents?.safetyInspection?.completedAt) || 0) + 366 * 86400000, (millis(review.documents?.backgroundScreening?.completedAt) || 0) + 366 * 86400000, Number.isFinite(millis(review.conditionReview?.expiresAt)) ? millis(review.conditionReview?.expiresAt) : 0, Number.isInteger(year) ? Date.parse(`${year + 6}-01-01T00:00:00-05:00`) : 0, ...DOCUMENTS.filter(doc => doc.expires).map(doc => (Number.isFinite(millis(review.documents?.[doc.key]?.expiresAt)) ? millis(review.documents?.[doc.key]?.expiresAt) : 0))), eligible: executiveIssues.length === 0, issues: executiveIssues, airportEligible: executiveIssues.length === 0 && verified(review.documents?.airportAuthorization, now, true) },
+    rideTypes: [...(prestine.eligible ? [`Rydr Prestine ${prestine.bodyType === "suv" ? "SUV" : "Sedan"}`] : []), ...(executiveIssues.length === 0 ? [`Rydr Executive ${suffix}`] : [])]
   };
 }
 /** @param {any} profile @param {string} rideType @param {number} [now] */
@@ -92,9 +86,10 @@ function premiumRideAllowed(profile, rideType, now = Date.now()) {
   if (!tier.includes('prestine') && !tier.includes('pristine') && !tier.includes('executive')) return true;
   const result = profile.vehicle ? evaluatePremiumVehicle(profile, now) : profile.premiumEligibility;
   if (!result) return false;
-  if (tier.includes('suv') && result.bodyType !== 'suv') return false;
-  if (tier.includes('sedan') && result.bodyType !== 'sedan') return false;
   const qualification = tier.includes('executive') ? result.executive : result.prestine;
+  const bodyType = qualification?.bodyType ?? result.bodyType;
+  if (tier.includes('suv') && bodyType !== 'suv') return false;
+  if (tier.includes('sedan') && bodyType !== 'sedan') return false;
   return qualification?.eligible === true && Number(qualification.validUntil) > now;
 }
 /** @param {any} evaluation @param {any} [config] */

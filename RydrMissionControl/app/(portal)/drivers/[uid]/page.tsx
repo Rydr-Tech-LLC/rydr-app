@@ -1,3 +1,4 @@
+import { bindPrestineLibrary } from "../../../../../rydr-backend/firebase/functions/src/services/prestineLibraryPolicy";
 import VehicleSpecifications from "./VehicleSpecifications";
 import { exactLibraryEntry, resolveSpecifications } from "../../../../../rydr-backend/firebase/functions/src/services/vehicleSpecificationPolicy";
 import DriverVehicles from "./DriverVehicles";
@@ -49,6 +50,8 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
   const rawDriver = snap.data() ?? {};
   const specificationLibrary = await adminDb.collection("vehicleLibrary").limit(1000).get();
   const vehicleSpecs = resolveSpecifications(rawDriver.vehicle ?? {}, exactLibraryEntry(specificationLibrary.docs.map(doc => doc.data()), rawDriver.vehicle ?? {}));
+  const prestineVehicle = { ...rawDriver.vehicle, libraryEligibility: bindPrestineLibrary(rawDriver.vehicle ?? {}, exactLibraryEntry(specificationLibrary.docs.map(doc => doc.data()), rawDriver.vehicle ?? {})) };
+  const premiumAssessment = evaluatePremiumVehicle({ ...rawDriver, vehicle: prestineVehicle });
   const vehicles = [ ...(rawDriver.vehicle ? [{ ...rawDriver.vehicle, id: "current" }] : []), ...Object.entries(rawDriver.savedVehicles ?? {}).map(([id, vehicle]: [string, any]) => ({ ...vehicle, id })) ];
   const vehicleArchive = history.docs.map(doc => { const data = doc.data(); return { id: doc.id, vehicle: data.vehicle ?? {}, action: data.action ?? "recorded", date: toDateSafe(data.recordedAt)?.toISOString() ?? "Unknown", actor: data.actorUid, reason: data.reason }; });
   const driver = { ...(snap.data() as DriverRecord), uid: snap.id };
@@ -102,7 +105,8 @@ export default async function DriverReviewPage(props: { params: Promise<{ uid: s
       <VehicleSpecifications uid={params.uid} specs={JSON.parse(JSON.stringify(vehicleSpecs))} vehicle={JSON.parse(JSON.stringify(rawDriver.vehicle ?? {}))} />
       <DriverVehicles uid={params.uid} vehicles={JSON.parse(JSON.stringify(vehicles))} archive={JSON.parse(JSON.stringify(vehicleArchive))} />
       <DriverComplianceReview uid={params.uid} assessment={compliance} records={JSON.parse(JSON.stringify(complianceRecords))} reportDate={dateInputValue(toDateSafe((snap.data() ?? {}).backgroundScreening?.completedAt))} />
-      <PremiumVehicleReview uid={params.uid} initial={JSON.parse(JSON.stringify((snap.data() ?? {}).premiumReview?.vehicleKey === vehicleKey((snap.data() ?? {}).vehicle) ? (snap.data() ?? {}).premiumReview : {}))} assessment={evaluatePremiumVehicle(snap.data())} specifications={vehicleSpecs} vehicleBodyStyle={exactLibraryEntry(specificationLibrary.docs.map(doc => doc.data()), rawDriver.vehicle ?? {})?.bodyStyle} />
+      <section id="prestine-approval" className="rounded-2xl border border-line bg-white p-5 space-y-2"><h2 className="font-semibold">Prestine eligibility · selected vehicle</h2><p>{premiumAssessment.prestine.eligible ? `Eligible for Rydr Prestine ${premiumAssessment.prestine.bodyType === "suv" ? "SUV" : "Sedan"}` : premiumAssessment.prestine.issues.join(" · ")}</p><p className="text-sm text-muted">Determined automatically by the selected vehicle’s library eligibility, body style and model year. No separate Prestine review is required. XL capacity is checked independently.</p></section>
+      <details><summary className="cursor-pointer font-medium">Executive verification — service disabled</summary><PremiumVehicleReview uid={params.uid} initial={JSON.parse(JSON.stringify((snap.data() ?? {}).premiumReview?.vehicleKey === vehicleKey((snap.data() ?? {}).vehicle) ? (snap.data() ?? {}).premiumReview : {}))} assessment={premiumAssessment} specifications={vehicleSpecs} vehicleBodyStyle={exactLibraryEntry(specificationLibrary.docs.map(doc => doc.data()), rawDriver.vehicle ?? {})?.bodyStyle} /></details>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

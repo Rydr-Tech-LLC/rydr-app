@@ -1,3 +1,5 @@
+import { bindPrestineLibrary } from "../../rydr-backend/firebase/functions/src/services/prestineLibraryPolicy";
+import { exactLibraryEntry, resolveSpecifications } from "../../rydr-backend/firebase/functions/src/services/vehicleSpecificationPolicy";
 import { normalizeSpecifications, xlCapacityAllowed } from "../../rydr-backend/firebase/functions/src/services/vehicleSpecificationPolicy";
 import { evaluatePremiumVehicle, availablePremiumRideTypes } from "../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
 import "server-only";
@@ -441,6 +443,7 @@ export async function backfillDriverVehicleImagesForEntry(entry: VehicleLibraryE
     pendingWrites = 0;
   }
 
+  const libraryEntries = (await collection().limit(1000).get()).docs.map(doc => doc.data());
   const executiveConfig = await adminDb.collection("platformConfig").doc("rydrExecutive").get();
   for (const doc of snap.docs) {
     const data = doc.data();
@@ -456,41 +459,40 @@ export async function backfillDriverVehicleImagesForEntry(entry: VehicleLibraryE
     const vehicleColor = normalizeColor(vehicle.color);
     if (color && vehicleColor !== color) continue;
     const match = matchingVehicleImagePath(entry, color ?? vehicleColor ?? undefined);
-    if (!match) continue;
-    const imageUrl = publicUrl(match.path);
-    if (!imageUrl) continue;
+    const imageUrl = match ? publicUrl(match.path) : null;
+    const specificationEntry = exactLibraryEntry(libraryEntries, vehicle);
 
     const nextVehicle = {
       ...vehicle,
-      imagePath: match.path,
-      imageUrl,
-      imageMatchTier: match.matchedColor ? 1 : 2,
-      libraryVehicleId: entry.vehicleId,
-      libraryMatchedColor: match.matchedColor
+      ...(match && imageUrl ? { imagePath: match.path, imageUrl, imageMatchTier: match.matchedColor ? 1 : 2, libraryVehicleId: entry.vehicleId, libraryMatchedColor: match.matchedColor } : {}),
+      specifications: resolveSpecifications(vehicle, specificationEntry),
+      libraryEligibility: bindPrestineLibrary(vehicle, specificationEntry)
     };
     const premium = evaluatePremiumVehicle({ ...data, vehicle: nextVehicle });
-    const libraryRideTypes = [...(entry.eligibleRideTypes ?? []).filter(type => !/prestine|pristine|executive/i.test(type)), ...availablePremiumRideTypes(premium, executiveConfig.data() ?? {})];
+    const libraryRideTypes = [...(specificationEntry?.eligibleRideTypes ?? []).filter((type: string) => !/prestine|pristine|executive/i.test(type) && (type !== "Rydr XL" || xlCapacityAllowed(nextVehicle.specifications))), ...availablePremiumRideTypes(premium, executiveConfig.data() ?? {})];
     const driverUpdate: Record<string, unknown> = {
       vehicle: nextVehicle,
-      vehicleImageStatus: "matched",
+      ...(imageUrl ? { vehicleImageStatus: "matched" } : {}),
+      premiumEligibility: premium,
       updatedAt: FieldValue.serverTimestamp()
     };
-    if (libraryRideTypes.length > 0) {
+    {
       driverUpdate.vehicleEligibility = {
         rideTypes: libraryRideTypes,
+        premium,
         source: "vehicleLibrary",
         matchedVehicleId: entry.vehicleId,
         evaluatedAt: FieldValue.serverTimestamp()
       };
       driverUpdate.qualifiedRideTypes = libraryRideTypes;
       driverUpdate.supportedRideTypes = libraryRideTypes;
-      driverUpdate.selectedRideTypes = libraryRideTypes;
+      driverUpdate.selectedRideTypes = (data.selectedRideTypes ?? []).filter((type: string) => libraryRideTypes.includes(type));
       driverUpdate.rideTypes = libraryRideTypes;
     }
 
     batch.set(doc.ref, driverUpdate, { merge: true });
     pendingWrites += 1;
-    batch.set(
+    if (imageUrl) batch.set(
       adminDb.collection("publicDriverProfiles").doc(doc.id),
       {
         vehicleColor: typeof vehicle.color === "string" ? vehicle.color : "",
@@ -500,7 +502,7 @@ export async function backfillDriverVehicleImagesForEntry(entry: VehicleLibraryE
       },
       { merge: true }
     );
-    pendingWrites += 1;
+    if (imageUrl) pendingWrites += 1;
     count += 1;
     await commitIfNeeded();
   }

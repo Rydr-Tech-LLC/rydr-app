@@ -1,15 +1,15 @@
 # Georgia pilot: Prestine and Executive
 
-Policy version: ga-premium-2026-v1. Executive remains paused until funding and operating readiness are approved. Backend bookings require the platform flag, no beta pause, and `fundingApproved: true`; document qualification cannot enable the offering. These are Rydr's admission standards; Uber/Lyft approval does not establish Rydr's carrier authority, airport access or insurance coverage.
+Policy version: ga-premium-2026-v2. Executive remains paused until funding and operating readiness are approved. Backend bookings require the platform flag, no beta pause, and `fundingApproved: true`; document qualification cannot enable the offering. These are Rydr's admission standards; Uber/Lyft approval does not establish Rydr's carrier authority, airport access or insurance coverage.
 
 ## Prestine Sedan and Prestine SUV
 
-- Approved luxury make/model and vehicle condition; any exterior color.
+- The selected vehicle must match a luxury Vehicle Library entry marked Prestine eligible; any exterior color. The library body style determines Prestine Sedan or Prestine SUV automatically. No separate driver-specific Prestine approval, condition-review expiry, professional-service verification, trip-count minimum or premium-rating gate is required. Normal account approval and compliance still apply.
 - Model-year floor = Georgia calendar year minus 8: 2018 in 2026, 2019 in 2027.
 - A vehicle approved while meeting the floor receives two additional calendar years after aging below the admission cutoff. A 2018 vehicle approved in 2026 remains eligible through December 31, 2028. It becomes ineligible January 1, 2029.
-- Approval is tied to the reviewed VIN, make/model and model year. A replacement vehicle requires a new review. An already-old vehicle cannot receive a new approval by calling it grandfathered.
+- First qualification is recorded in the backend-owned vehicle library snapshot and bound to VIN, year, make/model and trim. A replacement vehicle is matched independently and cannot inherit another vehicle’s grandfathering. An already-old vehicle cannot start a new grace period.
 - Normal driver onboarding, screening, registration and insurance requirements continue. This tier does not require Executive's commercial-livery credentials or professional-chauffeur service.
-- Mission Control reviews a Sedan/SUV category and manufacturer seating capacity (5–8 including driver). Body choices use the same Prestine pricing category and booking fee.
+- Mission Control sets the Sedan/SUV body style in the library. Seating does not determine SUV versus Sedan. XL separately requires verified seating for six riders plus the driver (7–8 total); a five-seat luxury SUV can qualify for Prestine SUV without qualifying for XL. Body choices use the same Prestine pricing category and booking fee.
 
 ## Executive Sedan and Executive SUV
 
@@ -32,7 +32,7 @@ Dispatch and scheduled matching reevaluate qualification and Sedan/SUV compatibi
 
 Rydr's existing background flow records Checkr intent/acknowledgement and a manual pending status; it does not establish a passed report or continuous monitoring. Executive requires a genuine reviewed screening report. Continuous provider monitoring still needs provider onboarding and integration before claiming parity with Uber/Lyft's monitoring infrastructure.
 
-Existing premium vehicles with no vehicle-specific approval history require review. Do not invent approval dates or grant automatic grace based on a driver's general account approval date.
+Prestine library changes and selected-vehicle changes refresh canonical and public eligibility automatically. Image coverage does not gate eligibility. Executive retains the separate vehicle-specific review; no legacy Executive approval date is invented.
 
 Before enabling Executive, confirm Rydr's Georgia commercial operating model, platform/carrier authority, commercial insurance coverage and applicable contracts with Georgia DPS and the insurer. Supporting TNC dispatch alone does not establish limousine authority. Prestine's luxury branding does not by itself determine its legal classification; confirm the platform's authorized rideshare model separately.
 

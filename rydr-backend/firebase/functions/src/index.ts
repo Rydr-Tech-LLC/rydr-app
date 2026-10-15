@@ -1,3 +1,4 @@
+import { selectedVehicleKey } from "./services/prestineLibraryPolicy";
 import { getVehicleSpecificationMatch } from "./services/vehicleSpecificationsService";
 import { addSavedDriverVehicle, deleteSavedDriverVehicle } from "./services/driverGarageService";
 export { maintainDriverDocumentCompliance, onDriverCompliancePolicyChanged, onDriverComplianceChanged } from "./triggers/driverCompliance";
@@ -9,7 +10,7 @@ import { vehicleImageService } from "./services/vehicleImageService";
 import { VEHICLE_COLORS, type VehicleColor, type VehicleBodyStyle } from "./types";
 import { evaluateVehicleEligibility, mergeDefaultTierRates } from "./services/vehicleEligibilityService";
 
-export { maintainPremiumVehicleEligibility, onExecutiveAvailabilityChanged } from "./triggers/premiumVehicleMaintenance";
+export { maintainPremiumVehicleEligibility, onExecutiveAvailabilityChanged, onVehicleLibraryEligibilityChanged } from "./triggers/premiumVehicleMaintenance";
 
 // Push notification sender architecture (Part 9 of the beta hardening
 // sprint). Each trigger below listens to the same Firestore documents the
@@ -198,11 +199,12 @@ export const submitVehicleVin = onCall(async (request) => {
     libraryVehicleId: lookup.result?.matchedVehicleId ?? null,
     libraryMatchedColor: lookup.result?.matchedColor ?? null
   };
-  const specificationMatch = await getVehicleSpecificationMatch(vehicleFields);
-  Object.assign(vehicleFields, { specifications: specificationMatch.specifications });
-  const libraryRideTypes = specificationMatch.eligibleRideTypes;
   const driverSnap = await driverRef.get();
   const driver = driverSnap.data() ?? {};
+  const previousVehicle = [driver.vehicle, ...Object.values(driver.savedVehicles ?? {})].find((vehicle: any) => vehicle && selectedVehicleKey(vehicle) === selectedVehicleKey(vehicleFields));
+  const specificationMatch = await getVehicleSpecificationMatch({ ...vehicleFields, libraryEligibility: previousVehicle?.libraryEligibility });
+  Object.assign(vehicleFields, { specifications: specificationMatch.specifications, libraryEligibility: specificationMatch.libraryEligibility });
+  const libraryRideTypes = specificationMatch.eligibleRideTypes;
   const executiveConfigSnap = await db.collection("platformConfig").doc("rydrExecutive").get();
   const eligibility = evaluateVehicleEligibility({
     make: decoded.make,
@@ -308,11 +310,12 @@ export const submitVehicleManual = onCall(async (request) => {
     libraryVehicleId: lookup.result?.matchedVehicleId ?? null,
     libraryMatchedColor: lookup.result?.matchedColor ?? null
   };
-  const specificationMatch = await getVehicleSpecificationMatch(vehicleFields);
-  Object.assign(vehicleFields, { specifications: specificationMatch.specifications });
-  const libraryRideTypes = specificationMatch.eligibleRideTypes;
   const driverSnap = await driverRef.get();
   const driver = driverSnap.data() ?? {};
+  const previousVehicle = [driver.vehicle, ...Object.values(driver.savedVehicles ?? {})].find((vehicle: any) => vehicle && selectedVehicleKey(vehicle) === selectedVehicleKey(vehicleFields));
+  const specificationMatch = await getVehicleSpecificationMatch({ ...vehicleFields, libraryEligibility: previousVehicle?.libraryEligibility });
+  Object.assign(vehicleFields, { specifications: specificationMatch.specifications, libraryEligibility: specificationMatch.libraryEligibility });
+  const libraryRideTypes = specificationMatch.eligibleRideTypes;
   const executiveConfigSnap = await db.collection("platformConfig").doc("rydrExecutive").get();
   const eligibility = evaluateVehicleEligibility({
     make,

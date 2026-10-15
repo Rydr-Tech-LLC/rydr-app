@@ -24,7 +24,7 @@ export default function VehicleEntryActions({ vehicleId }: { vehicleId: string }
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setPendingPrestine(Array.isArray(data.pendingPrestine) ? data.pendingPrestine : []);
-        setSyncMessage(`${data.matchedDriverCount ?? 0} driver profile${data.matchedDriverCount === 1 ? "" : "s"} synced. Prestine requires the vehicle approval shown below when pending.`);
+        setSyncMessage(`${data.matchedDriverCount ?? 0} driver profile${data.matchedDriverCount === 1 ? "" : "s"} synced. Prestine follows the selected vehicle’s library eligibility automatically.`);
         router.refresh();
       } else {
         setSyncMessage(typeof data.error === "string" ? data.error : "Sync failed.");
@@ -68,8 +68,8 @@ export default function VehicleEntryActions({ vehicleId }: { vehicleId: string }
       </div>
       {pendingPrestine.length > 0 && <div role="status" className="max-w-lg rounded-xl border border-amber-300 bg-amber-50 p-4 text-left text-sm text-amber-950">
         <p className="font-semibold">Prestine was not enabled for {pendingPrestine.length} driver{pendingPrestine.length === 1 ? "" : "s"}</p>
-        <p className="mt-1">Library settings saved successfully. These vehicles still need their individual Prestine approval; syncing again will not approve them.</p>
-        {pendingPrestine.map(driver => <div key={driver.uid} className="mt-3 border-t border-amber-200 pt-2"><Link className="font-semibold underline" href={`/drivers/${encodeURIComponent(driver.uid)}#prestine-approval`}>Complete {driver.name}’s vehicle approval →</Link><ul className="mt-1 list-disc pl-5">{driver.issues.map(issue => <li key={issue}>{issue}</li>)}</ul></div>)}
+        <p className="mt-1">Library settings saved. These vehicles do not currently meet the library or model-year requirements shown below.</p>
+        {pendingPrestine.map(driver => <div key={driver.uid} className="mt-3 border-t border-amber-200 pt-2"><Link className="font-semibold underline" href={`/drivers/${encodeURIComponent(driver.uid)}#prestine-approval`}>View {driver.name}’s eligibility →</Link><ul className="mt-1 list-disc pl-5">{driver.issues.map(issue => <li key={issue}>{issue}</li>)}</ul></div>)}
       </div>}
       {syncMessage && <p className="max-w-xs text-left text-xs text-muted sm:text-right">{syncMessage}</p>}
     </div>

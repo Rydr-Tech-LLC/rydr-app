@@ -1,9 +1,11 @@
+const { bindPrestineLibrary } = require('../firebase/functions/src/services/prestineLibraryPolicy');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { evaluatePremiumVehicle, premiumRideAllowed, vehicleKey, DOCUMENTS } = require('../firebase/functions/src/services/premiumVehiclePolicy');
 const now = Date.parse('2026-10-14T12:00:00Z');
 function driver(year = 2023, color = 'Black', bodyType = 'suv') {
   const vehicle = { vin: '1GYS4DKL0PR123456', year, make: 'Cadillac', model: 'Escalade', color, plate: 'LM1234' };
+  vehicle.libraryEligibility = bindPrestineLibrary(vehicle, { vehicleId: 'test-luxury', make: vehicle.make, model: vehicle.model, yearStart: year, yearEnd: year, bodyStyle: bodyType, eligibleRideTypes: ['Rydr Prestine'], specifications: { verified: true, luxuryClassification: 'luxury' } }, Date.parse('2026-01-01T12:00:00Z'));
   const document = { status: 'verified', verifiedBy: 'admin', verifiedAt: '2026-01-01T12:00:00Z', completedAt: '2026-01-01T12:00:00Z', expiresAt: '2030-12-31T23:59:59-05:00', reference: 'private/document' };
   return { vehicle, license: { state: "GA" }, rating: 4.99, premiumReview: {
     vehicleKey: vehicleKey(vehicle), reviewedBy: 'admin', bodyType, seatCapacity: bodyType === 'suv' ? 7 : 5, operatingState: 'GA', luxuryVehicleApproved: true,
@@ -20,12 +22,13 @@ test('Prestine 2018 cutoff advances and same approved vehicle gets exactly two a
   d.premiumReview.conditionReview.verifiedAt = '2028-12-01T12:00:00Z';
   assert.equal(evaluatePremiumVehicle(d, Date.parse('2028-12-31T22:00:00Z')).prestine.eligible, true);
   assert.equal(evaluatePremiumVehicle(d, Date.parse('2029-01-01T05:00:00Z')).prestine.eligible, false);
-  d.premiumReview.prestineApprovedAt = '2027-01-02T12:00:00Z';
+  d.vehicle.libraryEligibility.firstQualifiedAt = '2027-01-02T12:00:00Z';
   assert.equal(evaluatePremiumVehicle(d, Date.parse('2027-02-01T12:00:00Z')).prestine.eligible, false);
 });
 test('no automatic premium qualification from brand or stored tier labels', () => {
   assert.equal(premiumRideAllowed({ vehicle: driver().vehicle, eligibleRideTypes: ['Rydr Executive'] }, 'Rydr Executive SUV', now), false);
-  assert.deepEqual(evaluatePremiumVehicle({ vehicle: driver().vehicle }, now).rideTypes, []);
+  const unverifiedVehicle = { ...driver().vehicle }; delete unverifiedVehicle.libraryEligibility;
+  assert.deepEqual(evaluatePremiumVehicle({ vehicle: unverifiedVehicle }, now).rideTypes, []);
 });
 test('Executive requires black exterior/interior, commercial verification and current documents', () => {
   assert.equal(evaluatePremiumVehicle(driver(), now).executive.eligible, true);
@@ -104,6 +107,7 @@ test('five-seat Range Rover SUV qualifies for Prestine SUV without XL capacity',
   d.vehicle = { ...d.vehicle, vin: 'SAL1P9EU0RA170245', make: 'LAND ROVER', model: 'Range Rover Sport' };
   d.premiumReview.vehicleKey = vehicleKey(d.vehicle);
   d.premiumReview.seatCapacity = 5;
+  d.vehicle.libraryEligibility = bindPrestineLibrary(d.vehicle, { vehicleId: 'range-rover', make: d.vehicle.make, model: d.vehicle.model, yearStart: 2024, yearEnd: 2024, bodyStyle: 'suv', eligibleRideTypes: ['Rydr Go', 'Rydr Prestine'], specifications: { verified: true, luxuryClassification: 'luxury' } }, now);
   const result = evaluatePremiumVehicle(d, now);
   assert.equal(result.prestine.eligible, true);
   assert.ok(result.rideTypes.includes('Rydr Prestine SUV'));
@@ -111,4 +115,31 @@ test('five-seat Range Rover SUV qualifies for Prestine SUV without XL capacity',
   assert.equal(result.rideTypes.includes('Rydr XL'), false);
   assert.equal(premiumRideAllowed(d, 'Rydr Prestine SUV', now), true);
   assert.equal(premiumRideAllowed(d, 'Rydr Prestine Sedan', now), false);
+});
+
+test('Prestine needs no premium review, condition expiry, professional documents or trip rating', () => {
+  const d = driver(); delete d.premiumReview; d.rating = 0;
+  assert.equal(evaluatePremiumVehicle(d, now).prestine.eligible, true);
+  assert.equal(evaluatePremiumVehicle(d, now).executive.eligible, false);
+  assert.equal(premiumRideAllowed(d, 'Rydr Prestine SUV', now), true);
+  const nextYear = Date.parse('2027-10-14T12:00:00Z');
+  assert.equal(premiumRideAllowed(d, 'Rydr Prestine SUV', nextYear), true);
+});
+test('library revocation, wrong model/year/trim and unsupported body styles remove Prestine', () => {
+  const d = driver();
+  const entry = { vehicleId: 'test', make: d.vehicle.make, model: d.vehicle.model, yearStart: 2023, yearEnd: 2023, bodyStyle: 'suv', eligibleRideTypes: ['Rydr Prestine'], specifications: { verified: true, luxuryClassification: 'luxury' } };
+  for (const change of [{ eligibleRideTypes: ['Rydr Go'] }, { model: 'Other model' }, { yearStart: 2024 }, { trim: 'Other trim' }, { bodyStyle: 'coupe' }]) {
+    const vehicle = { ...d.vehicle, libraryEligibility: bindPrestineLibrary(d.vehicle, { ...entry, ...change }, now) };
+    assert.equal(evaluatePremiumVehicle({ vehicle }, now).prestine.eligible, false);
+  }
+});
+test('a selected non-premium vehicle cannot inherit another garage vehicle qualification', () => {
+  const d = driver();
+  d.vehicle = { ...d.vehicle, vin: 'SAL1P9EU0RA170245', make: 'Chevrolet', model: 'Equinox' };
+  assert.equal(premiumRideAllowed(d, 'Rydr Prestine SUV', now), false);
+});
+test('Sedan library body classification is independent of old Executive review or seat count', () => {
+  const d = driver(2023, 'White', 'sedan'); delete d.premiumReview;
+  assert.equal(premiumRideAllowed(d, 'Rydr Prestine Sedan', now), true);
+  assert.equal(premiumRideAllowed(d, 'Rydr Prestine SUV', now), false);
 });
