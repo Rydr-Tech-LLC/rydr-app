@@ -30,7 +30,7 @@ export interface WaitlistInternalAlertInput {
 export interface BetaApprovalInput {
   to: string;
   firstName?: string;
-  role?: "rider" | "driver";
+  role: "rider" | "driver";
 }
 
 export interface GenericEmailInput {
@@ -122,9 +122,11 @@ export class NotificationService {
   async sendBetaApproval(input: BetaApprovalInput): Promise<NotificationResult> {
     const template = betaApprovedTemplate({
       firstName: input.firstName,
-      riderTestFlightUrl: optionalEnv("TESTFLIGHT_RIDER_URL"),
-      driverTestFlightUrl: optionalEnv("TESTFLIGHT_DRIVER_URL"),
-      discordInviteUrl: discordInviteUrlForRole(input.role)
+      role: input.role,
+      riderTestFlightUrl: optionalEnv("TESTFLIGHT_RIDER_URL") ?? "https://testflight.apple.com/join/m7YMYqCn",
+      driverTestFlightUrl: optionalEnv("TESTFLIGHT_DRIVER_URL") ?? "https://testflight.apple.com/join/vGTnKeBV",
+      discordInviteUrl: discordInviteUrlForRole(input.role) ?? "https://discord.gg/kfUz52849",
+      discordChannelUrl: "https://discord.com/channels/1521954500498165840/1530594332778954923"
     });
 
     return this.toNotificationResult(
