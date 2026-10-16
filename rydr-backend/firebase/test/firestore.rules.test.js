@@ -82,6 +82,9 @@ test("rider may edit personal profile fields but not grant access", async () => 
   await assertSucceeds(updateDoc(doc(db, "riders/rider-1"), { preferredName: "Khris" }));
   await assertFails(updateDoc(doc(db, "riders/rider-1"), { hasRydrRiderAccess: false }));
   await assertFails(updateDoc(doc(db, "riders/rider-1"), { cashHubRole: "driver" }));
+  await assertFails(updateDoc(doc(db, "riders/rider-1"), { riderSignupCompleted: true }));
+  await assertFails(updateDoc(doc(db, "riders/rider-1"), { riderOnboardingStarted: false }));
+  await assertFails(updateDoc(doc(db, "riders/rider-1"), { riderPaymentStepCompleted: true }));
 });
 
 test("driver may edit dispatch preferences but not canonical vehicle or documents", async () => {
@@ -92,6 +95,8 @@ test("driver may edit dispatch preferences but not canonical vehicle or document
   await assertFails(updateDoc(doc(db, "drivers/driver-1"), { identityVerificationStepCompleted: true }));
   await assertFails(updateDoc(doc(db, "drivers/driver-1"), { payoutsStepCompleted: true }));
   await assertFails(updateDoc(doc(db, "drivers/driver-1"), { driverSignupCompleted: true }));
+  await assertFails(updateDoc(doc(db, "drivers/driver-1"), { onboardingResumeRequestID: "forged" }));
+  await assertFails(updateDoc(doc(db, "drivers/driver-1"), { onboardingResumeRequestedBy: "forged" }));
 });
 
 test("mobile clients cannot create authoritative ride records", async () => {

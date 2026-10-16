@@ -81,7 +81,7 @@ function readyDb() {
     "platformConfig/stripeRuntime": {mode:"test",status:"ready"},
     "riders/rider-1": { accountStatus: "active", verifiedRider: true },
     "drivers/driver-1": {
-      isApproved: true,
+      driverSignupCompleted: true, isApproved: true,
       accountStatus: "active",
       rateCardUpdatedAt: { seconds: 1 },
       tierRates: { go: { minimumFare: 8, perMile: 1, perMinute: 0.28 } }
@@ -212,7 +212,7 @@ test("backend rejects an offline selected driver before writing", async () => {
 test("backend rejects a selected driver whose canonical account is suspended", async () => {
   const db = readyDb();
   db.values.set("drivers/driver-1", {
-    isApproved: true,
+    driverSignupCompleted: true, isApproved: true,
     accountStatus: "suspended",
     tierRates: { go: { minimumFare: 8, perMile: 1, perMinute: 0.28 } }
   });

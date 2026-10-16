@@ -28,7 +28,7 @@ function isApprovedDriver(driver, compliancePolicy = driver?.complianceRequireme
   const safetySuspended = ["suspended", "deletion_requested", "removed"].includes(accountStatus)
     || safetyReviewStatus === "suspended"
     || driver?.safetyHold === true;
-  return approved && !safetySuspended && driver?.documentComplianceHold !== true && driver?.backgroundCheckHold !== true && evaluateDriverCompliance(driver ?? {}, compliancePolicy).drivingAllowed;
+  return driver?.driverSignupCompleted === true && approved && !safetySuspended && driver?.documentComplianceHold !== true && driver?.backgroundCheckHold !== true && evaluateDriverCompliance(driver ?? {}, compliancePolicy).drivingAllowed;
 }
 
 function normalizedRideTypes(value) {
@@ -90,6 +90,9 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   if (!driverSnap.exists) throw error("Driver profile not found", 404);
 
   const driver = driverSnap.data();
+  if (online && driver.driverSignupCompleted !== true) {
+    throw error("Finish driver onboarding before going online", 403);
+  }
   if (online && !isApprovedDriver(driver, compliancePolicySnap.data() ?? {})) {
     throw error("Driver approval and safety eligibility are required to go online", 403);
   }

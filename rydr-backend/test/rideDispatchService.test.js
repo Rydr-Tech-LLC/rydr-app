@@ -79,7 +79,7 @@ test("decline advances to the next backend-validated candidate and records the a
       eligibleRideTypes: ["Rydr Go"],
       rating: 5
     },
-    "drivers/driver-2": { isApproved: true, accountStatus: "active" },
+    "drivers/driver-2": { driverSignupCompleted: true, isApproved: true, accountStatus: "active" },
     "driver_status/driver-2": {
       isOnline: true,
       availabilityStatus: "available",

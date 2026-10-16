@@ -2,7 +2,7 @@ const { admin, getFirestore } = require("../config/firebase");
 
 const ROLES = new Set(["rider", "driver"]);
 const RIDER_TERMS_VERSION = "2026-10-07";
-const BETA_WAIVER_VERSION = "2026-07-04";
+const { BETA_WAIVER_VERSION } = require("../../firebase/functions/src/services/onboardingProgress");
 
 function error(message, statusCode, details) {
   const err = new Error(message);
@@ -195,7 +195,7 @@ async function finalizeAccountProfile({ uid, role, token, payload, db = getFires
   });
 }
 
-async function syncAccountIdentity({ uid, role, token, profileData = null, acceptBetaWaiver = false, db = getFirestore() }) {
+async function syncAccountIdentity({ uid, role, token, profileData = null, acceptBetaWaiver = false, beginOnboarding = false, db = getFirestore() }) {
   if (!ROLES.has(role)) throw error("role must be rider or driver", 400);
   const phone = normalizePhone(token?.phone_number);
   if (!phone) throw error("A verified Firebase phone number is required", 409);
@@ -261,7 +261,8 @@ async function syncAccountIdentity({ uid, role, token, profileData = null, accep
     tx.set(profileRef, {
       uid,
       ...canonicalProfile,
-      ...(role === "driver" && acceptBetaWaiver === true ? {
+      ...(role === "rider" && beginOnboarding === true ? { riderOnboardingStarted: true } : {}),
+      ...(acceptBetaWaiver === true ? {
         betaWaiverAccepted: true,
         betaWaiverVersion: BETA_WAIVER_VERSION,
         betaWaiverAcceptedAt: now

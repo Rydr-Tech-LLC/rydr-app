@@ -32,7 +32,7 @@ const approvedDriver = {
   cashHubTermsAccepted: true,
   cashHubTermsVersion: "2026-09",
   cashHubAccessStatus: "active",
-  driverApprovalStatus: "approved"
+  driverSignupCompleted: true, driverApprovalStatus: "approved"
 };
 
 test("Cash Hub accepts only supported visibility values", () => {

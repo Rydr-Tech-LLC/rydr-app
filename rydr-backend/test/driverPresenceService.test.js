@@ -3,7 +3,9 @@ const assert = require("node:assert/strict");
 const { isApprovedDriver, normalizedLocation, normalizedRideTypes } = require("../src/services/driverPresenceService");
 
 test("driver presence approval rejects safety holds and suspensions", () => {
-  assert.equal(isApprovedDriver({ driverApprovalStatus: "approved" }), true);
+  assert.equal(isApprovedDriver({ driverApprovalStatus: "approved", driverSignupCompleted: true }), true);
+  assert.equal(isApprovedDriver({ driverApprovalStatus: "approved", driverSignupCompleted: false }), false);
+  assert.equal(isApprovedDriver({ driverApprovalStatus: "approved" }), false);
   assert.equal(isApprovedDriver({ isApproved: true, safetyHold: true }), false);
   assert.equal(isApprovedDriver({ isApproved: true, accountStatus: "suspended" }), false);
   assert.equal(isApprovedDriver({ isApproved: true, accountStatus: "deletion_requested" }), false);
