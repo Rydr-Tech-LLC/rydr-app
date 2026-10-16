@@ -78,12 +78,28 @@ enum DriverSignupStep: Hashable {
     }
 
     static let trackedTotalSteps = 11
+    static func resumeStep(_ value: String) -> DriverSignupStep? {
+        switch value {
+        case "betaWaiver": return .betaWaiver
+        case "nameDOB": return .nameDOB
+        case "emailPassword": return .emailPassword
+        case "address": return .address
+        case "license": return .license
+        case "vehicle": return .vehicle
+        case "identity": return .identity
+        case "backgroundCheck": return .backgroundCheck
+        case "payouts": return .payouts
+        default: return nil
+        }
+    }
 }
 
 struct DriverSignupCoordinator: View {
     @EnvironmentObject var session: DriverSessionManager
     @Environment(\.dismiss) private var dismiss
 
+    private let resumeSnapshot: DriverOnboardingSnapshot?
+    private let onCompleted: (() -> Void)?
     @State private var path: [DriverSignupStep] = []
 
     // Shared state
@@ -133,6 +149,38 @@ struct DriverSignupCoordinator: View {
     @State private var isSocialAuthInProgress = false
     @State private var socialAuthAttemptID: UUID?
 
+    init(resumeSnapshot: DriverOnboardingSnapshot? = nil, onCompleted: (() -> Void)? = nil) {
+        self.resumeSnapshot = resumeSnapshot
+        self.onCompleted = onCompleted
+        guard let saved = resumeSnapshot else { return }
+        let p = saved.profile
+        _path = State(initialValue: saved.nextStep.flatMap(DriverSignupStep.resumeStep).map { [$0] } ?? [])
+        _phoneNumber = State(initialValue: p.phoneNumber ?? "")
+        _firstName = State(initialValue: p.firstName ?? "")
+        _lastName = State(initialValue: p.lastName ?? "")
+        _email = State(initialValue: p.email ?? "")
+        if let raw = p.dob {
+            let parser = ISO8601DateFormatter(); parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = parser.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) { _dob = State(initialValue: date) }
+        }
+        _street = State(initialValue: p.address?.street ?? "")
+        _addressLine2 = State(initialValue: p.address?.line2 ?? "")
+        _city = State(initialValue: p.address?.city ?? "")
+        _state = State(initialValue: p.address?.state ?? "GA")
+        _zip = State(initialValue: p.address?.zip ?? "")
+        _licenseNumber = State(initialValue: p.license?.number ?? "")
+        _licenseState = State(initialValue: p.license?.state ?? "GA")
+        _backgroundCheckAcknowledged = State(initialValue: p.backgroundCheckAcknowledged ?? false)
+        if let v = p.vehicle {
+            _vehicleVIN = State(initialValue: v.vin ?? "")
+            _plateNumber = State(initialValue: v.plate ?? "")
+            _selectedVehicleColor = State(initialValue: VehicleColor.allCases.first { $0.rawValue.lowercased() == v.color?.lowercased() })
+            if let make = v.make, !make.isEmpty, let model = v.model, let year = v.year {
+                _decodedVehicle = State(initialValue: DecodedVehicleInfo(vin: v.vin ?? "", make: make, model: model, year: year, trim: v.trim, bodyStyle: v.bodyStyle, fuelType: DriverVehicleFuelType(rawValue: v.fuelType ?? "Gas") ?? .gas))
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             DriverPhoneEntryView(
@@ -143,6 +191,7 @@ struct DriverSignupCoordinator: View {
                 }
             )
             .navigationDestination(for: DriverSignupStep.self) { step in
+                Group {
                 switch step {
                 case .phoneCode:
                     DriverPhoneCodeEntryView(
@@ -162,7 +211,12 @@ struct DriverSignupCoordinator: View {
                             // login resolves to this same uid, and the email/password step
                             // that follows links onto this account instead of creating a
                             // second, disconnected one.
-                            RydrWorkspace.auth.signIn(with: credential) { result, error in
+                            let authenticate: (@escaping (AuthDataResult?, Error?) -> Void) -> Void = { callback in
+                                if let current = RydrWorkspace.auth.currentUser, current.phoneNumber == nil {
+                                    current.link(with: credential, completion: callback)
+                                } else { RydrWorkspace.auth.signIn(with: credential, completion: callback) }
+                            }
+                            authenticate { result, error in
                                 Task { @MainActor in
                                     if let error {
                                         completion(.failure(error))
@@ -173,6 +227,7 @@ struct DriverSignupCoordinator: View {
                                         return
                                     }
                                     completion(.success(user))
+                                    if resumeSnapshot != nil { onCompleted?(); return }
 
                                     // Check for an existing driver by phone before allowing
                                     // signup to proceed.
@@ -213,8 +268,8 @@ struct DriverSignupCoordinator: View {
                             }
                         },
                         onDecline: {
-                            try? RydrWorkspace.auth.signOut()
-                            dismiss()
+                            if resumeSnapshot != nil { session.logout() }
+                            else { try? RydrWorkspace.auth.signOut(); dismiss() }
                         }
                     )
                     .onAppear { markCurrentOnboardingStep(.betaWaiver) }
@@ -234,8 +289,7 @@ struct DriverSignupCoordinator: View {
                             "displayName": legalName,
                             "dob": Timestamp(date: dob),
                             "nameDOBStepCompleted": true
-                        ])
-                        path.append(.emailPassword)
+                        ]) { path.append(.emailPassword) }
                     }
                     .onAppear { markCurrentOnboardingStep(.nameDOB) }
 
@@ -273,8 +327,7 @@ struct DriverSignupCoordinator: View {
                             "zip": zip
                         ],
                         "addressStepCompleted": true
-                        ])
-                        path.append(.license)
+                        ]) { path.append(.license) }
                     }
                     .onAppear { markCurrentOnboardingStep(.address) }
 
@@ -357,7 +410,7 @@ struct DriverSignupCoordinator: View {
                                 try await RydrBackendService.finalizeDriverAccount()
                                 if connectOnboarded { path.append(.done) }
                             } catch {
-                                errorText = error.localizedDescription
+                                flowAlertText = error.localizedDescription
                             }
                         }
                     }
@@ -368,10 +421,12 @@ struct DriverSignupCoordinator: View {
                         // Mark the session as logged in and keep Go Online disabled until the check passes
                         session.login(name: "\(firstName) \(lastName)".trimmingCharacters(in: .whitespaces), email: email)
                         session.canGoOnline = false
+                        onCompleted?()
                         dismiss()
                     })
                     .onAppear { markCurrentOnboardingStep(.done) }
                 }
+                }.navigationBarBackButtonHidden(resumeSnapshot != nil && path.count == 1)
             }
             .overlay {
                 if isSubmittingDocuments {
@@ -389,7 +444,11 @@ struct DriverSignupCoordinator: View {
                     }
                 }
             }
-            .toolbar { ToolbarItem(placement: .navigationBarLeading) { Button("Close") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .navigationBarLeading) {
+                Button(resumeSnapshot == nil ? "Close" : "Sign out") {
+                    if resumeSnapshot == nil { dismiss() } else { session.logout() }
+                }
+            } }
             .alert("Unable to continue", isPresented: $existingAccountAlert) {
                 Button("OK") { dismiss() }
             } message: {
@@ -677,6 +736,9 @@ struct DriverSignupCoordinator: View {
 
     // MARK: - Firestore helper
     private func markCurrentOnboardingStep(_ step: DriverSignupStep) {
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-DriverOnboardingResumeUITest") { return }
+        #endif
         guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         RydrWorkspace.firestore.collection("drivers").document(uid).setData([
             "driverOnboardingCurrentStep": step.trackingKey,
@@ -692,10 +754,11 @@ struct DriverSignupCoordinator: View {
         }
     }
 
-    private func upsertDriver(_ fields: [String: Any]) {
+    private func upsertDriver(_ fields: [String: Any], onSaved: @escaping () -> Void = {}) {
         guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         RydrWorkspace.firestore.collection("drivers").document(uid).setData(fields, merge: true) { err in
-            if let err = err { errorText = err.localizedDescription }
+            if let err = err { flowAlertText = err.localizedDescription }
+            else { onSaved() }
         }
     }
 

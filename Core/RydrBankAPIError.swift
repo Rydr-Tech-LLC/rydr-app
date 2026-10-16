@@ -99,8 +99,28 @@ struct RydrBankAPI {
 /// Firebase Auth proves and links credentials; this backend call owns the
 /// canonical Rider phone index and records the providers attached to the UID.
 enum RiderBackendIdentityService {
-    static func sync() async throws {
-        try await send(path: "/account/identity/sync", body: ["role": "rider"])
+    static func sync(acceptBetaWaiver: Bool = false, beginOnboarding: Bool = false) async throws {
+        try await send(path: "/account/identity/sync", body: ["role": "rider", "betaWaiverAccepted": acceptBetaWaiver, "beginOnboarding": beginOnboarding])
+    }
+
+    static func onboardingStatus() async throws -> RiderOnboardingSnapshot {
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String, let base = URL(string: raw), let endpoint = URL(string: "/account/onboarding?role=rider", relativeTo: base), let user = RydrWorkspace.auth.currentUser else { throw URLError(.userAuthenticationRequired) }
+        var request = RydrWorkspace.urlRequest(url: endpoint)
+        let token: String = try await withCheckedThrowingContinuation { continuation in
+            user.getIDTokenForcingRefresh(true) { token, error in
+                if let error { continuation.resume(throwing: error) }
+                else if let token { continuation.resume(returning: token) }
+                else { continuation.resume(throwing: URLError(.userAuthenticationRequired)) }
+            }
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.cachePolicy = .reloadIgnoringLocalCacheData; request.timeoutInterval = 20
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+        return try JSONDecoder().decode(RiderOnboardingSnapshot.self, from: data)
+    }
+    static func completePaymentStep() async throws {
+        try await send(path: "/account/onboarding/checkpoint", body: ["role": "rider", "step": "paymentMethod"])
     }
 
     static func createCashHubProfile(firstName: String, lastName: String, email: String) async throws {
@@ -199,4 +219,18 @@ enum RiderSafetyBackend {
         var request=RydrWorkspace.urlRequest(url:url);request.httpMethod="POST";request.setValue("application/json",forHTTPHeaderField:"Content-Type");request.setValue("Bearer \(try await user.getIDToken())",forHTTPHeaderField:"Authorization");request.httpBody=try JSONSerialization.data(withJSONObject:body)
         let (data,response)=try await URLSession.shared.data(for:request);guard let http=response as? HTTPURLResponse,(200..<300).contains(http.statusCode) else{let object=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any];throw NSError(domain:"RiderSafetyBackend",code:(response as? HTTPURLResponse)?.statusCode ?? -1,userInfo:[NSLocalizedDescriptionKey:object?["error"] as? String ?? "Report failed."])}
     }
+}
+
+
+struct RiderOnboardingSnapshot: Decodable {
+    let completed: Bool
+    let nextStep: String?
+    let cashHubOnly: Bool
+    let profile: RiderOnboardingProfile
+}
+struct RiderOnboardingProfile: Decodable {
+    let firstName: String?, lastName: String?, preferredName: String?, email: String?, phoneNumber: String?
+    let betaWaiverAccepted: Bool?
+    let address: Address?
+    struct Address: Decodable { let street: String?, line2: String?, city: String?, state: String?, zip: String? }
 }

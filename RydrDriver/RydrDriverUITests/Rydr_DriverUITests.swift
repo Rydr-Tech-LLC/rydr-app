@@ -9,6 +9,31 @@ import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
     @MainActor
+    func testOnboardingResumeAfterRelaunchAndFailClosed() {
+        for scenario in ["-ResumeAddress", "-ResumePayouts", "-ResumeUnavailable", "-ResumeComplete"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-DriverOnboardingResumeUITest", scenario]
+            for _ in 0..<2 {
+                app.launch()
+                if scenario == "-ResumeComplete" { XCTAssertTrue(app.staticTexts["driverDashboardFixture"].waitForExistence(timeout: 15)) }
+                else if scenario == "-ResumeUnavailable" {
+                    XCTAssertTrue(app.staticTexts["driverOnboardingError"].waitForExistence(timeout: 15))
+                    XCTAssertFalse(app.staticTexts["driverDashboardFixture"].exists)
+                } else if scenario == "-ResumePayouts" {
+                    XCTAssertTrue(app.buttons["Set Up Payouts"].waitForExistence(timeout: 15))
+                    XCTAssertFalse(app.staticTexts["driverDashboardFixture"].exists)
+                } else {
+                    XCTAssertTrue(app.textFields["Street Address"].waitForExistence(timeout: 15))
+                    XCTAssertEqual(app.textFields["Street Address"].value as? String, "1 Main St")
+                    let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = "onboarding-resumed-address"; proof.lifetime = .keepAlways; add(proof)
+                    XCTAssertFalse(app.staticTexts["driverDashboardFixture"].exists)
+                }
+                app.terminate()
+            }
+        }
+    }
+
+    @MainActor
     func testPayoutPlatformRestrictionShowsPersistentUsefulError() {
         let app = XCUIApplication()
         app.launchArguments = ["-DriverPayoutErrorUITest"]

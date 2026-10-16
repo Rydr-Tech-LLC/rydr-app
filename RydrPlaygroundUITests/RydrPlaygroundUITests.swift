@@ -9,6 +9,28 @@ import XCTest
 
 final class RydrPlaygroundUITests: XCTestCase {
 
+    @MainActor
+    func testOnboardingResumeAfterRelaunchAndFailClosed() {
+        for scenario in ["-ResumeAddress", "-ResumeUnavailable", "-ResumeComplete"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-RiderOnboardingResumeUITest", scenario]
+            for _ in 0..<2 {
+                app.launch()
+                if scenario == "-ResumeComplete" { XCTAssertTrue(app.staticTexts["riderDashboardFixture"].waitForExistence(timeout: 15)) }
+                else if scenario == "-ResumeUnavailable" {
+                    XCTAssertTrue(app.staticTexts["riderOnboardingError"].waitForExistence(timeout: 15))
+                    XCTAssertFalse(app.staticTexts["riderDashboardFixture"].exists)
+                } else {
+                    XCTAssertTrue(app.staticTexts["Where Are You Located?"].waitForExistence(timeout: 15))
+                    XCTAssertEqual(app.textFields["Street Address"].value as? String, "1 Main St")
+                    let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = "onboarding-resumed-address"; proof.lifetime = .keepAlways; add(proof)
+                    XCTAssertFalse(app.staticTexts["riderDashboardFixture"].exists)
+                }
+                app.terminate()
+            }
+        }
+    }
+
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
 

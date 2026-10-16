@@ -59,7 +59,8 @@ class UserSessionManager: ObservableObject {
         _isLoggedIn = AppStorage(wrappedValue: false, "rydr.session.\(workspace).isLoggedIn")
         _userName = AppStorage(wrappedValue: "", "rydr.session.\(workspace).userName")
         _userEmail = AppStorage(wrappedValue: "", "rydr.session.\(workspace).userEmail")
-        if !RydrWorkspace.isReady || RydrWorkspace.auth.currentUser == nil { isLoggedIn = false }
+        // Auth restores identity; the root's backend gate determines app access.
+        isLoggedIn = RydrWorkspace.isReady && RydrWorkspace.auth.currentUser != nil
     }
     @Published var selectedTab: MainAppTab = .ride
     @Published private(set) var accountAccess: RydrAccountAccess?

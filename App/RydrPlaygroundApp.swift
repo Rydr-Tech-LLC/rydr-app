@@ -17,6 +17,8 @@ struct RydrApp: App {
             #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
                 NavigationStack { LoginView().environmentObject(UserSessionManager()) }
+            } else if ProcessInfo.processInfo.arguments.contains("-RiderOnboardingResumeUITest") {
+                RiderOnboardingResumeUITestFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-RydrIdentityOnboardingUITest") {
                 IdentityOnboardingUITestFixture()
             } else { RydrWorkspaceGate { RiderWorkspaceContent() } }
@@ -62,7 +64,10 @@ private struct RiderWorkspaceContent: View {
                     SplashVideoView { showSplash = false }
                 } else {
                     if session.isLoggedIn {
-                        MainTabView().environmentObject(session)
+                        RiderOnboardingGate {
+                            MainTabView().environmentObject(session).onAppear { session.loadUserProfile() }
+                        }.environmentObject(session)
+                         .id("\(RydrWorkspace.identifier ?? "unresolved"):\(RydrWorkspace.auth.currentUser?.uid ?? "signed-out")")
                     } else {
                         WelcomeView().environmentObject(session)
                     }
@@ -115,6 +120,52 @@ private struct IdentityOnboardingUITestFixture: View {
                 .flowFailed(error: URLError(.unsupportedURL))
             })
         }
+    }
+}
+#endif
+
+
+private struct RiderOnboardingGate<Content: View>: View {
+    @EnvironmentObject private var session: UserSessionManager
+    var fetchStatus: () async throws -> RiderOnboardingSnapshot = { try await RiderBackendIdentityService.onboardingStatus() }
+    @ViewBuilder var content: () -> Content
+    @State private var snapshot: RiderOnboardingSnapshot?
+    @State private var failed = false
+    var body: some View {
+        Group {
+            if let snapshot {
+                if snapshot.completed { content() }
+                else { SignupCoordinator(resumeSnapshot: snapshot, onCompleted: { Task { await reload() } }).id(snapshot.nextStep) }
+            } else if failed {
+                VStack(spacing: 20) {
+                    Text("We couldn't confirm your onboarding progress. Please try again.").accessibilityIdentifier("riderOnboardingError")
+                    Button("Retry") { Task { await reload() } }
+                    Button("Sign out") { session.logout() }
+                }.padding()
+            } else { ProgressView("Restoring your onboarding…") }
+        }.task { await reload() }
+    }
+    @MainActor private func reload() async {
+        snapshot = nil; failed = false
+        do {
+            let result = try await fetchStatus()
+            guard result.completed || result.nextStep == "phone" || result.nextStep.flatMap(SignupStep.resumeStep) != nil else { throw URLError(.cannotParseResponse) }
+            snapshot = result
+        } catch { failed = true }
+    }
+}
+
+#if DEBUG && targetEnvironment(simulator)
+private struct RiderOnboardingResumeUITestFixture: View {
+    @StateObject private var session = UserSessionManager()
+    var body: some View {
+        RiderOnboardingGate(fetchStatus: {
+            let args = ProcessInfo.processInfo.arguments
+            if args.contains("-ResumeUnavailable") { throw URLError(.notConnectedToInternet) }
+            let object: [String: Any] = ["completed": args.contains("-ResumeComplete"), "nextStep": "addressEntry", "cashHubOnly": false, "profile": ["firstName": "Test", "lastName": "Rider", "email": "fixture@example.com", "phoneNumber": "+16783220004", "address": ["street": "1 Main St", "city": "Atlanta", "state": "GA", "zip": "30303"]]]
+            return try JSONDecoder().decode(RiderOnboardingSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
+        }) { Text("Rider dashboard").accessibilityIdentifier("riderDashboardFixture") }
+        .environmentObject(session)
     }
 }
 #endif

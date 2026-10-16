@@ -14,12 +14,25 @@ enum SignupStep: Hashable {
     case paymentMethod
     case termsAndVerification
     case done
+    static func resumeStep(_ key: String) -> SignupStep? {
+        switch key {
+        case "betaWaiver": return .betaWaiver
+        case "nameEntry": return .nameEntry
+        case "emailPassword": return .emailPassword
+        case "addressEntry": return .addressEntry
+        case "paymentMethod": return .paymentMethod
+        case "termsAndVerification": return .termsAndVerification
+        default: return nil
+        }
+    }
 }
 
 struct SignupCoordinator: View {
     @EnvironmentObject private var session: UserSessionManager
     @Environment(\.dismiss) private var dismiss
     let upgradingCashHubAccount: Bool
+    private let resumeSnapshot: RiderOnboardingSnapshot?
+    private let onCompleted: (() -> Void)?
 
     @State private var path: [SignupStep] = []
     @State private var hasLoadedExistingProfile = false
@@ -48,8 +61,24 @@ struct SignupCoordinator: View {
     // Navigate to main app
     @State private var showMainApp = false
 
-    init(upgradingCashHubAccount: Bool = false) {
+    init(upgradingCashHubAccount: Bool = false, resumeSnapshot: RiderOnboardingSnapshot? = nil, onCompleted: (() -> Void)? = nil) {
         self.upgradingCashHubAccount = upgradingCashHubAccount
+        self.resumeSnapshot = resumeSnapshot
+        self.onCompleted = onCompleted
+        guard let saved = resumeSnapshot else { return }
+        let p = saved.profile
+        _path = State(initialValue: saved.nextStep.flatMap(SignupStep.resumeStep).map { [$0] } ?? [])
+        _phoneNumber = State(initialValue: p.phoneNumber ?? "")
+        _firstName = State(initialValue: p.firstName ?? "")
+        _lastName = State(initialValue: p.lastName ?? "")
+        _preferredName = State(initialValue: p.preferredName ?? "")
+        _email = State(initialValue: p.email ?? "")
+        _streetAddress = State(initialValue: p.address?.street ?? "")
+        _addressLine2 = State(initialValue: p.address?.line2 ?? "")
+        _city = State(initialValue: p.address?.city ?? "")
+        _state = State(initialValue: p.address?.state ?? "")
+        _zip = State(initialValue: p.address?.zip ?? "")
+        _betaWaiverAccepted = State(initialValue: p.betaWaiverAccepted ?? false)
     }
 
     var body: some View {
@@ -61,14 +90,15 @@ struct SignupCoordinator: View {
                     // Your PhoneVerificationView should return a verified E.164 phone string
                     PhoneVerificationView(
                         initialPhoneNumber: phoneNumber,
-                        linkToCurrentUser: upgradingCashHubAccount
+                        linkToCurrentUser: upgradingCashHubAccount || resumeSnapshot != nil
                     ) { verifiedPhone in
                         phoneNumber = verifiedPhone
                         betaInviteApproved(phoneE164: verifiedPhone) { approved in
                             Task { @MainActor in
                                 if approved {
                                     writePhoneIndex(phoneE164: verifiedPhone, uid: RydrWorkspace.auth.currentUser?.uid ?? "")
-                                    path.append(.betaWaiver)
+                                    if resumeSnapshot != nil { onCompleted?() }
+                                    else { path.append(.betaWaiver) }
                                 } else {
                                     try? RydrWorkspace.auth.signOut()
                                     betaAccessError = "This phone number has not been approved for the Rydr rider beta yet. Join the waitlist or use the phone number from your beta approval."
@@ -85,18 +115,22 @@ struct SignupCoordinator: View {
                 }
             }
             .navigationDestination(for: SignupStep.self) { step in
+                Group {
                 switch step {
                 case .betaWaiver:
                     BetaWaiverView(
                         onAgree: {
-                            betaWaiverAccepted = true
                             Task { @MainActor in
-                                path.append(.nameEntry)
+                                do {
+                                    try await RiderBackendIdentityService.sync(acceptBetaWaiver: true, beginOnboarding: true)
+                                    betaWaiverAccepted = true
+                                    path.append(.nameEntry)
+                                } catch { betaAccessError = error.localizedDescription; showBetaAccessAlert = true }
                             }
                         },
                         onDecline: {
-                            try? RydrWorkspace.auth.signOut()
-                            dismiss()
+                            if resumeSnapshot != nil { session.logout() }
+                            else { try? RydrWorkspace.auth.signOut(); dismiss() }
                         }
                     )
 
@@ -112,10 +146,7 @@ struct SignupCoordinator: View {
                                 "firstName": firstName,
                                 "lastName": lastName,
                                 "preferredName": preferredName
-                            ])
-                            Task { @MainActor in
-                                path.append(upgradingCashHubAccount ? .addressEntry : .emailPassword)
-                            }
+                            ]) { path.append(upgradingCashHubAccount ? .addressEntry : .emailPassword) }
                         },
                         onContinueWithSocial: { socialProfile in
                             finishSocialAuthAccountSetup(profile: socialProfile)
@@ -150,17 +181,14 @@ struct SignupCoordinator: View {
                                     "state": state,
                                     "zip": zip
                                 ]
-                            ])
-                            Task { @MainActor in
-                                path.append(.paymentMethod)
-                            }
+                            ]) { path.append(.paymentMethod) }
                         }
                     )
 
                 case .paymentMethod:
                     PaymentScreenView(
-                        onComplete: { Task { @MainActor in path.append(.termsAndVerification) } },
-                        onSkip:     { Task { @MainActor in path.append(.termsAndVerification) } }   // ✅ optional
+                        onComplete: { completePaymentStep() },
+                        onSkip: { completePaymentStep() } // Optional, but save the choice for resume.
                     )
 
                 case .termsAndVerification:
@@ -175,7 +203,11 @@ struct SignupCoordinator: View {
                 case .done:
                     EmptyView()
                 }
+                }.navigationBarBackButtonHidden(resumeSnapshot != nil && path.count == 1)
             }
+        }
+        .toolbar {
+            if resumeSnapshot != nil { ToolbarItem(placement: .topBarTrailing) { Button("Sign out") { session.logout() } } }
         }
         .fullScreenCover(isPresented: $showMainApp) {
             MainTabView()
@@ -185,6 +217,13 @@ struct SignupCoordinator: View {
             Button("OK") { dismiss() }
         } message: {
             Text(betaAccessError)
+        }
+    }
+
+    private func completePaymentStep() {
+        Task { @MainActor in
+            do { try await RiderBackendIdentityService.completePaymentStep(); path.append(.termsAndVerification) }
+            catch { betaAccessError = error.localizedDescription; showBetaAccessAlert = true }
         }
     }
 
@@ -199,12 +238,13 @@ struct SignupCoordinator: View {
     }
 
     /// Merge-writes into `riders/{uid}` so the document exists early and stays current.
-    private func upsertRider(_ fields: [String: Any]) {
+    private func upsertRider(_ fields: [String: Any], onSaved: @escaping () -> Void = {}) {
         guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         RydrWorkspace.firestore
             .collection("riders").document(uid)
             .setData(fields, merge: true) { err in
-                if let err = err { print("❌ upsertRider error: \(err)") }
+                if let err = err { betaAccessError = err.localizedDescription; showBetaAccessAlert = true }
+                else { onSaved() }
             }
     }
 
@@ -334,7 +374,8 @@ struct SignupCoordinator: View {
                     startingTab: .ride,
                     access: .rider
                 )
-                showMainApp = true
+                if let onCompleted { onCompleted() }
+                else { showMainApp = true }
             } catch {
                 betaAccessError = error.localizedDescription
                 showBetaAccessAlert = true
@@ -370,7 +411,7 @@ struct SignupCoordinator: View {
 
     private func writePhoneIndex(phoneE164: String, uid: String) {
         Task {
-            do { try await RiderBackendIdentityService.sync() }
+            do { try await RiderBackendIdentityService.sync(beginOnboarding: true) }
             catch { print("⚠️ backend identity sync failed: \(error.localizedDescription)") }
         }
     }

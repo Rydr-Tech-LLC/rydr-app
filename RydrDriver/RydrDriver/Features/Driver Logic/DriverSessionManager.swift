@@ -21,7 +21,7 @@ enum DriverApprovalPolicy {
         let hasSafetyHold = (data["safetyHold"] as? Bool) ?? false
         let isSafetySuspended = accountStatus == "suspended" || safetyReviewStatus == "suspended" || hasSafetyHold
         let hasComplianceHold = (data["documentComplianceHold"] as? Bool) == true || (data["backgroundCheckHold"] as? Bool) == true
-        return approvedByMissionControl && !isSafetySuspended && !hasComplianceHold
+        return data["driverSignupCompleted"] as? Bool == true && approvedByMissionControl && !isSafetySuspended && !hasComplianceHold
     }
 }
 
@@ -30,6 +30,7 @@ final class DriverSessionManager: ObservableObject {
     @Published var driverEmail: String = ""
     @Published var isLoggedIn: Bool = false
     @Published var canGoOnline: Bool = false
+    @Published var onboardingResumeRequestID: String = ""
 
     private var driverListener: ListenerRegistration?
     private var isLoggingOut = false
@@ -134,6 +135,7 @@ final class DriverSessionManager: ObservableObject {
             guard error == nil, let data = snapshot?.data() else { return }
             DispatchQueue.main.async {
                 self.canGoOnline = DriverApprovalPolicy.isApproved(data: data)
+                self.onboardingResumeRequestID = data["onboardingResumeRequestID"] as? String ?? ""
             }
         }
     }

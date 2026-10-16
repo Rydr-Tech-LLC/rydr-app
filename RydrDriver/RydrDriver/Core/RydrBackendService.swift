@@ -44,6 +44,24 @@ enum RydrBackendService {
         }
     }
 
+    static func onboardingStatus() async throws -> DriverOnboardingSnapshot {
+        guard let baseURLString, let base = URL(string: baseURLString), let endpoint = URL(string: "/account/onboarding?role=driver", relativeTo: base), let user = RydrWorkspace.auth.currentUser else { throw URLError(.userAuthenticationRequired) }
+        var request = RydrWorkspace.urlRequest(url: endpoint)
+        let token: String = try await withCheckedThrowingContinuation { continuation in
+            user.getIDTokenForcingRefresh(true) { token, error in
+                if let error { continuation.resume(throwing: error) }
+                else if let token { continuation.resume(returning: token) }
+                else { continuation.resume(throwing: URLError(.userAuthenticationRequired)) }
+            }
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(try await appCheckToken(), forHTTPHeaderField: "X-Firebase-AppCheck")
+        request.cachePolicy = .reloadIgnoringLocalCacheData; request.timeoutInterval = 20
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+        return try JSONDecoder().decode(DriverOnboardingSnapshot.self, from: data)
+    }
+
     static func finalizeDriverAccount() async throws {
         try await sendAuthenticatedJSON(path: "/account/profile/finalize", body: ["role": "driver"])
     }
@@ -525,4 +543,20 @@ enum RydrBackendService {
     }
 
     private struct BackendError: Decodable { let error: String }
+}
+
+
+struct DriverOnboardingSnapshot: Decodable {
+    let completed: Bool
+    let nextStep: String?
+    let cashHubOnly: Bool
+    let profile: DriverOnboardingProfile
+}
+struct DriverOnboardingProfile: Decodable {
+    let firstName: String?, lastName: String?, preferredName: String?, email: String?, phoneNumber: String?, dob: String?
+    let betaWaiverAccepted: Bool?, backgroundCheckAcknowledged: Bool?
+    let address: Address?, license: License?, vehicle: Vehicle?
+    struct Address: Decodable { let street: String?, line2: String?, city: String?, state: String?, zip: String? }
+    struct License: Decodable { let number: String?, state: String? }
+    struct Vehicle: Decodable { let vin: String?, make: String?, model: String?, year: String?, trim: String?, bodyStyle: String?, fuelType: String?, color: String?, plate: String? }
 }

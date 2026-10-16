@@ -125,6 +125,8 @@ struct Rydr_DriverApp: App {
       #if DEBUG && targetEnvironment(simulator)
       if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
         NavigationStack { DriverLoginView().environmentObject(DriverSessionManager()) }
+      } else if ProcessInfo.processInfo.arguments.contains("-DriverOnboardingResumeUITest") {
+        DriverOnboardingResumeUITestFixture()
       } else if ProcessInfo.processInfo.arguments.contains("-DriverPayoutErrorUITest") {
         NavigationStack { DriverPayoutErrorUITestFixture() }
       } else if ProcessInfo.processInfo.arguments.contains("-DriverIdentityUITest") {
@@ -174,7 +176,8 @@ private struct DriverRootView: View {
                     didFinishSplash = true
                 }
             } else if session.isLoggedIn {
-                DriverDashboardView()
+                DriverOnboardingGate { DriverDashboardView().onAppear { session.startDriverStatusListener() } }
+                    .id("\(RydrWorkspace.identifier ?? "unresolved"):\(RydrWorkspace.auth.currentUser?.uid ?? "signed-out"):\(session.onboardingResumeRequestID)")
             } else {
                 DriverLoginView()
             }
@@ -189,3 +192,50 @@ private struct DriverRootView: View {
         }
     }
 }
+
+
+private struct DriverOnboardingGate<Content: View>: View {
+    @EnvironmentObject private var session: DriverSessionManager
+    var fetchStatus: () async throws -> DriverOnboardingSnapshot = { try await RydrBackendService.onboardingStatus() }
+    @ViewBuilder var content: () -> Content
+    @State private var snapshot: DriverOnboardingSnapshot?
+    @State private var failed = false
+    var body: some View {
+        Group {
+            if let snapshot {
+                if snapshot.completed { content() }
+                else { DriverSignupCoordinator(resumeSnapshot: snapshot, onCompleted: { Task { await reload() } }).id(snapshot.nextStep) }
+            } else if failed {
+                VStack(spacing: 20) {
+                    Text("We couldn't confirm your onboarding progress. Please try again.").accessibilityIdentifier("driverOnboardingError")
+                    Button("Retry") { Task { await reload() } }
+                    Button("Sign out") { session.logout() }
+                }.padding()
+            } else { ProgressView("Restoring your onboarding…") }
+        }.task { await reload() }
+    }
+    @MainActor private func reload() async {
+        snapshot = nil; failed = false; session.canGoOnline = false
+        do {
+            let result = try await fetchStatus()
+            guard result.completed || result.nextStep == "phone" || result.nextStep.flatMap(DriverSignupStep.resumeStep) != nil else { throw URLError(.cannotParseResponse) }
+            snapshot = result
+        } catch { failed = true }
+    }
+}
+
+#if DEBUG && targetEnvironment(simulator)
+private struct DriverOnboardingResumeUITestFixture: View {
+    @StateObject private var session = DriverSessionManager()
+    var body: some View {
+        DriverOnboardingGate(fetchStatus: {
+            let args = ProcessInfo.processInfo.arguments
+            if args.contains("-ResumeUnavailable") { throw URLError(.notConnectedToInternet) }
+            let step = args.contains("-ResumeAddress") ? "address" : "payouts"
+            let object: [String: Any] = ["completed": args.contains("-ResumeComplete"), "nextStep": step, "cashHubOnly": false, "profile": ["firstName": "Test", "lastName": "Driver", "email": "fixture@example.com", "phoneNumber": "+16783220004", "address": ["street": "1 Main St", "city": "Atlanta", "state": "GA", "zip": "30303"]]]
+            return try JSONDecoder().decode(DriverOnboardingSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
+        }) { Text("Driver dashboard").accessibilityIdentifier("driverDashboardFixture") }
+        .environmentObject(session)
+    }
+}
+#endif
