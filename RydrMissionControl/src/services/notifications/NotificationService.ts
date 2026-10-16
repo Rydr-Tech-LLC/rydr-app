@@ -125,7 +125,7 @@ export class NotificationService {
       role: input.role,
       riderTestFlightUrl: optionalEnv("TESTFLIGHT_RIDER_URL") ?? "https://testflight.apple.com/join/m7YMYqCn",
       driverTestFlightUrl: optionalEnv("TESTFLIGHT_DRIVER_URL") ?? "https://testflight.apple.com/join/vGTnKeBV",
-      discordInviteUrl: discordInviteUrlForRole(input.role),
+      discordInviteUrl: discordInviteUrlForRole(input.role) ?? "https://discord.gg/nhFwpADkD7",
       discordChannelUrl: "https://discord.com/channels/1521954500498165840/1530594332778954923"
     });
 

@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const ts=require('typescript');
 require.extensions['.ts']=(m,f)=>m._compile(ts.transpileModule(fs.readFileSync(f,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,f);
 const {betaApprovedTemplate}=require('../src/services/notifications/templates/betaApproved.ts');
-const links={riderTestFlightUrl:'https://testflight.apple.com/join/m7YMYqCn',driverTestFlightUrl:'https://testflight.apple.com/join/vGTnKeBV',discordInviteUrl:'https://discord.gg/kfUz52849',discordChannelUrl:'https://discord.com/channels/1521954500498165840/1530594332778954923'};
+const links={riderTestFlightUrl:'https://testflight.apple.com/join/m7YMYqCn',driverTestFlightUrl:'https://testflight.apple.com/join/vGTnKeBV',discordInviteUrl:'https://discord.gg/nhFwpADkD7',discordChannelUrl:'https://discord.com/channels/1521954500498165840/1530594332778954923'};
 for(const role of ['rider','driver'])test(`${role} approval contains only the matching app and includes Discord join and support links`,()=>{
  const result=betaApprovedTemplate({...links,role,firstName:'<Tester>'});
  const own=role==='rider'?links.riderTestFlightUrl:links.driverTestFlightUrl;
