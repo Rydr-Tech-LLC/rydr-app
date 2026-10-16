@@ -153,7 +153,7 @@ struct DriverLoginView: View {
                 case .code:
                     DriverPhoneCodeEntryView(
                         verificationID: $pendingVerificationID,
-                        phoneNumber: pendingPhone,
+                        phoneNumber: $pendingPhone,
                         onEditNumber: {
                             if !phoneFlowPath.isEmpty { phoneFlowPath.removeLast() }
                         },

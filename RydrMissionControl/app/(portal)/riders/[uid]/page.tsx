@@ -149,7 +149,7 @@ export default async function RiderReviewPage(props: { params: Promise<{ uid: st
             )}
           </Section>
 
-          <AccountAccessSupport uid={rider.uid} role="rider" />
+          <AccountAccessSupport key={rider.uid} uid={rider.uid} role="rider" />
           <RydrBankMintPanel uid={rider.uid} />
           <RiderActions
             uid={rider.uid}

@@ -146,7 +146,7 @@ struct DriverSignupCoordinator: View {
                 case .phoneCode:
                     DriverPhoneCodeEntryView(
                         verificationID: $pendingVerificationID,
-                        phoneNumber: phoneNumber,
+                        phoneNumber: $phoneNumber,
                         onEditNumber: {
                             if !path.isEmpty { path.removeLast() }
                         },

@@ -46,5 +46,9 @@ export async function POST(request:NextRequest,props:Params){
  if(request.headers.get("origin") !== request.nextUrl.origin)return NextResponse.json({error:"Same-origin request required"},{status:403});
  const {role,uid}=await props.params;
  try {const result=await access.post(role,uid,await request.json().catch(()=>null));return NextResponse.json(result.body,{status:result.status});}
- catch {return NextResponse.json({error:"Recovery could not be completed. Try later or contact support."},{status:503});}
+ catch(error) {
+  const failure=error as {code?:string;message?:string};
+  console.error("[accountAccess] recovery_failed",{code:failure.code || "unknown",message:(failure.message || "Unknown failure").replace(/https?:\/\/[^\s]+/g,"[redacted URL]")});
+  return NextResponse.json({error:"Recovery could not be completed. Try later or contact support."},{status:503});
+ }
 }

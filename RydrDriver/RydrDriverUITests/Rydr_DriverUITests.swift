@@ -27,6 +27,7 @@ final class Rydr_DriverUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["smsRequestCount"].label, "SMS transport calls: 1")
         let resend = app.buttons["smsResend"]
         XCTAssertTrue(resend.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["smsDestinationPhone"].label, "+1 (202) 555-0123")
         if !resend.isHittable { app.swipeUp() }
         XCTAssertFalse(resend.isEnabled)
         XCTAssertTrue(resend.waitForEnabled(timeout: 8))

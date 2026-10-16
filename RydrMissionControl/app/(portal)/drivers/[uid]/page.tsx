@@ -623,7 +623,7 @@ export default async function DriverReviewPage(props: {
             />
           </Section>
 
-          <AccountAccessSupport uid={driver.uid} role="driver" />
+          <AccountAccessSupport key={driver.uid} uid={driver.uid} role="driver" />
           <DriverProfileAdminTools
             uid={driver.uid}
             initial={adminProfileInitial}

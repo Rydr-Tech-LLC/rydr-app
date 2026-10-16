@@ -16,7 +16,7 @@ struct DriverPhoneCodeEntryView: View {
     /// swap in a new session without recreating this view.
     @Binding var verificationID: String
     /// The E.164 phone number the code was sent to (display only).
-    let phoneNumber: String
+    @Binding var phoneNumber: String
     /// Called when the driver wants to go back and fix the number. If nil, no
     /// Edit affordance is shown.
     var onEditNumber: (() -> Void)? = nil
@@ -130,6 +130,7 @@ struct DriverPhoneCodeEntryView: View {
 
                 HStack(spacing: 6) {
                     Text(formattedPhoneNumber)
+                        .accessibilityIdentifier("smsDestinationPhone")
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.primary)
 
