@@ -61,7 +61,7 @@ struct DriverSettingsView: View {
     @AppStorage(DriverScheduledDashboardPreference.key) private var showScheduledRidesOnDashboard = DriverScheduledDashboardPreference.defaultValue
 
     @State private var showLinkPhoneSheet = false
-    @State private var phoneProviderLinked = Auth.auth().currentUser?.providerData.contains { $0.providerID == PhoneAuthProviderID } ?? false
+    @State private var phoneProviderLinked = RydrWorkspace.auth.currentUser?.providerData.contains { $0.providerID == PhoneAuthProviderID } ?? false
     @State private var cashHubTermsAccepted = false
     @State private var cashHubOptedOut = false
     @State private var cashHubAccessStatus = "active"
@@ -379,7 +379,7 @@ struct DriverSettingsView: View {
     }
 
     private func loadCashHubAccess() {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             isLoadingCashHubAccess = false
             return
         }
@@ -454,7 +454,7 @@ struct DriverSettingsView: View {
     }
 
     private func optOutOfCashRydrHub() {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             cashHubAccessAlert = CashHubAccessAlert(title: "CashRydr Hub", message: "Sign in before changing CashRydr Hub access.")
             return
         }
@@ -602,7 +602,7 @@ private struct DriverLinkPhoneView: View {
         guard isPhoneValid else { return }
         errorMessage = ""
         isSending = true
-        PhoneAuthProvider.provider().verifyPhoneNumber(e164Phone, uiDelegate: nil) { id, error in
+        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(e164Phone, uiDelegate: nil) { id, error in
             Task { @MainActor in
                 isSending = false
                 if let error {
@@ -624,14 +624,14 @@ private struct DriverLinkPhoneView: View {
             errorMessage = "Verification session is missing. Please resend the code."
             return
         }
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             errorMessage = "You're no longer signed in. Please log in again."
             return
         }
 
         isVerifying = true
         errorMessage = ""
-        let credential = PhoneAuthProvider.provider().credential(
+        let credential = PhoneAuthProvider.provider(auth: RydrWorkspace.auth).credential(
             withVerificationID: verificationID,
             verificationCode: code
         )

@@ -1,6 +1,6 @@
 import { onRequest } from "../workspaceFunctions";
 import { defineSecret } from "firebase-functions/params";
-import { db, storage, firebaseAuth } from "../admin";
+import { db, storage, controlFirebaseAuth } from "../admin";
 import { VEHICLE_COLORS } from "../types";
 import { editVehicleBackground } from "../services/vehicleImageEditing";
 const key = defineSecret("OPENAI_API_KEY");
@@ -8,7 +8,7 @@ export const editVehicleLibraryBackground = onRequest({ secrets: [key], timeoutS
   response.set("Cache-Control", "no-store");
   if (request.method !== "POST") { response.status(405).json({ error: "Use POST." }); return; }
   let decoded;
-  try { decoded = await firebaseAuth().verifySessionCookie((request.headers.authorization ?? "").replace(/^Bearer /, ""), true); }
+  try { decoded = await controlFirebaseAuth().verifySessionCookie((request.headers.authorization ?? "").replace(/^Bearer /, ""), true); }
   catch { response.status(401).json({ error: "Mission Control authentication required." }); return; }
   if (!(decoded.role === "admin" || decoded.admin === true) || !/@rydr-go\.com$/i.test(decoded.email ?? "")) { response.status(403).json({ error: "Administrator access required." }); return; }
   const { vehicleId, color, prompt } = request.body ?? {};

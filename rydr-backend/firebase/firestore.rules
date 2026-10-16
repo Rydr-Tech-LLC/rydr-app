@@ -7,7 +7,13 @@ service cloud.firestore {
       let policy = get(path).data;
       let testAccount = request.auth.uid in policy.blockedAuthUids
         || request.auth.token.get("phone_number", "") in policy.testPhoneNumbers;
-      return policy.configured == true && ((database == "(default)" && testAccount) || (database == "live-beta" && !testAccount));
+      return policy.configured == true && (
+        (policy.get("authSeparationEnabled", false) == true && (
+          (database == "(default)" && policy.get("workspaceId", "") == "test") ||
+          (database == "live-beta" && policy.get("workspaceId", "") == "live-beta" && !(request.auth.uid in policy.blockedAuthUids))
+        )) ||
+        (policy.get("authSeparationEnabled", false) != true && ((database == "(default)" && testAccount) || (database == "live-beta" && !testAccount)))
+      );
     }
     function signedIn() {
       return request.auth != null && (

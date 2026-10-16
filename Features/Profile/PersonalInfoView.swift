@@ -81,7 +81,7 @@ struct PersonalInfoView: View {
     private var hasChanges: Bool { info != original }
 
     private func load() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         RydrWorkspace.firestore.collection("riders").document(uid).getDocument { snap, _ in
             guard let d = snap?.data() else { return }
             var i = RiderInfo.empty

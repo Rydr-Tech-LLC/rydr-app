@@ -117,7 +117,7 @@ enum DriverConnectAPI {
         return try await send(request)
     }
     private static func send<T: Decodable>(_ original: URLRequest) async throws -> T {
-        guard let user = Auth.auth().currentUser else { throw URLError(.userAuthenticationRequired) }
+        guard let user = RydrWorkspace.auth.currentUser else { throw URLError(.userAuthenticationRequired) }
         var request = original
         request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
         request.cachePolicy = .reloadIgnoringLocalCacheData

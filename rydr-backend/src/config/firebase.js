@@ -17,7 +17,10 @@ const { getAppCheck } = require("firebase-admin/app-check");
 
 // Keep the service layer's established `admin.firestore.Timestamp`-style API
 // while using Firebase Admin 14's modular entry points underneath.
-function firestoreFor(appInstance) { const {currentWorkspace}=require("../services/workspaceContext"); return getAdminFirestore(appInstance,currentWorkspace()==="test"?"(default)":"live-beta"); }
+const {configureWorkspaceSDK, appForWorkspace, authForWorkspace, firestoreForWorkspace, storageForWorkspace, projectForWorkspace}=require("../../firebase/functions/src/services/firebaseWorkspace");
+configureWorkspaceSDK(require);
+function workspace(){return require("../services/workspaceContext").currentWorkspace();}
+function firestoreFor(appInstance) { return firestoreForWorkspace(workspace(),appInstance); }
 firestoreFor.FieldValue = FieldValue;
 firestoreFor.GeoPoint = GeoPoint;
 firestoreFor.Timestamp = Timestamp;
@@ -28,8 +31,8 @@ const admin = {
   app: getApp,
   initializeApp,
   firestore: firestoreFor,
-  storage: (appInstance) => getStorage(appInstance),
-  auth: (appInstance) => getAuth(appInstance),
+  storage: (appInstance) => storageForWorkspace(workspace(),appInstance),
+  auth: (appInstance) => authForWorkspace(workspace(),appInstance),
   appCheck: (appInstance) => getAppCheck(appInstance)
 };
 
@@ -92,9 +95,9 @@ function getStorageBucket() {
 }
 
 function storageBucketCandidates() {
-  const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID || process.env.FIREBASE_PROJECT_ID;
+  const projectId = projectForWorkspace(workspace());
   return [
-    process.env.FIREBASE_STORAGE_BUCKET,
+    workspace() === "live-beta" ? process.env.FIREBASE_STORAGE_BUCKET : null,
     projectId ? `${projectId}.firebasestorage.app` : null,
     projectId ? `${projectId}.appspot.com` : null
   ].filter(Boolean);

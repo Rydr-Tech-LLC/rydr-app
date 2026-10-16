@@ -273,7 +273,7 @@ enum RydrBackendService {
               let baseURL = URL(string: baseURLString),
               let endpoint = URL(string: "/safety/reportable-rides", relativeTo: baseURL),
               var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: true),
-              let user = Auth.auth().currentUser else {
+              let user = RydrWorkspace.auth.currentUser else {
             throw URLError(.userAuthenticationRequired)
         }
         components.queryItems = [URLQueryItem(name: "limit", value: String(min(50, max(1, limit))))]
@@ -292,14 +292,14 @@ enum RydrBackendService {
     }
 
     static func fetchDriverEarningsSummary() async throws -> EarningsSummaryResponse {
-        guard let baseURLString,let base=URL(string:baseURLString),let url=URL(string:"/driver/earnings-summary",relativeTo:base),let user=Auth.auth().currentUser else{throw URLError(.userAuthenticationRequired)}
+        guard let baseURLString,let base=URL(string:baseURLString),let url=URL(string:"/driver/earnings-summary",relativeTo:base),let user=RydrWorkspace.auth.currentUser else{throw URLError(.userAuthenticationRequired)}
         var request=RydrWorkspace.urlRequest(url:url);request.httpMethod="GET";request.setValue("Bearer \(try await user.getIDToken())",forHTTPHeaderField:"Authorization")
         let(data,response)=try await URLSession.shared.data(for:request);guard let http=response as? HTTPURLResponse,(200..<300).contains(http.statusCode) else{throw URLError(.badServerResponse)}
         return try JSONDecoder().decode(EarningsSummaryResponse.self,from:data)
     }
 
     private static func sendAuthenticatedJSON(path: String, body: [String: Any]) async throws {
-        guard let baseURLString, let baseURL = URL(string: baseURLString), let url = URL(string: path, relativeTo: baseURL), let user = Auth.auth().currentUser else { throw URLError(.userAuthenticationRequired) }
+        guard let baseURLString, let baseURL = URL(string: baseURLString), let url = URL(string: path, relativeTo: baseURL), let user = RydrWorkspace.auth.currentUser else { throw URLError(.userAuthenticationRequired) }
         var request = RydrWorkspace.urlRequest(url: url); request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
@@ -333,7 +333,7 @@ enum RydrBackendService {
             return nil
         }
 
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             throw URLError(.userAuthenticationRequired)
         }
         let idToken = try await user.getIDToken()

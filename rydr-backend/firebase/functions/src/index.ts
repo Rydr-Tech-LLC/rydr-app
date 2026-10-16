@@ -3,7 +3,7 @@ import { getVehicleSpecificationMatch } from "./services/vehicleSpecificationsSe
 import { addSavedDriverVehicle, deleteSavedDriverVehicle } from "./services/driverGarageService";
 export { maintainDriverDocumentCompliance, onDriverCompliancePolicyChanged, onDriverComplianceChanged } from "./triggers/driverCompliance";
 import { HttpsError } from "firebase-functions/v2/https";
-import { onCall } from "./workspaceFunctions";
+import { onCall, deploymentProject } from "./workspaceFunctions";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { db, FieldValue } from "./admin";
 import { vehicleDecoderService, VinDecodeError } from "./services/vehicleDecoderService";
@@ -55,7 +55,7 @@ function asBodyStyle(value: unknown): VehicleBodyStyle | null {
     : null;
 }
 
-setGlobalOptions({ region: "us-central1", maxInstances: 20 });
+setGlobalOptions({ region: "us-central1", maxInstances: 20, ...(deploymentProject() === "rydr-test-c7ec1" ? {serviceAccount: "rydr-test-backend@rydr-test-c7ec1.iam.gserviceaccount.com"} : {}) });
 
 function requireAuth(auth: { uid: string } | undefined): { uid: string } {
   if (!auth) {

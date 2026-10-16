@@ -137,7 +137,7 @@ struct PaymentScreenView: View {
 
     private func bootstrap() {
         guard customerId == nil else { return }
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             error("You must be logged in.")
             return
         }
@@ -219,7 +219,7 @@ struct PaymentScreenView: View {
             }.resume()
         }
 
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             completion(.failure(simple("You must be logged in.")))
             return
         }

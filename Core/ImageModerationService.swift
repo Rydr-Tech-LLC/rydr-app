@@ -104,7 +104,7 @@ final class ImageModerationService {
     /// approval lets the backend write the final URL to `riders/{uid}.photoURL`.
     /// Returns the approved download URL.
     func submitProfilePhoto(_ image: UIImage) async throws -> URL {
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             throw ImageModerationError.notSignedIn
         }
         let uid = user.uid
@@ -114,7 +114,7 @@ final class ImageModerationService {
         }
 
         let pendingPath = "pendingProfilePhotos/\(uid)/\(UUID().uuidString).jpg"
-        let pendingRef = Storage.storage().reference(withPath: pendingPath)
+        let pendingRef = RydrWorkspace.storage.reference(withPath: pendingPath)
 
         do {
             let metadata = StorageMetadata()
@@ -157,7 +157,7 @@ final class ImageModerationService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["storagePath": storagePath])
 
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             throw ImageModerationError.notSignedIn
         }
         let token: String

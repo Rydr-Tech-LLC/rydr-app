@@ -499,7 +499,7 @@ final class RideManager: ObservableObject {
 
     var activeRideChatContext: RideChatContext? {
         guard let ride = currentRide,
-              let riderId = Auth.auth().currentUser?.uid else {
+              let riderId = RydrWorkspace.auth.currentUser?.uid else {
             return nil
         }
 
@@ -528,7 +528,7 @@ final class RideManager: ObservableObject {
     }
 
     private func loadSavedRidePreferences() async -> RiderRidePreferences? {
-        guard let uid = Auth.auth().currentUser?.uid else { return nil }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return nil }
         do {
             let preferences = try await RiderRidePreferenceStore().load(uid: uid)
             return preferences.isDefault ? nil : preferences
@@ -919,7 +919,7 @@ final class RideManager: ObservableObject {
     }
 
     func submitDriverFeedback(_ draft: DriverFeedbackDraft) async throws {
-        guard let user = Auth.auth().currentUser else { throw RideFeedbackError.notSignedIn }
+        guard let user = RydrWorkspace.auth.currentUser else { throw RideFeedbackError.notSignedIn }
         guard let receipt = lastReceipt else { throw RideFeedbackError.missingReceipt }
         guard let backendRideId = receipt.backendRideId else { throw RideFeedbackError.missingRideId }
 
@@ -1661,7 +1661,7 @@ final class RideManager: ObservableObject {
     // MARK: - Stripe wallet and backend-owned ride charges
 
     private func currentIDToken() async -> String? {
-        guard let user = Auth.auth().currentUser else { return nil }
+        guard let user = RydrWorkspace.auth.currentUser else { return nil }
         return try? await user.getIDToken()
     }
 
@@ -1687,7 +1687,7 @@ final class RideManager: ObservableObject {
     /// `email`/`name` (display data, not an identity the server trusts) are sent.
     private func ensureStripeCustomerId() async -> String? {
         if let stripeCustomerId { return stripeCustomerId }
-        guard let user = Auth.auth().currentUser else { return nil }
+        guard let user = RydrWorkspace.auth.currentUser else { return nil }
 
         let name = user.displayName ?? "Rydr Rider"
         guard let data = await stripeRequest("create-customer", body: ["name": name]),

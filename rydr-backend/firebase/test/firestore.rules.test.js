@@ -245,3 +245,36 @@ test('a recreated Firebase test-number identity is routed to Test without an all
  await assertSucceeds(getDoc(doc(db,'riders/recreated-test')));
  await assertFails(getDoc(doc(db,'operationalSecurity/liveBetaAccess')));
 });
+
+test("separated Test project authorizes its own identities without phone-based routing", async () => {
+  let original;
+  await environment.withSecurityRulesDisabled(async context => {
+    const ref = doc(context.firestore(), "operationalSecurity/liveBetaAccess");
+    original = (await getDoc(ref)).data();
+    await setDoc(ref, {...original, version:2, authSeparationEnabled:true, workspaceId:"test"});
+  });
+  try {
+    const db = environment.authenticatedContext("new-test-identity", {phone_number:"+16783220004"}).firestore();
+    await assertSucceeds(getDoc(doc(db,"riders/new-test-identity")));
+    await assertFails(getDoc(doc(db,"riders/rider-1")));
+  } finally {
+    await environment.withSecurityRulesDisabled(context => setDoc(doc(context.firestore(),"operationalSecurity/liveBetaAccess"), original));
+  }
+});
+
+test("the original control database denies end-user access after Auth separation", async () => {
+  let original;
+  await environment.withSecurityRulesDisabled(async context => {
+    const ref = doc(context.firestore(), "operationalSecurity/liveBetaAccess");
+    original = (await getDoc(ref)).data();
+    await setDoc(ref, {...original, version:2, authSeparationEnabled:true, workspaceId:"control"});
+  });
+  try {
+    const user = environment.authenticatedContext("rider-1", {phone_number:"+16783220004"}).firestore();
+    await assertFails(getDoc(doc(user,"riders/rider-1")));
+    const staff = environment.authenticatedContext("staff", {admin:true}).firestore();
+    await assertSucceeds(getDoc(doc(staff,"riders/rider-1")));
+  } finally {
+    await environment.withSecurityRulesDisabled(context => setDoc(doc(context.firestore(),"operationalSecurity/liveBetaAccess"), original));
+  }
+});

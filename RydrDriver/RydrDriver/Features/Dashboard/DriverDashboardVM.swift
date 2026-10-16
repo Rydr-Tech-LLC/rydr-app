@@ -129,7 +129,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         isLoadingPublicProfile = true
         publicProfileErrorMessage = nil
 
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             publicProfileErrorMessage = "Sign in to view your public profile."
             isLoadingPublicProfile = false
             return
@@ -470,7 +470,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private var rateCardCacheKey: String? {
-        guard let uid = Auth.auth().currentUser?.uid else { return nil }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return nil }
         return "rydr.driver.rate-card.\(uid).v1"
     }
 
@@ -638,7 +638,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     #endif
 
     func submitProfilePhotoForReview(_ image: UIImage) {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             profilePhotoMessage = "Sign in before updating your profile photo."
             return
         }
@@ -679,7 +679,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func accept(_ request: DriverRideRequest, queued: Bool) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         guard !respondingRequestIDs.contains(request.id) else { return }
         respondingRequestIDs.insert(request.id)
         Task { [weak self] in
@@ -817,7 +817,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     /// Insights is opened or pulled-to-refresh. No hardcoded fallback values.
     @MainActor
     func refreshEarningsSummary() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         isLoadingEarningsSummary = true
         Task {
             defer { isLoadingEarningsSummary = false }
@@ -832,7 +832,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func recordWaitTimeEvent(ride: DriverActiveRide, waitStage: String) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         let now = Date()
         let paidWaitSeconds: Int
         let complimentaryWaitSeconds: Int
@@ -881,7 +881,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     func requestAccountDeletion() {
         guard !isRequestingAccountDeletion else { return }
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             accountDeletionMessage = "Sign in before requesting account deletion."
             return
         }
@@ -913,7 +913,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func submitRiderRating(ride: DriverActiveRide, rating: Int?, feedback: String) {
-        guard Auth.auth().currentUser != nil else { return }
+        guard RydrWorkspace.auth.currentUser != nil else { return }
         let body = RydrBackendService.RideRatingRequest(
             rating: rating,
             feedback: feedback.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -937,7 +937,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func sendMessageToRider(ride: DriverActiveRide, text: String) async throws {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let encrypted = try DriverRideChatCrypto.encrypt(trimmed, rideId: ride.id, riderId: ride.riderId, driverId: uid)
@@ -957,7 +957,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func recordDriverOnlyRidePreferenceNote(ride: DriverActiveRide, preferences: DriverVisibleRidePreferences) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         Task { [weak self] in
             do {
                 try await DriverRideChatService().addDriverPrivatePreferenceNote(
@@ -988,7 +988,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func promoteNextQueuedRideIfAvailable() {
-        guard Auth.auth().currentUser != nil else { return }
+        guard RydrWorkspace.auth.currentUser != nil else { return }
         Task { [weak self] in
             do {
                 let promotion = try await RydrBackendService.promoteNextQueuedRide()
@@ -1026,7 +1026,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     private func startObservingDriverEligibility() {
         driverListener?.remove()
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             canGoOnline = false
             return
         }
@@ -1042,7 +1042,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 self.canGoOnline = DriverApprovalPolicy.isApproved(data: data)
                 self.complianceHoldReason = (data["documentComplianceHold"] as? Bool) == true ? "Upload current documents to restore driving access." : (data["backgroundCheckHold"] as? Bool) == true ? "Complete your required background screening before driving." : nil
                 if self.complianceHoldReason != nil { self.isOnline = false; self.pendingRequests = [] }
-                self.driverDisplayName = Self.publicDisplayName(from: data, authUser: Auth.auth().currentUser)
+                self.driverDisplayName = Self.publicDisplayName(from: data, authUser: RydrWorkspace.auth.currentUser)
                 self.driverRating = Self.doubleValue(data["rating"]) ?? self.driverRating
                 self.driverRatingCount = Self.intValue(data["ratingCount"]) ?? self.driverRatingCount
                 self.applyVehicleEligibility(from: data)
@@ -1055,7 +1055,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     private func startRequestListener() {
         requestListener?.remove()
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
 
         requestListener = db.collection("rideRequests")
             .whereField("driverId", isEqualTo: uid)
@@ -1098,7 +1098,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         safetyPenaltyNotificationListener?.remove()
         appealNotificationListener?.remove()
 
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             systemNotifications = []
             localNotifications = [:]
             refreshNotifications()
@@ -1241,7 +1241,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
         switch notification.source {
         case .system:
-            guard let uid = Auth.auth().currentUser?.uid else { return }
+            guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
             db.collection("drivers")
                 .document(uid)
                 .collection("notifications")
@@ -1268,7 +1268,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     func dismissNotification(_ notification: DriverNotificationItem) {
         switch notification.source {
         case .system:
-            guard let uid = Auth.auth().currentUser?.uid else { return }
+            guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
             db.collection("drivers")
                 .document(uid)
                 .collection("notifications")
@@ -1332,7 +1332,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     private func startScheduledMapOpportunityListener() {
         scheduledMapOpportunityListener?.remove()
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             scheduledMapOpportunities = []
             selectedScheduledMapOpportunity = nil
             return
@@ -1634,7 +1634,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     private func startActiveRideListener() {
         activeRideListener?.remove()
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
 
         activeRideListener = db.collection("rides")
             .whereField("driverId", isEqualTo: uid)
@@ -1754,7 +1754,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func publishDriverProfile() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         db.collection("drivers").document(uid).setData([
             "standardDispatchEnabled": true,
             "selectedRideTypes": Array(selectedRideTypes).sorted(),
@@ -1763,7 +1763,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func publishAutoAcceptPreference() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         db.collection("drivers").document(uid).setData([
             "autoAcceptQueuedRides": autoAcceptQueuedRides,
             "updatedAt": FieldValue.serverTimestamp()
@@ -1813,7 +1813,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         }
     }
 
-    private func resolvedDriverDisplayName(authUser: User? = Auth.auth().currentUser) -> String {
+    private func resolvedDriverDisplayName(authUser: User? = RydrWorkspace.auth.currentUser) -> String {
         let trimmed = driverDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty, trimmed != "Rydr Driver" { return trimmed }
         return Self.publicDisplayName(from: [:], authUser: authUser)
@@ -1996,7 +1996,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func recordTripTelemetryIfNeeded(ride: DriverActiveRide, location: CLLocation) {
-        guard Auth.auth().currentUser != nil else { return }
+        guard RydrWorkspace.auth.currentUser != nil else { return }
 
         let now = Date()
         let movedMeters = lastTripTelemetryLocation?.distance(from: location) ?? .greatestFiniteMagnitude
@@ -2190,7 +2190,7 @@ struct DriverDashboardView: View {
                 ZStack(alignment: .bottom) {
                     DriverRideInProgressView(
                         ride: ride,
-                        currentDriverId: Auth.auth().currentUser?.uid ?? "",
+                        currentDriverId: RydrWorkspace.auth.currentUser?.uid ?? "",
                         driverCoordinate: vm.lastLocation?.coordinate,
                         driverSpeedMetersPerSecond: vm.lastLocation?.speed,
                         isUpdatingRide: vm.isUpdatingActiveRide,

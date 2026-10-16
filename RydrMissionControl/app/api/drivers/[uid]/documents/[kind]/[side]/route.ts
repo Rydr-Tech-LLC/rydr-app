@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/session";
-import { getWorkspaceDb, adminStorage } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb, getWorkspaceStorage } from "@/lib/firebaseAdmin";
 import { uploadedDocumentPath } from "@/lib/driverDocumentReview";
 
 export async function GET(_request: NextRequest, props: { params: Promise<{ uid: string; kind: string; side: string }> }) {
@@ -10,7 +10,7 @@ export async function GET(_request: NextRequest, props: { params: Promise<{ uid:
   if (!snapshot.exists) return NextResponse.json({ error: "Driver not found" }, { status: 404 });
   const path = uploadedDocumentPath(snapshot.data(), uid, kind, side);
   if (!path) return NextResponse.json({ error: "Uploaded document not found" }, { status: 404 });
-  const bucket = adminStorage.bucket(process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "rydrapp-c7ec1.firebasestorage.app");
+  const bucket = (await getWorkspaceStorage()).bucket();
   try {
     const file = bucket.file(path);
     const [metadata] = await file.getMetadata();

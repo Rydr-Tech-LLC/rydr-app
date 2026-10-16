@@ -58,7 +58,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         riderVerified: Bool,
         candidateDriverIds _: [String]
     ) async throws -> String {
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             throw RideDispatchError.notSignedIn
         }
         guard let matchSessionId = activeMatchSessionId,
@@ -159,7 +159,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         riderPreferences: RiderRidePreferences?
     ) async throws -> BackendMatchSession {
         guard let dropoffCoordinate else { throw RideRequestError.routeEstimateRequired }
-        guard let user = Auth.auth().currentUser else { throw RideDispatchError.notSignedIn }
+        guard let user = RydrWorkspace.auth.currentUser else { throw RideDispatchError.notSignedIn }
         guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
               let base = URL(string: rawBase),
               let url = URL(string: "/rides/match-session", relativeTo: base) else { throw URLError(.badURL) }
@@ -264,7 +264,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
     }
 
     func refreshRideDispatch(rideId: String) async throws -> RideDispatchRefresh {
-        guard let user = Auth.auth().currentUser else { throw RideDispatchError.notSignedIn }
+        guard let user = RydrWorkspace.auth.currentUser else { throw RideDispatchError.notSignedIn }
         guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
               let base = URL(string: rawBase),
               let url = URL(string: "/rides/\(rideId)/dispatch/refresh", relativeTo: base) else {
@@ -351,7 +351,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
     }
 
     func recoverRide(rideId: String) async throws -> RideRecoverySnapshot {
-        guard let riderId = Auth.auth().currentUser?.uid else { throw RideDispatchError.notSignedIn }
+        guard let riderId = RydrWorkspace.auth.currentUser?.uid else { throw RideDispatchError.notSignedIn }
         let rideSnapshot = try await db.collection("rides").document(rideId).getDocument()
         guard let ride = rideSnapshot.data(), ride["riderId"] as? String == riderId else {
             throw NSError(domain: "RydrRideRecovery", code: 404, userInfo: [NSLocalizedDescriptionKey: "The active ride could not be found."])
@@ -439,7 +439,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
     }
 
     private func sendRideTransition(rideId: String, action: String, reason: String) async throws -> BackendRideFinancialOutcome? {
-        guard let user = Auth.auth().currentUser else { throw RideDispatchError.notSignedIn }
+        guard let user = RydrWorkspace.auth.currentUser else { throw RideDispatchError.notSignedIn }
         guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
               let base = URL(string: rawBase),
               let url = URL(string: "/rides/\(rideId)/transition", relativeTo: base) else { throw URLError(.badURL) }

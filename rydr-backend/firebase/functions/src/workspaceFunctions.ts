@@ -4,12 +4,18 @@ import * as scheduler from "firebase-functions/v2/scheduler";
 import * as storage from "firebase-functions/v2/storage";
 import { getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
+import { projectForWorkspace } from "./services/firebaseWorkspace";
 import { getFirestore } from "firebase-admin/firestore";
 import { runInWorkspace } from "./services/workspaceRuntime";
 import {
   accountWorkspace,
   workspaceDefinition,
 } from "./services/workspacePolicy";
+export function deploymentProject(): string | undefined {
+  const explicit = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
+  if (explicit) return explicit;
+  try { return JSON.parse(process.env.FIREBASE_CONFIG || "{}").projectId; } catch { return undefined; }
+}
 const liveHandlers = new Map<unknown, unknown>();
 function app() {
   return getApps().find((a) => a.name === "[DEFAULT]") ?? initializeApp();
@@ -25,7 +31,7 @@ async function assertWorkspace(uid: string, workspace: string, admin = false) {
       .doc("liveBetaAccess")
       .get()
   ).data();
-  if (accountWorkspace(uid, user.phoneNumber, policy) !== workspace)
+  if (accountWorkspace(uid, user.phoneNumber, policy, projectForWorkspace(workspace)) !== workspace)
     throw new https.HttpsError(
       "permission-denied",
       "Account belongs to a different workspace",
@@ -48,12 +54,17 @@ function dual(
   const create = (workspace: "test" | "live-beta") => {
     const opts = {
       ...options,
+      ...(deploymentProject() === projectForWorkspace("test") ? {serviceAccount: "rydr-test-backend@rydr-test-c7ec1.iam.gserviceaccount.com"} : {}),
+      ...(deploymentProject() === projectForWorkspace("test") && (kind === "callable" || kind === "http") ? {invoker: "private"} : {}),
       ...(kind === "firestore"
         ? { database: workspaceDefinition(workspace).databaseId }
         : {}),
     };
     return factory(opts, async (...values: any[]) =>
       runInWorkspace(workspace, async () => {
+        const project = deploymentProject();
+        if (project && project !== projectForWorkspace(workspace)) return;
+
         if (kind === "callable" && values[0].auth)
           await assertWorkspace(
             values[0].auth.uid,
@@ -75,9 +86,10 @@ function dual(
       }),
     );
   };
-  const test = create("test"),
-    live = create("live-beta");
-  liveHandlers.set(test, live);
+  const test = create("test");
+  if (deploymentProject() !== projectForWorkspace("test")) {
+    liveHandlers.set(test, create("live-beta"));
+  }
   return test;
 }
 export const onDocumentWritten = ((...args: any[]) =>
@@ -104,9 +116,9 @@ export const onCall = ((...args: any[]) =>
   dual(https.onCall, args, "callable")) as typeof https.onCall;
 export const onRequest = ((...args: any[]) =>
   dual(https.onRequest, args, "http")) as typeof https.onRequest;
-// Storage remains shared, but the verified owner determines the review database.
+// Each project owns its document bucket; verified owner and project select review data.
 export const onObjectFinalized = ((options: any, callback: any) =>
-  storage.onObjectFinalized(options, async (event: any) => {
+  storage.onObjectFinalized({...options, ...(deploymentProject() === projectForWorkspace("test") ? {serviceAccount: "rydr-test-backend@rydr-test-c7ec1.iam.gserviceaccount.com"} : {})}, async (event: any) => {
     const name = String(event.data?.name ?? "");
     const match = name.match(
       /^(driverDocuments|riderDocuments|riderVerificationDocuments)\/([^/]+)\//,
@@ -126,7 +138,7 @@ export const onObjectFinalized = ((options: any, callback: any) =>
         .get()
     ).data();
     return runInWorkspace(
-      accountWorkspace(user.uid, user.phoneNumber, policy),
+      accountWorkspace(user.uid, user.phoneNumber, policy, deploymentProject()),
       () => callback(event),
     );
   })) as typeof storage.onObjectFinalized;

@@ -159,7 +159,7 @@ struct DriverLoginView: View {
                         },
                         onResendCode: { resendLoginCode() },
                         onVerify: { credential, completion in
-                            Auth.auth().signIn(with: credential) { result, error in
+                            RydrWorkspace.auth.signIn(with: credential) { result, error in
                                 Task { @MainActor in
                                     if let error {
                                         completion(.failure(error))
@@ -457,7 +457,7 @@ struct DriverLoginView: View {
 
         errorMessage = ""
         isLoggingIn = true
-        Auth.auth().signIn(withEmail: email, password: password) { result, error in
+        RydrWorkspace.auth.signIn(withEmail: email, password: password) { result, error in
             Task { @MainActor in
                 isLoggingIn = false
                 if let error {
@@ -522,7 +522,7 @@ struct DriverLoginView: View {
         fallbackEmail: String,
         attemptID: UUID
     ) {
-        Auth.auth().signIn(with: credential) { result, error in
+        RydrWorkspace.auth.signIn(with: credential) { result, error in
             Task { @MainActor in
                 guard socialAuthAttemptID == attemptID else { return }
                 if let error {
@@ -574,7 +574,7 @@ struct DriverLoginView: View {
             return
         }
 
-        Auth.auth().sendPasswordReset(withEmail: email) { error in
+        RydrWorkspace.auth.sendPasswordReset(withEmail: email) { error in
             Task { @MainActor in
                 if let error = error as NSError?,
                    let code = AuthErrorCode(rawValue: error.code) {
@@ -601,7 +601,7 @@ struct DriverLoginView: View {
     /// DriverPhoneCodeEntryView (bound to it) doesn't need to be recreated.
     private func resendLoginCode() {
         guard !pendingPhone.isEmpty else { return }
-        PhoneAuthProvider.provider().verifyPhoneNumber(pendingPhone, uiDelegate: nil) { verificationID, error in
+        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(pendingPhone, uiDelegate: nil) { verificationID, error in
             Task { @MainActor in
                 guard let verificationID, !verificationID.isEmpty, error == nil else { return }
                 pendingVerificationID = verificationID
@@ -618,7 +618,7 @@ struct DriverLoginView: View {
             .getDocument { snapshot, error in
                 Task { @MainActor in
                     if let error {
-                        try? Auth.auth().signOut()
+                        try? RydrWorkspace.auth.signOut()
                         errorMessage = "Unable to load driver account: \(error.localizedDescription)"
                         return
                     }
@@ -646,13 +646,13 @@ struct DriverLoginView: View {
             .getDocument { snapshot, error in
                 Task { @MainActor in
                     if let error {
-                        try? Auth.auth().signOut()
+                        try? RydrWorkspace.auth.signOut()
                         errorMessage = "Unable to load phone account: \(error.localizedDescription)"
                         return
                     }
 
                     guard let mappedUid = snapshot?.data()?["uid"] as? String else {
-                        try? Auth.auth().signOut()
+                        try? RydrWorkspace.auth.signOut()
                         errorMessage = "No driver account was found for this phone number. Please sign up or use email login."
                         return
                     }
@@ -678,13 +678,13 @@ struct DriverLoginView: View {
             .getDocument { snapshot, error in
                 Task { @MainActor in
                     if let error {
-                        try? Auth.auth().signOut()
+                        try? RydrWorkspace.auth.signOut()
                         errorMessage = "Unable to load driver account: \(error.localizedDescription)"
                         return
                     }
 
                     guard let snapshot, snapshot.exists else {
-                        try? Auth.auth().signOut()
+                        try? RydrWorkspace.auth.signOut()
                         errorMessage = "No driver account was found for this phone number. Please sign up or use email login."
                         return
                     }
@@ -696,7 +696,7 @@ struct DriverLoginView: View {
 
     private func handlePhoneMatchedDriver(documentID: String, data: [String: Any], user: User) {
         guard documentID == user.uid else {
-            try? Auth.auth().signOut()
+            try? RydrWorkspace.auth.signOut()
             let profile = makeLoginProfile(from: data, user: user, fallbackEmail: data["email"] as? String ?? "")
             errorMessage = "This phone number belongs to \(profile.email). Sign in with email first, then verify this phone number to link phone login."
             return
@@ -718,7 +718,7 @@ struct DriverLoginView: View {
                     }
 
                     guard let snapshot, snapshot.exists else {
-                        try? Auth.auth().signOut()
+                        try? RydrWorkspace.auth.signOut()
                         DriverSocialAuthService.signOutFromGoogle()
                         errorMessage = "No driver account was found for this Google account. Choose the Google account used during driver signup or create a driver account first."
                         return

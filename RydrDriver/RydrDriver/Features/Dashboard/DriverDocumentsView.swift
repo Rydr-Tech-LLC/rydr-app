@@ -183,7 +183,7 @@ struct DriverDocumentsView: View {
             return
         }
         #endif
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             isLoading = false
             message = "Sign in before managing documents."
             return
@@ -626,14 +626,14 @@ enum DriverDocumentUploadService {
     }
 
     static func upload(data: Data, kind: DriverDocumentUploadKind, side: DriverDocumentUploadSide) async throws -> DriverDocumentUploadResult {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             throw DriverDocumentUploadError.notSignedIn
         }
 
         let uploadData = normalizedImageData(data) ?? data
         let timestamp = Int(Date().timeIntervalSince1970)
         let storagePath = "driverDocuments/\(uid)/\(kind.rawValue)/\(side.rawValue)-\(timestamp)-\(UUID().uuidString).jpg"
-        let ref = Storage.storage().reference(withPath: storagePath)
+        let ref = RydrWorkspace.storage.reference(withPath: storagePath)
         let metadata = StorageMetadata()
         metadata.contentType = "image/jpeg"
         _ = try await ref.putDataAsync(uploadData, metadata: metadata)

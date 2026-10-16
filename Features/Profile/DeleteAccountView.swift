@@ -159,7 +159,7 @@ struct DeleteAccountView: View {
     @MainActor
     private func loadExistingRequest() async {
         defer { isCheckingExistingRequest = false }
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         do {
             let snapshot = try await RydrWorkspace.firestore
                 .collection("accountDeletionRequests")
@@ -176,7 +176,7 @@ struct DeleteAccountView: View {
 
     @MainActor
     private func submitDeletionRequest() async {
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             submissionError = "You need to be signed in to request account deletion."
             return
         }

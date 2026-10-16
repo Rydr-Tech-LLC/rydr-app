@@ -669,7 +669,7 @@ struct ProfileView: View {
     }
 
     private func loadRidePreferences() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         Task {
             do {
                 let preferences = try await preferenceStore.load(uid: uid)
@@ -688,7 +688,7 @@ struct ProfileView: View {
     }
 
     private func saveRidePreferences() {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             preferenceSaveError = "Sign in before saving ride preferences."
             return
         }
@@ -811,7 +811,7 @@ struct ProfileView: View {
 
     // MARK: - Load a previously-approved photo on appear
     private func loadExistingProfilePhoto() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
 
         RydrWorkspace.firestore.collection("riders").document(uid).getDocument { snapshot, _ in
             guard

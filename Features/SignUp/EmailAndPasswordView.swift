@@ -30,19 +30,22 @@ struct EmailAndPasswordView: View {
     @Binding var email: String
     @Binding var password: String
     @Binding var confirmPassword: String
+    var isSubmitting = false
+    var submissionError = ""
     var onNext: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var errorMessage = ""
     @State private var showPassword = false
     @State private var showConfirmPassword = false
 
-    @State private var passwordValidations: [String: Bool] = [
-        "1 number": false,
-        "1 special character": false,
-        "1 uppercase letter": false,
-        "At least 8 characters": false
-    ]
+    private var passwordValidations: [String: Bool] {
+        [
+            "At least 8 characters": password.count >= 8,
+            "1 uppercase letter": password.rangeOfCharacter(from: .uppercaseLetters) != nil,
+            "1 number": password.rangeOfCharacter(from: .decimalDigits) != nil,
+            "1 special character": password.rangeOfCharacter(from: CharacterSet(charactersIn: "!@#$%^&*()_+{}|:<>?-=[];,./")) != nil
+        ]
+    }
 
     private var orderedRules: [(String, Bool)] {
         [
@@ -66,7 +69,7 @@ struct EmailAndPasswordView: View {
     }
 
     private var allValid: Bool {
-        passwordValidations.values.allSatisfy { $0 } && !confirmPassword.isEmpty && password == confirmPassword
+        !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && passwordValidations.values.allSatisfy { $0 } && !confirmPassword.isEmpty && password == confirmPassword
     }
 
     var body: some View {
@@ -117,9 +120,6 @@ struct EmailAndPasswordView: View {
                                 .textContentType(.newPassword)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
-                                .onChange(of: password) { _, newValue in
-                                    validatePassword(newValue)
-                                }
                             } trailingAction: {
                                 showPassword.toggle()
                             }
@@ -150,18 +150,19 @@ struct EmailAndPasswordView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
-                        Button("Continue") {
+                        Button(isSubmitting ? "Creating account…" : "Continue") {
                             onNext()
                         }
                         .buttonStyle(SignupPrimaryButtonStyle())
-                        .disabled(!allValid)
+                        .disabled(!allValid || isSubmitting)
                         .opacity(allValid ? 1 : 0.56)
                         .padding(.top, 2)
 
-                        if !errorMessage.isEmpty {
-                            Text(errorMessage)
+                        if !submissionError.isEmpty {
+                            Text(submissionError)
                                 .foregroundStyle(SignupPalette.red)
                                 .font(.caption.weight(.bold))
+                                .accessibilityIdentifier("signupAccountError")
                         }
 
                         Text("Already have an account? Log in")
@@ -175,12 +176,7 @@ struct EmailAndPasswordView: View {
         )
     }
 
-    private func validatePassword(_ text: String) {
-        passwordValidations["At least 8 characters"] = text.count >= 8
-        passwordValidations["1 uppercase letter"] = text.rangeOfCharacter(from: .uppercaseLetters) != nil
-        passwordValidations["1 number"] = text.rangeOfCharacter(from: .decimalDigits) != nil
-        passwordValidations["1 special character"] = text.rangeOfCharacter(from: CharacterSet(charactersIn: "!@#$%^&*()_+{}|:<>?-=[];,./")) != nil
-    }
+
 }
 
 struct SignupScreenScaffold<Hero: View, Content: View>: View {

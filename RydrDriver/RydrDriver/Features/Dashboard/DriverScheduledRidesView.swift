@@ -56,7 +56,7 @@ private final class DriverScheduledRidesVM: ObservableObject {
     }
 
     func start() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         opportunityListener?.remove()
         pendingSelectionListener?.remove()
         assignmentListener?.remove()

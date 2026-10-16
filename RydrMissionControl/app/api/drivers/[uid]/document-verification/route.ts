@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
-import { getWorkspaceDb, adminStorage } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb, getWorkspaceStorage } from "@/lib/firebaseAdmin";
 import { getAdminSession } from "@/lib/session";
 import { writeAuditLog } from "@/lib/auditLog";
 import { DOCUMENT_KINDS, documentDeadline, currentDocument } from "../../../../../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
@@ -14,7 +14,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
   if (typeof body.expirationDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.expirationDate) || !Number.isFinite(deadline) || deadline <= Date.now()) return NextResponse.json({ error: "A current, verified expiration date is required" }, { status: 422 });
   const path = typeof body.storagePath === "string" ? body.storagePath.trim() : "";
   if (!path.startsWith(`driverDocuments/${uid}/${body.kind}/`)) return NextResponse.json({ error: "Choose an uploaded document owned by this driver" }, { status: 422 });
-  const bucket = adminStorage.bucket(process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "rydrapp-c7ec1.firebasestorage.app");
+  const bucket = (await getWorkspaceStorage()).bucket();
   const [exists] = await bucket.file(path).exists();
   if (!exists) return NextResponse.json({ error: "Uploaded document could not be found" }, { status: 422 });
   const ref = (await getWorkspaceDb()).collection("drivers").doc(uid);

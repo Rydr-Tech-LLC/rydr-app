@@ -13,10 +13,13 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@google-cloud/firestore": "^9.3.1",
+    "@google-cloud/storage": "^8.4.0",
     "@sendgrid/mail": "^8.1.5",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "firebase-admin": "^13.4.0",
+    "google-auth-library": "^11.3.1",
     "twilio": "^5.8.0"
   }
 }

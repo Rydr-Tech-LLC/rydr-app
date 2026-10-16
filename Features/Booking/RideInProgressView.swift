@@ -1087,7 +1087,7 @@ private enum IncidentReportError: LocalizedError {
 private final class IncidentReportService {
     @MainActor
     func submit(draft: IncidentReportDraft, rideManager: RideManager) async throws {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             throw IncidentReportError.notSignedIn
         }
         guard rideManager.currentRide != nil,

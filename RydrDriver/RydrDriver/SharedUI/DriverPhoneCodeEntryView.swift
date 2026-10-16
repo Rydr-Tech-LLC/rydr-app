@@ -292,7 +292,7 @@ struct DriverPhoneCodeEntryView: View {
 
         isVerifying = true
         errorMessage = ""
-        let credential = PhoneAuthProvider.provider().credential(
+        let credential = PhoneAuthProvider.provider(auth: RydrWorkspace.auth).credential(
             withVerificationID: trimmedID,
             verificationCode: code
         )

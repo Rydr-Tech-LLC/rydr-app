@@ -35,12 +35,12 @@ private struct DriverCashRideRequest: Identifiable, Equatable {
 
     var isOpenForCurrentDriver: Bool {
         guard status == "open", connectedDriverUid == nil else { return false }
-        if releasedByUid == Auth.auth().currentUser?.uid { return false }
+        if releasedByUid == RydrWorkspace.auth.currentUser?.uid { return false }
         return !["scheduled", "confirmed", "arrived", "started"].contains(driverQueueStatus)
     }
 
     var isScheduledForCurrentDriver: Bool {
-        guard let uid = Auth.auth().currentUser?.uid else { return false }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return false }
         return connectedDriverUid == uid
             && (status == "connected" || status == "accepted")
             && ["scheduled", "confirmed", "arrived", "started"].contains(driverQueueStatus)
@@ -65,7 +65,7 @@ private struct DriverCashHubResponse: Identifiable, Equatable {
     var createdAt: Date?
 
     var isDriverAuthored: Bool {
-        authorUid == Auth.auth().currentUser?.uid
+        authorUid == RydrWorkspace.auth.currentUser?.uid
     }
 }
 
@@ -113,7 +113,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     private var blockedRiderUIDs: Set<String> = []
 
     func loadAccess() {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             errorMessage = "Sign in before using Cash Rydr Hub."
             isCheckingTerms = false
             isLoading = false
@@ -156,7 +156,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func acceptTerms() {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Sign in before continuing."
             return
         }
@@ -186,7 +186,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func start() {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             errorMessage = "Sign in before using Cash Rydr Hub."
             isLoading = false
             return
@@ -291,7 +291,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func sendMessage(to request: DriverCashRideRequest, text: String, driverName: String) -> Bool {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             errorMessage = "Sign in before sending a message."
             return false
         }
@@ -311,7 +311,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func sendOffer(to request: DriverCashRideRequest, draft: DriverCashOfferDraft) -> Bool {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Sign in before making an offer."
             return false
         }
@@ -337,7 +337,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func accept(_ request: DriverCashRideRequest, driverName: String, completion: @escaping (DriverCashRideRequest?) -> Void) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             errorMessage = "Sign in before connecting with a rider."
             completion(nil)
             return
@@ -375,7 +375,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func updateQueueStatus(_ request: DriverCashRideRequest, status: String) {
-        guard request.connectedDriverUid == Auth.auth().currentUser?.uid else {
+        guard request.connectedDriverUid == RydrWorkspace.auth.currentUser?.uid else {
             errorMessage = "Only the connected driver can update this listing."
             return
         }
@@ -384,7 +384,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func releaseScheduledRide(_ request: DriverCashRideRequest, driverName: String) {
-        guard let uid = Auth.auth().currentUser?.uid,
+        guard let uid = RydrWorkspace.auth.currentUser?.uid,
               request.connectedDriverUid == uid else {
             errorMessage = "Only the connected driver can release this listing."
             return
@@ -395,7 +395,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func reportRequest(_ request: DriverCashRideRequest) {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Sign in before reporting a Cash Hub post."
             return
         }
@@ -408,7 +408,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func reportRider(_ request: DriverCashRideRequest) {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Sign in before reporting a rider."
             return
         }
@@ -422,7 +422,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func endChat(_ request: DriverCashRideRequest) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             errorMessage = "Sign in before ending a chat."
             return
         }
@@ -431,7 +431,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func proposePrice(_ request: DriverCashRideRequest, amountText: String, message: String) -> Bool {
-        guard let uid = Auth.auth().currentUser?.uid,
+        guard let uid = RydrWorkspace.auth.currentUser?.uid,
               let offerAmount = cleanAmount(amountText) else {
             errorMessage = "Enter a valid proposed price."
             return false
@@ -445,19 +445,19 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func acceptPrice(_ request: DriverCashRideRequest) {
-        guard let uid = Auth.auth().currentUser?.uid else { errorMessage = "Sign in before accepting a price."; return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { errorMessage = "Sign in before accepting a price."; return }
         let conversationId = driverCashHubConversationId(requestId: request.id, driverUid: uid)
         Task { [weak self] in do { try await RydrBackendService.cashHubConversationCommand(conversationId:conversationId,action:"accept_price");await MainActor.run{self?.confirmationMessage="Price accepted. This trip was added to your queue."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func declinePrice(_ request: DriverCashRideRequest) {
-        guard let uid = Auth.auth().currentUser?.uid else { errorMessage = "Sign in before declining a price."; return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { errorMessage = "Sign in before declining a price."; return }
         let conversationId = driverCashHubConversationId(requestId: request.id, driverUid: uid)
         Task { [weak self] in do { try await RydrBackendService.cashHubConversationCommand(conversationId:conversationId,action:"decline_price");await MainActor.run{self?.confirmationMessage="Price declined. The conversation remains open."} } catch { await MainActor.run{self?.errorMessage=error.localizedDescription} } }
     }
 
     func reportChat(_ request: DriverCashRideRequest) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             errorMessage = "Sign in before reporting a chat."
             return
         }
@@ -471,7 +471,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     func blockRider(_ request: DriverCashRideRequest) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             errorMessage = "Sign in before blocking a rider."
             return
         }
@@ -485,7 +485,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     }
 
     private func syncResponseListeners(for requests: [DriverCashRideRequest]) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         let activeIDs = Set(requests.map { driverCashHubConversationId(requestId: $0.id, driverUid: uid) })
             .intersection(knownConversationIDs)
         for (id, listener) in responseListeners where !activeIDs.contains(id) {
@@ -2867,11 +2867,11 @@ private struct DriverCashOfferSheet: View {
     }
 
     private var shouldShowPriceDecision: Bool {
-        unresolvedPriceProposal?.authorUid != nil && unresolvedPriceProposal?.authorUid != Auth.auth().currentUser?.uid
+        unresolvedPriceProposal?.authorUid != nil && unresolvedPriceProposal?.authorUid != RydrWorkspace.auth.currentUser?.uid
     }
 
     private var isWaitingForPriceResponse: Bool {
-        unresolvedPriceProposal?.authorUid == Auth.auth().currentUser?.uid
+        unresolvedPriceProposal?.authorUid == RydrWorkspace.auth.currentUser?.uid
     }
 
     private var isNegotiationClosed: Bool {

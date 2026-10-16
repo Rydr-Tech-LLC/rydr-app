@@ -342,7 +342,7 @@ struct VerificationCodeView: View {
             return
         }
 
-        let credential = PhoneAuthProvider.provider().credential(
+        let credential = PhoneAuthProvider.provider(auth: RydrWorkspace.auth).credential(
             withVerificationID: trimmedVerificationID,
             verificationCode: verificationCode
         )
@@ -368,10 +368,10 @@ struct VerificationCodeView: View {
             }
         }
 
-        if linkToCurrentUser, let user = Auth.auth().currentUser {
+        if linkToCurrentUser, let user = RydrWorkspace.auth.currentUser {
             user.link(with: credential, completion: completion)
         } else {
-            Auth.auth().signIn(with: credential, completion: completion)
+            RydrWorkspace.auth.signIn(with: credential, completion: completion)
         }
     }
 

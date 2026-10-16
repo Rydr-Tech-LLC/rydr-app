@@ -23,7 +23,15 @@ function workspaceDefinition(id) {
   }
   return value;
 }
-function accountWorkspace(uid, phone, policy) {
+function accountWorkspace(uid, phone, policy, verifiedProjectId) {
+  if (policy?.authSeparationEnabled === true) {
+    const {workspaceFromProject} = require("./firebaseWorkspace");
+    const workspace = workspaceFromProject(verifiedProjectId);
+    // Legacy Test identities in the Live project remain quarantined until migration retirement.
+    if (workspace === "live-beta" && policy.blockedAuthUids?.includes(uid))
+      throw Object.assign(new Error("legacy_test_identity_not_live"), {statusCode: 403});
+    return workspace;
+  }
   if (
     !policy ||
     policy.configured !== true ||

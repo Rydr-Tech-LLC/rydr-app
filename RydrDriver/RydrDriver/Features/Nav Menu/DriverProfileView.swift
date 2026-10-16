@@ -274,11 +274,11 @@ private final class DriverProfileViewModel: ObservableObject {
 
     func start() {
         listener?.remove()
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         listener = db.collection("drivers").document(uid).addSnapshotListener { [weak self] snapshot, _ in
             guard let self else { return }
             let data = snapshot?.data() ?? [:]
-            let user = Auth.auth().currentUser
+            let user = RydrWorkspace.auth.currentUser
             Task { @MainActor in
                 self.profile = DriverProfileSummary(
                     displayName: Self.publicDisplayName(from: data, authUser: user),

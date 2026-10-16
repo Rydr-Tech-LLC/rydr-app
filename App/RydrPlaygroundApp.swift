@@ -21,7 +21,9 @@ struct RydrApp: App {
         WindowGroup {
             RydrWorkspaceGate { Group {
                 #if DEBUG && targetEnvironment(simulator)
-                if ProcessInfo.processInfo.arguments.contains("-RydrPromotionsUITest") {
+                if ProcessInfo.processInfo.arguments.contains("-RydrSignupUITest") {
+                    SignupAccountUIFixture()
+                } else if ProcessInfo.processInfo.arguments.contains("-RydrPromotionsUITest") {
                     RiderPromotionPanel()
                 } else if ProcessInfo.processInfo.arguments.contains("-PrestineBookingUITest") {
                     NavigationStack { RideTypeSelectionView(userName: "Test Rider") }
@@ -56,3 +58,27 @@ struct RydrApp: App {
     }
 }
 
+
+#if DEBUG && targetEnvironment(simulator)
+private struct SignupAccountUIFixture: View {
+    @State private var email = "rider@example.com"
+    @State private var password = "Simulator123!"
+    @State private var confirmation = "Simulator123!"
+    @State private var advanced = false
+    @State private var message = ""
+    var body: some View {
+        NavigationStack {
+            if advanced {
+                Text("Account step continued").accessibilityIdentifier("signupContinued")
+            } else {
+                EmailAndPasswordView(email: $email, password: $password, confirmPassword: $confirmation,
+                                     submissionError: message) {
+                    if ProcessInfo.processInfo.arguments.contains("-RydrSignupErrorUITest") {
+                        message = "That email is already linked to an account. Log in with that account, or use a different email for this phone number."
+                    } else { advanced = true }
+                }
+            }
+        }
+    }
+}
+#endif

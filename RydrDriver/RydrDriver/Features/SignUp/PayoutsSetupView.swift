@@ -324,7 +324,7 @@ struct PayoutsSetupView: View {
         var request = RydrWorkspace.urlRequest(url: stripeBackendBase.appendingPathComponent("connect/accounts"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let token = try await Auth.auth().currentUser?.getIDToken() {
+        if let token = try await RydrWorkspace.auth.currentUser?.getIDToken() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: [
@@ -356,7 +356,7 @@ struct PayoutsSetupView: View {
 
         var request = RydrWorkspace.urlRequest(url: stripeBackendBase.appendingPathComponent("connect/status"))
         request.httpMethod = "GET"
-        if let token = try? await Auth.auth().currentUser?.getIDToken() {
+        if let token = try? await RydrWorkspace.auth.currentUser?.getIDToken() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 

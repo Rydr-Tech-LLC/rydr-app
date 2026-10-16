@@ -92,7 +92,7 @@ final class DriverImageModerationService {
     /// approval lets the backend write the final URL to `drivers/{uid}.profilePhotoURL`.
     /// Returns the approved download URL.
     func submitProfilePhoto(_ image: UIImage) async throws -> URL {
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             throw DriverImageModerationError.notSignedIn
         }
         let uid = user.uid
@@ -104,7 +104,7 @@ final class DriverImageModerationService {
         // Must match the storage.rules pattern for driverProfilePhotos/{uid}/{fileName}:
         // fileName.matches('pending-[0-9]+\.jpg')
         let pendingPath = "driverProfilePhotos/\(uid)/pending-\(Int(Date().timeIntervalSince1970)).jpg"
-        let pendingRef = Storage.storage().reference(withPath: pendingPath)
+        let pendingRef = RydrWorkspace.storage.reference(withPath: pendingPath)
 
         do {
             let metadata = StorageMetadata()
@@ -147,7 +147,7 @@ final class DriverImageModerationService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["storagePath": storagePath])
 
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             throw DriverImageModerationError.notSignedIn
         }
         let token: String

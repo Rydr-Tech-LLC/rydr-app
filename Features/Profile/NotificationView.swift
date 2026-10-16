@@ -71,7 +71,7 @@ final class RiderNotificationInboxViewModel: ObservableObject {
 
     func start() {
         guard riderListener == nil, announcementListener == nil else { return }
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             errorMessage = "Sign in to view notifications."
             return
         }
@@ -93,7 +93,7 @@ final class RiderNotificationInboxViewModel: ObservableObject {
 
         switch item.source {
         case .rider:
-            guard let uid = Auth.auth().currentUser?.uid else { return }
+            guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
             db.collection("riders")
                 .document(uid)
                 .collection("notifications")
@@ -124,7 +124,7 @@ final class RiderNotificationInboxViewModel: ObservableObject {
     func dismiss(_ item: RiderNotificationItem) {
         switch item.source {
         case .rider:
-            guard let uid = Auth.auth().currentUser?.uid else { return }
+            guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
             db.collection("riders")
                 .document(uid)
                 .collection("notifications")

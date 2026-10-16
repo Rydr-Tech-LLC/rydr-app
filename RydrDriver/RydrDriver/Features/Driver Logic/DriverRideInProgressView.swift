@@ -1249,7 +1249,7 @@ private struct DriverRideMessageSheet: View {
                 }
             )
         }
-        let isOutgoing = chatMessage.senderId == Auth.auth().currentUser?.uid
+        let isOutgoing = chatMessage.senderId == RydrWorkspace.auth.currentUser?.uid
 
         return AnyView(HStack {
             if isOutgoing { Spacer(minLength: 48) }

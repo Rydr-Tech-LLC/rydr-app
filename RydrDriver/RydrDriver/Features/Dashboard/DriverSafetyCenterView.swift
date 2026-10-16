@@ -182,7 +182,7 @@ final class DriverSafetyCenterModel: ObservableObject {
     }
 
     func start() {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             isLoading = false
             message = "Sign in to view safety records."
             return
@@ -236,7 +236,7 @@ final class DriverSafetyCenterModel: ObservableObject {
     }
 
     func submitIncidentReport(type: DriverIncidentType, rideId: String, description: String) async -> String? {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             message = "Sign in before submitting a report."
             return message
         }
@@ -264,7 +264,7 @@ final class DriverSafetyCenterModel: ObservableObject {
     }
 
     func submitAppeal(for penalty: DriverSafetyPenalty, reason: String) async {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             message = "Sign in before submitting an appeal."
             return
         }

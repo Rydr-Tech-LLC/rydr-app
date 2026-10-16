@@ -282,7 +282,7 @@ struct PaymentMethodView: View {
 private extension PaymentMethodView {
     func bootstrapIfNeeded() {
         guard customerId == nil else { return }
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             errorMessage = "You must be logged in."
             return
         }
@@ -393,7 +393,7 @@ private func requestJSON<T: Decodable>(
         }.resume()
     }
 
-    if let user = Auth.auth().currentUser {
+    if let user = RydrWorkspace.auth.currentUser {
         user.getIDTokenForcingRefresh(true) { token, _ in
             var r = req
             if let token { r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }

@@ -30,7 +30,7 @@ struct RydrBankAPI {
 
     // MARK: - Core request
     private static func authedRequest(path: String, json: [String: Any]) async throws -> [String: Any] {
-        guard let user = Auth.auth().currentUser else { throw RydrBankAPIError.notSignedIn }
+        guard let user = RydrWorkspace.auth.currentUser else { throw RydrBankAPIError.notSignedIn }
         let token = try await user.getIDToken()
 
         var req = RydrWorkspace.urlRequest(url: base.appendingPathComponent(path))
@@ -137,7 +137,7 @@ enum RiderBackendIdentityService {
     }
 
     private static func send(path: String, body: [String: Any]) async throws {
-        guard let user = Auth.auth().currentUser else { throw RydrBankAPIError.notSignedIn }
+        guard let user = RydrWorkspace.auth.currentUser else { throw RydrBankAPIError.notSignedIn }
         guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
               let base = URL(string: rawBase),
               let url = URL(string: path, relativeTo: base) else {
@@ -171,7 +171,7 @@ enum RiderCashHubBackend {
     private static func send(path: String, method: String = "POST", body: [String: Any]) async throws {
         guard let raw = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
               let base = URL(string: raw), let url = URL(string: path, relativeTo: base),
-              let user = Auth.auth().currentUser else { throw URLError(.userAuthenticationRequired) }
+              let user = RydrWorkspace.auth.currentUser else { throw URLError(.userAuthenticationRequired) }
         var request = RydrWorkspace.urlRequest(url: url); request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
@@ -195,7 +195,7 @@ enum RiderCashHubBackend {
 
 enum RiderSafetyBackend {
     static func submit(_ body: [String: Any]) async throws {
-        guard let raw=Bundle.main.object(forInfoDictionaryKey:"RYDR_BACKEND_BASE_URL") as? String,let base=URL(string:raw),let url=URL(string:"/safety/reports",relativeTo:base),let user=Auth.auth().currentUser else{throw URLError(.userAuthenticationRequired)}
+        guard let raw=Bundle.main.object(forInfoDictionaryKey:"RYDR_BACKEND_BASE_URL") as? String,let base=URL(string:raw),let url=URL(string:"/safety/reports",relativeTo:base),let user=RydrWorkspace.auth.currentUser else{throw URLError(.userAuthenticationRequired)}
         var request=RydrWorkspace.urlRequest(url:url);request.httpMethod="POST";request.setValue("application/json",forHTTPHeaderField:"Content-Type");request.setValue("Bearer \(try await user.getIDToken())",forHTTPHeaderField:"Authorization");request.httpBody=try JSONSerialization.data(withJSONObject:body)
         let (data,response)=try await URLSession.shared.data(for:request);guard let http=response as? HTTPURLResponse,(200..<300).contains(http.statusCode) else{let object=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any];throw NSError(domain:"RiderSafetyBackend",code:(response as? HTTPURLResponse)?.statusCode ?? -1,userInfo:[NSLocalizedDescriptionKey:object?["error"] as? String ?? "Report failed."])}
     }

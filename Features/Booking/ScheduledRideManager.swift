@@ -154,7 +154,7 @@ final class ScheduledRideManager: ObservableObject {
     }
 
     func startScheduleListener() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         scheduleListener?.remove()
         scheduleListener = db.collection("scheduledRideRequests")
             .whereField("riderId", isEqualTo: uid)
@@ -203,7 +203,7 @@ final class ScheduledRideManager: ObservableObject {
     }
 
     private func backendRequest(path: String, body: [String: Any]) async throws -> [String: Any] {
-        guard let user = Auth.auth().currentUser else { throw ScheduledRideError.notSignedIn }
+        guard let user = RydrWorkspace.auth.currentUser else { throw ScheduledRideError.notSignedIn }
         guard let rawBase = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
               let base = URL(string: rawBase), let url = URL(string: path, relativeTo: base) else {
             throw URLError(.badURL)

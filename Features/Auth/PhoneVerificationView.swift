@@ -297,16 +297,16 @@ struct PhoneVerificationView: View {
         sending = true
         let e164 = formattedPhoneNumber
 
-        if linkToCurrentUser, Auth.auth().currentUser?.phoneNumber == e164 {
+        if linkToCurrentUser, RydrWorkspace.auth.currentUser?.phoneNumber == e164 {
             sending = false
             onVerified(e164)
             return
         }
 
         // DEBUG/testing on simulator (don't ship enabled):
-        // Auth.auth().settings?.isAppVerificationDisabledForTesting = true
+        // RydrWorkspace.auth.settings?.isAppVerificationDisabledForTesting = true
 
-        PhoneAuthProvider.provider().verifyPhoneNumber(e164, uiDelegate: nil) { id, error in
+        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(e164, uiDelegate: nil) { id, error in
             Task { @MainActor in
                 sending = false
                 if let error = error {

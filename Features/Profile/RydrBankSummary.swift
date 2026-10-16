@@ -73,7 +73,7 @@ final class RydrBankVM: ObservableObject {
     private var codesListener: ListenerRegistration?
 
     func start() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         listenSummary(uid: uid)
         listenCodes(uid: uid)
     }
@@ -115,7 +115,7 @@ final class RydrBankVM: ObservableObject {
     }
 
     func refreshCodes() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         db.collection("users").document(uid)
             .collection("rydrBankCodes")
             .order(by: "createdAt", descending: true)
@@ -186,7 +186,7 @@ final class RydrBankVM: ObservableObject {
         }
 
         Task {
-            guard let user = Auth.auth().currentUser else {
+            guard let user = RydrWorkspace.auth.currentUser else {
                 completion(.failure(makeError("You must be logged in.")))
                 return
             }
@@ -1297,7 +1297,7 @@ struct RiderPromotionPanel: View {
         }
     }
     @MainActor private func request(path: String, body: [String: String]? = nil) async throws -> Data {
-        guard let user = Auth.auth().currentUser else { throw NSError(domain: "Promotions", code: 401, userInfo: [NSLocalizedDescriptionKey: "Sign in to view your promotions."]) }
+        guard let user = RydrWorkspace.auth.currentUser else { throw NSError(domain: "Promotions", code: 401, userInfo: [NSLocalizedDescriptionKey: "Sign in to view your promotions."]) }
         let token = try await user.getIDToken()
         var request = RydrWorkspace.urlRequest(url: URL(string: "https://rydr-stripe-backend.onrender.com\(path)")!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

@@ -42,6 +42,8 @@ struct SignupCoordinator: View {
     @State private var verificationRequested = false
     @State private var betaAccessError = ""
     @State private var showBetaAccessAlert = false
+    @State private var accountSubmissionError = ""
+    @State private var isCreatingAccount = false
 
     // Navigate to main app
     @State private var showMainApp = false
@@ -65,10 +67,10 @@ struct SignupCoordinator: View {
                         betaInviteApproved(phoneE164: verifiedPhone) { approved in
                             Task { @MainActor in
                                 if approved {
-                                    writePhoneIndex(phoneE164: verifiedPhone, uid: Auth.auth().currentUser?.uid ?? "")
+                                    writePhoneIndex(phoneE164: verifiedPhone, uid: RydrWorkspace.auth.currentUser?.uid ?? "")
                                     path.append(.betaWaiver)
                                 } else {
-                                    try? Auth.auth().signOut()
+                                    try? RydrWorkspace.auth.signOut()
                                     betaAccessError = "This phone number has not been approved for the Rydr rider beta yet. Join the waitlist or use the phone number from your beta approval."
                                     showBetaAccessAlert = true
                                 }
@@ -93,7 +95,7 @@ struct SignupCoordinator: View {
                             }
                         },
                         onDecline: {
-                            try? Auth.auth().signOut()
+                            try? RydrWorkspace.auth.signOut()
                             dismiss()
                         }
                     )
@@ -125,6 +127,8 @@ struct SignupCoordinator: View {
                         email: $email,
                         password: $password,
                         confirmPassword: $confirmPassword,
+                        isSubmitting: isCreatingAccount,
+                        submissionError: accountSubmissionError,
                         onNext: {
                             createOrLinkFirebaseAccount()
                         }
@@ -196,7 +200,7 @@ struct SignupCoordinator: View {
 
     /// Merge-writes into `riders/{uid}` so the document exists early and stays current.
     private func upsertRider(_ fields: [String: Any]) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         RydrWorkspace.firestore
             .collection("riders").document(uid)
             .setData(fields, merge: true) { err in
@@ -215,52 +219,45 @@ struct SignupCoordinator: View {
             }
     }
 
+    @MainActor
     private func createOrLinkFirebaseAccount() {
-        if let currentUser = Auth.auth().currentUser {
-            linkEmailPassword(to: currentUser)
-        } else {
-            createEmailPasswordAccount()
-        }
-    }
-
-    private func linkEmailPassword(to user: User) {
-        if user.email?.caseInsensitiveCompare(email) == .orderedSame {
-            finishAuthAccountSetup(for: user)
-            return
-        }
-
-        let credential = EmailAuthProvider.credential(withEmail: email, password: password)
-        user.link(with: credential) { result, error in
-            if let error = error as NSError? {
-                if error.code == AuthErrorCode.providerAlreadyLinked.rawValue {
-                    finishAuthAccountSetup(for: user)
+        guard !isCreatingAccount else { return }
+        isCreatingAccount = true
+        accountSubmissionError = ""
+        email = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task { @MainActor in
+            defer { isCreatingAccount = false }
+            do {
+                let user: User
+                if let current = RydrWorkspace.auth.currentUser {
+                    if current.email?.caseInsensitiveCompare(email) == .orderedSame {
+                        user = current
+                    } else {
+                        let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+                        user = try await current.link(with: credential).user
+                    }
                 } else {
-                    print("❌ Firebase email link failed: \(error.localizedDescription)")
+                    user = try await RydrWorkspace.auth.createUser(withEmail: email, password: password).user
                 }
-                return
-            }
-
-            finishAuthAccountSetup(for: result?.user ?? user)
-        }
-    }
-
-    private func createEmailPasswordAccount() {
-        Auth.auth().createUser(withEmail: email, password: password) { result, error in
-            if let error = error as NSError? {
-                if error.code == AuthErrorCode.emailAlreadyInUse.rawValue {
-                    print("❌ Firebase signup failed: email already in use")
-                } else {
-                    print("❌ Firebase signup failed: \(error.localizedDescription)")
+                finishAuthAccountSetup(for: user)
+            } catch {
+                switch (error as NSError).code {
+                case AuthErrorCode.emailAlreadyInUse.rawValue, AuthErrorCode.credentialAlreadyInUse.rawValue:
+                    accountSubmissionError = "That email is already linked to an account. Log in with that account, or use a different email for this phone number."
+                case AuthErrorCode.providerAlreadyLinked.rawValue:
+                    accountSubmissionError = "This phone account already has a different email. Log in with that email to continue."
+                case AuthErrorCode.invalidEmail.rawValue:
+                    accountSubmissionError = "Enter a valid email address, then try again."
+                case AuthErrorCode.weakPassword.rawValue:
+                    accountSubmissionError = "Choose a stronger password that meets all the requirements below."
+                case AuthErrorCode.networkError.rawValue:
+                    accountSubmissionError = "We couldn’t connect. Check your internet connection and try again."
+                case AuthErrorCode.tooManyRequests.rawValue:
+                    accountSubmissionError = "Too many attempts. Please wait a few minutes and try again."
+                default:
+                    accountSubmissionError = "We couldn’t create your account. Please try again. If this continues, contact Rydr support."
                 }
-                return
             }
-
-            guard let user = result?.user else {
-                print("❌ Firebase signup failed: account creation did not return a user")
-                return
-            }
-
-            finishAuthAccountSetup(for: user)
         }
     }
 
@@ -282,7 +279,7 @@ struct SignupCoordinator: View {
     }
 
     private func finishSocialAuthAccountSetup(profile: RiderSocialAuthProfile) {
-        guard let user = Auth.auth().currentUser else { return }
+        guard let user = RydrWorkspace.auth.currentUser else { return }
         let resolvedFirstName = firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? profile.firstName : firstName
         let resolvedLastName = lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? profile.lastName : lastName
         let resolvedEmail = profile.email.isEmpty ? user.email ?? email : profile.email
@@ -311,7 +308,7 @@ struct SignupCoordinator: View {
 
     /// Final save (still uses merge so it’s idempotent), then load profile & go to app.
     private func saveUserToFirestore() {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             print("❌ No authenticated user to save.")
             return
         }
@@ -346,7 +343,7 @@ struct SignupCoordinator: View {
     }
 
     private func loadExistingProfile() {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             hasLoadedExistingProfile = true
             return
         }
@@ -359,7 +356,7 @@ struct SignupCoordinator: View {
                 firstName = data["firstName"] as? String ?? ""
                 lastName = data["lastName"] as? String ?? ""
                 preferredName = data["preferredName"] as? String ?? ""
-                email = data["email"] as? String ?? Auth.auth().currentUser?.email ?? ""
+                email = data["email"] as? String ?? RydrWorkspace.auth.currentUser?.email ?? ""
                 phoneNumber = data["phoneNumber"] as? String ?? ""
                 streetAddress = address["street"] as? String ?? ""
                 addressLine2 = address["line2"] as? String ?? ""
@@ -383,7 +380,7 @@ struct SignupCoordinator: View {
     func provisionStripeCustomerIfNeeded(
         backendBase: URL = RydrStripeBackendConfig.baseURL
     ) {
-        guard let user = Auth.auth().currentUser else { return }
+        guard let user = RydrWorkspace.auth.currentUser else { return }
         user.getIDTokenForcingRefresh(true) { token, _ in
             var req = RydrWorkspace.urlRequest(url: backendBase.appendingPathComponent("create-customer"))
             req.httpMethod = "POST"

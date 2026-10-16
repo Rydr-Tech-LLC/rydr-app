@@ -151,7 +151,7 @@ struct DriverSignupCoordinator: View {
                             if !path.isEmpty { path.removeLast() }
                         },
                         onResendCode: {
-                            PhoneAuthProvider.provider().verifyPhoneNumber(phoneNumber, uiDelegate: nil) { id, error in
+                            PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(phoneNumber, uiDelegate: nil) { id, error in
                                 Task { @MainActor in
                                     guard let id, !id.isEmpty, error == nil else { return }
                                     pendingVerificationID = id
@@ -164,7 +164,7 @@ struct DriverSignupCoordinator: View {
                             // login resolves to this same uid, and the email/password step
                             // that follows links onto this account instead of creating a
                             // second, disconnected one.
-                            Auth.auth().signIn(with: credential) { result, error in
+                            RydrWorkspace.auth.signIn(with: credential) { result, error in
                                 Task { @MainActor in
                                     if let error {
                                         completion(.failure(error))
@@ -181,7 +181,7 @@ struct DriverSignupCoordinator: View {
                                     let verifiedE164 = phoneNumber
                                     driverExists(phoneE164: verifiedE164) { exists in
                                         if exists {
-                                            try? Auth.auth().signOut()
+                                            try? RydrWorkspace.auth.signOut()
                                             errorText = "An account with this phone number already exists. Please sign in."
                                             existingAccountAlert = true
                                         } else {
@@ -189,7 +189,7 @@ struct DriverSignupCoordinator: View {
                                                 if approved {
                                                     path.append(.betaWaiver)
                                                 } else {
-                                                    try? Auth.auth().signOut()
+                                                    try? RydrWorkspace.auth.signOut()
                                                     errorText = "This phone number has not been approved for the Rydr Driver beta yet. Join the waitlist or use the phone number from your beta approval."
                                                     existingAccountAlert = true
                                                 }
@@ -215,7 +215,7 @@ struct DriverSignupCoordinator: View {
                             }
                         },
                         onDecline: {
-                            try? Auth.auth().signOut()
+                            try? RydrWorkspace.auth.signOut()
                             dismiss()
                         }
                     )
@@ -340,7 +340,7 @@ struct DriverSignupCoordinator: View {
 
                 case .payouts:
                     PayoutsSetupView(
-                        uid: Auth.auth().currentUser?.uid ?? "",
+                        uid: RydrWorkspace.auth.currentUser?.uid ?? "",
                         email: email,
                         firstName: firstName,
                         lastName: lastName,
@@ -486,11 +486,11 @@ struct DriverSignupCoordinator: View {
     /// continue instead of erroring out.
     private func completeEmailPasswordStep() {
         // The phone step already signed this driver into Firebase via phone auth, so
-        // Auth.auth().currentUser is the phone-authenticated account. We LINK the
+        // RydrWorkspace.auth.currentUser is the phone-authenticated account. We LINK the
         // email/password credential onto that same account (rather than calling
         // createUser, which would mint a second, unrelated UID) so that phone login
         // and email login both resolve to the same driver going forward.
-        guard let phoneUser = Auth.auth().currentUser else {
+        guard let phoneUser = RydrWorkspace.auth.currentUser else {
             errorText = "Your phone verification session expired. Please restart signup."
             existingAccountAlert = true
             return
@@ -581,7 +581,7 @@ struct DriverSignupCoordinator: View {
         profile: DriverSocialAuthProfile,
         attemptID: UUID
     ) {
-        guard let phoneUser = Auth.auth().currentUser else {
+        guard let phoneUser = RydrWorkspace.auth.currentUser else {
             finishSocialAuthAttempt(
                 attemptID,
                 error: "Your phone verification session expired. Please restart signup."
@@ -647,7 +647,7 @@ struct DriverSignupCoordinator: View {
     private func finishSocialAuthStep(uid: String, profile: DriverSocialAuthProfile) {
         let resolvedFirstName = firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? profile.firstName : firstName
         let resolvedLastName = lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? profile.lastName : lastName
-        let resolvedEmail = profile.email.isEmpty ? Auth.auth().currentUser?.email ?? email : profile.email
+        let resolvedEmail = profile.email.isEmpty ? RydrWorkspace.auth.currentUser?.email ?? email : profile.email
         let legalName = [resolvedFirstName, resolvedLastName]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -679,7 +679,7 @@ struct DriverSignupCoordinator: View {
 
     // MARK: - Firestore helper
     private func markCurrentOnboardingStep(_ step: DriverSignupStep) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         RydrWorkspace.firestore.collection("drivers").document(uid).setData([
             "driverOnboardingCurrentStep": step.trackingKey,
             "driverOnboardingCurrentStepLabel": step.trackingLabel,
@@ -695,14 +695,14 @@ struct DriverSignupCoordinator: View {
     }
 
     private func upsertDriver(_ fields: [String: Any]) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         RydrWorkspace.firestore.collection("drivers").document(uid).setData(fields, merge: true) { err in
             if let err = err { errorText = err.localizedDescription }
         }
     }
 
     private func driverExists(phoneE164: String, completion: @escaping (Bool) -> Void) {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             completion(false)
             return
         }
@@ -733,7 +733,7 @@ struct DriverSignupCoordinator: View {
     }
 
     private func recordDriverApprovalRequest(type: String) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         RydrWorkspace.firestore.collection("driverApprovalRequests").document(uid).setData([
             "uid": uid,
             "requestType": type,

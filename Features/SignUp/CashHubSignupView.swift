@@ -232,7 +232,7 @@ struct CashHubSignupView: View {
                     saveCashHubProfile(uid: user.uid)
                 },
                 onResendCode: {
-                    if Auth.auth().currentUser != nil {
+                    if RydrWorkspace.auth.currentUser != nil {
                         sendCashHubPhoneVerification()
                     }
                 }
@@ -658,7 +658,7 @@ struct CashHubSignupView: View {
     }
 
     private func createFirebaseAccount() {
-        Auth.auth().createUser(withEmail: normalizedEmail, password: password) { result, error in
+        RydrWorkspace.auth.createUser(withEmail: normalizedEmail, password: password) { result, error in
             if let error {
                 Task { @MainActor in
                     isSaving = false
@@ -683,7 +683,7 @@ struct CashHubSignupView: View {
     }
 
     private func sendCashHubPhoneVerification() {
-        PhoneAuthProvider.provider().verifyPhoneNumber(normalizedPhone, uiDelegate: nil) { verificationID, error in
+        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(normalizedPhone, uiDelegate: nil) { verificationID, error in
             Task { @MainActor in
                 if let error {
                     isSaving = false

@@ -258,7 +258,7 @@ struct DriverPhoneEntryView: View {
         errorMessage = ""
         isSending = true
         let phone = e164Phone
-        PhoneAuthProvider.provider().verifyPhoneNumber(phone, uiDelegate: nil) { verificationID, error in
+        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(phone, uiDelegate: nil) { verificationID, error in
             Task { @MainActor in
                 isSending = false
                 if let error {

@@ -221,7 +221,7 @@ struct BackgroundCheckView: View {
 
     @MainActor
     private func loadExistingAcknowledgement() async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
 
         do {
             let snapshot = try await RydrWorkspace.firestore.collection("drivers").document(uid).getDocument()
@@ -238,7 +238,7 @@ struct BackgroundCheckView: View {
 
     private func saveAcknowledgement() {
         guard acknowledged else { return }
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             message = "Your session expired. Please sign in again."
             messageIsError = true
             return

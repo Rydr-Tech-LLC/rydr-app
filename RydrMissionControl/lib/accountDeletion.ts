@@ -1,5 +1,5 @@
 import { FieldValue } from "firebase-admin/firestore";
-import { adminAuth, getWorkspaceDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceAuth, getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { cleanupStripeAccount } from "@/lib/stripeCleanup";
 
 export type AccountRole = "rider" | "driver";
@@ -59,7 +59,7 @@ export async function deleteAccount({
     result: await cleanupStripeAccount(role, profile ?? {}, adminUid, requestId, uid)
   })));
 
-  await adminAuth.deleteUser(uid).catch((err: { code?: string }) => {
+  await (await getWorkspaceAuth()).deleteUser(uid).catch((err: { code?: string }) => {
     if (err?.code !== "auth/user-not-found") throw err;
   });
 

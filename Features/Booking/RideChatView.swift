@@ -117,7 +117,7 @@ struct RideChatView: View {
     }
 
     private func messageRow(_ message: ChatMessage) -> some View {
-        let isOutgoing = message.senderId == Auth.auth().currentUser?.uid
+        let isOutgoing = message.senderId == RydrWorkspace.auth.currentUser?.uid
 
         return HStack {
             if isOutgoing {

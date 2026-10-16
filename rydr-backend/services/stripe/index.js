@@ -20,10 +20,12 @@ const { rideWithFinancialOutcome, paidOutcomeForIntent } = require("./financialO
 const { reserveCashHubFee, finalizeCashHubFee, releaseCashHubFee, applyCashHubWithholding } = require("./cashHubBilling");
 
 const {accountWorkspace,workspaceDefinition}=require("../../firebase/functions/src/services/workspacePolicy");
+const {configureWorkspaceSDK,appForWorkspace,authForWorkspace,firestoreForWorkspace,workspaceFromProject,PROJECTS}=require("../../firebase/functions/src/services/firebaseWorkspace");
+configureWorkspaceSDK(require);
 dotenv.config();
 function createStripeApp(env,workspace="test") {
 const databaseId=workspaceDefinition(workspace).databaseId;
-function firestoreFor(appInstance) { return getFirestore(appInstance, databaseId); }
+function firestoreFor(appInstance) { return firestoreForWorkspace(workspace,appInstance); }
 firestoreFor.FieldValue = FieldValue;
 const admin = {
   credential: { applicationDefault, cert },
@@ -31,7 +33,7 @@ const admin = {
   app: getApp,
   initializeApp,
   firestore: firestoreFor,
-  auth: (appInstance) => getAuth(appInstance)
+  auth: (appInstance) => authForWorkspace(workspace,appInstance)
 };
 
 
@@ -163,6 +165,7 @@ async function verifiedFirebaseUid(req) {
 
   initializeFirebase();
   const decoded = await admin.auth().verifyIdToken(match[1], true);
+  req.rydrVerifiedProjectId = decoded.aud;
   return decoded.uid;
 }
 
@@ -175,7 +178,7 @@ async function requireFirebaseUid(req, res) {
     }
     const policy=(await getFirestore(admin.app()).collection("operationalSecurity").doc("liveBetaAccess").get()).data();
     const authUser=await admin.auth().getUser(uid);
-    if(accountWorkspace(uid,authUser.phoneNumber,policy)!==workspace){res.status(403).json({error:"account_workspace_mismatch"});return null;}
+    if(accountWorkspace(uid,authUser.phoneNumber,policy,req.rydrVerifiedProjectId)!==workspace){res.status(403).json({error:"account_workspace_mismatch"});return null;}
     try { await stripeModeState.ensure(); } catch { res.status(503).json({error:"stripe_mode_preparation_failed"}); return null; }
     try { await assertLiveBetaAccess({db:admin.firestore(),uid,mode:stripeConfig.mode,getUser:id=>admin.auth().getUser(id)}); }
     catch(error) {res.status(error.statusCode || 503).json({error:error.code || "live_beta_protection_unavailable"});return null;}
@@ -2629,7 +2632,7 @@ function createWorkspaceServer(env = process.env, dependencies = {}) {
       initializeApp({credential: projectId && clientEmail && privateKey ? cert({projectId, clientEmail, privateKey}) : applicationDefault()});
     }
     return {auth: getAuth(), db: getFirestore(), getWorkspaceState: async workspace =>
-      (await getFirestore(undefined, workspaceDefinition(workspace).databaseId).collection("platformConfig").doc("workspace").get()).data()};
+      (await firestoreForWorkspace(workspace).collection("platformConfig").doc("workspace").get()).data()};
   }
   function liveReady() {
     if (env.LIVE_BETA_ENABLED !== "true") return false;
@@ -2653,6 +2656,7 @@ function createWorkspaceServer(env = process.env, dependencies = {}) {
       const {createHash} = require("node:crypto");
       res.set("Cache-Control", "no-store");
       return res.json({
+        authenticationVersion: 2, authProjects: PROJECTS,
         testUidHashes: policy.blockedAuthUids.map(uid => createHash("sha256").update(uid).digest("hex")),
         testPhoneHashes: policy.blockedPhoneHashes,
       });
@@ -2662,12 +2666,18 @@ function createWorkspaceServer(env = process.env, dependencies = {}) {
     try {
       const match = (req.header("authorization") || "").match(/^Bearer (.+)$/);
       if (!match) return res.status(401).json({error: "unauthorized"});
-      const {auth, db} = control();
+      const {auth: legacyAuth, db} = control();
+      const policy = (await db.collection("operationalSecurity").doc("liveBetaAccess").get()).data();
+      let auth = legacyAuth;
+      if (!dependencies.control) {
+        // Payload only selects an allowlisted verifier; signature, audience, issuer and revocation are checked below.
+        const payload = JSON.parse(Buffer.from(match[1].split(".")[1], "base64url").toString("utf8"));
+        auth = authForWorkspace(workspaceFromProject(payload.aud));
+      }
       const decoded = await auth.verifyIdToken(match[1], true);
       const user = await auth.getUser(decoded.uid);
       if (user.disabled) return res.status(403).json({error: "account_disabled"});
-      const policy = (await db.collection("operationalSecurity").doc("liveBetaAccess").get()).data();
-      const workspace = accountWorkspace(decoded.uid, user.phoneNumber, policy);
+      const workspace = accountWorkspace(decoded.uid, user.phoneNumber, policy, decoded.aud);
       const mode = workspace === "test" ? "test" : "live";
       const config = mode === "test" ? testEnv : liveEnv;
       const state = mode === "live" && liveReady() ? await control().getWorkspaceState(workspace) : null;
@@ -2677,7 +2687,7 @@ function createWorkspaceServer(env = process.env, dependencies = {}) {
         publishableKey: ready ? config.STRIPE_PUBLISHABLE_KEY : null, ready,
         apiPrefix: "/workspaces/" + workspace, functionsPrefix: workspace === "test" ? "" : "liveBeta-"});
     } catch (error) {
-      return res.status(error.code?.startsWith("auth/") ? 401 : 503).json({error: "account_configuration_unavailable"});
+      return res.status(error.statusCode || (error.code?.startsWith("auth/") ? 401 : 503)).json({error: "account_configuration_unavailable"});
     }
   });
   // Authenticate signed events before choosing a database. An unsigned livemode field is never trusted.

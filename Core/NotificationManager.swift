@@ -19,8 +19,8 @@ final class NotificationManager {
 
     private var db: Firestore { RydrWorkspace.firestore }
     private let defaults = UserDefaults.standard
-    private let lastTokenKey = "rydr.rider.notifications.lastFCMToken"
-    private let lastUIDKey = "rydr.rider.notifications.lastUID"
+    private var lastTokenKey: String { "rydr.rider.notifications.\(RydrWorkspace.selected ?? "unresolved").lastFCMToken" }
+    private var lastUIDKey: String { "rydr.rider.notifications.\(RydrWorkspace.selected ?? "unresolved").lastUID" }
 
     private init() {}
 
@@ -73,7 +73,7 @@ final class NotificationManager {
     }
 
     func disableAndDeleteCurrentTokenForLogout(uid explicitUID: String? = nil) async {
-        guard let uid = explicitUID ?? Auth.auth().currentUser?.uid ?? defaults.string(forKey: lastUIDKey) else {
+        guard let uid = explicitUID ?? RydrWorkspace.auth.currentUser?.uid ?? defaults.string(forKey: lastUIDKey) else {
             Self.log("logout_token_cleanup_skipped", ["reason": "missing_uid"])
             return
         }
@@ -126,7 +126,7 @@ final class NotificationManager {
             Self.log("token_save_deferred", ["reason": "workspace_not_ready"])
             return
         }
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             Self.log("token_save_deferred", ["reason": "missing_authenticated_user"])
             return
         }

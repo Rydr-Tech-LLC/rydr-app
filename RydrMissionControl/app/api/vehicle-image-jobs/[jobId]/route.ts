@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { getWorkspaceDb, adminStorage } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb, getWorkspaceStorage } from "@/lib/firebaseAdmin";
 import { buildVehicleId } from "@/lib/vehicleLibrary";
 import { writeAuditLog } from "@/lib/auditLog";
 
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ jo
         const path = library?.colorImages?.[q.color];
         if (typeof path !== "string" || !path.startsWith("vehicle-library/")) throw new Error("Upload this vehicle's color image to the library first");
         update = { ...update, status: "completed", vehicleId, storagePath: path,
-          imageUrl: `https://storage.googleapis.com/${adminStorage.bucket().name}/${encodeURI(path)}`,
+          imageUrl: `https://storage.googleapis.com/${(await getWorkspaceStorage()).bucket().name}/${encodeURI(path)}`,
           reason: "Resolved with a Mission Control library image" };
       }
       if (body.action === "retry") update.reason = "Retry requested by administrator";

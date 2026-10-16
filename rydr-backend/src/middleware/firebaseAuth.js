@@ -25,16 +25,17 @@ async function requireFirebaseAuth(req, res, next) {
   }
 
   try {
-    initializeFirebase();
-    const decoded = await admin.auth().verifyIdToken(match[1], true);
-    const user = await admin.auth().getUser(decoded.uid);
+    const {app}=initializeFirebase();
+    const {currentWorkspace}=require("../services/workspaceContext");
+    const {decoded,user,staff}=await require("../../firebase/functions/src/services/firebaseWorkspace").verifyWorkspaceToken(match[1],currentWorkspace(),app,true);
     if (user.disabled) return res.status(403).json({error: "account_disabled"});
-    try {await require("../services/workspaceContext").assertAccountWorkspace(decoded.uid,user.phoneNumber);}
+    try {if(!staff)await require("../services/workspaceContext").assertAccountWorkspace(decoded.uid,user.phoneNumber,decoded.aud);}
     catch(error){return res.status(error.statusCode || 503).json({error:error.message});}
     req.firebaseUid = decoded.uid;
     req.firebaseToken = decoded;
     return next();
   } catch (err) {
+    if (err.message === "account_disabled") return res.status(403).json({error:"account_disabled"});
     console.error("Firebase ID token verification failed", {
       code: err.code,
       message: err.message

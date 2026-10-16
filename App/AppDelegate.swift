@@ -192,7 +192,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     open url: URL,
     options: [UIApplication.OpenURLOptionsKey : Any] = [:]
   ) -> Bool {
-    return GIDSignIn.sharedInstance.handle(url) || Auth.auth().canHandle(url)
+    return GIDSignIn.sharedInstance.handle(url) || RydrWorkspace.auth.canHandle(url)
   }
 
   // Remote notifications passthrough (leave as-is)
@@ -201,7 +201,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
   ) {
-    if Auth.auth().canHandleNotification(userInfo) {
+    if RydrWorkspace.auth.canHandleNotification(userInfo) {
       completionHandler(.noData)
       return
     }

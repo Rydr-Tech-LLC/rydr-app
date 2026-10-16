@@ -1,3 +1,4 @@
+import {appForWorkspace, authForWorkspace, firestoreForWorkspace, storageForWorkspace} from "./services/firebaseWorkspace";
 import {currentWorkspace} from "./services/workspaceRuntime";
 import { getAuth } from "firebase-admin/auth";
 import { App, getApps, initializeApp } from "firebase-admin/app";
@@ -16,15 +17,16 @@ function app(): App {
 }
 
 function firestore(): Firestore {
-  return getFirestore(app(),currentWorkspace()==="test"?"(default)":"live-beta");
+  return firestoreForWorkspace(currentWorkspace(),app());
 }
 
 function firebaseStorage(): Storage {
-  return getStorage(app());
+  return storageForWorkspace(currentWorkspace(),app());
 }
 
 function firebaseMessaging(): Messaging {
-  return getMessaging(app());
+  // FCM transport stays on the original iOS app registration; account data is isolated.
+  return getMessaging(appForWorkspace("live-beta",app()));
 }
 
 export const db = new Proxy({} as Firestore, {
@@ -53,4 +55,5 @@ export const messaging = new Proxy({} as Messaging, {
 
 export { FieldValue, Timestamp };
 
-export function firebaseAuth() { return getAuth(app()); }
+export function firebaseAuth() { return authForWorkspace(currentWorkspace(),app()); }
+export function controlFirebaseAuth() { return authForWorkspace("live-beta",app()); }

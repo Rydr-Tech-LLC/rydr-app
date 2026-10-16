@@ -5,7 +5,7 @@ import { normalizeSpecifications, xlCapacityAllowed } from "../../rydr-backend/f
 import { evaluatePremiumVehicle, availablePremiumRideTypes } from "../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
 import "server-only";
 import { FieldValue } from "firebase-admin/firestore";
-import { getWorkspaceDb, adminStorage } from "./firebaseAdmin";
+import { getWorkspaceDb, getWorkspaceStorage } from "./firebaseAdmin";
 
 // Mission Control's side of the Vehicle Library System. The Firestore
 // `vehicleLibrary` collection and `vehicle-library/` Storage layout here are
@@ -208,36 +208,26 @@ function normalizeVehicleLibraryEntry(data: unknown, fallbackVehicleId?: string)
   };
 }
 
-function storageBucketName(): string | null {
-  return (
-    process.env.FIREBASE_STORAGE_BUCKET ||
-    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ||
-    (process.env.FIREBASE_ADMIN_PROJECT_ID ? `${process.env.FIREBASE_ADMIN_PROJECT_ID}.firebasestorage.app` : null)
-  );
-}
+async function bucket() { return (await getWorkspaceStorage()).bucket(); }
 
-function bucket() {
-  return adminStorage.bucket(storageBucketName() ?? undefined);
-}
-
-function publicUrl(path: string): string | null {
-  const bucketName = storageBucketName();
+function publicUrl(path: string, bucketName: string): string | null {
   if (!bucketName) return null;
   return `https://storage.googleapis.com/${bucketName}/${encodeURI(path)}`;
 }
 
-function withUrls(data: unknown, fallbackVehicleId?: string): VehicleLibraryEntry {
+async function withUrls(data: unknown, fallbackVehicleId?: string): Promise<VehicleLibraryEntry> {
+  const bucketName = (await bucket()).name;
   const entry = normalizeVehicleLibraryEntry(data, fallbackVehicleId);
   const colorImageUrls: Partial<Record<VehicleColor, string>> = {};
   for (const [color, path] of Object.entries(entry.colorImages ?? {})) {
     if (path) {
-      const url = publicUrl(path);
+      const url = publicUrl(path, bucketName);
       if (url) colorImageUrls[color as VehicleColor] = url;
     }
   }
   return {
     ...entry,
-    defaultImageUrl: entry.defaultImage ? publicUrl(entry.defaultImage) : null,
+    defaultImageUrl: entry.defaultImage ? publicUrl(entry.defaultImage, bucketName) : null,
     colorImageUrls
   };
 }
@@ -265,7 +255,7 @@ export interface VehicleLibrarySearchFilters {
 
 export async function searchVehicleLibrary(filters: VehicleLibrarySearchFilters): Promise<VehicleLibraryEntry[]> {
   const snap = await (await collection()).limit(filters.limit ?? 500).get();
-  let entries = snap.docs.map((d) => withUrls(d.data(), d.id));
+  let entries = await Promise.all(snap.docs.map((d) => withUrls(d.data(), d.id)));
 
   if (filters.make) {
     const make = filters.make.trim().toLowerCase();
@@ -298,7 +288,7 @@ export async function searchVehicleLibrary(filters: VehicleLibrarySearchFilters)
 
 export async function listVehicleLibrary(limit = 1000): Promise<VehicleLibraryEntry[]> {
   const snap = await (await collection()).limit(limit).get();
-  return snap.docs.map((d) => withUrls(d.data(), d.id));
+  return Promise.all(snap.docs.map((d) => withUrls(d.data(), d.id)));
 }
 
 export async function upsertVehicleLibraryEntry(
@@ -385,7 +375,7 @@ export async function uploadVehicleImage(params: {
   const fileName = params.color ? `${slugify(params.color)}.webp` : "default.webp";
   const path = await storagePathFor(entry.make, entry.model, entry.yearStart, fileName);
 
-  const file = bucket().file(path);
+  const file = (await bucket()).file(path);
   await file.save(params.data, {
     contentType: params.contentType,
     metadata: { cacheControl: "public, max-age=31536000, immutable" }
@@ -460,7 +450,7 @@ export async function backfillDriverVehicleImagesForEntry(entry: VehicleLibraryE
     const vehicleColor = normalizeColor(vehicle.color);
     if (color && vehicleColor !== color) continue;
     const match = matchingVehicleImagePath(entry, color ?? vehicleColor ?? undefined);
-    const imageUrl = match ? publicUrl(match.path) : null;
+    const imageUrl = match ? publicUrl(match.path, (await bucket()).name) : null;
     const specificationEntry = exactLibraryEntry(libraryEntries, vehicle);
 
     const nextVehicle = {
@@ -521,7 +511,7 @@ export async function deleteVehicleImage(params: { vehicleId: string; color?: Ve
   const entry = snap.data() as VehicleLibraryEntry;
   const path = params.color ? entry.colorImages?.[params.color] : entry.defaultImage;
   if (path) {
-    await bucket().file(path).delete({ ignoreNotFound: true });
+    await (await bucket()).file(path).delete({ ignoreNotFound: true });
   }
 
   const update: Record<string, unknown> = {
@@ -544,6 +534,6 @@ export async function deleteVehicleLibraryEntry(vehicleId: string): Promise<void
   if (!snap.exists) return;
   const entry = snap.data() as VehicleLibraryEntry;
   const paths = [entry.defaultImage, ...Object.values(entry.colorImages ?? {})].filter(Boolean) as string[];
-  await Promise.all(paths.map((p) => bucket().file(p).delete({ ignoreNotFound: true })));
+  await Promise.all(paths.map(async (p) => (await bucket()).file(p).delete({ ignoreNotFound: true })));
   await ref.delete();
 }

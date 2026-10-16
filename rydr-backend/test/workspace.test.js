@@ -26,12 +26,13 @@ test('service routing replaces previous workspace and preserves route isolation'
 
 test('backend authenticates canonical Auth phone and rejects cross-workspace requests',async()=>{
  const configPath=require.resolve('../src/config/firebase');let user={uid:'real',phoneNumber:'+15555550999'};
- const previous=require.cache[configPath];require.cache[configPath]={id:configPath,filename:configPath,loaded:true,exports:{initializeFirebase:()=>{},getControlFirestore:()=>({collection:()=>({doc:()=>({get:async()=>({data:()=>policy})})})}),admin:{auth:()=>({verifyIdToken:async(_token,revoked)=>{assert.equal(revoked,true);return{uid:user.uid,phone_number:'+15555550999'}},getUser:async()=>user})}}};
+ const authPath=require.resolve('../firebase/functions/src/services/firebaseWorkspace');const previousAuth=require.cache[authPath];require.cache[authPath]={id:authPath,filename:authPath,loaded:true,exports:{configureWorkspaceSDK:()=>{},verifyWorkspaceToken:async()=>({decoded:{uid:user.uid,aud:'rydrapp-c7ec1'},user,staff:false})}};
+ const previous=require.cache[configPath];require.cache[configPath]={id:configPath,filename:configPath,loaded:true,exports:{initializeFirebase:()=>({app:{}}),getControlFirestore:()=>({collection:()=>({doc:()=>({get:async()=>({data:()=>policy})})})}),admin:{auth:()=>({verifyIdToken:async(_token,revoked)=>{assert.equal(revoked,true);return{uid:user.uid,phone_number:'+15555550999'}},getUser:async()=>user})}}};
  try{const {requireFirebaseAuth}=require('../src/middleware/firebaseAuth');async function invoke(workspace){let next=false;const res={statusCode:200,status(n){this.statusCode=n;return this},json(body){this.body=body;return this}};await runInWorkspace(workspace,()=>requireFirebaseAuth({header:()=> 'Bearer token'},res,()=>{next=true}));return{res,next}}
  assert.equal((await invoke('live-beta')).next,true);assert.equal((await invoke('test')).res.statusCode,403);
  user={uid:'real',phoneNumber:'+15555550101'};assert.equal((await invoke('live-beta')).res.statusCode,403,'current test phone overrides stale ID-token phone');assert.equal((await invoke('test')).next,true);
  user={uid:'real',disabled:true};assert.equal((await invoke('live-beta')).res.statusCode,403);
- }finally{if(previous)require.cache[configPath]=previous;else delete require.cache[configPath]}
+ }finally{if(previousAuth)require.cache[authPath]=previousAuth;else delete require.cache[authPath];if(previous)require.cache[configPath]=previous;else delete require.cache[configPath]}
 });
 
 test('real HTTP JSON requests preserve workspace through middleware and concurrent handlers',async()=>{

@@ -18,7 +18,7 @@ function workspaceRouting(req, res, next) {
     return res.status(404).json({ error: "invalid_workspace" });
   }
 }
-async function assertAccountWorkspace(uid, phone) {
+async function assertAccountWorkspace(uid, phone, verifiedProjectId) {
   const { getControlFirestore } = require("../config/firebase");
   const policy = (
     await getControlFirestore()
@@ -26,7 +26,7 @@ async function assertAccountWorkspace(uid, phone) {
       .doc("liveBetaAccess")
       .get()
   ).data();
-  if (accountWorkspace(uid, phone, policy) !== currentWorkspace())
+  if (accountWorkspace(uid, phone, policy, verifiedProjectId) !== currentWorkspace())
     throw Object.assign(new Error("account_workspace_mismatch"), {
       statusCode: 403,
     });

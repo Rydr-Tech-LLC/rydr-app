@@ -18,7 +18,7 @@ class UserViewModel: ObservableObject {
     }
 
     func loadUserName() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
 
         RydrWorkspace.firestore.collection("users").document(uid).getDocument { doc, error in
             if let doc = doc, let data = doc.data() {

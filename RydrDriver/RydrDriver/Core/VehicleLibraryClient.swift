@@ -88,7 +88,7 @@ enum VehicleLibraryClient {
         ])
     }
 
-    private static var functions: Functions { Functions.functions() }
+    private static var functions: Functions { RydrWorkspace.functions() }
 
     /// Calls the `decodeVin` callable function. Used to populate the
     /// "Year Make Model Trim" summary as soon as the driver taps "Decode

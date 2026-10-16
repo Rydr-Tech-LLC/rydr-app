@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminAuth, getWorkspaceDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceAuth, getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 import { notificationService } from "@/src/services/notifications/NotificationService";
 
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
 
   const [driverSnap, user] = await Promise.all([
     (await getWorkspaceDb()).collection("drivers").doc(params.uid).get(),
-    adminAuth.getUser(params.uid).catch(() => null)
+    (await getWorkspaceAuth()).getUser(params.uid).catch(() => null)
   ]);
   if (!driverSnap.exists) return NextResponse.json({ error: "Driver not found." }, { status: 404 });
   if (!user) return NextResponse.json({ error: "Firebase Auth user not found." }, { status: 404 });
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
   if (!email) return NextResponse.json({ error: "Driver does not have an email address." }, { status: 400 });
 
   if (action === "mark_email_verified") {
-    await adminAuth.updateUser(params.uid, { emailVerified: true });
+    await (await getWorkspaceAuth()).updateUser(params.uid, { emailVerified: true });
     await (await getWorkspaceDb()).collection("drivers").doc(params.uid).set(
       {
         emailVerified: true,
@@ -52,8 +52,8 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
 
   const link =
     action === "send_password_reset"
-      ? await adminAuth.generatePasswordResetLink(email)
-      : await adminAuth.generateEmailVerificationLink(email);
+      ? await (await getWorkspaceAuth()).generatePasswordResetLink(email)
+      : await (await getWorkspaceAuth()).generateEmailVerificationLink(email);
 
   const firstName = typeof driver.firstName === "string" && driver.firstName.trim() ? driver.firstName.trim() : "there";
   const result = await notificationService.sendGenericEmail({

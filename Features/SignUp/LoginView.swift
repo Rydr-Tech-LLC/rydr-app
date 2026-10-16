@@ -435,7 +435,7 @@ struct LoginView: View {
         }
         
         // Firebase password reset
-        Auth.auth().sendPasswordReset(withEmail: email) { error in
+        RydrWorkspace.auth.sendPasswordReset(withEmail: email) { error in
             if let error = error as NSError?,
                let errorCode = AuthErrorCode(rawValue: error.code) {
                 switch errorCode {
@@ -462,7 +462,7 @@ struct LoginView: View {
         phoneRepairPassword = ""
         isRepairingPhoneLogin = false
         
-        PhoneAuthProvider.provider().verifyPhoneNumber(formattedNumber, uiDelegate: nil) { verificationID, error in
+        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(formattedNumber, uiDelegate: nil) { verificationID, error in
             Task { @MainActor in
                 if let error = error {
                     errorMessage = "Failed to send code: \(error.localizedDescription)"
@@ -496,7 +496,7 @@ struct LoginView: View {
         }
 
         errorMessage = ""
-        Auth.auth().signIn(withEmail: email, password: password) { result, error in
+        RydrWorkspace.auth.signIn(withEmail: email, password: password) { result, error in
             Task { @MainActor in
                 if let error {
                     errorMessage = "Login failed: \(error.localizedDescription)"
@@ -585,7 +585,7 @@ struct LoginView: View {
         fallbackEmail: String,
         attemptID: UUID
     ) {
-        Auth.auth().signIn(with: credential) { result, error in
+        RydrWorkspace.auth.signIn(with: credential) { result, error in
             Task { @MainActor in
                 guard socialAuthAttemptID == attemptID else { return }
                 if let error {
@@ -674,7 +674,7 @@ struct LoginView: View {
             .getDocument { snapshot, error in
                 Task { @MainActor in
                     if let error {
-                        try? Auth.auth().signOut()
+                        try? RydrWorkspace.auth.signOut()
                         errorMessage = "Unable to load rider account: \(error.localizedDescription)"
                         return
                     }
@@ -698,13 +698,13 @@ struct LoginView: View {
             .getDocument { snapshot, error in
                 Task { @MainActor in
                     if let error {
-                        try? Auth.auth().signOut()
+                        try? RydrWorkspace.auth.signOut()
                         errorMessage = "Unable to load phone account: \(error.localizedDescription)"
                         return
                     }
 
                     guard let mappedUid = snapshot?.data()?["uid"] as? String else {
-                        try? Auth.auth().signOut()
+                        try? RydrWorkspace.auth.signOut()
                         errorMessage = "No rider account was found for this phone number. Please sign up or use email login."
                         return
                     }
@@ -721,13 +721,13 @@ struct LoginView: View {
             .getDocument { snapshot, error in
                 Task { @MainActor in
                     if let error {
-                        try? Auth.auth().signOut()
+                        try? RydrWorkspace.auth.signOut()
                         errorMessage = "Unable to load rider account: \(error.localizedDescription)"
                         return
                     }
 
                     guard let snapshot, snapshot.exists else {
-                        try? Auth.auth().signOut()
+                        try? RydrWorkspace.auth.signOut()
                         errorMessage = "No rider account was found for this phone number. Please sign up or use email login."
                         return
                     }
@@ -755,7 +755,7 @@ struct LoginView: View {
                 phoneRepairPassword = ""
                 errorMessage = "This phone number belongs to \(loginProfile.email). Confirm your password to link phone login."
             } else {
-                try? Auth.auth().signOut()
+                try? RydrWorkspace.auth.signOut()
                 errorMessage = "This phone number is saved on \(loginProfile.email). Sign in with email first, then verify this phone number to link phone login."
             }
             return
@@ -792,7 +792,7 @@ struct LoginView: View {
                 return
             }
 
-            Auth.auth().signIn(withEmail: repair.profile.email, password: phoneRepairPassword) { result, signInError in
+            RydrWorkspace.auth.signIn(withEmail: repair.profile.email, password: phoneRepairPassword) { result, signInError in
                 if let signInError {
                     Task { @MainActor in
                         isRepairingPhoneLogin = false

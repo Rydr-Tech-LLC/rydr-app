@@ -37,7 +37,7 @@ final class DriverSessionManager: ObservableObject {
     deinit { driverListener?.remove() }
 
     func restoreSessionIfPossible() {
-        guard !isLoggedIn, let user = Auth.auth().currentUser else { return }
+        guard !isLoggedIn, let user = RydrWorkspace.auth.currentUser else { return }
         login(name: user.displayName ?? "Rydr Driver", email: user.email ?? "")
         RydrWorkspace.firestore.collection("drivers").document(user.uid).getDocument { [weak self] snapshot, _ in
             guard let self else { return }
@@ -66,12 +66,12 @@ final class DriverSessionManager: ObservableObject {
     func logout() {
         guard !isLoggingOut else { return }
         isLoggingOut = true
-        let uid = Auth.auth().currentUser?.uid
+        let uid = RydrWorkspace.auth.currentUser?.uid
         Task {
             await DriverNotificationManager.shared.disableAndDeleteCurrentTokenForLogout(uid: uid)
 
             do {
-                try Auth.auth().signOut()
+                try RydrWorkspace.auth.signOut()
             } catch {
                 print("[RydrSession][driver] firebase_sign_out_failed error=\(error.localizedDescription)")
                 await MainActor.run { self.isLoggingOut = false }
@@ -125,7 +125,7 @@ final class DriverSessionManager: ObservableObject {
     /// Observes the driver's Firestore document for background check status updates.
     func startDriverStatusListener() {
         driverListener?.remove()
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         let doc = RydrWorkspace.firestore.collection("drivers").document(uid)
         driverListener = doc.addSnapshotListener { [weak self] snapshot, error in
             guard let self = self else { return }

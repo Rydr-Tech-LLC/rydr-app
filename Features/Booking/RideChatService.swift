@@ -132,7 +132,7 @@ final class RideChatService {
 
     @discardableResult
     private func requireParticipant(riderId: String, driverId: String) throws -> String {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             throw RideChatServiceError.notSignedIn
         }
         guard uid == riderId || uid == driverId else {

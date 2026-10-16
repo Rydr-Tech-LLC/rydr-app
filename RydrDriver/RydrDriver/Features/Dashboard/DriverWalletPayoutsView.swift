@@ -531,7 +531,7 @@ struct DriverWalletPayoutsView: View {
 
     @MainActor
     private func loadWallet() async {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             wallet = .empty
             return
         }
@@ -555,7 +555,7 @@ struct DriverWalletPayoutsView: View {
             if append, let nextPayoutCursor { url.queryItems = [.init(name: "startingAfter", value: nextPayoutCursor)] }
             var request = RydrWorkspace.urlRequest(url: url.url!)
             request.cachePolicy = .reloadIgnoringLocalCacheData
-            guard let user = Auth.auth().currentUser else { throw URLError(.userAuthenticationRequired) }
+            guard let user = RydrWorkspace.auth.currentUser else { throw URLError(.userAuthenticationRequired) }
             request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { throw URLError(.badServerResponse) }
@@ -619,7 +619,7 @@ struct DriverWalletPayoutsView: View {
             var request = RydrWorkspace.urlRequest(url: stripeBackendBase.appendingPathComponent("connect/instant-payout"))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            if let token = try await Auth.auth().currentUser?.getIDToken() {
+            if let token = try await RydrWorkspace.auth.currentUser?.getIDToken() {
                 request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             }
             // Keep one request ID and payload across an uncertain response.
@@ -859,7 +859,7 @@ private struct DriverPromotionPanel: View {
         }
     }
     @MainActor private func request(path: String, body: [String: String]? = nil) async throws -> Data {
-        guard let user = Auth.auth().currentUser else { throw NSError(domain: "Promotions", code: 401, userInfo: [NSLocalizedDescriptionKey: "Sign in to view your promotions."]) }
+        guard let user = RydrWorkspace.auth.currentUser else { throw NSError(domain: "Promotions", code: 401, userInfo: [NSLocalizedDescriptionKey: "Sign in to view your promotions."]) }
         let token = try await user.getIDToken()
         var request = RydrWorkspace.urlRequest(url: URL(string: "https://rydr-stripe-backend.onrender.com\(path)")!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

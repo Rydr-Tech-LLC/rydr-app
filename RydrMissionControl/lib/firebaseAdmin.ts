@@ -1,8 +1,24 @@
 import "server-only";
+import { configureWorkspaceSDK, appForWorkspace, firestoreForWorkspace, storageForWorkspace } from "../../rydr-backend/firebase/functions/src/services/firebaseWorkspace";
 import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getAuth, type Auth } from "firebase-admin/auth";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { getStorage, type Storage } from "firebase-admin/storage";
+import * as appSDK from "firebase-admin/app";
+import * as authSDK from "firebase-admin/auth";
+import * as firestoreSDK from "firebase-admin/firestore";
+import * as storageSDK from "firebase-admin/storage";
+import * as cloudFirestore from "@google-cloud/firestore";
+import * as cloudStorage from "@google-cloud/storage";
+import * as googleAuth from "google-auth-library";
+configureWorkspaceSDK((id: string) => {
+ const sdk: Record<string, unknown> = {"firebase-admin/app":appSDK,"firebase-admin/auth":authSDK,
+  "firebase-admin/firestore":firestoreSDK,"firebase-admin/storage":storageSDK,
+  "@google-cloud/firestore":cloudFirestore,"@google-cloud/storage":cloudStorage,"google-auth-library":googleAuth};
+ if (!sdk[id]) throw new Error("Unsupported Firebase workspace dependency");
+ return sdk[id];
+});
+
 
 /**
  * Server-only Firebase Admin SDK singleton. This is what every privileged
@@ -23,7 +39,8 @@ import { getStorage, type Storage } from "firebase-admin/storage";
 let cachedApp: App | null = null;
 
 function buildAdminApp(): App {
-  if (getApps().length) return getApps()[0]!;
+  const existing = getApps().find(app => app.name === "[DEFAULT]");
+  if (existing) return existing;
 
   const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
@@ -80,5 +97,15 @@ export const adminStorage: Storage = lazy(() => getStorage(getAdminApp()));
 /** Each request resolves its workspace before obtaining privileged database access. */
 export async function getWorkspaceDb():Promise<Firestore>{
  const {currentWorkspace}=await import("./workspace");
- return getFirestore(getAdminApp(),(await currentWorkspace()) === "test" ? "(default)" : "live-beta");
+ const workspace = await currentWorkspace();
+ return firestoreForWorkspace(workspace,getAdminApp());
+}
+
+export async function getWorkspaceAuth():Promise<Auth> {
+ const {currentWorkspace}=await import("./workspace");
+ return getAuth(appForWorkspace(await currentWorkspace(),getAdminApp()));
+}
+export async function getWorkspaceStorage():Promise<Storage> {
+ const {currentWorkspace}=await import("./workspace");
+ return storageForWorkspace(await currentWorkspace(),getAdminApp());
 }

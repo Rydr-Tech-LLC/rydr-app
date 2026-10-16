@@ -222,7 +222,7 @@ struct NameEntryView: View {
         attemptID existingAttemptID: UUID? = nil
     ) {
         let attemptID = existingAttemptID ?? beginSocialAuthAttempt()
-        if let currentUser = Auth.auth().currentUser {
+        if let currentUser = RydrWorkspace.auth.currentUser {
             currentUser.link(with: credential) { _, err in
                 Task { @MainActor in
                     guard socialAuthAttemptID == attemptID else { return }
@@ -238,7 +238,7 @@ struct NameEntryView: View {
                 }
             }
         } else {
-            Auth.auth().signIn(with: credential) { _, err in
+            RydrWorkspace.auth.signIn(with: credential) { _, err in
                 Task { @MainActor in
                     guard socialAuthAttemptID == attemptID else { return }
                     if let err {
@@ -327,11 +327,11 @@ struct NameEntryView: View {
             fullName: appleCred.fullName
         )
 
-        let splitName = splitDisplayName(Auth.auth().currentUser?.displayName ?? "")
+        let splitName = splitDisplayName(RydrWorkspace.auth.currentUser?.displayName ?? "")
         let profile = RiderSocialAuthProfile(
             firstName: appleCred.fullName?.givenName ?? splitName.first,
             lastName: appleCred.fullName?.familyName ?? splitName.last,
-            email: appleCred.email ?? Auth.auth().currentUser?.email ?? "",
+            email: appleCred.email ?? RydrWorkspace.auth.currentUser?.email ?? "",
             providerID: "apple.com"
         )
 

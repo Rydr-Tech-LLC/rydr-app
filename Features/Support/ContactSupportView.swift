@@ -149,7 +149,7 @@ struct ContactSupportView: View {
     }
 
     private var emailDraft: SupportEmailDraft {
-        let uid = Auth.auth().currentUser?.uid ?? "Not signed in"
+        let uid = RydrWorkspace.auth.currentUser?.uid ?? "Not signed in"
         let rideLine = rideId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Ride ID: Not provided" : "Ride ID: \(rideId)"
         let body = """
         User ID: \(uid)

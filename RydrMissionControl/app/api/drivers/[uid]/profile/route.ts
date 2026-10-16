@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminAuth, getWorkspaceDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceAuth, getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 
 type ProfilePayload = {
@@ -118,7 +118,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ uid
     };
   }
 
-  const authUpdate: Parameters<typeof adminAuth.updateUser>[1] = {};
+  const authUpdate: import("firebase-admin/auth").UpdateRequest = {};
   if (body.email !== undefined && email) {
     authUpdate.email = email;
     authUpdate.emailVerified = false;
@@ -130,7 +130,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ uid
     authUpdate.phoneNumber = phoneNumber;
   }
   if (Object.keys(authUpdate).length > 0) {
-    await adminAuth.updateUser(params.uid, authUpdate);
+    await (await getWorkspaceAuth()).updateUser(params.uid, authUpdate);
   }
 
   await driverRef.set(update, { merge: true });

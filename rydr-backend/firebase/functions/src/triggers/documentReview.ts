@@ -1,11 +1,11 @@
-import { onObjectFinalized } from "../workspaceFunctions";
+import { onObjectFinalized, deploymentProject } from "../workspaceFunctions";
 import { reviewUploadedDocument } from "../services/documentReviewService";
 
 export const onDocumentUploadedForReview = onObjectFinalized(
   {
-    bucket: "rydrapp-c7ec1.firebasestorage.app",
+    bucket: `${deploymentProject() || "rydrapp-c7ec1"}.firebasestorage.app`,
     memory: "1GiB",
-    region: "us-east1",
+    region: deploymentProject() === "rydr-test-c7ec1" ? "us-central1" : "us-east1",
     timeoutSeconds: 120
   },
   async (event) => {

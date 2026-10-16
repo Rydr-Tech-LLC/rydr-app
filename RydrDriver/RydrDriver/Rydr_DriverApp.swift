@@ -55,7 +55,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     #if DEBUG
     if ProcessInfo.processInfo.arguments.contains("-RydrUseFirebaseTestPhoneNumbers") {
-      Auth.auth().settings?.isAppVerificationDisabledForTesting = true
+      RydrWorkspace.auth.settings?.isAppVerificationDisabledForTesting = true
     }
     #endif
 
@@ -67,7 +67,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
   ) {
-    if Auth.auth().canHandleNotification(userInfo) {
+    if RydrWorkspace.auth.canHandleNotification(userInfo) {
       completionHandler(.noData)
       return
     }
@@ -130,7 +130,7 @@ struct Rydr_DriverApp: App {
       .environmentObject(session)
       .hideKeyboardOnTap()
       .onOpenURL { url in
-        _ = GIDSignIn.sharedInstance.handle(url) || Auth.auth().canHandle(url)
+        _ = GIDSignIn.sharedInstance.handle(url) || RydrWorkspace.auth.canHandle(url)
       }
       }
     }

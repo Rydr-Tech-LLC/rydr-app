@@ -1,4 +1,7 @@
 import workspaceRuntime from "../../firebase/functions/src/services/workspaceRuntime.js";
+import firebaseWorkspace from "../../firebase/functions/src/services/firebaseWorkspace.js";
+import {createRequire} from "node:module";
+firebaseWorkspace.configureWorkspaceSDK(createRequire(import.meta.url));
 import workspacePolicy from "../../firebase/functions/src/services/workspacePolicy.js";
 import {getFirestore} from "firebase-admin/firestore";
 // server.js
@@ -23,7 +26,7 @@ if (!admin.apps.length) {
     ),
   });
 }
-const db = new Proxy({}, {get(_target,key){const real=getFirestore(undefined,workspaceRuntime.currentWorkspace()==="test"?"(default)":"live-beta");const value=real[key];return typeof value==="function"?value.bind(real):value}});
+const db = new Proxy({}, {get(_target,key){const real=firebaseWorkspace.firestoreForWorkspace(workspaceRuntime.currentWorkspace());const value=real[key];return typeof value==="function"?value.bind(real):value}});
 
 // ---------- Express ----------
 const app = express();
@@ -97,10 +100,11 @@ async function requireAuth(req, res, next) {
     const authz = req.headers.authorization || "";
     const [, token] = authz.split(" ");
     if (!token) return res.status(401).json({ error: "Missing token" });
-    const decoded = await admin.auth().verifyIdToken(token,true);
+    const workspaceAuth=firebaseWorkspace.authForWorkspace(workspaceRuntime.currentWorkspace());
+    const decoded = await workspaceAuth.verifyIdToken(token,true);
     const policy=(await getFirestore().collection("operationalSecurity").doc("liveBetaAccess").get()).data();
-    const user=await admin.auth().getUser(decoded.uid);
-    if(workspacePolicy.accountWorkspace(decoded.uid,user.phoneNumber,policy)!==workspaceRuntime.currentWorkspace())return res.status(403).json({error:"account_workspace_mismatch"});
+    const user=await workspaceAuth.getUser(decoded.uid);
+    if(workspacePolicy.accountWorkspace(decoded.uid,user.phoneNumber,policy,decoded.aud)!==workspaceRuntime.currentWorkspace())return res.status(403).json({error:"account_workspace_mismatch"});
     req.uid = decoded.uid;
     next();
   } catch (e) {
@@ -477,7 +481,7 @@ app.post("/promo/transfer", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "code and recipientEmail required" });
 
   try {
-    const recipient = await admin.auth().getUserByEmail(recipientEmail).catch(() => null);
+    const recipient = await firebaseWorkspace.authForWorkspace(workspaceRuntime.currentWorkspace()).getUserByEmail(recipientEmail).catch(() => null);
     const friendIsUser = !!recipient;
 
     if (friendIsUser) {

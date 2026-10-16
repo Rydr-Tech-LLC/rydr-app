@@ -2,20 +2,24 @@
 
 Mission Control has two operational workspaces. The selector stays visible in the sidebar, and the URL includes the workspace so separate browser tabs cannot silently change each other's data context.
 
-| Workspace | Firestore database | Stripe | Accounts |
+| Workspace | Firebase project / database | Stripe | Accounts |
 | --- | --- | --- | --- |
-| Test | `(default)` | Test keys only | Preserved Firebase test identities and configured Firebase test phone numbers |
-| Live Beta | `live-beta` | Live keys only, disabled until explicitly enabled | Real verified identities participating in the live beta |
+| Test | `rydr-test-c7ec1` / `(default)` | Test keys only | Independent Test identities; preserved beta Test accounts |
+| Live Beta | `rydrapp-c7ec1` / `live-beta` | Live keys only, gated by both live switches | Independent real identities participating in the live beta |
 
 Accounts, ride requests, trips, support disputes, safety flags, rider/driver campaigns, rewards, payment jobs, and driver payouts live in the selected database. Staff authentication and access management remain shared. Live Beta starts with operating configuration and independent vehicle-library assets, without copying Test accounts, rides, promotions, disputes, or balances. The account-reset security archive remains in the control database and outside both operational lists.
 
-The identity policy is an exact snapshot of Firebase’s configured test numbers, rather than a phone-prefix match. If those Firebase test numbers change, synchronize the phone list and hashes in both databases’ `operationalSecurity/liveBetaAccess` records before using the new numbers. Keep previously pinned Test UIDs in the policy.
+Authentication v2 uses independent Firebase projects. Email, phone, password and social-provider ownership are scoped to each project, so the same email and phone can be registered in both. Firebase mock phone numbers belong only in the Test project's Auth configuration. The original project's legacy Test UIDs remain blocked for Live Beta, even after their credentials are retired. Staff accounts and the security archive stay in the original control database.
+
+External backend credentials use a restricted Workload Identity Federation provider to impersonate `rydr-test-backend@rydr-test-c7ec1.iam.gserviceaccount.com` with short-lived tokens. The provider accepts only the existing backend service account's signed Google identity. No new service-account private key or organization-policy exception is required. Test Functions run under the dedicated Test identity. FCM transport uses the original iOS registration, with workspace-scoped device tokens and payloads.
+
+Deploy Test with `firebase deploy --project rydr-test-c7ec1 --config firebase.test.json --only functions,firestore,storage --non-interactive --force` from `rydr-backend/firebase`. Test callable/HTTP handlers retain Firebase/application authentication; their Cloud Run services use `run.googleapis.com/invoker-iam-disabled=true` instead of an organization-prohibited `allUsers` IAM binding. Keep event-driven and scheduler services protected by IAM. Recheck these six HTTP services after deploying: `decodeVin`, `getVehicleImage`, `submitVehicleVin`, `submitVehicleManual`, `deleteDriverVehicle`, `editVehicleLibraryBackground`.
 
 ## Mobile routing
 
-The rider and driver apps fetch a hashed identity policy before displaying their screens. A signed-in Firebase UID or canonical phone matching the configured Test policy selects Test automatically; other identities select Live Beta. There is no account-controlled environment picker. Every Firestore reference, callable function, and Rydr backend request follows that selection. Backends independently verify the current Firebase identity and reject cross-workspace requests. Rules also enforce the database boundary. Missing policy or payment configuration fails closed.
+The rider and driver apps explicitly choose Test or Live Beta before sign-in, then verify the server project map. Workspace switching requires signing out. The selected project owns Auth, Firestore, Storage and Functions. Every backend verifies the token against the selected, allowlisted project, checks revocation and the canonical account, and rejects tokens from the other project even when the UID, email or phone matches. Headers cannot select an account’s Stripe mode. Rules enforce the project/database boundary; missing configuration fails closed.
 
-The rider obtains its Stripe publishable key from authenticated `/account-config`, bound to the current UID. Driver payout components validate key mode and obtain authenticated account sessions from the selected workspace. Bundled Stripe keys are not a fallback for account configuration.
+The rider obtains its Stripe publishable key from authenticated `/account-config`, bound to the current workspace and UID. Driver payout components validate key mode and obtain authenticated account sessions from the selected workspace. Bundled Stripe keys are not a fallback for account configuration.
 
 ## Stripe environment variables
 

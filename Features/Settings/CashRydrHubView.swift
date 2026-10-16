@@ -348,7 +348,7 @@ private final class CashRydrHubVM: ObservableObject {
     private var favoriteProfileListeners: [String: ListenerRegistration] = [:]
 
     nonisolated private func logFavoriteDriversPath(uid uidBeingUsedForFirestorePath: String, operation: String) {
-        if let user = Auth.auth().currentUser {
+        if let user = RydrWorkspace.auth.currentUser {
             print("🔥 AUTH UID: \(user.uid)")
         } else {
             print("🔥 AUTH UID: nil")
@@ -360,7 +360,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func loadAccess() {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             isCheckingTerms = false
             errorMessage = "Please log in to use Cash Rydr Hub."
             return
@@ -398,7 +398,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func acceptTerms() {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Please log in to continue."
             return
         }
@@ -429,7 +429,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func startMarketplace() {
-        guard let uid = Auth.auth().currentUser?.uid else {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
             errorMessage = "Please log in to use Cash Rydr Hub."
             return
         }
@@ -466,7 +466,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func startFavoriteDrivers() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         favoriteDriversListener?.remove()
         logFavoriteDriversPath(uid: uid, operation: "listen")
         favoriteDriversListener = db.collection("riders").document(uid)
@@ -490,7 +490,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func removeFavoriteDriver(_ driver: CashHubFavoriteDriver) {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Please log in to update favorite drivers."
             return
         }
@@ -498,7 +498,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func blockFavoriteDriver(_ driver: CashHubFavoriteDriver) {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Please log in to block a driver."
             return
         }
@@ -506,7 +506,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func blockDriver(_ offer: CashHubResponse) {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Please log in to block a driver."
             return
         }
@@ -514,7 +514,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func reportDriver(_ offer: CashHubResponse, for request: CashRydrRequest) {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Please log in to report a driver."
             return
         }
@@ -528,7 +528,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func reportConnectedListingProblem(_ request: CashRydrRequest) {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Please log in to report a problem."
             return
         }
@@ -541,7 +541,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func addFavoriteDriver(from offer: CashHubResponse) {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Please log in to save favorite drivers."
             return
         }
@@ -557,7 +557,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func createRequest(from draft: CashHubRequestDraft, riderName: String, completion: @escaping (Bool) -> Void) {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Please log in to post a request."
             completion(false)
             return
@@ -606,7 +606,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func updateVisibility(for request: CashRydrRequest, to visibility: String) {
-        guard Auth.auth().currentUser?.uid == request.riderUid else {
+        guard RydrWorkspace.auth.currentUser?.uid == request.riderUid else {
             errorMessage = "Only the rider who posted this request can change its visibility."
             return
         }
@@ -615,7 +615,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func removeRequest(_ request: CashRydrRequest) {
-        guard Auth.auth().currentUser?.uid == request.riderUid else {
+        guard RydrWorkspace.auth.currentUser?.uid == request.riderUid else {
             errorMessage = "Only the rider who posted this request can delete it."
             return
         }
@@ -623,7 +623,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func sendOffer(to request: CashRydrRequest, draft: CashHubOfferDraft, driverName: String) -> Bool {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Please log in to make an offer."
             return false
         }
@@ -649,7 +649,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func sendMessage(to context: CashHubMessageContext, message: String, authorName: String) -> Bool {
-        guard Auth.auth().currentUser != nil else {
+        guard RydrWorkspace.auth.currentUser != nil else {
             errorMessage = "Please log in to send a message."
             return false
         }
@@ -677,7 +677,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func acceptOffer(_ offer: CashHubResponse, for request: CashRydrRequest) {
-        guard Auth.auth().currentUser?.uid == request.riderUid else {
+        guard RydrWorkspace.auth.currentUser?.uid == request.riderUid else {
             errorMessage = "Only the rider who posted this request can accept an offer."
             return
         }
@@ -690,7 +690,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func declineOffer(_ offer: CashHubResponse, for request: CashRydrRequest) {
-        guard Auth.auth().currentUser?.uid == request.riderUid else {
+        guard RydrWorkspace.auth.currentUser?.uid == request.riderUid else {
             errorMessage = "Only the rider who posted this request can decline an offer."
             return
         }
@@ -743,7 +743,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     func cancelListing(_ request: CashRydrRequest) {
-        guard Auth.auth().currentUser?.uid == request.riderUid else {
+        guard RydrWorkspace.auth.currentUser?.uid == request.riderUid else {
             errorMessage = "Only the rider who posted this request can cancel it."
             return
         }
@@ -789,7 +789,7 @@ private final class CashRydrHubVM: ObservableObject {
     }
 
     private func syncResponseListeners(for requests: [CashRydrRequest]) {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         let activeIDs = Set(requests.map(\.id))
         for (id, listener) in responseListeners where !activeIDs.contains(id) {
             listener.remove()
@@ -1014,7 +1014,7 @@ struct CashRydrHubView: View {
     @AppStorage("cashHubDismissedFeedEventIDs") private var dismissedFeedEventIDsStorage = ""
     @State private var pendingNotificationRoute: [AnyHashable: Any]?
 
-    private var currentUID: String { Auth.auth().currentUser?.uid ?? "" }
+    private var currentUID: String { RydrWorkspace.auth.currentUser?.uid ?? "" }
     private var riderRequests: [CashRydrRequest] { vm.requests.filter { $0.riderUid == currentUID } }
     private var myRequests: [CashRydrRequest] { riderRequests.filter { !$0.isHiddenFromMyPosts } }
     private var completedCashRideCount: Int {
@@ -4446,10 +4446,10 @@ private struct CashHubMessageForm: View {
     }
 
     private var shouldShowPriceDecision: Bool {
-        mode == .requestThread && !request.isConnected && unresolvedPriceProposal?.authorUid != Auth.auth().currentUser?.uid
+        mode == .requestThread && !request.isConnected && unresolvedPriceProposal?.authorUid != RydrWorkspace.auth.currentUser?.uid
     }
     private var isWaitingForPriceResponse: Bool {
-        mode == .requestThread && !request.isConnected && unresolvedPriceProposal?.authorUid == Auth.auth().currentUser?.uid
+        mode == .requestThread && !request.isConnected && unresolvedPriceProposal?.authorUid == RydrWorkspace.auth.currentUser?.uid
     }
     private var canNegotiatePrice: Bool {
         mode == .requestThread
@@ -4516,7 +4516,7 @@ private struct CashHubPriceProposalEditor: View {
 
 private struct CashHubChatBubble: View {
     let response: CashHubResponse
-    private var isCurrentUser: Bool { response.authorUid == Auth.auth().currentUser?.uid }
+    private var isCurrentUser: Bool { response.authorUid == RydrWorkspace.auth.currentUser?.uid }
     private var isSystem: Bool { response.authorRole == "system" }
 
     var body: some View {

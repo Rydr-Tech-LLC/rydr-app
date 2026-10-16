@@ -95,12 +95,12 @@ class UserSessionManager: ObservableObject {
     func logout() {
         guard !isLoggingOut else { return }
         isLoggingOut = true
-        let uid = Auth.auth().currentUser?.uid
+        let uid = RydrWorkspace.auth.currentUser?.uid
         Task {
             await NotificationManager.shared.disableAndDeleteCurrentTokenForLogout(uid: uid)
 
             do {
-                try Auth.auth().signOut()
+                try RydrWorkspace.auth.signOut()
             } catch {
                 print("[RydrSession][rider] firebase_sign_out_failed error=\(error.localizedDescription)")
                 isLoggingOut = false
@@ -136,7 +136,7 @@ class UserSessionManager: ObservableObject {
 
     /// Load rider info from Firestore and compute a display name.
     func loadUserProfile() {
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             logout()
             return
         }
@@ -213,7 +213,7 @@ class UserSessionManager: ObservableObject {
         zip: String,
         completion: @escaping (Error?) -> Void
     ) {
-        guard let user = Auth.auth().currentUser else {
+        guard let user = RydrWorkspace.auth.currentUser else {
             completion(NSError(domain: "NoUser", code: 0))
             return
         }

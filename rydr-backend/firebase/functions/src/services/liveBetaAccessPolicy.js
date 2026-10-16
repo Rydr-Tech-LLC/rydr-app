@@ -13,7 +13,7 @@ function phoneHash(phone) {
     : null;
 }
 function isBlockedTestAccount(policy, uid, phone) {
-  const hash = phoneHash(phone);
+  const hash = policy.authSeparationEnabled === true ? null : phoneHash(phone);
   return (
     policy.blockedAuthUids.includes(uid) ||
     (hash !== null && policy.blockedPhoneHashes.includes(hash))
@@ -51,11 +51,11 @@ async function liveBetaContext(db, mode) {
   ).data();
   if (
     !policy ||
-    policy.version !== 1 ||
+    ![1,2].includes(policy.version) ||
     policy.configured !== true ||
     !Array.isArray(policy.blockedAuthUids) ||
     !Array.isArray(policy.blockedPhoneHashes) ||
-    !policy.blockedPhoneHashes.length
+    (!policy.authSeparationEnabled && !policy.blockedPhoneHashes.length)
   )
     throw accessError("live_beta_protection_unavailable", 503);
   return { mode: "live", policy };

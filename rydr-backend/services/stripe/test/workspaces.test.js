@@ -4,7 +4,7 @@ const {phoneHash}=require('../../../firebase/functions/src/services/liveBetaAcce
 const keys={STRIPE_SECRET_KEY:'sk_test_sample',STRIPE_PUBLISHABLE_KEY:'pk_test_sample',STRIPE_SECRET_KEY_LIVE:'sk_live_sample',STRIPE_PUBLISHABLE_KEY_LIVE:'pk_live_sample',STRIPE_WEBHOOK_SECRET_TEST:'whsec_test',STRIPE_CONNECT_WEBHOOK_SECRET_TEST:'whsec_connect_test',STRIPE_WEBHOOK_SECRET_LIVE:'whsec_live',STRIPE_CONNECT_WEBHOOK_SECRET_LIVE:'whsec_connect_live',STRIPE_DRIVER_VERIFICATION_FLOW_ID_LIVE:'vf_driver_live',STRIPE_RIDER_VERIFICATION_FLOW_ID_LIVE:'vf_rider_live'};
 const policy={configured:true,blockedAuthUids:['test-uid'],blockedPhoneHashes:[phoneHash('+15555550101')]};
 async function fixture(env={},overrides={}){
- const app=createWorkspaceServer({...keys,...env},{createApp:(config,workspace)=>{const child=express();child.use((req,res)=>res.json({workspace,key:config.STRIPE_PUBLISHABLE_KEY}));return child},control:()=>({getWorkspaceState:async()=>Object.hasOwn(overrides,'workspaceState')?overrides.workspaceState:{enabled:true,livePaymentsEnabled:true},auth:{verifyIdToken:async(token,revoked)=>{assert.equal(revoked,true);return {uid:token}},getUser:async uid=>({uid,phoneNumber:uid==='recreated'?'+15555550101':'+15555550999',...overrides.user})},db:{collection:()=>({doc:()=>({get:async()=>({data:()=>overrides.policy===null?null:policy})})})}})});
+ const app=createWorkspaceServer({...keys,...env},{createApp:(config,workspace)=>{const child=express();child.use((req,res)=>res.json({workspace,key:config.STRIPE_PUBLISHABLE_KEY}));return child},control:()=>({getWorkspaceState:async()=>Object.hasOwn(overrides,'workspaceState')?overrides.workspaceState:{enabled:true,livePaymentsEnabled:true},auth:{verifyIdToken:async(token,revoked)=>{assert.equal(revoked,true);return {uid:token,...(overrides.audience?{aud:overrides.audience}:{})}},getUser:async uid=>({uid,phoneNumber:uid==='recreated'?'+15555550101':'+15555550999',...overrides.user})},db:{collection:()=>({doc:()=>({get:async()=>({data:()=>overrides.policy===null?null:(overrides.policy||policy)})})})}})});
  const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));return {url:`http://127.0.0.1:${server.address().port}`,close:()=>new Promise(resolve=>server.close(resolve))};
 }
 test('test key selection survives global live key changes and mismatches fail closed',()=>{
@@ -41,4 +41,12 @@ test('direct prefixed webhook routes accept only their own signing secret',async
 
 test('the Firestore Live Beta switch is enforced even with complete enabled live keys',async()=>{
  for(const workspaceState of [null,{enabled:true,livePaymentsEnabled:false}]){const f=await fixture({LIVE_BETA_ENABLED:'true'},{workspaceState});try{assert.equal((await fetch(f.url+'/workspaces/live-beta/config')).status,503);const response=await fetch(f.url+'/account-config',{headers:{authorization:'Bearer real'}});const config=await response.json();assert.equal(config.ready,false);assert.equal(config.publishableKey,null);assert.equal((await fetch(f.url+'/workspaces/test/config')).status,200)}finally{await f.close()}}
+});
+
+test('separate Auth projects route identical email and phone to their own Stripe keys',async()=>{
+ const v2={...policy,version:2,authSeparationEnabled:true};
+ for(const [audience,workspace,key] of [['rydr-test-c7ec1','test','pk_test_sample'],['rydrapp-c7ec1','live-beta','pk_live_sample']]){
+  const f=await fixture({LIVE_BETA_ENABLED:'true'},{audience,policy:v2,user:{email:'same@example.com',phoneNumber:'+15555550101'}});
+  try{const r=await fetch(f.url+'/account-config',{headers:{authorization:'Bearer same-new-uid','x-rydr-workspace':workspace==='test'?'live-beta':'test'}});assert.equal(r.status,200);const body=await r.json();assert.equal(body.workspace,workspace);assert.equal(body.publishableKey,key);}finally{await f.close()}
+ }
 });

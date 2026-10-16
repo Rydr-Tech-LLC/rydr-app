@@ -13,10 +13,11 @@ test('lazy Admin services initialize DEFAULT even when a runtime named app exist
   assert.equal(typeof messaging.sendEachForMulticast, 'function');
   assert.equal(typeof storage.bucket, 'function');
   assert.equal(getApp().name, '[DEFAULT]');
-  assert.equal(getApps().length, 2);
+  assert.ok(getApps().some(app => app.name === "rydr-workspace-test"));
+  assert.ok(getApps().some(app => app.name === "rydr-workspace-live-beta"));
+  const initializedCount = getApps().length;
   // Repeated access reuses DEFAULT instead of initializing another app.
   db.collection('riders');
-  assert.equal(getApps().length, 2);
-  await deleteApp(getApp());
-  await deleteApp(named);
+  assert.equal(getApps().length, initializedCount);
+  await Promise.all(getApps().map(deleteApp));
 });
