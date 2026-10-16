@@ -813,7 +813,7 @@ struct ProfileView: View {
     private func loadExistingProfilePhoto() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
 
-        Firestore.firestore().collection("riders").document(uid).getDocument { snapshot, _ in
+        RydrWorkspace.firestore.collection("riders").document(uid).getDocument { snapshot, _ in
             guard
                 let urlString = snapshot?.data()?["photoURL"] as? String,
                 let url = URL(string: urlString)

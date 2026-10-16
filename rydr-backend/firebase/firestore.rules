@@ -2,8 +2,19 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function workspaceAllowed() {
+      let path = /databases/$(database)/documents/operationalSecurity/liveBetaAccess;
+      let policy = get(path).data;
+      let testAccount = request.auth.uid in policy.blockedAuthUids
+        || request.auth.token.get("phone_number", "") in policy.testPhoneNumbers;
+      return policy.configured == true && ((database == "(default)" && testAccount) || (database == "live-beta" && !testAccount));
+    }
     function signedIn() {
-      return request.auth != null;
+      return request.auth != null && (
+        request.auth.token.get("admin", false) == true
+        || request.auth.token.get("role", "") == "admin"
+        || workspaceAllowed()
+      );
     }
 
     function isSelf(uid) {

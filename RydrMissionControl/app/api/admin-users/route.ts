@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { writeAuditLog } from "@/lib/auditLog";
-import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
+import { adminAuth, getControlDb } from "@/lib/firebaseAdmin";
 import { getAdminSession } from "@/lib/session";
 import {
   isMissionControlRole,
@@ -18,7 +18,7 @@ export async function GET() {
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const snap = await adminDb.collection(ADMIN_COLLECTION).orderBy("email", "asc").limit(250).get();
+  const snap = await (await getControlDb()).collection(ADMIN_COLLECTION).orderBy("email", "asc").limit(250).get();
   const admins = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   return NextResponse.json({ admins });
 }
@@ -168,7 +168,7 @@ export async function POST(request: NextRequest) {
 
   await adminAuth.setCustomUserClaims(user.uid, nextClaims);
 
-  const adminRef = adminDb.collection(ADMIN_COLLECTION).doc(user.uid);
+  const adminRef = (await getControlDb()).collection(ADMIN_COLLECTION).doc(user.uid);
   if (action === "grant") {
     await upsertAdminRecord({
       uid: user.uid,
@@ -281,5 +281,5 @@ async function upsertAdminRecord(input: {
   if (typeof input.createdLogin === "boolean") {
     payload.createdLogin = input.createdLogin;
   }
-  await adminDb.collection(ADMIN_COLLECTION).doc(input.uid).set(payload, { merge: true });
+  await (await getControlDb()).collection(ADMIN_COLLECTION).doc(input.uid).set(payload, { merge: true });
 }

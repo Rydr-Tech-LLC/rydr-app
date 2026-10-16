@@ -1,6 +1,6 @@
 import "server-only";
 import type { DocumentData } from "firebase-admin/firestore";
-import { adminDb } from "./firebaseAdmin";
+import { getWorkspaceDb } from "./firebaseAdmin";
 import type { ActiveRideSummary } from "./activeRideTypes";
 
 const ACTIVE_RIDE_STATUSES = [
@@ -32,8 +32,8 @@ export async function findActiveRideForDriver(uid: string) {
 
 async function findActiveRide(field: ParticipantField, uid: string): Promise<ActiveRideSummary | null> {
   const snapshots = await Promise.all(
-    chunks(ACTIVE_RIDE_STATUSES, 10).map((statuses) =>
-      adminDb
+    chunks(ACTIVE_RIDE_STATUSES, 10).map(async (statuses) =>
+      (await getWorkspaceDb())
         .collection("rides")
         .where(field, "==", uid)
         .where("status", "in", statuses)

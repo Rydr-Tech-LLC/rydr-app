@@ -1,6 +1,6 @@
 import { sendPushToUser, type NotificationType } from "../services/notificationSender";
-import { onDocumentWritten } from "firebase-functions/v2/firestore";
-import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onDocumentWritten } from "../workspaceFunctions";
+import { onSchedule } from "../workspaceFunctions";
 import { db } from "../admin";
 import { reconcileDriverCompliance } from "../services/driverComplianceService";
 

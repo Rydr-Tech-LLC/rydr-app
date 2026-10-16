@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 import { getAdminSession } from "@/lib/session";
 
@@ -16,10 +16,10 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
     return NextResponse.json({ error: "Invalid CashRydr Hub access action." }, { status: 400 });
   }
 
-  const driverRef = adminDb.collection("drivers").doc(params.uid);
+  const driverRef = (await getWorkspaceDb()).collection("drivers").doc(params.uid);
   const [driverSnap, configSnap] = await Promise.all([
     driverRef.get(),
-    adminDb.collection("platformConfig").doc("cashRydrHub").get()
+    (await getWorkspaceDb()).collection("platformConfig").doc("cashRydrHub").get()
   ]);
   if (!driverSnap.exists) return NextResponse.json({ error: "Driver not found." }, { status: 404 });
 

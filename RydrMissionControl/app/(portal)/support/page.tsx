@@ -1,9 +1,9 @@
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { toDateSafe } from "@/lib/format";
 import SupportInbox from "@/components/SupportInbox";
 export const dynamic = "force-dynamic";
 export default async function SupportPage() {
-  const snap = await adminDb
+  const snap = await (await getWorkspaceDb())
     .collection("supportTickets")
     .orderBy("updatedAt", "desc")
     .limit(200)

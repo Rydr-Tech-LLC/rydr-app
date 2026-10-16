@@ -2,7 +2,7 @@ import { randomInt } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import type { DocumentReference, Transaction } from "firebase-admin/firestore";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { getAdminSession } from "@/lib/session";
 import { writeAuditLog } from "@/lib/auditLog";
 
@@ -33,7 +33,7 @@ async function reserveUniqueCode(
 ): Promise<{ code: string; indexRef: DocumentReference }> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const code = randomCode();
-    const indexRef = adminDb.collection("codes_index").doc(code);
+    const indexRef = (await getWorkspaceDb()).collection("codes_index").doc(code);
     const indexSnap = await transaction.get(indexRef);
     if (!indexSnap.exists) return { code, indexRef };
   }
@@ -63,9 +63,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
   }
 
   try {
-    const result = await adminDb.runTransaction(async (transaction) => {
-      const riderRef = adminDb.collection("riders").doc(params.uid);
-      const userRef = adminDb.collection("users").doc(params.uid);
+    const result = await (await getWorkspaceDb()).runTransaction(async (transaction) => {
+      const riderRef = (await getWorkspaceDb()).collection("riders").doc(params.uid);
+      const userRef = (await getWorkspaceDb()).collection("users").doc(params.uid);
       const [riderSnap, userSnap] = await Promise.all([
         transaction.get(riderRef),
         transaction.get(userRef)

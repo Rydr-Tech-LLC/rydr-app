@@ -2,7 +2,8 @@ import { selectedVehicleKey } from "./services/prestineLibraryPolicy";
 import { getVehicleSpecificationMatch } from "./services/vehicleSpecificationsService";
 import { addSavedDriverVehicle, deleteSavedDriverVehicle } from "./services/driverGarageService";
 export { maintainDriverDocumentCompliance, onDriverCompliancePolicyChanged, onDriverComplianceChanged } from "./triggers/driverCompliance";
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { HttpsError } from "firebase-functions/v2/https";
+import { onCall } from "./workspaceFunctions";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { db, FieldValue } from "./admin";
 import { vehicleDecoderService, VinDecodeError } from "./services/vehicleDecoderService";
@@ -369,3 +370,6 @@ export const deleteDriverVehicle = onCall(async request => {
 export { onDriverVehicleHistoryChanged } from "./triggers/driverVehicleHistory";
 
 export { editVehicleLibraryBackground } from "./triggers/vehicleImageEditing";
+
+import {liveWorkspaceHandlers} from "./workspaceFunctions";
+export const liveBeta=liveWorkspaceHandlers(exports);

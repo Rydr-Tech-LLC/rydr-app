@@ -9,7 +9,7 @@ import {
   cleanLongText,
   type OutreachDraft
 } from "@/lib/campusGrowth";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { getCampusGrowthSession } from "@/lib/session";
 import { notificationService } from "@/src/services/notifications/NotificationService";
 
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     return NextResponse.json({ error: "Invalid outreach action." }, { status: 400 });
   }
 
-  const ref = adminDb.collection(campusCollections.outreach).doc(params.id);
+  const ref = (await getWorkspaceDb()).collection(campusCollections.outreach).doc(params.id);
   const snap = await ref.get();
   if (!snap.exists) return NextResponse.json({ error: "Outreach draft not found." }, { status: 404 });
   const draft = { id: snap.id, ...(snap.data() as Omit<OutreachDraft, "id">) };
@@ -89,7 +89,7 @@ async function approveAndSendUpdate(draft: OutreachDraft, reviewer: string) {
     reviewedBy: reviewer,
     sentAt: FieldValue.serverTimestamp(),
     sentBy: reviewer,
-    sentVia: "resend",
+    sentVia: result.providerMessageId === "simulated-test-email" ? "simulated_test" : "resend",
     providerMessageId: result.providerMessageId ?? null,
     fromEmail: draft.fromEmail || CAMPUS_OUTREACH_FROM_EMAIL,
     bccEmail: draft.bccEmail || CAMPUS_OUTREACH_BCC_EMAIL,

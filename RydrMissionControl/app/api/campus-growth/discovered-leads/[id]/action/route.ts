@@ -10,7 +10,7 @@ import {
   serverTimestamps,
   type DiscoveredCampusLead
 } from "@/lib/campusGrowth";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { getCampusGrowthSession } from "@/lib/session";
 
 const ACTIONS = ["approve", "reject", "reset"] as const;
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     return NextResponse.json({ error: "Invalid discovered lead action." }, { status: 400 });
   }
 
-  const ref = adminDb.collection(campusCollections.discoveredLeads).doc(params.id);
+  const ref = (await getWorkspaceDb()).collection(campusCollections.discoveredLeads).doc(params.id);
   const snap = await ref.get();
   if (!snap.exists) return NextResponse.json({ error: "Discovered lead not found." }, { status: 404 });
   const lead = { id: snap.id, ...(snap.data() as Omit<DiscoveredCampusLead, "id">) };
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
 
 async function convertDiscoveredLead(lead: DiscoveredCampusLead, createdBy: string) {
   if (lead.kind === "event") {
-    const doc = await adminDb.collection(campusCollections.events).add({
+    const doc = await (await getWorkspaceDb()).collection(campusCollections.events).add({
       campusId: lead.campusId ?? "",
       campusName: lead.campusName ?? "",
       name: cleanText(lead.name, 180),
@@ -107,7 +107,7 @@ async function convertDiscoveredLead(lead: DiscoveredCampusLead, createdBy: stri
     return doc.id;
   }
 
-  const doc = await adminDb.collection(campusCollections.organizations).add({
+  const doc = await (await getWorkspaceDb()).collection(campusCollections.organizations).add({
     campusId: lead.campusId ?? "",
     campusName: lead.campusName ?? "",
     name: cleanText(lead.name, 180),

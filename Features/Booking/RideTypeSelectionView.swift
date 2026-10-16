@@ -123,7 +123,7 @@ struct RideTypeSelectionView: View {
 
     private func startExecutiveConfigListener() {
         executiveConfigListener?.remove()
-        executiveConfigListener = Firestore.firestore()
+        executiveConfigListener = RydrWorkspace.firestore
             .collection("platformConfig")
             .document("rydrExecutive")
             .addSnapshotListener { snapshot, _ in

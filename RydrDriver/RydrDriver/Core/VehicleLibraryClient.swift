@@ -83,7 +83,7 @@ enum VehicleLibraryClientError: LocalizedError {
 
 enum VehicleLibraryClient {
     static func deleteVehicle(_ vehicle: SavedDriverVehicle) async throws {
-        _ = try await functions.httpsCallable("deleteDriverVehicle").call([
+        _ = try await functions.httpsCallable(RydrWorkspace.functionName("deleteDriverVehicle")).call([
             "vehicleId": vehicle.id, "vin": vehicle.vin ?? "", "plate": vehicle.plate
         ])
     }
@@ -95,7 +95,7 @@ enum VehicleLibraryClient {
     /// Vehicle" — before any color has been chosen and before anything is
     /// written to their driver record.
     static func decodeVin(_ vin: String) async throws -> DecodedVehicleInfo {
-        let result = try await functions.httpsCallable("decodeVin").call(["vin": vin])
+        let result = try await functions.httpsCallable(RydrWorkspace.functionName("decodeVin")).call(["vin": vin])
         guard let data = result.data as? [String: Any] else {
             throw VehicleLibraryClientError.invalidResponse
         }
@@ -140,7 +140,7 @@ enum VehicleLibraryClient {
         if let trim = decoded.trim { payload["trim"] = trim }
         if let bodyStyle = decoded.bodyStyle { payload["bodyStyle"] = bodyStyle }
 
-        let result = try await functions.httpsCallable("getVehicleImage").call(payload)
+        let result = try await functions.httpsCallable(RydrWorkspace.functionName("getVehicleImage")).call(payload)
         guard let data = result.data as? [String: Any] else {
             throw VehicleLibraryClientError.invalidResponse
         }
@@ -168,7 +168,7 @@ enum VehicleLibraryClient {
             return VehicleImageInfo(color: color.rawValue, status: "missing")
         }
         #endif
-        let result = try await functions.httpsCallable("submitVehicleVin").call(["vin": vin, "color": color.rawValue, "plate": plate, "addToGarage": addToGarage])
+        let result = try await functions.httpsCallable(RydrWorkspace.functionName("submitVehicleVin")).call(["vin": vin, "color": color.rawValue, "plate": plate, "addToGarage": addToGarage])
         guard let data = result.data as? [String: Any] else {
             throw VehicleLibraryClientError.invalidResponse
         }
@@ -202,7 +202,7 @@ enum VehicleLibraryClient {
         if let trim = info.trim, !trim.isEmpty { payload["trim"] = trim }
         payload["fuelType"] = info.fuelType.rawValue
 
-        let result = try await functions.httpsCallable("submitVehicleManual").call(payload)
+        let result = try await functions.httpsCallable(RydrWorkspace.functionName("submitVehicleManual")).call(payload)
         guard let data = result.data as? [String: Any] else {
             throw VehicleLibraryClientError.invalidResponse
         }

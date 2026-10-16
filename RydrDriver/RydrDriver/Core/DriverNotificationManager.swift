@@ -17,7 +17,7 @@ extension Notification.Name {
 final class DriverNotificationManager {
     static let shared = DriverNotificationManager()
 
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private let defaults = UserDefaults.standard
     private let lastTokenKey = "rydr.driver.notifications.lastFCMToken"
     private let lastUIDKey = "rydr.driver.notifications.lastUID"
@@ -97,11 +97,13 @@ final class DriverNotificationManager {
     }
 
     func handleForegroundNotification(_ userInfo: [AnyHashable: Any]) {
+        if let workspace = userInfo["workspace"] as? String, workspace != RydrWorkspace.identifier { return }
         let route = DriverNotificationRoute(userInfo: userInfo)
         Self.log("foreground_notification", route.logFields)
     }
 
     func handleNotificationTap(_ userInfo: [AnyHashable: Any]) {
+        if let workspace = userInfo["workspace"] as? String, workspace != RydrWorkspace.identifier { return }
         let route = DriverNotificationRoute(userInfo: userInfo)
         Self.log("notification_tap", route.logFields)
         DispatchQueue.main.async {

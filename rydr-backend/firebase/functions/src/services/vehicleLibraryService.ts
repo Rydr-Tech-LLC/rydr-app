@@ -1,3 +1,4 @@
+import { currentWorkspace } from "./workspaceRuntime";
 import { db, storage, FieldValue } from "../admin";
 import { VEHICLE_COLORS, type VehicleBodyStyle, type VehicleColor, type VehicleLibraryEntry } from "../types";
 
@@ -39,7 +40,7 @@ export function genericBodyVehicleId(bodyStyle: VehicleBodyStyle): string {
 }
 
 export function storagePathFor(make: string, model: string, year: number, fileName: string): string {
-  return `${STORAGE_ROOT}/${slugify(make)}/${slugify(model)}/${year}/${fileName}`;
+  return `${STORAGE_ROOT}/${currentWorkspace()}/${slugify(make)}/${slugify(model)}/${year}/${fileName}`;
 }
 
 export interface VehicleLibrarySearchFilters {

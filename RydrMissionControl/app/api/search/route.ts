@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/session";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import type { DriverRecord, RiderRecord } from "@/lib/types";
 import { driverFullName } from "@/lib/format";
 
@@ -15,8 +15,8 @@ export async function GET(request: NextRequest) {
   if (!q) return NextResponse.json({ drivers: [], riders: [] });
 
   const [driverSnap, riderSnap] = await Promise.all([
-    adminDb.collection("drivers").limit(500).get(),
-    adminDb.collection("riders").limit(500).get()
+    (await getWorkspaceDb()).collection("drivers").limit(500).get(),
+    (await getWorkspaceDb()).collection("riders").limit(500).get()
   ]);
 
   function matches(fields: (string | undefined)[]) {

@@ -1,6 +1,7 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 
-import { useRouter } from "next/navigation";
+
 import { useState } from "react";
 
 export default function OutreachActions({ id, status }: { id: string; status: string }) {

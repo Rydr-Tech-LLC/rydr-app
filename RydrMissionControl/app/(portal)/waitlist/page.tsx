@@ -1,4 +1,4 @@
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { timeAgo, toDateSafe } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
 import WaitlistActions from "./WaitlistActions";
@@ -25,7 +25,7 @@ interface WaitlistRecord {
 }
 
 export default async function WaitlistPage() {
-  const snap = await adminDb.collection("betaWaitlist").limit(500).get();
+  const snap = await (await getWorkspaceDb()).collection("betaWaitlist").limit(500).get();
   const entries = snap.docs
     .map((doc) => ({ ...(doc.data() as Omit<WaitlistRecord, "id">), id: doc.id }))
     .sort((a, b) => {

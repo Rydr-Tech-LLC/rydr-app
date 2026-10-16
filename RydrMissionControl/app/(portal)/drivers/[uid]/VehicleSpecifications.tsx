@@ -1,7 +1,8 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
 export default function VehicleSpecifications({uid, specs, vehicle}:{uid:string;specs:any;vehicle:any}) {
  const router=useRouter();const [busy,setBusy]=useState(false);const [message,setMessage]=useState('');
  return <section className="rounded-lg border border-line bg-white p-5 space-y-3"><h2 className="text-sm font-semibold">Vehicle specifications for approval</h2>

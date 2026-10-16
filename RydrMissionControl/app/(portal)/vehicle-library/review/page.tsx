@@ -1,7 +1,7 @@
-import Link from "next/link";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
 import { redirect } from "next/navigation";
 import { getAdminSession } from "@/lib/session";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { buildVehicleId } from "@/lib/vehicleLibrary";
 import ReviewActions from "./ReviewActions";
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ function safeUrl(value: unknown, host: string | string[]): string | undefined {
 }
 export default async function VehicleImageReviewPage() {
   if (!(await getAdminSession())) redirect("/login");
-  const snapshot = await adminDb.collection("vehicleImageJobs").where("status", "==", "needs_review").limit(100).get();
+  const snapshot = await (await getWorkspaceDb()).collection("vehicleImageJobs").where("status", "==", "needs_review").limit(100).get();
   return <div className="space-y-6">
     <Link href="/vehicle-library" className="text-sm underline">Back to vehicle library</Link>
     <div><h1 className="text-xl font-semibold text-ink">Vehicle image issues</h1>

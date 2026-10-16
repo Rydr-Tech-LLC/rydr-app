@@ -1,4 +1,4 @@
-import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentUpdated } from "../workspaceFunctions";
 import { db, FieldValue } from "../admin";
 import { sendPushToUser } from "../services/notificationSender";
 

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
 import StatusPill from "@/components/StatusPill";
 import { campusGrowthAnalytics, campusGrowthCounts, listOutreachDrafts } from "@/lib/campusGrowth";
 import { timeAgo, toDateSafe } from "@/lib/format";

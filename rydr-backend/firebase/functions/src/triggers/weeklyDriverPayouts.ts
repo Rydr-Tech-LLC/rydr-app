@@ -1,7 +1,9 @@
+import {currentWorkspace} from "../services/workspaceRuntime";
+import {workspaceServiceURL} from "../services/workspacePolicy";
 import { createHash } from "crypto";
 import fetch from "node-fetch";
-import { onSchedule } from "firebase-functions/v2/scheduler";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onSchedule } from "../workspaceFunctions";
+import { onDocumentCreated } from "../workspaceFunctions";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { db, FieldValue } from "../admin";
 const token = defineSecret("RYDR_INTERNAL_SERVICE_TOKEN");
@@ -9,7 +11,7 @@ const stripeURL = defineString("RYDR_STRIPE_BACKEND_URL", { default: "https://ry
 
 type StripeMode = "test" | "live";
 async function currentStripeMode(): Promise<StripeMode> {
-  const response=await fetch(`${stripeURL.value().replace(/\/$/, "")}/internal/stripe-mode`,{headers:{"x-rydr-internal-token":token.value()},timeout:10000});
+  const response=await fetch(`${workspaceServiceURL(stripeURL.value(),currentWorkspace())}/internal/stripe-mode`,{headers:{"x-rydr-internal-token":token.value()},timeout:10000});
   if(!response.ok)throw new Error(`Stripe mode unavailable: HTTP ${response.status}`);
   const state=await response.json() as {mode?: string;status?: string};
   if(state.status!=="ready" || (state.mode!=="test" && state.mode!=="live"))throw new Error("Stripe mode not ready");
@@ -68,7 +70,7 @@ export const dispatchWeeklyDriverPayout = onDocumentCreated({ document: "driverP
   if (!current || current.status !== "queued") return;
   let response;
   try {
-    response = await fetch(`${stripeURL.value().replace(/\/$/, "")}/internal/payout-jobs/${event.params.jobId}/process`, { method: "POST", timeout: 50000, headers: { "content-type": "application/json", "x-rydr-internal-token": token.value() }, body: "{}" });
+    response = await fetch(`${workspaceServiceURL(stripeURL.value(),currentWorkspace())}/internal/payout-jobs/${event.params.jobId}/process`, { method: "POST", timeout: 50000, headers: { "content-type": "application/json", "x-rydr-internal-token": token.value() }, body: "{}" });
   } catch (error) {
     await ref.set({ needsReview: true, reasonCode: "payout_dispatch_unreachable", reason: "Weekly payout dispatcher could not reach the Stripe backend. Automatic dispatch will retry; no additional payout is initiated by this flag.", updatedAt: FieldValue.serverTimestamp() }, { merge: true });
     throw error;
@@ -94,7 +96,7 @@ export const reconcileDriverPayouts = onSchedule({ schedule: "every 30 minutes",
       const updated = job.data().updatedAt?.toMillis?.() ?? 0;
       if (status === "processing" && Date.now() - updated < 10 * 60 * 1000) continue;
       try {
-        const response = await fetch(`${stripeURL.value().replace(/\/$/, "")}/internal/payout-jobs/${job.id}/reconcile`, { method: "POST", timeout: 5000, headers: { "content-type": "application/json", "x-rydr-internal-token": token.value() }, body: "{}" });
+        const response = await fetch(`${workspaceServiceURL(stripeURL.value(),currentWorkspace())}/internal/payout-jobs/${job.id}/reconcile`, { method: "POST", timeout: 5000, headers: { "content-type": "application/json", "x-rydr-internal-token": token.value() }, body: "{}" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
       } catch (error) {
         console.error("Payout reconciliation failed", job.id, error instanceof Error ? error.message : "unknown");

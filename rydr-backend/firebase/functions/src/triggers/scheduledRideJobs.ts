@@ -1,6 +1,8 @@
+import {currentWorkspace} from "../services/workspaceRuntime";
+import {workspaceServiceURL} from "../services/workspacePolicy";
 import fetch from "node-fetch";
 import { defineSecret, defineString } from "firebase-functions/params";
-import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onSchedule } from "../workspaceFunctions";
 
 const internalToken = defineSecret("RYDR_INTERNAL_SERVICE_TOKEN");
 const rydrBackendURL = defineString("RYDR_BACKEND_URL", {
@@ -15,7 +17,7 @@ export const maintainScheduledRides = onSchedule(
     secrets: [internalToken]
   },
   async () => {
-    const response = await fetch(`${rydrBackendURL.value().replace(/\/$/, "")}/scheduled-rides/internal/sweep`, {
+    const response = await fetch(`${workspaceServiceURL(rydrBackendURL.value(),currentWorkspace())}/scheduled-rides/internal/sweep`, {
       method: "POST",
       headers: {
         "content-type": "application/json",

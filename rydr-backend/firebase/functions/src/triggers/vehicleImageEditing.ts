@@ -1,4 +1,4 @@
-import { onRequest } from "firebase-functions/v2/https";
+import { onRequest } from "../workspaceFunctions";
 import { defineSecret } from "firebase-functions/params";
 import { db, storage, firebaseAuth } from "../admin";
 import { VEHICLE_COLORS } from "../types";

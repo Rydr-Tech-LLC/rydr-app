@@ -1,8 +1,9 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 
 import type React from "react";
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+
 
 const LEAD_INTENTS = [
   { label: "Commuter riders", value: "commuter riders" },

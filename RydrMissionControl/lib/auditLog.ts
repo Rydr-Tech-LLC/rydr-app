@@ -1,6 +1,6 @@
 import "server-only";
 import { FieldValue } from "firebase-admin/firestore";
-import { adminDb } from "./firebaseAdmin";
+import { getWorkspaceDb } from "./firebaseAdmin";
 import type { AuditLogEntry } from "./types";
 
 /**
@@ -21,7 +21,7 @@ export async function writeAuditLog(entry: Omit<AuditLogEntry, "createdAt">) {
   const sanitized = Object.fromEntries(
     Object.entries(entry).filter(([, value]) => value !== undefined)
   );
-  await adminDb.collection("audits").add({
+  await (await getWorkspaceDb()).collection("audits").add({
     ...sanitized,
     createdAt: FieldValue.serverTimestamp()
   });

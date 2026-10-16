@@ -5,7 +5,7 @@ import {
   localTimeToISO,
 } from "../../rydr-backend/services/stripe/promotionPolicy";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { adminDb } from "./firebaseAdmin";
+import { getWorkspaceDb } from "./firebaseAdmin";
 
 export type PromotionStatus =
   | "draft"
@@ -144,8 +144,8 @@ export const PROMOTION_REWARD_KINDS: PromotionRewardKind[] = [
 
 const COLLECTION = "promotions";
 
-function collection() {
-  return adminDb.collection(COLLECTION);
+async function collection() {
+  return (await getWorkspaceDb()).collection(COLLECTION);
 }
 
 function asString(value: unknown): string {
@@ -347,7 +347,7 @@ export function normalizePromotionInput(input: PromotionInput) {
 export async function listPromotions(
   includeArchived = false,
 ): Promise<PromotionRecord[]> {
-  const snap = await collection().orderBy("startsAt", "desc").limit(200).get();
+  const snap = await (await collection()).orderBy("startsAt", "desc").limit(200).get();
   return snap.docs
     .map((doc) => ({
       ...(doc.data() as Omit<PromotionRecord, "id">),
@@ -359,7 +359,7 @@ export async function listPromotions(
 export async function getPromotion(
   id: string,
 ): Promise<PromotionRecord | null> {
-  const snap = await collection().doc(id).get();
+  const snap = await (await collection()).doc(id).get();
   return snap.exists
     ? { ...(snap.data() as Omit<PromotionRecord, "id">), id: snap.id }
     : null;
@@ -371,7 +371,7 @@ export async function createPromotion(
   sourcePromotionId?: string | null,
 ) {
   const normalized = normalizePromotionInput(input);
-  const ref = collection().doc();
+  const ref = (await collection()).doc();
   await persistPromotion(ref.id, {
     ...normalized,
     reusableSourcePromotionId: sourcePromotionId ?? null,
@@ -439,8 +439,8 @@ export async function setPromotionStatus(
 }
 
 async function persistPromotion(id: string, data: Record<string, unknown>) {
-  const ref = collection().doc(id);
-  await adminDb.runTransaction(async (transaction) => {
+  const ref = (await collection()).doc(id);
+  await (await getWorkspaceDb()).runTransaction(async (transaction) => {
     const existing = await transaction.get(ref);
     const before = existing.data();
     if (
@@ -485,10 +485,10 @@ async function persistPromotion(id: string, data: Record<string, unknown>) {
     const oldCode = existing.data()?.promoCode as string | undefined;
     const newCode = data.promoCode as string | undefined;
     const oldRef = oldCode
-      ? adminDb.collection("promotionCodes").doc(oldCode)
+      ? (await getWorkspaceDb()).collection("promotionCodes").doc(oldCode)
       : null;
     const newRef = newCode
-      ? adminDb.collection("promotionCodes").doc(newCode)
+      ? (await getWorkspaceDb()).collection("promotionCodes").doc(newCode)
       : null;
     const [oldIndex, newIndex] = await Promise.all([
       oldRef ? transaction.get(oldRef) : null,

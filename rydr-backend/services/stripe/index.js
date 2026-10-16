@@ -19,7 +19,11 @@ const { financialAfterPromotion } = require("./promotionPolicy");
 const { rideWithFinancialOutcome, paidOutcomeForIntent } = require("./financialOutcome");
 const { reserveCashHubFee, finalizeCashHubFee, releaseCashHubFee, applyCashHubWithholding } = require("./cashHubBilling");
 
-function firestoreFor(appInstance) { return getFirestore(appInstance); }
+const {accountWorkspace,workspaceDefinition}=require("../../firebase/functions/src/services/workspacePolicy");
+dotenv.config();
+function createStripeApp(env,workspace="test") {
+const databaseId=workspaceDefinition(workspace).databaseId;
+function firestoreFor(appInstance) { return getFirestore(appInstance, databaseId); }
 firestoreFor.FieldValue = FieldValue;
 const admin = {
   credential: { applicationDefault, cert },
@@ -30,16 +34,17 @@ const admin = {
   auth: (appInstance) => getAuth(appInstance)
 };
 
-dotenv.config();
 
-if (!process.env.STRIPE_SECRET_KEY) {
+
+if (!env.STRIPE_SECRET_KEY) {
   console.error("❌ Missing STRIPE_SECRET_KEY");
-  process.exit(1);
+  throw new Error("Missing Stripe key for workspace");
 }
 
 const app = express();
-const stripeConfig = runtimeConfig(process.env);
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: stripeConfig.apiVersion });
+const stripeConfig = runtimeConfig(env);
+if(stripeConfig.mode !== (workspace === "test" ? "test" : "live")) throw new Error("workspace_stripe_mode_mismatch");
+const stripe = new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: stripeConfig.apiVersion });
 const stripeModeState = new StripeModeState({ mode: stripeConfig.mode, fieldValue: FieldValue, getDb: () => { initializeFirebase(); return admin.firestore(); } });
 const driverPayoutService = new DriverPayoutService({ stripe, mode: stripeConfig.mode, getDb: () => { initializeFirebase(); return admin.firestore(); } });
 const identityFlows = stripeConfig.identityFlows;
@@ -118,11 +123,11 @@ function identitySessionErrorPayload(err) {
 
 function firebaseCredential() {
   const FIREBASE_PROJECT_ID =
-    process.env.FIREBASE_PROJECT_ID || process.env.FIREBASE_ADMIN_PROJECT_ID;
+    env.FIREBASE_PROJECT_ID || env.FIREBASE_ADMIN_PROJECT_ID;
   const FIREBASE_CLIENT_EMAIL =
-    process.env.FIREBASE_CLIENT_EMAIL || process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+    env.FIREBASE_CLIENT_EMAIL || env.FIREBASE_ADMIN_CLIENT_EMAIL;
   const FIREBASE_PRIVATE_KEY =
-    process.env.FIREBASE_PRIVATE_KEY || process.env.FIREBASE_ADMIN_PRIVATE_KEY;
+    env.FIREBASE_PRIVATE_KEY || env.FIREBASE_ADMIN_PRIVATE_KEY;
 
   if (FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY) {
     return admin.credential.cert({
@@ -157,7 +162,7 @@ async function verifiedFirebaseUid(req) {
   if (!match) return null;
 
   initializeFirebase();
-  const decoded = await admin.auth().verifyIdToken(match[1]);
+  const decoded = await admin.auth().verifyIdToken(match[1], true);
   return decoded.uid;
 }
 
@@ -168,6 +173,9 @@ async function requireFirebaseUid(req, res) {
       res.status(401).json({ error: "unauthorized" });
       return null;
     }
+    const policy=(await getFirestore(admin.app()).collection("operationalSecurity").doc("liveBetaAccess").get()).data();
+    const authUser=await admin.auth().getUser(uid);
+    if(accountWorkspace(uid,authUser.phoneNumber,policy)!==workspace){res.status(403).json({error:"account_workspace_mismatch"});return null;}
     try { await stripeModeState.ensure(); } catch { res.status(503).json({error:"stripe_mode_preparation_failed"}); return null; }
     try { await assertLiveBetaAccess({db:admin.firestore(),uid,mode:stripeConfig.mode,getUser:id=>admin.auth().getUser(id)}); }
     catch(error) {res.status(error.statusCode || 503).json({error:error.code || "live_beta_protection_unavailable"});return null;}
@@ -202,7 +210,7 @@ async function requireFirebaseUid(req, res) {
 async function requireAdminUid(req, res) {
   try {
     const sharedSecret = req.header("x-internal-admin-secret");
-    if (secureStringEquals(sharedSecret, process.env.RYDR_INTERNAL_ADMIN_SECRET)) {
+    if (secureStringEquals(sharedSecret, env.RYDR_INTERNAL_ADMIN_SECRET)) {
       const onBehalfOf = req.header("x-admin-uid") || "mission-control";
       return onBehalfOf;
     }
@@ -215,7 +223,7 @@ async function requireAdminUid(req, res) {
     }
 
     initializeFirebase();
-    const decoded = await admin.auth().verifyIdToken(match[1]);
+    const decoded = await admin.auth().verifyIdToken(match[1], true);
     const isAdminClaim = decoded.admin === true || decoded.role === "admin";
     if (!isAdminClaim) {
       res.status(403).json({ error: "admin_required" });
@@ -252,7 +260,7 @@ async function authUserProfile(uid) {
 
 // --- Driver Connect helpers ---
 function appBaseURL() {
-  const base = process.env.APP_BASE_URL;
+  const base = env.APP_BASE_URL;
   if (!base) {
     throw new Error("APP_BASE_URL is required for hosted Stripe return URLs");
   }
@@ -986,7 +994,7 @@ async function rideByPaymentIntentMetadata(rideId) {
 }
 
 // --- CORS (optional; iOS native calls don't need it, web would) ---
-const allowed = (process.env.CORS_ORIGINS || "")
+const allowed = (env.CORS_ORIGINS || "")
   .split(",").map(s => s.trim()).filter(Boolean);
 app.use(cors({
   origin: (origin, cb) =>
@@ -1786,7 +1794,7 @@ async function chargeRideAttempt({
 }
 
 function validInternalServiceToken(req) {
-  const expected = process.env.RYDR_INTERNAL_SERVICE_TOKEN || "";
+  const expected = env.RYDR_INTERNAL_SERVICE_TOKEN || "";
   const supplied = req.get("x-rydr-internal-token") || "";
   return secureStringEquals(supplied, expected);
 }
@@ -2365,7 +2373,7 @@ app.post("/connect/account-session", async (req,res)=>{
     const owned=await requireOwnAccountId(req,res);if(!owned)return;
     const components=accountSessionComponents(req.body?.purpose);
     const session=await stripe.accountSessions.create({account:owned.accountId,components});
-    const publicKey=String(process.env.STRIPE_PUBLISHABLE_KEY||"").trim();
+    const publicKey=String(env.STRIPE_PUBLISHABLE_KEY||"").trim();
     if(!/^pk_(test|live)_/.test(publicKey) || publicKey.startsWith("pk_live_")!==session.livemode)return res.status(503).json({error:"stripe_mode_mismatch"});
     res.set("Cache-Control","no-store").json({clientSecret:session.client_secret});
   }catch(error){res.status(error instanceof PayoutError?error.status:500).json({error:error instanceof PayoutError?error.code:"account_session_failed"});}
@@ -2593,6 +2601,100 @@ app.post("/admin/cleanup-account", async (req, res) => {
   }
 });
 
-// --- Listen ---
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
+return app;
+}
+function environmentFor(mode, env = process.env) {
+  const suffix = mode.toUpperCase();
+  const key = env[`STRIPE_SECRET_KEY_${suffix}`] ||
+    (new RegExp(`^(sk|rk)_${mode}_`).test(env.STRIPE_SECRET_KEY || "") ? env.STRIPE_SECRET_KEY : "");
+  const publicKey = env[`STRIPE_PUBLISHABLE_KEY_${suffix}`] ||
+    ((env.STRIPE_PUBLISHABLE_KEY || "").startsWith(`pk_${mode}_`) ? env.STRIPE_PUBLISHABLE_KEY : "");
+  return {...env, STRIPE_SECRET_KEY: key, STRIPE_PUBLISHABLE_KEY: publicKey};
+}
+
+function createWorkspaceServer(env = process.env, dependencies = {}) {
+  const root = express();
+  const createApp = dependencies.createApp || createStripeApp;
+  const testEnv = environmentFor("test", env);
+  const liveEnv = environmentFor("live", env);
+  const testApp = createApp(testEnv, "test");
+  let liveApp;
+  function control() {
+    if (dependencies.control) return dependencies.control();
+    if (!getApps().length) {
+      const projectId = env.FIREBASE_PROJECT_ID || env.FIREBASE_ADMIN_PROJECT_ID;
+      const clientEmail = env.FIREBASE_CLIENT_EMAIL || env.FIREBASE_ADMIN_CLIENT_EMAIL;
+      const privateKey = (env.FIREBASE_PRIVATE_KEY || env.FIREBASE_ADMIN_PRIVATE_KEY || "").replace(/\\n/g, "\n");
+      initializeApp({credential: projectId && clientEmail && privateKey ? cert({projectId, clientEmail, privateKey}) : applicationDefault()});
+    }
+    return {auth: getAuth(), db: getFirestore()};
+  }
+  function liveReady() {
+    if (env.LIVE_BETA_ENABLED !== "true") return false;
+    try { return runtimeConfig(liveEnv).mode === "live"; } catch { return false; }
+  }
+  function live(req, res, next) {
+    if (!liveReady()) return res.status(503).json({error: "live_beta_not_enabled"});
+    try {
+      liveApp ??= createApp(liveEnv, "live-beta");
+      return liveApp(req, res, next);
+    } catch { return res.status(503).json({error: "live_beta_configuration_incomplete"}); }
+  }
+  root.get("/workspace-bootstrap", async (_req, res) => {
+    try {
+      const policy = (await control().db.collection("operationalSecurity").doc("liveBetaAccess").get()).data();
+      if (!policy?.configured || !policy.blockedPhoneHashes?.length || !Array.isArray(policy.blockedAuthUids))
+        return res.status(503).json({error: "workspace_policy_unavailable"});
+      const {createHash} = require("node:crypto");
+      res.set("Cache-Control", "no-store");
+      return res.json({
+        testUidHashes: policy.blockedAuthUids.map(uid => createHash("sha256").update(uid).digest("hex")),
+        testPhoneHashes: policy.blockedPhoneHashes,
+      });
+    } catch { return res.status(503).json({error: "workspace_policy_unavailable"}); }
+  });
+  root.get("/account-config", async (req, res) => {
+    try {
+      const match = (req.header("authorization") || "").match(/^Bearer (.+)$/);
+      if (!match) return res.status(401).json({error: "unauthorized"});
+      const {auth, db} = control();
+      const decoded = await auth.verifyIdToken(match[1], true);
+      const user = await auth.getUser(decoded.uid);
+      if (user.disabled) return res.status(403).json({error: "account_disabled"});
+      const policy = (await db.collection("operationalSecurity").doc("liveBetaAccess").get()).data();
+      const workspace = accountWorkspace(decoded.uid, user.phoneNumber, policy);
+      const mode = workspace === "test" ? "test" : "live";
+      const config = mode === "test" ? testEnv : liveEnv;
+      const ready = mode === "test" || liveReady();
+      res.set("Cache-Control", "private, no-store");
+      return res.json({workspace, databaseId: workspaceDefinition(workspace).databaseId, mode,
+        publishableKey: ready ? config.STRIPE_PUBLISHABLE_KEY : null, ready,
+        apiPrefix: "/workspaces/" + workspace, functionsPrefix: workspace === "test" ? "" : "liveBeta-"});
+    } catch (error) {
+      return res.status(error.code?.startsWith("auth/") ? 401 : 503).json({error: "account_configuration_unavailable"});
+    }
+  });
+  // Authenticate signed events before choosing a database. An unsigned livemode field is never trusted.
+  for (const endpoint of ["/webhook", "/webhook/connect"]) {
+    root.post(endpoint, express.raw({type: "application/json"}), (req, res, next) => {
+      try {
+        const config = runtimeConfig(testEnv);
+        const connect = endpoint.endsWith("connect");
+        const verified = verifyWebhook(new Stripe(testEnv.STRIPE_SECRET_KEY, {apiVersion: config.apiVersion}),
+          req.body, req.header("stripe-signature"), connect ? config.connectSecrets : config.platformSecrets,
+          connect ? "connect" : "platform", "test");
+        return verified.event.livemode ? live(req, res, next) : testApp(req, res, next);
+      } catch { return res.status(400).json({error: "invalid_webhook_signature"}); }
+    });
+  }
+  root.use("/workspaces/test", testApp);
+  root.use("/workspaces/live-beta", live);
+  root.use(testApp);
+  return root;
+}
+if (require.main === module) {
+  const port = process.env.PORT || 10000;
+  createWorkspaceServer().listen(port, () => console.log(`Server running on port ${port}`));
+}
+module.exports = {createStripeApp, createWorkspaceServer, environmentFor};

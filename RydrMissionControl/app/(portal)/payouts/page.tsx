@@ -1,6 +1,6 @@
-import Link from "next/link";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
 import { redirect } from "next/navigation";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { getAdminSession } from "@/lib/session";
 import { toDateSafe } from "@/lib/format";
 import PayoutActions from "./PayoutActions";
@@ -8,8 +8,8 @@ export const dynamic="force-dynamic";
 export default async function DriverPayoutsPage() {
   if(!(await getAdminSession()))redirect("/login");
   const [issues,pending]=await Promise.all([
-    adminDb.collection("driverPayouts").where("needsReview","==",true).limit(200).get(),
-    adminDb.collection("driverPayouts").where("status","==","pending").count().get()
+    (await getWorkspaceDb()).collection("driverPayouts").where("needsReview","==",true).limit(200).get(),
+    (await getWorkspaceDb()).collection("driverPayouts").where("status","==","pending").count().get()
   ]);
   const jobs=issues.docs.map(doc=>({id:doc.id,...doc.data()})).sort((a:any,b:any)=>(toDateSafe(b.updatedAt)?.getTime()??0)-(toDateSafe(a.updatedAt)?.getTime()??0)) as Array<Record<string,any>>;
   return <div className="space-y-6">

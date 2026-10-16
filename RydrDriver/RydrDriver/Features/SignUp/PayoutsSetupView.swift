@@ -321,7 +321,7 @@ struct PayoutsSetupView: View {
     }
 
     private func createConnectAccount() async throws -> String {
-        var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/accounts"))
+        var request = RydrWorkspace.urlRequest(url: stripeBackendBase.appendingPathComponent("connect/accounts"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token = try await Auth.auth().currentUser?.getIDToken() {
@@ -354,7 +354,7 @@ struct PayoutsSetupView: View {
         isCheckingStatus = true
         defer { isCheckingStatus = false }
 
-        var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/status"))
+        var request = RydrWorkspace.urlRequest(url: stripeBackendBase.appendingPathComponent("connect/status"))
         request.httpMethod = "GET"
         if let token = try? await Auth.auth().currentUser?.getIDToken() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

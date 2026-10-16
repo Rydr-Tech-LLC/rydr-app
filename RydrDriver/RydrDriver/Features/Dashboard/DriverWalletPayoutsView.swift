@@ -537,7 +537,7 @@ struct DriverWalletPayoutsView: View {
         }
 
         do {
-            let snapshot = try await Firestore.firestore().collection("drivers").document(uid).getDocument()
+            let snapshot = try await RydrWorkspace.firestore.collection("drivers").document(uid).getDocument()
             wallet = DriverWalletSnapshot(driverData: snapshot.data() ?? [:])
         } catch {
             wallet = .empty
@@ -553,7 +553,7 @@ struct DriverWalletPayoutsView: View {
         do {
             var url = URLComponents(url: stripeBackendBase.appendingPathComponent("connect/wallet"), resolvingAgainstBaseURL: false)!
             if append, let nextPayoutCursor { url.queryItems = [.init(name: "startingAfter", value: nextPayoutCursor)] }
-            var request = URLRequest(url: url.url!)
+            var request = RydrWorkspace.urlRequest(url: url.url!)
             request.cachePolicy = .reloadIgnoringLocalCacheData
             guard let user = Auth.auth().currentUser else { throw URLError(.userAuthenticationRequired) }
             request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
@@ -616,7 +616,7 @@ struct DriverWalletPayoutsView: View {
 
         do {
             let amountCents = max(1, NSDecimalNumber(decimal: wallet.instantAvailableBalance * 100).intValue)
-            var request = URLRequest(url: stripeBackendBase.appendingPathComponent("connect/instant-payout"))
+            var request = RydrWorkspace.urlRequest(url: stripeBackendBase.appendingPathComponent("connect/instant-payout"))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             if let token = try await Auth.auth().currentUser?.getIDToken() {
@@ -861,7 +861,7 @@ private struct DriverPromotionPanel: View {
     @MainActor private func request(path: String, body: [String: String]? = nil) async throws -> Data {
         guard let user = Auth.auth().currentUser else { throw NSError(domain: "Promotions", code: 401, userInfo: [NSLocalizedDescriptionKey: "Sign in to view your promotions."]) }
         let token = try await user.getIDToken()
-        var request = URLRequest(url: URL(string: "https://rydr-stripe-backend.onrender.com\(path)")!)
+        var request = RydrWorkspace.urlRequest(url: URL(string: "https://rydr-stripe-backend.onrender.com\(path)")!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body { request.httpMethod = "POST"; request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try JSONSerialization.data(withJSONObject: body) }
         let (data, response) = try await URLSession.shared.data(for: request)

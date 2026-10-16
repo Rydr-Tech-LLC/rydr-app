@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 import { deleteAccount, restoreRejectedDeletionRequest, type AccountRole } from "@/lib/accountDeletion";
 import type { AccountDeletionRequestRecord } from "@/lib/types";
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
-  const requestRef = adminDb.collection("accountDeletionRequests").doc(params.id);
+  const requestRef = (await getWorkspaceDb()).collection("accountDeletionRequests").doc(params.id);
   const requestSnap = await requestRef.get();
   if (!requestSnap.exists) return NextResponse.json({ error: "Request not found" }, { status: 404 });
   const deletionRequest = requestSnap.data() as AccountDeletionRequestRecord;

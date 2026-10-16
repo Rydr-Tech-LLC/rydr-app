@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminDb, adminStorage } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb, adminStorage } from "@/lib/firebaseAdmin";
 import { buildVehicleId } from "@/lib/vehicleLibrary";
 import { writeAuditLog } from "@/lib/auditLog";
 
@@ -12,9 +12,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ jo
   if (!/^[a-f0-9]{64}$/.test(jobId)) return NextResponse.json({ error: "Invalid job" }, { status: 400 });
   const body = await request.json().catch(() => null);
   if (!["retry", "dismiss", "use_library"].includes(body?.action)) return NextResponse.json({ error: "Invalid action" }, { status: 400 });
-  const ref = adminDb.collection("vehicleImageJobs").doc(jobId);
+  const ref = (await getWorkspaceDb()).collection("vehicleImageJobs").doc(jobId);
   try {
-    await adminDb.runTransaction(async tx => {
+    await (await getWorkspaceDb()).runTransaction(async tx => {
       const snap = await tx.get(ref); const job = snap.data();
       if (!job || job.status !== "needs_review") throw new Error("Only an unresolved review can be changed");
       let update: Record<string, unknown> = { status: body.action === "retry" ? "queued" : "dismissed",
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ jo
       if (body.action === "use_library") {
         const q = job.query;
         const vehicleId = buildVehicleId(q.make, q.model, q.year, q.year, q.trim);
-        const library = (await tx.get(adminDb.collection("vehicleLibrary").doc(vehicleId))).data();
+        const library = (await tx.get((await getWorkspaceDb()).collection("vehicleLibrary").doc(vehicleId))).data();
         const path = library?.colorImages?.[q.color];
         if (typeof path !== "string" || !path.startsWith("vehicle-library/")) throw new Error("Upload this vehicle's color image to the library first");
         update = { ...update, status: "completed", vehicleId, storagePath: path,

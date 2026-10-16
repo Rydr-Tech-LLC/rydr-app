@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/session";
-import { adminDb, adminStorage } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb, adminStorage } from "@/lib/firebaseAdmin";
 import { uploadedDocumentPath } from "@/lib/driverDocumentReview";
 
 export async function GET(_request: NextRequest, props: { params: Promise<{ uid: string; kind: string; side: string }> }) {
   if (!await getAdminSession()) return NextResponse.json({ error: "Admin access required" }, { status: 401 });
   const { uid, kind, side } = await props.params;
-  const snapshot = await adminDb.collection("drivers").doc(uid).get();
+  const snapshot = await (await getWorkspaceDb()).collection("drivers").doc(uid).get();
   if (!snapshot.exists) return NextResponse.json({ error: "Driver not found" }, { status: 404 });
   const path = uploadedDocumentPath(snapshot.data(), uid, kind, side);
   if (!path) return NextResponse.json({ error: "Uploaded document not found" }, { status: 404 });

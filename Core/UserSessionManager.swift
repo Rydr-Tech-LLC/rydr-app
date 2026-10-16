@@ -143,7 +143,7 @@ class UserSessionManager: ObservableObject {
         let uid = user.uid
         let displayName = user.displayName
         let authEmail = user.email
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("riders").document(uid)
             .getDocument { snap, _ in
                 guard let data = snap?.data() else {
@@ -246,7 +246,7 @@ class UserSessionManager: ObservableObject {
             self.userEmail = email
         }
 
-        Firestore.firestore().collection("riders").document(user.uid).setData(payload, merge: true) { error in
+        RydrWorkspace.firestore.collection("riders").document(user.uid).setData(payload, merge: true) { error in
             if let error {
                 completion(error)
                 return

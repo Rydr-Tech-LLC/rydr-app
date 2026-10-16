@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/session";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 
 export async function POST(request: NextRequest, props: { params: Promise<{ uid: string }> }) {
@@ -13,7 +13,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
 
-  await adminDb.collection("riders").doc(params.uid).set({ accountStatus: status }, { merge: true });
+  await (await getWorkspaceDb()).collection("riders").doc(params.uid).set({ accountStatus: status }, { merge: true });
   await writeAuditLog({
     adminUid: session.uid,
     adminEmail: session.email ?? undefined,

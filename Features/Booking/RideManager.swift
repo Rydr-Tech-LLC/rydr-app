@@ -946,7 +946,7 @@ final class RideManager: ObservableObject {
               let base = URL(string: rawBase),
               let url = URL(string: "/rides/\(backendRideId)/rating", relativeTo: base) else { throw URLError(.badURL) }
         let token = try await user.getIDToken()
-        var request = URLRequest(url: url)
+        var request = RydrWorkspace.urlRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -1666,7 +1666,7 @@ final class RideManager: ObservableObject {
     }
 
     private func stripeRequest(_ path: String, body: [String: Any]) async -> Data? {
-        var request = URLRequest(url: stripeBackendBase.appendingPathComponent(path))
+        var request = RydrWorkspace.urlRequest(url: stripeBackendBase.appendingPathComponent(path))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)

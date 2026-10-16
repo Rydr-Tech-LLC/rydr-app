@@ -1,7 +1,89 @@
+import SwiftUI
+import FirebaseFirestore
+import CryptoKit
 import FirebaseAuth
 import Stripe
 import StripeIdentity
 import UIKit
+
+// Account environment is derived from signed-in Firebase identity and server policy.
+private struct RydrWorkspaceBootstrap: Decodable {
+    let testUidHashes: [String]
+    let testPhoneHashes: [String]
+}
+private final class RydrWorkspacePolicyCache: @unchecked Sendable {
+    let lock = NSLock()
+    var value: RydrWorkspaceBootstrap?
+    func read() -> RydrWorkspaceBootstrap? { lock.lock(); defer { lock.unlock() }; return value }
+    func write(_ value: RydrWorkspaceBootstrap) { lock.lock(); defer { lock.unlock() }; self.value = value }
+}
+enum RydrWorkspace {
+    private static let cache = RydrWorkspacePolicyCache()
+    static var isReady: Bool { cache.read() != nil }
+    private static func hash(_ value: String) -> String { SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined() }
+    static var identifier: String? {
+        guard let policy = cache.read(), let user = Auth.auth().currentUser else { return nil }
+        return policy.testUidHashes.contains(hash(user.uid)) || policy.testPhoneHashes.contains(hash(user.phoneNumber ?? "")) ? "test" : "live-beta"
+    }
+    static var firestore: Firestore { Firestore.firestore(database: identifier == "test" ? "(default)" : identifier == "live-beta" ? "live-beta" : "workspace-unresolved") }
+    static func functionName(_ name: String) -> String { identifier == "test" ? name : "liveBeta-" + name }
+    static func scopedURL(_ url: URL) -> URL {
+        guard ["rydr-stripe-backend.onrender.com", "rydr-backend-2cl9.onrender.com", "rydr-backend.onrender.com", "rydr-bank.onrender.com"].contains(url.host ?? "") else { return url }
+        guard !["/workspace-bootstrap", "/account-config"].contains(url.path) else { return url }
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        let path = parts.path.replacingOccurrences(of: "^/workspaces/(test|live-beta|unresolved)(?=/|$)", with: "", options: .regularExpression)
+        parts.path = "/workspaces/\(identifier ?? "unresolved")" + (path.hasPrefix("/") ? path : "/" + path)
+        return parts.url ?? url
+    }
+    static func urlRequest(url: URL, cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy, timeoutInterval: TimeInterval = 60) -> URLRequest {
+        URLRequest(url: scopedURL(url), cachePolicy: cachePolicy, timeoutInterval: timeoutInterval)
+    }
+    static func bootstrap() async throws {
+        var request = URLRequest(url: URL(string: "https://rydr-stripe-backend.onrender.com/workspace-bootstrap")!)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 15
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw URLError(.badServerResponse) }
+        let policy = try JSONDecoder().decode(RydrWorkspaceBootstrap.self, from: data)
+        guard !policy.testPhoneHashes.isEmpty else { throw URLError(.cannotParseResponse) }
+        cache.write(policy)
+    }
+}
+struct RydrWorkspaceGate<Content: View>: View {
+    @State private var ready = RydrWorkspace.isReady
+    @State private var failed = false
+    @State private var retry = 0
+    @State private var signedInUID: String?
+    @State private var authListener: AuthStateDidChangeListenerHandle?
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        Group {
+            if ready {
+                content().safeAreaInset(edge: .top, spacing: 0) {
+                    if signedInUID != nil && RydrWorkspace.identifier == "test" {
+                        Text("TEST WORKSPACE · Simulated payments")
+                            .font(.system(size: 10, weight: .semibold)).tracking(1)
+                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                            .foregroundStyle(.white)
+                            .background(LinearGradient(colors: [.red, .purple], startPoint: .leading, endPoint: .trailing))
+                    }
+                }
+            } else {
+                VStack(spacing: 18) {
+                    if failed {
+                        Image(systemName: "wifi.exclamationmark").font(.largeTitle).foregroundStyle(.red)
+                        Text("Unable to verify your workspace").font(.headline)
+                        Text("Check your connection and try again.").font(.subheadline).foregroundStyle(.secondary)
+                        Button("Try again") { failed = false; retry += 1 }.buttonStyle(.borderedProminent).tint(.red)
+                    } else { ProgressView("Connecting securely…") }
+                }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: retry) { do { try await RydrWorkspace.bootstrap(); ready = true } catch { failed = true } }
+        .onAppear { authListener = Auth.auth().addStateDidChangeListener { _, user in signedInUID = user?.uid } }
+        .onDisappear { if let authListener { Auth.auth().removeStateDidChangeListener(authListener) } }
+    }
+}
 
 enum RydrStripeBackendConfig {
     private struct StripeRuntimeConfig: Decodable {
@@ -10,6 +92,7 @@ enum RydrStripeBackendConfig {
     }
 
     @MainActor private static var configuredPublishableKey: String?
+    @MainActor private static var configuredUID: String?
 
     static var baseURL: URL {
         if let raw = Bundle.main.object(forInfoDictionaryKey: "RYDR_STRIPE_BACKEND_BASE_URL") as? String,
@@ -22,36 +105,43 @@ enum RydrStripeBackendConfig {
 
     @MainActor
     static var hasConfiguredPublishableKey: Bool {
-        configuredPublishableKey != nil
+        configuredPublishableKey != nil && configuredUID == Auth.auth().currentUser?.uid
     }
 
     @MainActor
     static func configureStripePublishableKeyIfNeeded() async {
-        if configuredPublishableKey != nil { return }
+        guard let uid = Auth.auth().currentUser?.uid else { configuredPublishableKey = nil; configuredUID = nil; StripeAPI.defaultPublishableKey = nil; return }
+        if configuredPublishableKey != nil && configuredUID == uid { return }
+        configuredPublishableKey = nil
+        configuredUID = nil
+        StripeAPI.defaultPublishableKey = nil
 
         do {
             let config = try await fetchRuntimeConfig()
-            guard isValidPublishableKey(config.publishableKey) else {
+            guard isValidPublishableKey(config.publishableKey),
+                  config.mode == (RydrWorkspace.identifier == "test" ? "test" : "live"),
+                  config.publishableKey.hasPrefix(RydrWorkspace.identifier == "test" ? "pk_test_" : "pk_live_") else {
                 print("⚠️ Stripe config endpoint returned an invalid publishable key.")
                 return
             }
 
+            guard Auth.auth().currentUser?.uid == uid else { return }
             StripeAPI.defaultPublishableKey = config.publishableKey
             configuredPublishableKey = config.publishableKey
+            configuredUID = uid
             print("💳 Stripe \(config.mode ?? "unknown") publishable key loaded from backend")
         } catch {
-            if let bundledKey = bundledPublishableKey(), isValidPublishableKey(bundledKey) {
-                StripeAPI.defaultPublishableKey = bundledKey
-                configuredPublishableKey = bundledKey
-                print("💳 Stripe publishable key loaded from Info.plist fallback")
-            } else {
-                print("⚠️ Stripe publishable key is not configured: \(error.localizedDescription)")
-            }
+            // No bundled-key fallback: an unverified account must never inherit another environment.
+            configuredPublishableKey = nil
+            configuredUID = nil
+            StripeAPI.defaultPublishableKey = nil
         }
     }
 
     private static func fetchRuntimeConfig() async throws -> StripeRuntimeConfig {
-        var request = URLRequest(url: baseURL.appendingPathComponent("config"))
+        guard let user = Auth.auth().currentUser else { throw URLError(.userAuthenticationRequired) }
+        var request = URLRequest(url: baseURL.appendingPathComponent("account-config"))
+        request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 8
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -127,7 +217,7 @@ final class RiderIdentityVerificationService {
             throw RiderIdentityVerificationError.notSignedIn
         }
         let token = try await refreshedIDToken(for: user)
-        var request = URLRequest(url: backendBase.appendingPathComponent("identity/create-session"))
+        var request = RydrWorkspace.urlRequest(url: backendBase.appendingPathComponent("identity/create-session"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -151,7 +241,7 @@ final class RiderIdentityVerificationService {
         components.queryItems = [URLQueryItem(name: "role", value: "verified_rider")]
         guard let url = components.url else { throw RiderIdentityVerificationError.invalidResponse }
 
-        var request = URLRequest(url: url)
+        var request = RydrWorkspace.urlRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 

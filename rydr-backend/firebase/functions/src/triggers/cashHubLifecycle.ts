@@ -1,5 +1,5 @@
-import { onSchedule } from "firebase-functions/v2/scheduler";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onSchedule } from "../workspaceFunctions";
+import { onDocumentCreated } from "../workspaceFunctions";
 import { db, FieldValue, Timestamp } from "../admin";
 import { sendPushToUser } from "../services/notificationSender";
 

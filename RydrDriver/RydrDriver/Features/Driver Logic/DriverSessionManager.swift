@@ -39,7 +39,7 @@ final class DriverSessionManager: ObservableObject {
     func restoreSessionIfPossible() {
         guard !isLoggedIn, let user = Auth.auth().currentUser else { return }
         login(name: user.displayName ?? "Rydr Driver", email: user.email ?? "")
-        Firestore.firestore().collection("drivers").document(user.uid).getDocument { [weak self] snapshot, _ in
+        RydrWorkspace.firestore.collection("drivers").document(user.uid).getDocument { [weak self] snapshot, _ in
             guard let self else { return }
             let data = snapshot?.data() ?? [:]
             let resolvedName = Self.publicDisplayName(from: data, authUser: user)
@@ -126,7 +126,7 @@ final class DriverSessionManager: ObservableObject {
     func startDriverStatusListener() {
         driverListener?.remove()
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        let doc = Firestore.firestore().collection("drivers").document(uid)
+        let doc = RydrWorkspace.firestore.collection("drivers").document(uid)
         driverListener = doc.addSnapshotListener { [weak self] snapshot, error in
             guard let self = self else { return }
             guard error == nil, let data = snapshot?.data() else { return }

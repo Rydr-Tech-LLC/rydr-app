@@ -8,7 +8,7 @@
 // backend owns lifecycle transitions, so notifications reflect persisted,
 // server-validated state rather than a client-side simulation.
 
-import { onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentWritten } from "../workspaceFunctions";
 import { sendPushToUser } from "../services/notificationSender";
 import { db, FieldValue } from "../admin";
 

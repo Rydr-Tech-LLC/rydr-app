@@ -1,7 +1,7 @@
 import { driverDocumentReviewItems } from "@/lib/driverDocumentReview";
 import { evaluateDriverCompliance } from "../../../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
-import Link from "next/link";
-import { adminDb } from "@/lib/firebaseAdmin";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { evaluateDriverRequirements, type DriverRecord } from "@/lib/types";
 import { driverFullName, driverNameCollected, timeAgo, toDateSafe } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
@@ -9,7 +9,7 @@ import StatusPill from "@/components/StatusPill";
 export const dynamic = "force-dynamic";
 
 export default async function DriverVerificationQueuePage() {
-  const [snap, policySnap] = await Promise.all([adminDb.collection("drivers").limit(300).get(), adminDb.collection("platformConfig").doc("driverCompliance").get()]);
+  const [snap, policySnap] = await Promise.all([(await getWorkspaceDb()).collection("drivers").limit(300).get(), (await getWorkspaceDb()).collection("platformConfig").doc("driverCompliance").get()]);
   const policy = policySnap.data() ?? {};
 
   const queue = snap.docs

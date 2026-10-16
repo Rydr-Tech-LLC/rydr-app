@@ -1,3 +1,4 @@
+import {currentWorkspace} from "@/lib/workspace";
 import "server-only";
 
 import { Resend } from "resend";
@@ -35,6 +36,7 @@ export class EmailService {
   }
 
   async sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
+    if(await currentWorkspace()==="test")return {ok:true,id:"simulated-test-email"};
     const from = input.from ?? this.fromEmail;
     if (!this.apiKey) {
       return this.fail("Resend API key is not configured.", input);

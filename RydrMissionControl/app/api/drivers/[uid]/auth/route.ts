@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
+import { adminAuth, getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 import { notificationService } from "@/src/services/notifications/NotificationService";
 
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
   }
 
   const [driverSnap, user] = await Promise.all([
-    adminDb.collection("drivers").doc(params.uid).get(),
+    (await getWorkspaceDb()).collection("drivers").doc(params.uid).get(),
     adminAuth.getUser(params.uid).catch(() => null)
   ]);
   if (!driverSnap.exists) return NextResponse.json({ error: "Driver not found." }, { status: 404 });
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
 
   if (action === "mark_email_verified") {
     await adminAuth.updateUser(params.uid, { emailVerified: true });
-    await adminDb.collection("drivers").doc(params.uid).set(
+    await (await getWorkspaceDb()).collection("drivers").doc(params.uid).set(
       {
         emailVerified: true,
         emailVerifiedAt: FieldValue.serverTimestamp(),
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
     return NextResponse.json({ error: result.error ?? "Unable to send email." }, { status: 502 });
   }
 
-  await adminDb.collection("drivers").doc(params.uid).set(
+  await (await getWorkspaceDb()).collection("drivers").doc(params.uid).set(
     {
       [action === "send_password_reset" ? "passwordResetSentAt" : "emailVerificationSentAt"]: FieldValue.serverTimestamp(),
       [action === "send_password_reset" ? "passwordResetSentBy" : "emailVerificationSentBy"]: session.uid,

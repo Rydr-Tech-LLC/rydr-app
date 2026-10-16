@@ -1,5 +1,5 @@
 import { evaluateDriverCompliance } from "../services/driverCompliancePolicy";
-import { onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentWritten } from "../workspaceFunctions";
 import { db, FieldValue } from "../admin";
 
 type DriverApprovalStatus = "pending" | "needs_attention" | "approved" | "rejected";

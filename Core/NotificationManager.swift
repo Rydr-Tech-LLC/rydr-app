@@ -17,7 +17,7 @@ extension Notification.Name {
 final class NotificationManager {
     static let shared = NotificationManager()
 
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private let defaults = UserDefaults.standard
     private let lastTokenKey = "rydr.rider.notifications.lastFCMToken"
     private let lastUIDKey = "rydr.rider.notifications.lastUID"
@@ -97,11 +97,13 @@ final class NotificationManager {
     }
 
     func handleForegroundNotification(_ userInfo: [AnyHashable: Any]) {
+        if let workspace = userInfo["workspace"] as? String, workspace != RydrWorkspace.identifier { return }
         let route = NotificationRoute(userInfo: userInfo)
         Self.log("foreground_notification", route.logFields)
     }
 
     func handleNotificationTap(_ userInfo: [AnyHashable: Any]) {
+        if let workspace = userInfo["workspace"] as? String, workspace != RydrWorkspace.identifier { return }
         let route = NotificationRoute(userInfo: userInfo)
         Self.log("notification_tap", route.logFields)
         DispatchQueue.main.async {

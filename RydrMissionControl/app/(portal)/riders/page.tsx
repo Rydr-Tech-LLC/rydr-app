@@ -1,6 +1,6 @@
 import DataTable from "@/components/DataTable";
-import Link from "next/link";
-import { adminDb } from "@/lib/firebaseAdmin";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import type { RiderRecord } from "@/lib/types";
 import { fullName } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
@@ -8,7 +8,7 @@ import StatusPill from "@/components/StatusPill";
 export const dynamic = "force-dynamic";
 
 export default async function RidersPage() {
-  const snap = await adminDb.collection("riders").limit(500).get();
+  const snap = await (await getWorkspaceDb()).collection("riders").limit(500).get();
   const riders = snap.docs.map((doc) => ({
     ...(doc.data() as RiderRecord),
     uid: doc.id,

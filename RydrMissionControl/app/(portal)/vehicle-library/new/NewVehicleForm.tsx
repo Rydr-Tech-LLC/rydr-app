@@ -1,9 +1,10 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 import { vehicleImageSearchUrl } from "@/lib/vehicleImageSearch";
 
 import VehicleSpecificationFields from "@/components/VehicleSpecificationFields";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+
 
 const BODY_STYLES = ["sedan", "suv", "truck", "coupe", "hatchback", "minivan", "crossover", "wagon", "convertible", "van", "unknown"];
 const RIDE_TYPES = ["Rydr Go", "Rydr Eco", "Rydr XL", "Rydr Prestine"];

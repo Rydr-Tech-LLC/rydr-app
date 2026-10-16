@@ -1,4 +1,4 @@
-import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentUpdated } from "../workspaceFunctions";
 import { sendPushToUser } from "../services/notificationSender";
 
 interface RydrBankSummaryFields {

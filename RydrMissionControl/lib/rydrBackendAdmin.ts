@@ -1,3 +1,4 @@
+import {workspaceServiceURL} from "@/lib/workspace";
 import "server-only";
 
 export async function callRydrBackendAdmin(
@@ -8,7 +9,7 @@ export async function callRydrBackendAdmin(
   const base = process.env.RYDR_BACKEND_BASE_URL;
   const token = process.env.RYDR_INTERNAL_SERVICE_TOKEN;
   if (!base || !token) throw new Error("Rydr backend admin integration is not configured");
-  const response = await fetch(`${base.replace(/\/+$/, "")}${path}`, {
+  const response = await fetch(`${await workspaceServiceURL(base)}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -12,7 +12,7 @@ import {
   splitTags,
   type LeadStatus
 } from "@/lib/campusGrowth";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { getCampusGrowthSession } from "@/lib/session";
 
 const STATUSES: LeadStatus[] = ["new", "qualified", "queued", "contacted", "replied", "archived"];
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
   const opportunityScore = scoreCampusLead({ category, name, notes });
   const status = STATUSES.includes(body.status) ? body.status : "new";
 
-  const doc = await adminDb.collection(campusCollections.events).add({
+  const doc = await (await getWorkspaceDb()).collection(campusCollections.events).add({
     campusId: campus.id,
     campusName: campus.name,
     name,
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
 async function loadCampus(campusId: unknown) {
   const id = cleanText(campusId, 120);
   if (!id) return { id: "", name: "" };
-  const snap = await adminDb.collection(campusCollections.campuses).doc(id).get();
+  const snap = await (await getWorkspaceDb()).collection(campusCollections.campuses).doc(id).get();
   if (!snap.exists) return { id: "", name: "" };
   const data = snap.data() as { name?: string };
   return { id: snap.id, name: data.name ?? "" };

@@ -34,6 +34,7 @@ test.before(async () => {
   });
   await environment.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();
+    await setDoc(doc(db, "operationalSecurity/liveBetaAccess"), {configured:true,blockedAuthUids:["rider-1","rider-2","driver-1","driver-2","attacker","other","stranger","compliance-driver"],testPhoneNumbers:["+16783220004","+16783225555"]});
     await setDoc(doc(db, "betaInvites/rider/phones/+16783220004"), { status: "approved" });
     await setDoc(doc(db, "betaInvites/driver/phones/+16783225555"), { status: "approved" });
     await setDoc(doc(db, "riders/rider-1"), { uid: "rider-1", preferredName: "Rider", hasRydrRiderAccess: true });
@@ -232,4 +233,15 @@ test('promotion codes, financial rewards and eligibility counters are server-own
   await assertFails(updateDoc(doc(owner,'promotionProgress/progress-1'),{eligibleRideCount:99}));
   await assertFails(updateDoc(doc(admin,'promotionRewards/reward-1'),{status:'used'}));
   await assertFails(setDoc(doc(owner,'promotionEnrollments/fake'),{userId:'rider-1',promotionId:'private-campaign'}));
+});
+
+test('real identities cannot read or create Test profiles even when they own the UID',async()=>{
+ const db=environment.authenticatedContext('real-beta',{phone_number:'+15555550999'}).firestore();
+ await assertFails(getDoc(doc(db,'riders/real-beta')));
+ await assertFails(setDoc(doc(db,'riders/real-beta'),{uid:'real-beta',preferredName:'Real'}));
+});
+test('a recreated Firebase test-number identity is routed to Test without an allowlisted UID',async()=>{
+ const db=environment.authenticatedContext('recreated-test',{phone_number:'+16783220004'}).firestore();
+ await assertSucceeds(getDoc(doc(db,'riders/recreated-test')));
+ await assertFails(getDoc(doc(db,'operationalSecurity/liveBetaAccess')));
 });

@@ -1,3 +1,6 @@
+import workspaceRuntime from "../../firebase/functions/src/services/workspaceRuntime.js";
+import workspacePolicy from "../../firebase/functions/src/services/workspacePolicy.js";
+import {getFirestore} from "firebase-admin/firestore";
 // server.js
 // RydrBank service — Express + Firebase Admin + Firestore
 // - Fixes Firestore transaction order (all READS before any WRITES)
@@ -20,10 +23,11 @@ if (!admin.apps.length) {
     ),
   });
 }
-const db = admin.firestore();
+const db = new Proxy({}, {get(_target,key){const real=getFirestore(undefined,workspaceRuntime.currentWorkspace()==="test"?"(default)":"live-beta");const value=real[key];return typeof value==="function"?value.bind(real):value}});
 
 // ---------- Express ----------
 const app = express();
+app.use((req,res,next)=>{const match=req.url.match(/^\/workspaces\/(test|live-beta)(\/.*|$)/);if(match){req.url=match[2]||"/";return workspaceRuntime.runInWorkspace(match[1],next);}return workspaceRuntime.runInWorkspace("test",next);});
 app.use(express.json());
 const allowedOrigins = (process.env.CORS_ORIGINS || "https://www.rydr-go.com,https://rydr-go.com")
   .split(",")
@@ -93,7 +97,10 @@ async function requireAuth(req, res, next) {
     const authz = req.headers.authorization || "";
     const [, token] = authz.split(" ");
     if (!token) return res.status(401).json({ error: "Missing token" });
-    const decoded = await admin.auth().verifyIdToken(token);
+    const decoded = await admin.auth().verifyIdToken(token,true);
+    const policy=(await getFirestore().collection("operationalSecurity").doc("liveBetaAccess").get()).data();
+    const user=await admin.auth().getUser(decoded.uid);
+    if(workspacePolicy.accountWorkspace(decoded.uid,user.phoneNumber,policy)!==workspaceRuntime.currentWorkspace())return res.status(403).json({error:"account_workspace_mismatch"});
     req.uid = decoded.uid;
     next();
   } catch (e) {
@@ -145,6 +152,7 @@ Rydr Support`;
 }
 
 async function sendGiftEmail({ toEmail, friendName, code }) {
+  if(workspaceRuntime.currentWorkspace()==="test")return;
   if (!process.env.SENDGRID_API_KEY) return;
   const { subject, text, html } = giftEmailContent(friendName, code);
   await sgMail.send({
@@ -157,6 +165,7 @@ async function sendGiftEmail({ toEmail, friendName, code }) {
 }
 
 async function sendGiftSms({ toPhone, code }) {
+  if(workspaceRuntime.currentWorkspace()==="test")return;
   if (!twilioClient || !SMS_FROM || !toPhone) return;
   const msg = `You’ve been gifted a free Rydr ride. Promo code: ${code}. Book at https://www.rydr-go.com`;
   await twilioClient.messages.create({ to: toPhone, from: SMS_FROM, body: msg });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
-import { adminDb, adminStorage } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb, adminStorage } from "@/lib/firebaseAdmin";
 import { getAdminSession } from "@/lib/session";
 import { writeAuditLog } from "@/lib/auditLog";
 import { DOCUMENT_KINDS, documentDeadline, currentDocument } from "../../../../../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
@@ -17,9 +17,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
   const bucket = adminStorage.bucket(process.env.FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "rydrapp-c7ec1.firebasestorage.app");
   const [exists] = await bucket.file(path).exists();
   if (!exists) return NextResponse.json({ error: "Uploaded document could not be found" }, { status: 422 });
-  const ref = adminDb.collection("drivers").doc(uid);
+  const ref = (await getWorkspaceDb()).collection("drivers").doc(uid);
   try {
-    await adminDb.runTransaction(async tx => {
+    await (await getWorkspaceDb()).runTransaction(async tx => {
       const snap = await tx.get(ref);
       if (!snap.exists) throw new Error("Driver not found");
       const driver = snap.data() ?? {};

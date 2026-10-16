@@ -644,7 +644,7 @@ struct CashHubSignupView: View {
     }
 
     private func loadCashHubTermsGate() {
-        Firestore.firestore().collection("platformConfig").document("cashRydrHub").getDocument { snapshot, _ in
+        RydrWorkspace.firestore.collection("platformConfig").document("cashRydrHub").getDocument { snapshot, _ in
             Task { @MainActor in
                 let config = snapshot?.data() ?? [:]
                 termsAcceptanceEnabled = config["termsAcceptanceEnabled"] as? Bool ?? false

@@ -1,5 +1,5 @@
-import { onDocumentWritten } from "firebase-functions/v2/firestore";
-import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onDocumentWritten } from "../workspaceFunctions";
+import { onSchedule } from "../workspaceFunctions";
 import { defineSecret } from "firebase-functions/params";
 import { db, FieldValue, Timestamp } from "../admin";
 import { IMAGE_JOBS, enqueueImageJob, processImageJob, updateWaitingDrivers, matchesVehicle, validImageQuery } from "../services/vehicleImageAcquisition";

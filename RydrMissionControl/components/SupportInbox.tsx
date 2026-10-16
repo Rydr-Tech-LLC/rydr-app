@@ -1,5 +1,5 @@
 "use client";
-import Link from "next/link";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
 import { useState } from "react";
 import { Inbox, Search, ArrowUpRight, MessageCircle } from "lucide-react";
 import StatusPill from "./StatusPill";

@@ -384,7 +384,7 @@ struct DriverSettingsView: View {
             return
         }
         isLoadingCashHubAccess = true
-        let db = Firestore.firestore()
+        let db = RydrWorkspace.firestore
         db.collection("platformConfig").document("cashRydrHub").getDocument { configSnapshot, _ in
             db.collection("drivers").document(uid).getDocument { snapshot, error in
                 DispatchQueue.main.async {
@@ -422,7 +422,7 @@ struct DriverSettingsView: View {
         cashHubBillingPeriodLabel = period.label
         isLoadingCashHubBilling = true
 
-        Firestore.firestore().collection("drivers").document(uid)
+        RydrWorkspace.firestore.collection("drivers").document(uid)
             .collection("cashHubBilling").document(period.id)
             .getDocument { snapshot, _ in
                 DispatchQueue.main.async {

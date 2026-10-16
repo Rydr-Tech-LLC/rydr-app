@@ -1,4 +1,4 @@
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { toDateSafe } from "@/lib/format";
 import AnalyticsWorkspace, {
   type AnalyticsRide,
@@ -6,8 +6,8 @@ import AnalyticsWorkspace, {
 export const dynamic = "force-dynamic";
 export default async function AnalyticsPage() {
   const [rides, online] = await Promise.allSettled([
-    adminDb.collection("rides").orderBy("updatedAt", "desc").limit(500).get(),
-    adminDb
+    (await getWorkspaceDb()).collection("rides").orderBy("updatedAt", "desc").limit(500).get(),
+    (await getWorkspaceDb())
       .collection("driver_status")
       .where("isOnline", "==", true)
       .count()

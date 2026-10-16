@@ -680,7 +680,7 @@ struct DriverSignupCoordinator: View {
     // MARK: - Firestore helper
     private func markCurrentOnboardingStep(_ step: DriverSignupStep) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        Firestore.firestore().collection("drivers").document(uid).setData([
+        RydrWorkspace.firestore.collection("drivers").document(uid).setData([
             "driverOnboardingCurrentStep": step.trackingKey,
             "driverOnboardingCurrentStepLabel": step.trackingLabel,
             "driverOnboardingCurrentStepIndex": step.trackingIndex,
@@ -696,7 +696,7 @@ struct DriverSignupCoordinator: View {
 
     private func upsertDriver(_ fields: [String: Any]) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        Firestore.firestore().collection("drivers").document(uid).setData(fields, merge: true) { err in
+        RydrWorkspace.firestore.collection("drivers").document(uid).setData(fields, merge: true) { err in
             if let err = err { errorText = err.localizedDescription }
         }
     }
@@ -706,7 +706,7 @@ struct DriverSignupCoordinator: View {
             completion(false)
             return
         }
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("drivers")
             .document(uid)
             .getDocument { snapshot, _ in
@@ -715,7 +715,7 @@ struct DriverSignupCoordinator: View {
     }
 
     private func betaInviteApproved(phoneE164: String, completion: @escaping (Bool) -> Void) {
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("betaInvites")
             .document("driver")
             .collection("phones")
@@ -734,7 +734,7 @@ struct DriverSignupCoordinator: View {
 
     private func recordDriverApprovalRequest(type: String) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        Firestore.firestore().collection("driverApprovalRequests").document(uid).setData([
+        RydrWorkspace.firestore.collection("driverApprovalRequests").document(uid).setData([
             "uid": uid,
             "requestType": type,
             "source": "driver-ios-signup",

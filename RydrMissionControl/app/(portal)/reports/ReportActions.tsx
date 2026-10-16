@@ -1,7 +1,8 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+
 
 export default function ReportActions({ id, hasDriver, hasRider }: { id: string; hasDriver: boolean; hasRider: boolean }) {
   const router = useRouter();

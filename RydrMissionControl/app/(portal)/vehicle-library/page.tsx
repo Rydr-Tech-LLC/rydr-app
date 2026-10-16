@@ -1,5 +1,5 @@
-import Link from "next/link";
-import { adminDb } from "@/lib/firebaseAdmin";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { listVehicleLibrary, searchVehicleLibrary } from "@/lib/vehicleLibrary";
 import VehicleLibraryClient from "./VehicleLibraryClient";
 
@@ -15,7 +15,7 @@ export default async function VehicleLibraryPage(
   const model = searchParams?.model;
   const entries = make || model ? await searchVehicleLibrary({ make, model }) : await listVehicleLibrary();
 
-  const issues = await adminDb.collection("vehicleImageJobs").where("status", "==", "needs_review").count().get();
+  const issues = await (await getWorkspaceDb()).collection("vehicleImageJobs").where("status", "==", "needs_review").count().get();
 
   return (
     <div className="space-y-6">

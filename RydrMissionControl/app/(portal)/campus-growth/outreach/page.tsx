@@ -1,5 +1,5 @@
 import DataTable from "@/components/DataTable";
-import Link from "next/link";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
 import StatusPill from "@/components/StatusPill";
 import {
   listCampuses,

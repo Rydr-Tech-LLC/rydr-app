@@ -21,8 +21,8 @@ import {
   vehicleKey,
 } from "../../../../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
 import { notFound } from "next/navigation";
-import Link from "next/link";
-import { adminDb } from "@/lib/firebaseAdmin";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import {
   driverConnectStatus,
   driverDocumentBackUrl,
@@ -57,10 +57,10 @@ export default async function DriverReviewPage(props: {
   const params = await props.params;
   const [snap, activeRide, cashHubBilling, cashHubConfigSnap] =
     await Promise.all([
-      adminDb.collection("drivers").doc(params.uid).get(),
+      (await getWorkspaceDb()).collection("drivers").doc(params.uid).get(),
       findActiveRideForDriver(params.uid),
       getCurrentCashHubBilling(params.uid),
-      adminDb
+      (await getWorkspaceDb())
         .collection("platformConfig")
         .doc("cashRydrHub")
         .get()
@@ -76,21 +76,21 @@ export default async function DriverReviewPage(props: {
         : null,
   };
 
-  const history = await adminDb
+  const history = await (await getWorkspaceDb())
     .collection("drivers")
     .doc(params.uid)
     .collection("vehicleArchive")
     .orderBy("recordedAt", "desc")
     .get();
   const rawDriver = snap.data() ?? {};
-  const documentHistory = await adminDb
+  const documentHistory = await (await getWorkspaceDb())
     .collection("drivers")
     .doc(params.uid)
     .collection("documentReviews")
     .orderBy("createdAt", "desc")
     .limit(20)
     .get();
-  const specificationLibrary = await adminDb
+  const specificationLibrary = await (await getWorkspaceDb())
     .collection("vehicleLibrary")
     .limit(1000)
     .get();
@@ -135,7 +135,7 @@ export default async function DriverReviewPage(props: {
   const driver = { ...(snap.data() as DriverRecord), uid: snap.id };
   const compliancePolicy =
     (
-      await adminDb.collection("platformConfig").doc("driverCompliance").get()
+      await (await getWorkspaceDb()).collection("platformConfig").doc("driverCompliance").get()
     ).data() ?? {};
   const compliance = evaluateDriverCompliance(
     snap.data() ?? {},

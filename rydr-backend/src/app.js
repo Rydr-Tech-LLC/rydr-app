@@ -19,6 +19,7 @@ const scheduledRideRoutes = require("./routes/scheduledRides");
 const app = express();
 const port = process.env.PORT || 3000;
 
+app.use(require("./services/workspaceContext").workspaceRouting);
 app.use(helmet());
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)

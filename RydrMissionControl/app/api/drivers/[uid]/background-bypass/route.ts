@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 
 export async function POST(request: NextRequest, props: { params: Promise<{ uid: string }> }) {
@@ -12,9 +12,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
   }
 
   const { reason } = (await request.json().catch(() => ({}))) as { reason?: string };
-  const policy = (await adminDb.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
+  const policy = (await (await getWorkspaceDb()).collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
   if (policy.backgroundChecksRequired === true) return NextResponse.json({ error: "Background screening is required for the open pilot; beta deferral is unavailable." }, { status: 409 });
-  const driverRef = adminDb.collection("drivers").doc(params.uid);
+  const driverRef = (await getWorkspaceDb()).collection("drivers").doc(params.uid);
   const driverSnap = await driverRef.get();
   if (!driverSnap.exists) {
     return NextResponse.json({ error: "Driver not found" }, { status: 404 });

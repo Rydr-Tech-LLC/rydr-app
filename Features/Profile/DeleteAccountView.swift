@@ -161,7 +161,7 @@ struct DeleteAccountView: View {
         defer { isCheckingExistingRequest = false }
         guard let uid = Auth.auth().currentUser?.uid else { return }
         do {
-            let snapshot = try await Firestore.firestore()
+            let snapshot = try await RydrWorkspace.firestore
                 .collection("accountDeletionRequests")
                 .document(uid)
                 .getDocument()
@@ -191,7 +191,7 @@ struct DeleteAccountView: View {
                 throw URLError(.badURL)
             }
             let token = try await user.getIDToken()
-            var request = URLRequest(url: url)
+            var request = RydrWorkspace.urlRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

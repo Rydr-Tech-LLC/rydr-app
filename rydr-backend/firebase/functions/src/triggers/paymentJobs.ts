@@ -1,6 +1,8 @@
+import {currentWorkspace} from "../services/workspaceRuntime";
+import {workspaceServiceURL} from "../services/workspacePolicy";
 import fetch from "node-fetch";
 import { defineSecret, defineString } from "firebase-functions/params";
-import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentWritten } from "../workspaceFunctions";
 import { db, FieldValue } from "../admin";
 
 const internalToken = defineSecret("RYDR_INTERNAL_SERVICE_TOKEN");
@@ -26,7 +28,7 @@ export const onPaymentJobCreated = onDocumentCreated(
       updatedAt: FieldValue.serverTimestamp()
     }, { merge: true });
 
-    const response = await fetch(`${stripeBackendURL.value().replace(/\/$/, "")}/internal/rides/${encodeURIComponent(rideId)}/charge`, {
+    const response = await fetch(`${workspaceServiceURL(stripeBackendURL.value(),currentWorkspace())}/internal/rides/${encodeURIComponent(rideId)}/charge`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -67,7 +69,7 @@ export const onPaidRidePromotionSettlement = onDocumentWritten({
   const after = event.data?.after.data();
   if (after?.status !== "paid" || after.outcomeType !== "completed") return;
   const rideId = event.params.rideId;
-  const response = await fetch(`${stripeBackendURL.value().replace(/\/$/, "")}/internal/rides/${encodeURIComponent(rideId)}/promotions/settle`, {
+  const response = await fetch(`${workspaceServiceURL(stripeBackendURL.value(),currentWorkspace())}/internal/rides/${encodeURIComponent(rideId)}/promotions/settle`, {
     method: "POST", headers: { "content-type": "application/json", "x-rydr-internal-token": internalToken.value() }, body: "{}", timeout: 55000
   });
   if (!response.ok) throw new Error(`Promotion settlement dispatch failed: ${response.status}`);

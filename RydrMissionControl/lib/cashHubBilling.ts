@@ -1,4 +1,4 @@
-import { adminDb } from "./firebaseAdmin";
+import { getWorkspaceDb } from "./firebaseAdmin";
 import type { DriverRecord } from "./types";
 
 export type CashHubBillingStatus = "active" | "feePending" | "partiallyCollected" | "collected" | "pastDue" | "unknown";
@@ -26,7 +26,7 @@ export function currentCashHubBillingPeriod(date = new Date()) {
 
 export async function getCurrentCashHubBilling(driverUid: string): Promise<CashHubBillingRecord | null> {
   const period = currentCashHubBillingPeriod();
-  const snap = await adminDb.collection("drivers").doc(driverUid).collection("cashHubBilling").doc(period.id).get();
+  const snap = await (await getWorkspaceDb()).collection("drivers").doc(driverUid).collection("cashHubBilling").doc(period.id).get();
   if (!snap.exists) return null;
 
   const data = snap.data() ?? {};

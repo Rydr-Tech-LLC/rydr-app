@@ -1,4 +1,4 @@
-import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onSchedule } from "../workspaceFunctions";
 import { db, FieldValue, Timestamp } from "../admin";
 
 const FEE_CENTS = 499;

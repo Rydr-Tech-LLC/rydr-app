@@ -1,3 +1,4 @@
+import {currentWorkspace} from "./workspaceRuntime";
 // Push notification sender service — the single place every Cloud Function
 // trigger goes through to deliver a push notification to a rider or driver.
 //
@@ -65,6 +66,7 @@ function collectionFor(audience: NotificationAudience): string {
  * FCM data payloads are string-only on the wire. */
 function dataPayload(route: NotificationRouteData): Record<string, string> {
   const data: Record<string, string> = {
+    workspace: currentWorkspace(),
     type: route.type,
     target: route.target
   };
@@ -77,7 +79,7 @@ function dataPayload(route: NotificationRouteData): Record<string, string> {
 async function writeInboxRecord(args: SendPushArgs): Promise<{ ref: FirebaseFirestore.DocumentReference; shouldSendPush: boolean }> {
   const { audience, uid, title, body, route } = args;
   const inbox = db.collection(collectionFor(audience)).doc(uid).collection("notifications");
-  const payload = { title, body, type: route.type, target: route.target, rideId: route.rideId ?? null, requestId: route.requestId ?? null, chatId: route.chatId ?? null, isRead: false, createdAt: FieldValue.serverTimestamp() };
+  const payload = { workspace: currentWorkspace(), title, body, type: route.type, target: route.target, rideId: route.rideId ?? null, requestId: route.requestId ?? null, chatId: route.chatId ?? null, isRead: false, createdAt: FieldValue.serverTimestamp() };
   if (args.notificationId) {
     const ref = inbox.doc(args.notificationId);
     try { await ref.create({ ...payload, pushStatus: "pending" }); }

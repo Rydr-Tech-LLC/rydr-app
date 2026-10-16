@@ -1,7 +1,7 @@
 import { refreshDriverVehicleEligibility } from "../services/refreshDriverVehicleEligibility";
 import { evaluateDriverCompliance } from "../services/driverCompliancePolicy";
 import { evaluatePremiumVehicle, availablePremiumRideTypes } from "../services/premiumVehiclePolicy";
-import { onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentWritten } from "../workspaceFunctions";
 import { db, FieldValue } from "../admin";
 
 export const onDriverPublicProfileProjection = onDocumentWritten("drivers/{uid}", async (event) => {

@@ -1,10 +1,13 @@
 "use client";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import {useWorkspace} from "./WorkspaceContext";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
+import { usePathname } from "next/navigation";
 import { useTransition } from "react";
 import { ChevronRight, RefreshCw, Search } from "lucide-react";
 export default function WorkspaceHeader({ role }: { role: string }) {
-  const path = usePathname();
+  const workspace=useWorkspace();
+  const path = usePathname().replace(/^\/workspaces\/(test|live-beta)/, "");
   const router = useRouter();
   const [pending, start] = useTransition();
   const parts = path.split("/").filter(Boolean);
@@ -39,7 +42,7 @@ export default function WorkspaceHeader({ role }: { role: string }) {
           </span>
         ))}
       </nav>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2"><span className="rounded-full bg-purple-50 px-3 py-1 text-[10px] font-semibold text-purple-800">{workspace === "test" ? "TEST · Simulated" : "LIVE BETA"}</span>
         {role !== "marketing" && (
           <Link
             href="/search"

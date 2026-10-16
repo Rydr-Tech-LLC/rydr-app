@@ -1,7 +1,8 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+
 
 export default function PromotionActions({ id, status }: { id: string; status: string }) {
   const router = useRouter();

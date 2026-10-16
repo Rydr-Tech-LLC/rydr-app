@@ -1,12 +1,12 @@
-import Link from "next/link";
-import { adminDb } from "@/lib/firebaseAdmin";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import StatCard from "@/components/StatCard";
 
 export const dynamic = "force-dynamic";
 
 async function count(collection: string, filter?: (q: any) => any) {
   try {
-    let ref: any = adminDb.collection(collection);
+    let ref: any = (await getWorkspaceDb()).collection(collection);
     if (filter) ref = filter(ref);
     const snap = await ref.count().get();
     return snap.data().count as number;
@@ -36,7 +36,7 @@ export default async function DashboardPage() {
     count("driver_status", (q) => q.where("isOnline", "==", true)),
   ]);
 
-  const recentActivity = await adminDb
+  const recentActivity = await (await getWorkspaceDb())
     .collection("audits")
     .orderBy("createdAt", "desc")
     .limit(8)

@@ -1,5 +1,5 @@
-import Link from "next/link";
-import { adminDb } from "@/lib/firebaseAdmin";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import type { SafetyReport } from "@/lib/types";
 import { toDateSafe } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
@@ -8,7 +8,7 @@ import ReportActions from "./ReportActions";
 export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
-  const snap = await adminDb
+  const snap = await (await getWorkspaceDb())
     .collection("safetyReports")
     .orderBy("createdAt", "desc")
     .limit(200)

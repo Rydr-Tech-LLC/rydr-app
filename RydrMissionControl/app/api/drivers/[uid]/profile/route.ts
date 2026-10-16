@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
+import { adminAuth, getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 
 type ProfilePayload = {
@@ -41,7 +41,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ uid
   const body = (await request.json().catch(() => null)) as ProfilePayload | null;
   if (!body) return NextResponse.json({ error: "Invalid profile payload." }, { status: 400 });
 
-  const driverRef = adminDb.collection("drivers").doc(params.uid);
+  const driverRef = (await getWorkspaceDb()).collection("drivers").doc(params.uid);
   const driverSnap = await driverRef.get();
   if (!driverSnap.exists) return NextResponse.json({ error: "Driver not found." }, { status: 404 });
 

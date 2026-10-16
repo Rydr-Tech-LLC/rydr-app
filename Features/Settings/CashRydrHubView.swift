@@ -339,7 +339,7 @@ private final class CashRydrHubVM: ObservableObject {
 
     private var cashHubTermsVersion = "legacy"
     private let favoriteDriverLimit = 10
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private var requestListener: ListenerRegistration?
     private var responseListeners: [String: ListenerRegistration] = [:]
     private var messageListeners: [String: ListenerRegistration] = [:]

@@ -428,7 +428,7 @@ private struct CommunityEventsService {
             throw CommunityEventsError.badURL
         }
 
-        var request = URLRequest(url: url)
+        var request = RydrWorkspace.urlRequest(url: url)
         request.timeoutInterval = 18
 
         let (data, response) = try await URLSession.shared.data(for: request)

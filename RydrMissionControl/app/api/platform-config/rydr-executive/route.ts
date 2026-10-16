@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 
-const configRef = () => adminDb.collection("platformConfig").doc("rydrExecutive");
+const configRef = async () => (await getWorkspaceDb()).collection("platformConfig").doc("rydrExecutive");
 
 export async function GET() {
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const snap = await configRef().get();
+  const snap = await (await configRef()).get();
   const data = snap.data() ?? {};
 
   return NextResponse.json({
@@ -30,14 +30,14 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "enabled must be a boolean" }, { status: 400 });
   }
 
-  const current = await configRef().get();
+  const current = await (await configRef()).get();
   if (body.enabled && current.data()?.fundingApproved !== true) {
     return NextResponse.json({ error: "Executive remains paused until funding is approved. Driver document approval does not enable the service." }, { status: 409 });
   }
   const enabled = body.enabled;
   const reason = typeof body.reason === "string" ? body.reason : undefined;
 
-  await configRef().set(
+  await (await configRef()).set(
     {
       enabled,
       betaPaused: !enabled,

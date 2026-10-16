@@ -10,7 +10,7 @@ import {
   type CampusPriority,
   type CampusStatus
 } from "@/lib/campusGrowth";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { getCampusGrowthSession } from "@/lib/session";
 
 const PRIORITIES: CampusPriority[] = ["low", "medium", "high"];
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
 
   const priority = PRIORITIES.includes(body.priority) ? body.priority : "medium";
   const status = STATUSES.includes(body.status) ? body.status : "researching";
-  const doc = await adminDb.collection(campusCollections.campuses).add({
+  const doc = await (await getWorkspaceDb()).collection(campusCollections.campuses).add({
     name,
     city: cleanText(body.city, 100),
     state: cleanText(body.state, 40).toUpperCase(),

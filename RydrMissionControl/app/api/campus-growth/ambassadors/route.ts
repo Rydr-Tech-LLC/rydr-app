@@ -10,7 +10,7 @@ import {
   splitTags,
   type AmbassadorStatus
 } from "@/lib/campusGrowth";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { getCampusGrowthSession } from "@/lib/session";
 
 const STATUSES: AmbassadorStatus[] = ["prospect", "interview", "accepted", "active", "inactive"];
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
   const campus = await loadCampus(body.campusId);
   const status = STATUSES.includes(body.status) ? body.status : "prospect";
 
-  const doc = await adminDb.collection(campusCollections.ambassadors).add({
+  const doc = await (await getWorkspaceDb()).collection(campusCollections.ambassadors).add({
     campusId: campus.id,
     campusName: campus.name,
     name,
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
 async function loadCampus(campusId: unknown) {
   const id = cleanText(campusId, 120);
   if (!id) return { id: "", name: "" };
-  const snap = await adminDb.collection(campusCollections.campuses).doc(id).get();
+  const snap = await (await getWorkspaceDb()).collection(campusCollections.campuses).doc(id).get();
   if (!snap.exists) return { id: "", name: "" };
   const data = snap.data() as { name?: string };
   return { id: snap.id, name: data.name ?? "" };

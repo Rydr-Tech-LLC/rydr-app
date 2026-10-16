@@ -1,6 +1,7 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 
-import { useRouter } from "next/navigation";
+
 import { FormEvent, useState } from "react";
 import StatusPill from "@/components/StatusPill";
 import type { MissionControlRole } from "@/lib/missionControlAccess";

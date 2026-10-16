@@ -39,7 +39,7 @@ enum DriverRideChatError: LocalizedError {
 }
 
 final class DriverRideChatService {
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
 
     func createOrInitializeChat(rideId: String, riderId: String, driverId: String) async throws {
         try requireParticipant(riderId: riderId, driverId: driverId)

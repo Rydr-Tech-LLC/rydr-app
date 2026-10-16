@@ -81,7 +81,7 @@ enum SupportTicketServiceError: LocalizedError {
 }
 
 final class SupportTicketService {
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
 
     func createTicket(_ draft: SupportTicketDraft) async throws -> SupportTicket {
         let userId = try currentUserId()
@@ -244,7 +244,7 @@ final class SupportTicketService {
 
     private func backend(path: String, body: [String: Any]) async throws -> [String: Any] {
         guard let raw=Bundle.main.object(forInfoDictionaryKey:"RYDR_BACKEND_BASE_URL") as? String,let base=URL(string:raw),let url=URL(string:path,relativeTo:base),let user=Auth.auth().currentUser else{throw SupportTicketServiceError.notSignedIn}
-        var request=URLRequest(url:url);request.httpMethod="POST";request.setValue("application/json",forHTTPHeaderField:"Content-Type");request.setValue("Bearer \(try await user.getIDToken())",forHTTPHeaderField:"Authorization");request.httpBody=try JSONSerialization.data(withJSONObject:body)
+        var request=RydrWorkspace.urlRequest(url:url);request.httpMethod="POST";request.setValue("application/json",forHTTPHeaderField:"Content-Type");request.setValue("Bearer \(try await user.getIDToken())",forHTTPHeaderField:"Authorization");request.httpBody=try JSONSerialization.data(withJSONObject:body)
         let(data,response)=try await URLSession.shared.data(for:request);guard let http=response as? HTTPURLResponse,(200..<300).contains(http.statusCode) else{throw NSError(domain:"SupportTicketService",code:(response as? HTTPURLResponse)?.statusCode ?? -1,userInfo:[NSLocalizedDescriptionKey:"Support request failed."])}
         return (try JSONSerialization.jsonObject(with:data) as? [String:Any]) ?? [:]
     }

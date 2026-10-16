@@ -74,5 +74,11 @@ function lazy<T extends object>(factory: () => T): T {
 }
 
 export const adminAuth: Auth = lazy(() => getAuth(getAdminApp()));
-export const adminDb: Firestore = lazy(() => getFirestore(getAdminApp()));
+export function getControlDb():Firestore {return getFirestore(getAdminApp());}
 export const adminStorage: Storage = lazy(() => getStorage(getAdminApp()));
+
+/** Each request resolves its workspace before obtaining privileged database access. */
+export async function getWorkspaceDb():Promise<Firestore>{
+ const {currentWorkspace}=await import("./workspace");
+ return getFirestore(getAdminApp(),(await currentWorkspace()) === "test" ? "(default)" : "live-beta");
+}

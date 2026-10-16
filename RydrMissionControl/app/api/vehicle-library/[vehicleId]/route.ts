@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { evaluatePremiumVehicle } from "../../../../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
 import { getAdminSession } from "@/lib/session";
 import { writeAuditLog } from "@/lib/auditLog";
@@ -109,7 +109,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ vehi
 
   const pendingPrestine: { uid: string; name: string; issues: string[] }[] = [];
   if (entry.eligibleRideTypes?.includes("Rydr Prestine")) {
-    const drivers = await adminDb.collection("drivers").where("vehicle.libraryVehicleId", "==", entry.vehicleId).limit(1000).get();
+    const drivers = await (await getWorkspaceDb()).collection("drivers").where("vehicle.libraryVehicleId", "==", entry.vehicleId).limit(1000).get();
     for (const doc of drivers.docs) {
       const driver = doc.data();
       const assessment = evaluatePremiumVehicle(driver);

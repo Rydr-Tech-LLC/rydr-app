@@ -3,7 +3,7 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { discoverCampusLeads, discoveryFingerprint } from "@/lib/ai/campusGrowthAI";
 import { writeAuditLog } from "@/lib/auditLog";
 import { campusCollections, cleanText, listCampuses } from "@/lib/campusGrowth";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { getCampusGrowthSession } from "@/lib/session";
 
 const DISCOVERY_RATE_LIMIT = new Map<string, number[]>();
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
       const timelineCreatedAt = Timestamp.now();
       const campus = campusByName.get(lead.campusName.toLowerCase());
       const id = discoveryFingerprint(lead);
-      const ref = adminDb.collection(campusCollections.discoveredLeads).doc(id);
+      const ref = (await getWorkspaceDb()).collection(campusCollections.discoveredLeads).doc(id);
       const existing = await ref.get();
       if (existing.exists && existing.data()?.reviewStatus === "approved") continue;
 

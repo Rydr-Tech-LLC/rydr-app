@@ -1,4 +1,4 @@
-import { onObjectFinalized } from "firebase-functions/v2/storage";
+import { onObjectFinalized } from "../workspaceFunctions";
 import { reviewUploadedDocument } from "../services/documentReviewService";
 
 export const onDocumentUploadedForReview = onObjectFinalized(

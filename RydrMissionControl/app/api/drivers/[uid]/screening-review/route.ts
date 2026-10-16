@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { getAdminSession } from "@/lib/session";
 import { writeAuditLog } from "@/lib/auditLog";
 export async function POST(request: NextRequest, props: { params: Promise<{ uid: string }> }) {
@@ -12,9 +12,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
   const completed = typeof input.completedDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.completedDate) ? Date.parse(`${input.completedDate}T12:00:00Z`) : NaN;
   if (input.passed !== true || !reportReference || !Number.isFinite(completed) || completed > Date.now() || completed + 366 * 86400000 <= Date.now()) return NextResponse.json({ error: "A reviewed passing report and current completion date are required" }, { status: 422 });
   if (new Date(completed).toISOString().slice(0, 10) !== input.completedDate) return NextResponse.json({ error: "Invalid completion date" }, { status: 422 });
-  const ref = adminDb.collection("drivers").doc(uid);
-  await adminDb.runTransaction(async tx => {
-    const [snap, config] = await Promise.all([tx.get(ref), tx.get(adminDb.collection("platformConfig").doc("driverCompliance"))]);
+  const ref = (await getWorkspaceDb()).collection("drivers").doc(uid);
+  await (await getWorkspaceDb()).runTransaction(async tx => {
+    const [snap, config] = await Promise.all([tx.get(ref), tx.get((await getWorkspaceDb()).collection("platformConfig").doc("driverCompliance"))]);
     if (!snap.exists) throw new Error("Driver not found");
     tx.update(ref, { backgroundScreening: { status: "passed", provider: "manual_report_review", reportReference, completedAt: Timestamp.fromMillis(completed), validUntil: Timestamp.fromMillis(completed + 366 * 86400000), requirementVersion: String(config.data()?.backgroundCheckRequirementVersion ?? "open-pilot-v1"), reviewedBy: session.uid, reviewedAt: FieldValue.serverTimestamp() }, backgroundCheckStatus: "passed", backgroundCheckPassed: true, backgroundCheckCompletedAt: Timestamp.fromMillis(completed), betaBackgroundCheckBypassEnabled: false, updatedAt: FieldValue.serverTimestamp() });
   });

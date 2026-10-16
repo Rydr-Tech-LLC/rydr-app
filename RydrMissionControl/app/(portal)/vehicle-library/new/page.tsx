@@ -1,4 +1,4 @@
-import Link from "next/link";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
 import NewVehicleForm from "./NewVehicleForm";
 
 export default function NewVehicleLibraryEntryPage() {

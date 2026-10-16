@@ -1,5 +1,5 @@
-import Link from "next/link";
-import { adminDb } from "@/lib/firebaseAdmin";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import StatusPill from "@/components/StatusPill";
 import { listPromotions } from "@/lib/promotions";
 import PromotionActions from "./PromotionActions";
@@ -15,12 +15,12 @@ export default async function PromotionsPage({
   const all = await listPromotions();
   const promotions = all.filter((p) => !audience || p.audience === audience);
   const [issues, fundingIssues] = await Promise.all([
-    adminDb
+    (await getWorkspaceDb())
       .collection("promotionRedemptions")
       .where("status", "in", ["needs_review", "dispatching", "pending_payout"])
       .limit(50)
       .get(),
-    adminDb
+    (await getWorkspaceDb())
       .collection("rides")
       .where("promoSubsidyTransferStatus", "in", [
         "failed",

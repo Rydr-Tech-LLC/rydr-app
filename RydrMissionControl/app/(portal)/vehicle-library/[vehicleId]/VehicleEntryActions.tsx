@@ -1,8 +1,9 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 
 import { useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
+
 
 export default function VehicleEntryActions({ vehicleId }: { vehicleId: string }) {
   const router = useRouter();

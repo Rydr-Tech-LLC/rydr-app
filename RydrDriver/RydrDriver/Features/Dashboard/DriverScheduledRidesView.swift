@@ -38,7 +38,7 @@ private final class DriverScheduledRidesVM: ObservableObject {
     @Published var workingIDs: Set<String> = []
     @Published var errorMessage: String?
 
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private var opportunityListener: ListenerRegistration?
     private var pendingSelectionListener: ListenerRegistration?
     private var assignmentListener: ListenerRegistration?

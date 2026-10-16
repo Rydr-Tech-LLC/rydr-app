@@ -1,4 +1,4 @@
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { toDateSafe } from "@/lib/format";
 
 type SubjectKind = "driver" | "rider";
@@ -130,7 +130,7 @@ export default async function TripSafetyAnalytics({ uid, kind }: { uid: string; 
 
 async function loadRides(uid: string, kind: SubjectKind): Promise<RideRecord[]> {
   const field = kind === "driver" ? "driverId" : "riderId";
-  const snap = await adminDb.collection("rides").where(field, "==", uid).limit(50).get().catch(() => null);
+  const snap = await (await getWorkspaceDb()).collection("rides").where(field, "==", uid).limit(50).get().catch(() => null);
   if (!snap) return [];
   return snap.docs
     .map((doc) => ({ ...(doc.data() as RideRecord), id: doc.id }))
@@ -138,7 +138,7 @@ async function loadRides(uid: string, kind: SubjectKind): Promise<RideRecord[]> 
 }
 
 async function summarizeRide(ride: RideRecord): Promise<RideSafetySummary> {
-  const telemetrySnap = await adminDb
+  const telemetrySnap = await (await getWorkspaceDb())
     .collection("rides")
     .doc(ride.id)
     .collection("telemetry")

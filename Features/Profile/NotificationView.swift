@@ -56,7 +56,7 @@ final class RiderNotificationInboxViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
 
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private let defaults = UserDefaults.standard
     private var riderListener: ListenerRegistration?
     private var announcementListener: ListenerRegistration?

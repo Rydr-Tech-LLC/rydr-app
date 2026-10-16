@@ -1,4 +1,4 @@
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import type { AccountDeletionRequestRecord } from "@/lib/types";
 import { toDateSafe } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
@@ -7,7 +7,7 @@ import AccountDeletionActions from "./AccountDeletionActions";
 export const dynamic = "force-dynamic";
 
 export default async function AccountDeletionsPage() {
-  const snap = await adminDb
+  const snap = await (await getWorkspaceDb())
     .collection("accountDeletionRequests")
     .orderBy("requestedAt", "desc")
     .limit(200)

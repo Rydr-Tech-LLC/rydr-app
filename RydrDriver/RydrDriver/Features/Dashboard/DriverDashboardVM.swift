@@ -224,7 +224,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
     private let locationManager = CLLocationManager()
     private var locationTimer: Timer?
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private var driverListener: ListenerRegistration?
     private var requestListener: ListenerRegistration?
     private var mapRequestBlipListener: ListenerRegistration?

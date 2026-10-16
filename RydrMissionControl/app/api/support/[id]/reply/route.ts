@@ -2,7 +2,7 @@ import { validSupportRequest } from "@/lib/workspaceReporting";
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 
 // Writes admin replies with the Admin SDK so they bypass the client-facing
@@ -28,7 +28,7 @@ export async function POST(
     );
   }
 
-  const ticketRef = adminDb.collection("supportTickets").doc(params.id);
+  const ticketRef = (await getWorkspaceDb()).collection("supportTickets").doc(params.id);
   const ticketSnap = await ticketRef.get();
   if (!ticketSnap.exists)
     return NextResponse.json({ error: "Ticket not found" }, { status: 404 });

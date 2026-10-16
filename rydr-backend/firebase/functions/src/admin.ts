@@ -1,3 +1,4 @@
+import {currentWorkspace} from "./services/workspaceRuntime";
 import { getAuth } from "firebase-admin/auth";
 import { App, getApps, initializeApp } from "firebase-admin/app";
 import { FieldValue, Firestore, Timestamp, getFirestore } from "firebase-admin/firestore";
@@ -15,7 +16,7 @@ function app(): App {
 }
 
 function firestore(): Firestore {
-  return getFirestore(app());
+  return getFirestore(app(),currentWorkspace()==="test"?"(default)":"live-beta");
 }
 
 function firebaseStorage(): Storage {

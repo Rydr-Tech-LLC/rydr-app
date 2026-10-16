@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { writeAuditLog } from "@/lib/auditLog";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { requireAdminSession } from "@/lib/session";
 import { notificationService } from "@/src/services/notifications/NotificationService";
 
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     return NextResponse.json({ error: "A rejection reason is required." }, { status: 400 });
   }
 
-  const waitlistRef = adminDb.collection("betaWaitlist").doc(params.id);
+  const waitlistRef = (await getWorkspaceDb()).collection("betaWaitlist").doc(params.id);
   const snap = await waitlistRef.get();
   if (!snap.exists) {
     return NextResponse.json({ error: "Waitlist application not found." }, { status: 404 });
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
   await waitlistRef.set(update, { merge: true });
 
   if (role && phoneNumber) {
-    const inviteRef = adminDb.collection("betaInvites").doc(role).collection("phones").doc(phoneNumber);
+    const inviteRef = (await getWorkspaceDb()).collection("betaInvites").doc(role).collection("phones").doc(phoneNumber);
     if (decision === "approved") {
       await inviteRef.set(
         {

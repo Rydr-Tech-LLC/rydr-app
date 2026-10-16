@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
 
 interface Result {
   uid: string;

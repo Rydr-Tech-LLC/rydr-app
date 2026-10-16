@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentWritten } from "../workspaceFunctions";
 import { db, FieldValue } from "../admin";
 const signature = (v: any) => JSON.stringify([v?.vin, v?.plate, v?.make, v?.model, v?.year, v?.color]);
 export const onDriverVehicleHistoryChanged = onDocumentWritten({ document: "drivers/{uid}", retry: true }, async event => {

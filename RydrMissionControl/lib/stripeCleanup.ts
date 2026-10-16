@@ -1,3 +1,4 @@
+import {workspaceServiceURL} from "@/lib/workspace";
 // Shared helper for telling stripe-backend to deactivate/clean up a user's
 // Stripe records (Customer + Connect account) from an admin-initiated flow.
 // Used by both the account-deletion request queue (anonymize) and the
@@ -25,7 +26,7 @@ export async function cleanupStripeAccount(
     throw new Error("Stripe account cleanup is not configured");
   }
 
-  const res = await fetch(`${base.replace(/\/+$/, "")}/admin/cleanup-account`, {
+  const res = await fetch(`${await workspaceServiceURL(base)}/admin/cleanup-account`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

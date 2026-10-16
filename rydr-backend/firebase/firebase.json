@@ -1,8 +1,16 @@
 {
-  "firestore": {
-    "rules": "firestore.rules",
-    "indexes": "firestore.indexes.json"
-  },
+  "firestore": [
+    {
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json",
+      "database": "(default)"
+    },
+    {
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json",
+      "database": "live-beta"
+    }
+  ],
   "storage": {
     "rules": "storage.rules"
   },
@@ -10,8 +18,15 @@
     {
       "source": "functions",
       "codebase": "default",
-      "ignore": ["node_modules", ".git", "*.log", "*.local"],
-      "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"]
+      "ignore": [
+        "node_modules",
+        ".git",
+        "*.log",
+        "*.local"
+      ],
+      "predeploy": [
+        "npm --prefix \"$RESOURCE_DIR\" run build"
+      ]
     }
   ]
 }

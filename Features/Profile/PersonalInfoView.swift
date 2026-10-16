@@ -82,7 +82,7 @@ struct PersonalInfoView: View {
 
     private func load() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        Firestore.firestore().collection("riders").document(uid).getDocument { snap, _ in
+        RydrWorkspace.firestore.collection("riders").document(uid).getDocument { snap, _ in
             guard let d = snap?.data() else { return }
             var i = RiderInfo.empty
             i.firstName      = d["firstName"] as? String ?? ""

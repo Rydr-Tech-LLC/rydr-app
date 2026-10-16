@@ -8,7 +8,7 @@
 // anything beyond clicking Approve/Reject/Needs Attention in Mission
 // Control.
 
-import { onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { onDocumentUpdated } from "../workspaceFunctions";
 import { sendPushToUser } from "../services/notificationSender";
 
 interface DriverDoc {

@@ -1,4 +1,4 @@
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import type { DriverRecord, RiderRecord } from "@/lib/types";
 import { driverFullName, fullName } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
@@ -7,8 +7,8 @@ export const dynamic = "force-dynamic";
 
 export default async function BetaTestersPage() {
   const [driverSnap, riderSnap] = await Promise.all([
-    adminDb.collection("drivers").limit(500).get(),
-    adminDb.collection("riders").limit(500).get()
+    (await getWorkspaceDb()).collection("drivers").limit(500).get(),
+    (await getWorkspaceDb()).collection("riders").limit(500).get()
   ]);
 
   const drivers = driverSnap.docs.map((doc) => ({ ...(doc.data() as DriverRecord), uid: doc.id }));

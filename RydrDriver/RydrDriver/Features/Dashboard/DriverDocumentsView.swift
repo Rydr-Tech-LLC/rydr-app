@@ -191,7 +191,7 @@ struct DriverDocumentsView: View {
 
         isLoading = true
         listener?.remove()
-        listener = Firestore.firestore().collection("drivers").document(uid).addSnapshotListener { doc, error in
+        listener = RydrWorkspace.firestore.collection("drivers").document(uid).addSnapshotListener { doc, error in
             Task { @MainActor in
                 isLoading = false
                 if let error {

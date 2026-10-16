@@ -265,7 +265,7 @@ private struct DriverProfileSummary {
 private final class DriverProfileViewModel: ObservableObject {
     @Published var profile = DriverProfileSummary()
 
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private var listener: ListenerRegistration?
 
     deinit {

@@ -12,7 +12,7 @@ import FirebaseAppCheck
 import FirebaseFirestore
 
 final class FirestoreRideService: RideService, @unchecked Sendable {
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private var activeMatchSessionId: String?
     private var activeQuoteFingerprints: [String: String] = [:]
 
@@ -113,7 +113,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         }
 
         let token = try await user.getIDToken()
-        var request = URLRequest(url: url)
+        var request = RydrWorkspace.urlRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -169,7 +169,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             "dropoffCoordinate": ["lat": dropoffCoordinate.latitude, "lng": dropoffCoordinate.longitude]
         ]
         if let preferences = riderPreferences?.rideRequestPayload { body["riderPreferences"] = preferences }
-        var request = URLRequest(url: url)
+        var request = RydrWorkspace.urlRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
@@ -271,7 +271,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             throw URLError(.badURL)
         }
         let token = try await user.getIDToken()
-        var request = URLRequest(url: url)
+        var request = RydrWorkspace.urlRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -444,7 +444,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
               let base = URL(string: rawBase),
               let url = URL(string: "/rides/\(rideId)/transition", relativeTo: base) else { throw URLError(.badURL) }
         let token = try await user.getIDToken()
-        var request = URLRequest(url: url)
+        var request = RydrWorkspace.urlRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

@@ -1,6 +1,7 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+
 const documents = [
   ["driverLicense", "Current Georgia driver license", true],
   ["backgroundScreening", "Annual criminal, driving-history and sex-offender screening", true],

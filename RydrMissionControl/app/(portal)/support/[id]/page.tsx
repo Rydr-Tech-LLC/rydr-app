@@ -1,6 +1,6 @@
-import Link from "next/link";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
 import { notFound } from "next/navigation";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import type { SupportMessageRecord, SupportTicketRecord } from "@/lib/types";
 import { toDateSafe } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
@@ -12,7 +12,7 @@ export default async function SupportTicketPage(props: {
   params: Promise<{ id: string }>;
 }) {
   const params = await props.params;
-  const ticketRef = adminDb.collection("supportTickets").doc(params.id);
+  const ticketRef = (await getWorkspaceDb()).collection("supportTickets").doc(params.id);
   const ticketSnap = await ticketRef.get();
   if (!ticketSnap.exists) notFound();
   const ticket = {

@@ -38,6 +38,7 @@ struct DriverPayoutAccountView: View {
         errorMessage = nil
         do {
             let config: Config = try await DriverConnectAPI.get("config")
+            guard config.publishableKey.hasPrefix(RydrWorkspace.identifier == "test" ? "pk_test_" : "pk_live_") else { throw URLError(.badServerResponse) }
             let apiClient = STPAPIClient(publishableKey: config.publishableKey)
             // Preflight makes backend/session errors visible instead of leaving a spinner.
             let first: Session = try await DriverConnectAPI.session(purpose: purpose.rawValue)
@@ -106,10 +107,10 @@ private struct EmbeddedDriverAccount: UIViewControllerRepresentable {
 enum DriverConnectAPI {
     static let base = URL(string: "https://rydr-stripe-backend.onrender.com")!
     static func get<T: Decodable>(_ path: String) async throws -> T {
-        try await send(URLRequest(url: base.appendingPathComponent(path)))
+        try await send(RydrWorkspace.urlRequest(url: base.appendingPathComponent(path)))
     }
     fileprivate static func session(purpose: String) async throws -> DriverPayoutAccountView.Session {
-        var request = URLRequest(url: base.appendingPathComponent("connect/account-session"))
+        var request = RydrWorkspace.urlRequest(url: base.appendingPathComponent("connect/account-session"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["purpose": purpose])

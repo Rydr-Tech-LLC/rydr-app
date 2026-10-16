@@ -1,7 +1,7 @@
 import "server-only";
 
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 
 export type CampusPriority = "low" | "medium" | "high";
 export type CampusStatus = "researching" | "active" | "paused" | "archived";
@@ -243,13 +243,13 @@ export const CAMPUS_OUTREACH_BCC_EMAIL = process.env.CAMPUS_OUTREACH_BCC_EMAIL |
 
 export async function campusGrowthCounts() {
   const [campuses, orgs, events, drafts, ambassadors, pendingDiscoveredLeads, approvedDiscoveredLeads] = await Promise.all([
-    adminDb.collection(CAMPUS_COLLECTION).count().get(),
-    adminDb.collection(ORG_COLLECTION).count().get(),
-    adminDb.collection(EVENT_COLLECTION).count().get(),
-    adminDb.collection(OUTREACH_COLLECTION).where("status", "==", "draft").count().get(),
-    adminDb.collection(AMBASSADOR_COLLECTION).count().get(),
-    adminDb.collection(DISCOVERED_LEAD_COLLECTION).where("reviewStatus", "==", "pending_review").count().get(),
-    adminDb.collection(DISCOVERED_LEAD_COLLECTION).where("reviewStatus", "==", "approved").count().get()
+    (await getWorkspaceDb()).collection(CAMPUS_COLLECTION).count().get(),
+    (await getWorkspaceDb()).collection(ORG_COLLECTION).count().get(),
+    (await getWorkspaceDb()).collection(EVENT_COLLECTION).count().get(),
+    (await getWorkspaceDb()).collection(OUTREACH_COLLECTION).where("status", "==", "draft").count().get(),
+    (await getWorkspaceDb()).collection(AMBASSADOR_COLLECTION).count().get(),
+    (await getWorkspaceDb()).collection(DISCOVERED_LEAD_COLLECTION).where("reviewStatus", "==", "pending_review").count().get(),
+    (await getWorkspaceDb()).collection(DISCOVERED_LEAD_COLLECTION).where("reviewStatus", "==", "approved").count().get()
   ]);
   return {
     campuses: campuses.data().count,
@@ -291,32 +291,32 @@ export async function campusGrowthAnalytics() {
 }
 
 export async function listCampuses(limit = 100): Promise<CampusTarget[]> {
-  const snap = await adminDb.collection(CAMPUS_COLLECTION).orderBy("updatedAt", "desc").limit(limit).get();
+  const snap = await (await getWorkspaceDb()).collection(CAMPUS_COLLECTION).orderBy("updatedAt", "desc").limit(limit).get();
   return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<CampusTarget, "id">) }));
 }
 
 export async function listOrganizations(limit = 200): Promise<StudentOrganization[]> {
-  const snap = await adminDb.collection(ORG_COLLECTION).orderBy("relevanceScore", "desc").limit(limit).get();
+  const snap = await (await getWorkspaceDb()).collection(ORG_COLLECTION).orderBy("relevanceScore", "desc").limit(limit).get();
   return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<StudentOrganization, "id">) }));
 }
 
 export async function listCampusEvents(limit = 200): Promise<CampusEvent[]> {
-  const snap = await adminDb.collection(EVENT_COLLECTION).orderBy("startsAt", "desc").limit(limit).get();
+  const snap = await (await getWorkspaceDb()).collection(EVENT_COLLECTION).orderBy("startsAt", "desc").limit(limit).get();
   return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<CampusEvent, "id">) }));
 }
 
 export async function listOutreachDrafts(limit = 200): Promise<OutreachDraft[]> {
-  const snap = await adminDb.collection(OUTREACH_COLLECTION).orderBy("createdAt", "desc").limit(limit).get();
+  const snap = await (await getWorkspaceDb()).collection(OUTREACH_COLLECTION).orderBy("createdAt", "desc").limit(limit).get();
   return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<OutreachDraft, "id">) }));
 }
 
 export async function listAmbassadors(limit = 200): Promise<AmbassadorCandidate[]> {
-  const snap = await adminDb.collection(AMBASSADOR_COLLECTION).orderBy("updatedAt", "desc").limit(limit).get();
+  const snap = await (await getWorkspaceDb()).collection(AMBASSADOR_COLLECTION).orderBy("updatedAt", "desc").limit(limit).get();
   return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<AmbassadorCandidate, "id">) }));
 }
 
 export async function listDiscoveredCampusLeads(limit = 200): Promise<DiscoveredCampusLead[]> {
-  const snap = await adminDb.collection(DISCOVERED_LEAD_COLLECTION).orderBy("createdAt", "desc").limit(limit).get();
+  const snap = await (await getWorkspaceDb()).collection(DISCOVERED_LEAD_COLLECTION).orderBy("createdAt", "desc").limit(limit).get();
   return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<DiscoveredCampusLead, "id">) }));
 }
 

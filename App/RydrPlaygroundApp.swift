@@ -19,7 +19,7 @@ struct RydrApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
+            RydrWorkspaceGate { Group {
                 #if DEBUG && targetEnvironment(simulator)
                 if ProcessInfo.processInfo.arguments.contains("-RydrPromotionsUITest") {
                     RiderPromotionPanel()
@@ -37,6 +37,7 @@ struct RydrApp: App {
             .onPreferenceChange(PrestineLightAppearancePreference.self) { prestineLightAppearance = $0 }
             .preferredColorScheme(prestineLightAppearance && session.selectedTab == .ride ? .light : RydrAppAppearance(rawValue: appAppearance)?.colorScheme)
             .hideKeyboardOnTap()
+            }
         }
     }
 

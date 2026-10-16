@@ -1136,7 +1136,7 @@ private final class DriverCommunityHubVM: ObservableObject {
     @Published var isLoadingEvents = false
     @Published var errorMessage: String?
 
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private var driverListener: ListenerRegistration?
 
     var hotspots: [DriverCommunityHotspot] {
@@ -1233,7 +1233,7 @@ private final class DriverCommunityHubVM: ObservableObject {
         ]
         guard let url = components?.url else { throw URLError(.badURL) }
 
-        var request = URLRequest(url: url)
+        var request = RydrWorkspace.urlRequest(url: url)
         request.timeoutInterval = 18
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {

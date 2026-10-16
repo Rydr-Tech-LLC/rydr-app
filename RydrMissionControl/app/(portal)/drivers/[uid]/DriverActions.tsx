@@ -1,7 +1,8 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+
 import type { ActiveRideSummary } from "@/lib/activeRideTypes";
 
 export default function DriverActions({

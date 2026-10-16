@@ -17,7 +17,7 @@ const { getAppCheck } = require("firebase-admin/app-check");
 
 // Keep the service layer's established `admin.firestore.Timestamp`-style API
 // while using Firebase Admin 14's modular entry points underneath.
-function firestoreFor(appInstance) { return getAdminFirestore(appInstance); }
+function firestoreFor(appInstance) { const {currentWorkspace}=require("../services/workspaceContext"); return getAdminFirestore(appInstance,currentWorkspace()==="test"?"(default)":"live-beta"); }
 firestoreFor.FieldValue = FieldValue;
 firestoreFor.GeoPoint = GeoPoint;
 firestoreFor.Timestamp = Timestamp;
@@ -59,7 +59,7 @@ function initializeFirebase() {
 
   if (admin.apps.length > 0) {
     app = admin.app();
-    db = admin.firestore();
+    db = getAdminFirestore(app);
     return { app, db };
   }
 
@@ -76,13 +76,14 @@ function initializeFirebase() {
   }
 
   app = admin.initializeApp(options);
-  db = admin.firestore();
+  db = getAdminFirestore(app);
 
   return { app, db };
 }
 
 function getFirestore() {
-  return initializeFirebase().db;
+  const {app}=initializeFirebase();
+  return firestoreFor(app);
 }
 
 function getStorageBucket() {
@@ -115,6 +116,7 @@ module.exports = {
   admin,
   initializeFirebase,
   getFirestore,
+  getControlFirestore: () => { const {app}=initializeFirebase(); return getAdminFirestore(app); },
   getStorageBucket,
   getStorageBucketsForReads
 };

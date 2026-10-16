@@ -1,8 +1,9 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 
 import VehicleSpecificationFields from "@/components/VehicleSpecificationFields";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+
 import type { VehicleBodyStyle, VehicleLibraryEntry } from "@/lib/vehicleLibrary";
 
 const BODY_STYLES: VehicleBodyStyle[] = ["sedan", "suv", "truck", "coupe", "hatchback", "minivan", "crossover", "wagon", "convertible", "van", "unknown"];

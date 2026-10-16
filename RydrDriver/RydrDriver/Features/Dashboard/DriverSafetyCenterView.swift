@@ -174,7 +174,7 @@ final class DriverSafetyCenterModel: ObservableObject {
     @Published var isLoading = true
     @Published var message: String?
 
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private var penaltyListener: ListenerRegistration?
     private var appealListener: ListenerRegistration?
     var hasInvestigationHold: Bool {

@@ -26,7 +26,11 @@ async function requireFirebaseAuth(req, res, next) {
 
   try {
     initializeFirebase();
-    const decoded = await admin.auth().verifyIdToken(match[1]);
+    const decoded = await admin.auth().verifyIdToken(match[1], true);
+    const user = await admin.auth().getUser(decoded.uid);
+    if (user.disabled) return res.status(403).json({error: "account_disabled"});
+    try {await require("../services/workspaceContext").assertAccountWorkspace(decoded.uid,user.phoneNumber);}
+    catch(error){return res.status(error.statusCode || 503).json({error:error.message});}
     req.firebaseUid = decoded.uid;
     req.firebaseToken = decoded;
     return next();

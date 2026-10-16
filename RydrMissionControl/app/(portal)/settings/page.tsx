@@ -1,7 +1,7 @@
 import DriverComplianceSettings from "./DriverComplianceSettings";
 import { redirect } from "next/navigation";
 import { getMissionControlSession } from "@/lib/session";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb, getControlDb } from "@/lib/firebaseAdmin";
 import { isMissionControlRole } from "@/lib/missionControlAccess";
 import AdminUsersPanel from "./AdminUsersPanel";
 import CashHubBetaToggle from "./CashHubBetaToggle";
@@ -26,9 +26,9 @@ export default async function SettingsPage() {
   }
 
   const [cashHubConfigSnap, executiveConfigSnap, adminUsersSnap] = await Promise.all([
-    adminDb.collection("platformConfig").doc("cashRydrHub").get().catch(() => null),
-    adminDb.collection("platformConfig").doc("rydrExecutive").get().catch(() => null),
-    adminDb.collection("missionControlAdmins").orderBy("email", "asc").limit(250).get().catch(() => null)
+    (await getWorkspaceDb()).collection("platformConfig").doc("cashRydrHub").get().catch(() => null),
+    (await getWorkspaceDb()).collection("platformConfig").doc("rydrExecutive").get().catch(() => null),
+    getControlDb().collection("missionControlAdmins").orderBy("email", "asc").limit(250).get().catch(() => null)
   ]);
   const cashHubConfig = cashHubConfigSnap?.data() ?? {};
   const executiveConfig = executiveConfigSnap?.data() ?? {};
@@ -52,7 +52,7 @@ export default async function SettingsPage() {
   const cashHubTermsVersion = typeof cashHubConfig.cashHubTermsVersion === "string" ? cashHubConfig.cashHubTermsVersion : null;
   const cashHubBillingEnabled = cashHubConfig.cashHubBillingEnabled === true;
   const rydrExecutiveEnabled = executiveConfig.enabled === true;
-  const driverCompliancePolicy = (await adminDb.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
+  const driverCompliancePolicy = (await (await getWorkspaceDb()).collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
 
   return (
     <div className="space-y-6">

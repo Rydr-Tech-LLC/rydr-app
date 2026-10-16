@@ -1,7 +1,8 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+
 
 const rewardGroups = [
   { value: "go_eco", label: "Rydr Go / Rydr Eco" },

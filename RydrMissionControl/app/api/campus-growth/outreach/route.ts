@@ -10,7 +10,7 @@ import {
   listOutreachDrafts,
   serverTimestamps
 } from "@/lib/campusGrowth";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { getCampusGrowthSession } from "@/lib/session";
 
 const TARGET_TYPES = ["organization", "event", "campus", "manual"] as const;
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "A valid recipient email is required for email drafts." }, { status: 400 });
   }
 
-  const doc = await adminDb.collection(campusCollections.outreach).add({
+  const doc = await (await getWorkspaceDb()).collection(campusCollections.outreach).add({
     targetType,
     targetId: cleanText(body.targetId, 160),
     campusId: cleanText(body.campusId, 160),

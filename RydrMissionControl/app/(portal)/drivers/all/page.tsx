@@ -1,7 +1,7 @@
 import { evaluateDriverCompliance } from "../../../../../rydr-backend/firebase/functions/src/services/driverCompliancePolicy";
 import DataTable from "@/components/DataTable";
-import Link from "next/link";
-import { adminDb } from "@/lib/firebaseAdmin";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import type { DriverRecord } from "@/lib/types";
 import { driverFullName, driverNameCollected } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
@@ -14,13 +14,13 @@ export const dynamic = "force-dynamic";
 
 export default async function AllDriversPage() {
   const [snap, configSnap, complianceSnap] = await Promise.all([
-    adminDb.collection("drivers").limit(500).get(),
-    adminDb
+    (await getWorkspaceDb()).collection("drivers").limit(500).get(),
+    (await getWorkspaceDb())
       .collection("platformConfig")
       .doc("cashRydrHub")
       .get()
       .catch(() => null),
-    adminDb.collection("platformConfig").doc("driverCompliance").get(),
+    (await getWorkspaceDb()).collection("platformConfig").doc("driverCompliance").get(),
   ]);
   const configData = configSnap?.data() ?? {};
   const cashHubGateConfig = {

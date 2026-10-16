@@ -6,7 +6,7 @@ function ref(path){return {collection:name=>({doc:id=>ref(`${path}/${name}/${id}
 const load=Module._load;
 Module._load=function(request,parent){
  if(parent?.filename.endsWith('driverVehicleHistory.js')){
-  if(request==='firebase-functions/v2/firestore')return {onDocumentWritten:(_opts,handler)=>handler};
+  if(request==='../workspaceFunctions')return {onDocumentWritten:(_opts,handler)=>handler};
   if(request==='../admin')return {db:{collection:name=>({doc:id=>ref(`${name}/${id}`)})},FieldValue:{serverTimestamp:()=>++timestamp}};
  }
  return load.apply(this,arguments);

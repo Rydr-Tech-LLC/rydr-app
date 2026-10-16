@@ -612,7 +612,7 @@ struct DriverLoginView: View {
     private func completePhoneLogin(for user: User) {
         let phone = user.phoneNumber ?? pendingPhone
 
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("drivers")
             .document(user.uid)
             .getDocument { snapshot, error in
@@ -640,7 +640,7 @@ struct DriverLoginView: View {
         // can't query it by phone field directly. Resolve via the dedicated phone->uid
         // pointer doc instead, then fetch the driver's own document by uid (a `get`,
         // which the rules allow for the owning uid or a verified-phone match).
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("driverPhoneIndex")
             .document(phone)
             .getDocument { snapshot, error in
@@ -672,7 +672,7 @@ struct DriverLoginView: View {
     }
 
     private func fetchDriverDocument(uid: String, signedInUser user: User) {
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("drivers")
             .document(uid)
             .getDocument { snapshot, error in
@@ -707,7 +707,7 @@ struct DriverLoginView: View {
     }
 
     private func loadDriverProfile(for user: User, fallbackEmail: String) {
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("drivers")
             .document(user.uid)
             .getDocument { snapshot, error in

@@ -1,4 +1,4 @@
-import { onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentWritten } from "../workspaceFunctions";
 import { sendPushToUser } from "../services/notificationSender";
 
 export const onCashHubBillingUpdated = onDocumentWritten("drivers/{driverId}/cashHubBilling/{periodId}", async (event) => {

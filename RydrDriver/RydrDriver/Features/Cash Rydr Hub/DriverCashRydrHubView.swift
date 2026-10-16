@@ -99,7 +99,7 @@ private final class DriverCashRydrHubVM: ObservableObject {
     @Published var isSavingTerms = false
 
     private var cashHubTermsVersion = "legacy"
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private var openRequestListener: ListenerRegistration?
     private var favoriteRequestListener: ListenerRegistration?
     private var scheduledRequestListener: ListenerRegistration?

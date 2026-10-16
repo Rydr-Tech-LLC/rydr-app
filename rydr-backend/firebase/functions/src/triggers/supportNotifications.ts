@@ -7,7 +7,7 @@
 // senderRole == "admin"). When that happens, notify whichever rider/driver
 // owns the ticket.
 
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated } from "../workspaceFunctions";
 import { db } from "../admin";
 import { sendPushToUser } from "../services/notificationSender";
 

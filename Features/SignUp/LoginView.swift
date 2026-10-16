@@ -632,7 +632,7 @@ struct LoginView: View {
     }
 
     private func completeEmailLogin(for user: User, fallbackEmail: String) {
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("riders")
             .document(user.uid)
             .getDocument { snapshot, error in
@@ -668,7 +668,7 @@ struct LoginView: View {
     private func completePhoneLogin(for user: User, credential: AuthCredential? = nil) {
         let phone = user.phoneNumber ?? formattedPhoneNumber
 
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("riders")
             .document(user.uid)
             .getDocument { snapshot, error in
@@ -692,7 +692,7 @@ struct LoginView: View {
     }
 
     private func lookupRiderByPhone(_ phone: String, signedInUser user: User, credential: AuthCredential?) {
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("riderPhoneIndex")
             .document(phone)
             .getDocument { snapshot, error in
@@ -715,7 +715,7 @@ struct LoginView: View {
     }
 
     private func fetchRiderDocument(uid: String, signedInUser user: User, credential: AuthCredential?) {
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("riders")
             .document(uid)
             .getDocument { snapshot, error in

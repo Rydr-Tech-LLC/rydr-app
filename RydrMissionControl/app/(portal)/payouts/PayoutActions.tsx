@@ -1,6 +1,7 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+
 export default function PayoutActions({jobId}:{jobId:string}) {
   const [busy,setBusy]=useState(false),[error,setError]=useState("");
   const router=useRouter();

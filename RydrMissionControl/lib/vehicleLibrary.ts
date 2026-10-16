@@ -1,10 +1,11 @@
+import { currentWorkspace } from "./workspace";
 import { bindPrestineLibrary } from "../../rydr-backend/firebase/functions/src/services/prestineLibraryPolicy";
 import { exactLibraryEntry, resolveSpecifications } from "../../rydr-backend/firebase/functions/src/services/vehicleSpecificationPolicy";
 import { normalizeSpecifications, xlCapacityAllowed } from "../../rydr-backend/firebase/functions/src/services/vehicleSpecificationPolicy";
 import { evaluatePremiumVehicle, availablePremiumRideTypes } from "../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
 import "server-only";
 import { FieldValue } from "firebase-admin/firestore";
-import { adminDb, adminStorage } from "./firebaseAdmin";
+import { getWorkspaceDb, adminStorage } from "./firebaseAdmin";
 
 // Mission Control's side of the Vehicle Library System. The Firestore
 // `vehicleLibrary` collection and `vehicle-library/` Storage layout here are
@@ -111,8 +112,8 @@ export function genericBodyVehicleId(bodyStyle: VehicleBodyStyle): string {
   return `${GENERIC_BODY_PREFIX}_${slugify(bodyStyle)}`;
 }
 
-function storagePathFor(make: string, model: string, year: number, fileName: string): string {
-  return `${STORAGE_ROOT}/${slugify(make)}/${slugify(model)}/${year}/${fileName}`;
+async function storagePathFor(make: string, model: string, year: number, fileName: string): Promise<string> {
+  return `${STORAGE_ROOT}/${await currentWorkspace()}/${slugify(make)}/${slugify(model)}/${year}/${fileName}`;
 }
 
 function normalizedText(value: string): string {
@@ -241,12 +242,12 @@ function withUrls(data: unknown, fallbackVehicleId?: string): VehicleLibraryEntr
   };
 }
 
-function collection() {
-  return adminDb.collection(COLLECTION);
+async function collection() {
+  return (await getWorkspaceDb()).collection(COLLECTION);
 }
 
 export async function getVehicleLibraryEntry(vehicleId: string): Promise<VehicleLibraryEntry | null> {
-  const snap = await collection().doc(vehicleId).get();
+  const snap = await (await collection()).doc(vehicleId).get();
   if (!snap.exists) return null;
   return withUrls(snap.data(), snap.id);
 }
@@ -263,7 +264,7 @@ export interface VehicleLibrarySearchFilters {
 }
 
 export async function searchVehicleLibrary(filters: VehicleLibrarySearchFilters): Promise<VehicleLibraryEntry[]> {
-  const snap = await collection().limit(filters.limit ?? 500).get();
+  const snap = await (await collection()).limit(filters.limit ?? 500).get();
   let entries = snap.docs.map((d) => withUrls(d.data(), d.id));
 
   if (filters.make) {
@@ -296,7 +297,7 @@ export async function searchVehicleLibrary(filters: VehicleLibrarySearchFilters)
 }
 
 export async function listVehicleLibrary(limit = 1000): Promise<VehicleLibraryEntry[]> {
-  const snap = await collection().limit(limit).get();
+  const snap = await (await collection()).limit(limit).get();
   return snap.docs.map((d) => withUrls(d.data(), d.id));
 }
 
@@ -321,7 +322,7 @@ export async function upsertVehicleLibraryEntry(
   if (eligibleRideTypes.includes("Rydr Prestine") && !["suv", "sedan"].includes(input.bodyStyle)) throw new Error("Prestine requires an SUV or Sedan body style; seating capacity does not determine body style.");
   const prestineRideType = eligibleRideTypes.includes("Rydr Prestine") ? input.bodyStyle === "suv" ? "Rydr Prestine SUV" as const : "Rydr Prestine Sedan" as const : null;
   const vehicleId = input.vehicleId ?? buildVehicleId(make, model, input.yearStart, input.yearEnd, trim);
-  const ref = collection().doc(vehicleId);
+  const ref = (await collection()).doc(vehicleId);
   const existing = await ref.get();
   const specifications = input.specifications === undefined ? existing.data()?.specifications ?? normalizeSpecifications({}, adminUid) : normalizeSpecifications(input.specifications, adminUid);
   if (eligibleRideTypes.includes("Rydr XL") && !xlCapacityAllowed({ ...specifications, source: specifications.verified ? "reviewed_library" : "unknown" })) throw new Error("XL requires verified seating for six riders plus the driver (7–8 total seats).");
@@ -375,14 +376,14 @@ export async function uploadVehicleImage(params: {
   data: Buffer;
   adminUid: string;
 }): Promise<VehicleLibraryEntry> {
-  const ref = collection().doc(params.vehicleId);
+  const ref = (await collection()).doc(params.vehicleId);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new Error(`Vehicle library entry "${params.vehicleId}" does not exist. Create it before uploading images.`);
   }
   const entry = snap.data() as VehicleLibraryEntry;
   const fileName = params.color ? `${slugify(params.color)}.webp` : "default.webp";
-  const path = storagePathFor(entry.make, entry.model, entry.yearStart, fileName);
+  const path = await storagePathFor(entry.make, entry.model, entry.yearStart, fileName);
 
   const file = bucket().file(path);
   await file.save(params.data, {
@@ -430,21 +431,21 @@ function matchingVehicleImagePath(entry: VehicleLibraryEntry, color?: VehicleCol
 }
 
 export async function backfillDriverVehicleImagesForEntry(entry: VehicleLibraryEntry, color?: VehicleColor): Promise<number> {
-  const snap = await adminDb.collection("drivers").limit(1000).get();
+  const snap = await (await getWorkspaceDb()).collection("drivers").limit(1000).get();
   let count = 0;
   let pendingWrites = 0;
-  let batch = adminDb.batch();
+  let batch = (await getWorkspaceDb()).batch();
 
   async function commitIfNeeded(force = false) {
     if (pendingWrites === 0) return;
     if (!force && pendingWrites < 450) return;
     await batch.commit();
-    batch = adminDb.batch();
+    batch = (await getWorkspaceDb()).batch();
     pendingWrites = 0;
   }
 
-  const libraryEntries = (await collection().limit(1000).get()).docs.map(doc => doc.data());
-  const executiveConfig = await adminDb.collection("platformConfig").doc("rydrExecutive").get();
+  const libraryEntries = (await (await collection()).limit(1000).get()).docs.map(doc => doc.data());
+  const executiveConfig = await (await getWorkspaceDb()).collection("platformConfig").doc("rydrExecutive").get();
   for (const doc of snap.docs) {
     const data = doc.data();
     const vehicle = data.vehicle && typeof data.vehicle === "object" && !Array.isArray(data.vehicle)
@@ -493,7 +494,7 @@ export async function backfillDriverVehicleImagesForEntry(entry: VehicleLibraryE
     batch.set(doc.ref, driverUpdate, { merge: true });
     pendingWrites += 1;
     if (imageUrl) batch.set(
-      adminDb.collection("publicDriverProfiles").doc(doc.id),
+      (await getWorkspaceDb()).collection("publicDriverProfiles").doc(doc.id),
       {
         vehicleColor: typeof vehicle.color === "string" ? vehicle.color : "",
         vehicleImageURL: imageUrl,
@@ -512,7 +513,7 @@ export async function backfillDriverVehicleImagesForEntry(entry: VehicleLibraryE
 }
 
 export async function deleteVehicleImage(params: { vehicleId: string; color?: VehicleColor; adminUid: string }): Promise<VehicleLibraryEntry> {
-  const ref = collection().doc(params.vehicleId);
+  const ref = (await collection()).doc(params.vehicleId);
   const snap = await ref.get();
   if (!snap.exists) {
     throw new Error(`Vehicle library entry "${params.vehicleId}" does not exist.`);
@@ -538,7 +539,7 @@ export async function deleteVehicleImage(params: { vehicleId: string; color?: Ve
 }
 
 export async function deleteVehicleLibraryEntry(vehicleId: string): Promise<void> {
-  const ref = collection().doc(vehicleId);
+  const ref = (await collection()).doc(vehicleId);
   const snap = await ref.get();
   if (!snap.exists) return;
   const entry = snap.data() as VehicleLibraryEntry;

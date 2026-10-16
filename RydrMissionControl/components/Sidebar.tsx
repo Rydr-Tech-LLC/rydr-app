@@ -1,7 +1,8 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
+import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   Users,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import {WorkspaceSwitcher} from "./WorkspaceContext";
 import type { MissionControlRole } from "@/lib/missionControlAccess";
 
 const CAMPUS_GROWTH_ITEMS = [
@@ -60,7 +62,9 @@ const NAV_ITEMS = [
   { href: "/riders", label: "Riders" },
   { href: "/promotions", label: "Promotions" },
   { href: "/campus-growth", label: "Campus Growth" },
-  { href: "/reports", label: "Reports" },
+  { href: "/rides", label: "Rides" },
+  { href: "/disputes", label: "Disputes" },
+  { href: "/reports", label: "Safety Flags" },
   { href: "/analytics", label: "Analytics" },
   { href: "/payment-failures", label: "Payment Failures" },
   { href: "/payouts", label: "Driver Payouts" },
@@ -80,7 +84,7 @@ export default function Sidebar({
   email: string | null;
   role: MissionControlRole;
 }) {
-  const pathname = usePathname();
+  const pathname = usePathname().replace(/^\/workspaces\/(test|live-beta)/, "");
   const router = useRouter();
   const drawer = useRef<HTMLElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
@@ -155,6 +159,7 @@ export default function Sidebar({
         </div>
       </div>
 
+      <WorkspaceSwitcher/>
       <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-3 pb-3">
         {navItems.map((item) => {
           const active =
@@ -164,7 +169,7 @@ export default function Sidebar({
                 !pathname?.startsWith("/drivers/all")
               : item.href !== "/dashboard" &&
                 pathname?.startsWith(item.href + "/"));
-          const Icon = NAV_ICONS[NAV_ITEMS.indexOf(item)];
+          const Icon = item.href === "/rides" ? Car : item.href === "/disputes" ? Flag : NAV_ICONS[Math.max(0, NAV_ITEMS.filter(i=>!["/rides","/disputes"].includes(i.href)).indexOf(item))];
           return (
             <div key={item.href}>
               <Link

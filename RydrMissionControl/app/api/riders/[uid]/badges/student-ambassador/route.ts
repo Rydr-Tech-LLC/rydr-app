@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 
 export async function POST(request: NextRequest, props: { params: Promise<{ uid: string }> }) {
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
     return NextResponse.json({ error: "Expected active to be true or false." }, { status: 400 });
   }
 
-  const riderRef = adminDb.collection("riders").doc(params.uid);
+  const riderRef = (await getWorkspaceDb()).collection("riders").doc(params.uid);
   const riderSnap = await riderRef.get();
   if (!riderSnap.exists) return NextResponse.json({ error: "Rider not found." }, { status: 404 });
 

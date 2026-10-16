@@ -1,4 +1,4 @@
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import type { RideRecord } from "@/lib/types";
 import { toDateSafe } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
@@ -7,7 +7,7 @@ import PaymentFailureActions from "./PaymentFailureActions";
 export const dynamic = "force-dynamic";
 
 export default async function PaymentFailuresPage() {
-  const snap = await adminDb
+  const snap = await (await getWorkspaceDb())
     .collection("rides")
     .where("paymentStatus", "==", "failed")
     .orderBy("lastPaymentAttempt", "desc")

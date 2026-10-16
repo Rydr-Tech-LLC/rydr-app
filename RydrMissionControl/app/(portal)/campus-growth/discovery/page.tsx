@@ -1,4 +1,4 @@
-import Link from "next/link";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
 import StatusPill from "@/components/StatusPill";
 import { DEFAULT_PRIORITY_CATEGORIES, DEFAULT_TARGET_CAMPUSES } from "@/lib/ai/campusGrowthAI";
 import { listDiscoveredCampusLeads, type DiscoveredCampusLead } from "@/lib/campusGrowth";

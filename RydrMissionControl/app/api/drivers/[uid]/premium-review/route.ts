@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { getAdminSession } from "@/lib/session";
 import { writeAuditLog } from "@/lib/auditLog";
 import { DOCUMENTS, vehicleKey, evaluatePremiumVehicle, availablePremiumRideTypes } from "../../../../../../rydr-backend/firebase/functions/src/services/premiumVehiclePolicy";
@@ -22,9 +22,9 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
   };
   let result;
   try {
-    result = await adminDb.runTransaction(async tx => {
-      const ref = adminDb.collection("drivers").doc(uid);
-      const [snap, executiveConfig] = await Promise.all([tx.get(ref), tx.get(adminDb.collection("platformConfig").doc("rydrExecutive"))]);
+    result = await (await getWorkspaceDb()).runTransaction(async tx => {
+      const ref = (await getWorkspaceDb()).collection("drivers").doc(uid);
+      const [snap, executiveConfig] = await Promise.all([tx.get(ref), tx.get((await getWorkspaceDb()).collection("platformConfig").doc("rydrExecutive"))]);
       if (!snap.exists) throw new Error("Driver not found");
       const driver = snap.data() ?? {};
       const specificationEvidence = String(input.specificationEvidence ?? "").trim().slice(0, 1000);

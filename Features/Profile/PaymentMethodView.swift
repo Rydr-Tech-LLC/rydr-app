@@ -381,7 +381,7 @@ private func requestJSON<T: Decodable>(
     decode: T.Type,
     completion: @escaping (T?) -> Void
 ) {
-    var req = URLRequest(url: backendBase.appendingPathComponent(path))
+    var req = RydrWorkspace.urlRequest(url: backendBase.appendingPathComponent(path))
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])

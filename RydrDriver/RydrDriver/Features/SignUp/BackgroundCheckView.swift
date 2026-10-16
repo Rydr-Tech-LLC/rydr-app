@@ -224,7 +224,7 @@ struct BackgroundCheckView: View {
         guard let uid = Auth.auth().currentUser?.uid else { return }
 
         do {
-            let snapshot = try await Firestore.firestore().collection("drivers").document(uid).getDocument()
+            let snapshot = try await RydrWorkspace.firestore.collection("drivers").document(uid).getDocument()
             let data = snapshot.data() ?? [:]
             let alreadyAcknowledged = data["backgroundCheckAcknowledged"] as? Bool ?? false
             if alreadyAcknowledged {

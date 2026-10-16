@@ -20,7 +20,7 @@ final class ScheduledRideManager: ObservableObject {
     @Published private(set) var cancellingRequestIDs: Set<String> = []
     @Published var errorMessage: String?
 
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private var requestListener: ListenerRegistration?
     private var offersListener: ListenerRegistration?
     private var scheduleListener: ListenerRegistration?
@@ -209,7 +209,7 @@ final class ScheduledRideManager: ObservableObject {
             throw URLError(.badURL)
         }
         let token = try await user.getIDToken()
-        var request = URLRequest(url: url)
+        var request = RydrWorkspace.urlRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 20
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")

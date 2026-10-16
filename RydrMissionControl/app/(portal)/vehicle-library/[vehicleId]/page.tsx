@@ -1,4 +1,4 @@
-import Link from "next/link";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
 import { notFound } from "next/navigation";
 import { getVehicleLibraryEntry } from "@/lib/vehicleLibrary";
 import VehicleImageManager from "./VehicleImageManager";

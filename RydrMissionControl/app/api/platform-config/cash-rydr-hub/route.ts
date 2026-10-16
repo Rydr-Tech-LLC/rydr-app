@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 
-const configRef = () => adminDb.collection("platformConfig").doc("cashRydrHub");
+const configRef = async () => (await getWorkspaceDb()).collection("platformConfig").doc("cashRydrHub");
 
 function newTermsVersion() {
   return `cash-hub-${Date.now()}`;
@@ -14,7 +14,7 @@ export async function GET() {
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-  const snap = await configRef().get();
+  const snap = await (await configRef()).get();
   const data = snap.data() ?? {};
 
   return NextResponse.json({
@@ -36,10 +36,10 @@ export async function PATCH(request: NextRequest) {
   if (typeof body.cashHubBillingEnabled === "boolean") {
     const enabled = body.cashHubBillingEnabled;
     const reason = typeof body.reason === "string" ? body.reason : undefined;
-    const snap = await configRef().get();
+    const snap = await (await configRef()).get();
     const current = snap.data() ?? {};
     const wasEnabled = current.cashHubBillingEnabled === true;
-    await configRef().set({
+    await (await configRef()).set({
       cashHubBillingEnabled: enabled,
       cashHubMonthlyFeeCents: 499,
       cashHubBillingLaunchAt: enabled && !wasEnabled ? FieldValue.serverTimestamp() : current.cashHubBillingLaunchAt ?? null,
@@ -66,8 +66,8 @@ export async function PATCH(request: NextRequest) {
   const enabled = body.termsAcceptanceEnabled;
   const reason = typeof body.reason === "string" ? body.reason : undefined;
 
-  const updatedConfig = await adminDb.runTransaction(async (transaction) => {
-    const ref = configRef();
+  const updatedConfig = await (await getWorkspaceDb()).runTransaction(async (transaction) => {
+    const ref = await configRef();
     const snap = await transaction.get(ref);
     const current = snap.data() ?? {};
     const currentVersion = typeof current.cashHubTermsVersion === "string" ? current.cashHubTermsVersion : null;

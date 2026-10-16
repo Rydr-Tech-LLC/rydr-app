@@ -1,5 +1,5 @@
 import { FieldValue } from "firebase-admin/firestore";
-import { adminAuth, adminDb } from "@/lib/firebaseAdmin";
+import { adminAuth, getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { cleanupStripeAccount } from "@/lib/stripeCleanup";
 
 export type AccountRole = "rider" | "driver";
@@ -46,7 +46,7 @@ export async function deleteAccount({
 }) {
   const profileEntries = await Promise.all(
     (["rider", "driver"] as AccountRole[]).map(async (role) => {
-      const ref = adminDb.collection(role === "driver" ? "drivers" : "riders").doc(uid);
+      const ref = (await getWorkspaceDb()).collection(role === "driver" ? "drivers" : "riders").doc(uid);
       const snap = await ref.get();
       return { role, ref, snap, profile: snap.exists ? (snap.data() as Record<string, unknown>) : null };
     })
@@ -66,13 +66,13 @@ export async function deleteAccount({
   for (const { role, ref, profile } of existing) {
     const phone = (profile?.phoneE164 ?? profile?.phoneNumber) as string | undefined;
     if (phone) {
-      const indexRef = adminDb.collection(role === "driver" ? "driverPhoneIndex" : "riderPhoneIndex").doc(phone);
+      const indexRef = (await getWorkspaceDb()).collection(role === "driver" ? "driverPhoneIndex" : "riderPhoneIndex").doc(phone);
       const indexSnap = await indexRef.get();
       if (indexSnap.exists && indexSnap.data()?.uid === uid) await indexRef.delete();
     }
 
     if (mode === "hard") {
-      await adminDb.recursiveDelete(ref);
+      await (await getWorkspaceDb()).recursiveDelete(ref);
     } else {
       const tokensSnap = await ref.collection("notificationTokens").get();
       await Promise.all(tokensSnap.docs.map((doc) => doc.ref.set({ enabled: false }, { merge: true })));
@@ -81,8 +81,8 @@ export async function deleteAccount({
   }
 
   await Promise.all([
-    adminDb.collection("driver_status").doc(uid).delete().catch(() => undefined),
-    adminDb.collection("publicDriverProfiles").doc(uid).delete().catch(() => undefined)
+    (await getWorkspaceDb()).collection("driver_status").doc(uid).delete().catch(() => undefined),
+    (await getWorkspaceDb()).collection("publicDriverProfiles").doc(uid).delete().catch(() => undefined)
   ]);
 
   return { roles: existing.map((entry) => entry.role), stripe };
@@ -94,7 +94,7 @@ export async function restoreRejectedDeletionRequest(
   priorAccountStatuses?: Partial<Record<AccountRole, string | null>>
 ) {
   await Promise.all(roles.map(async (role) => {
-    const ref = adminDb.collection(role === "driver" ? "drivers" : "riders").doc(uid);
+    const ref = (await getWorkspaceDb()).collection(role === "driver" ? "drivers" : "riders").doc(uid);
     const snap = await ref.get();
     if (!snap.exists) return;
     const priorStatus = priorAccountStatuses?.[role];

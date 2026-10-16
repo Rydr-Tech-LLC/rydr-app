@@ -2,7 +2,7 @@
 import { vehicleImageSearchUrl } from "@/lib/vehicleImageSearch";
 
 import { useMemo, useState, useTransition } from "react";
-import Link from "next/link";
+import {WorkspaceLink as Link} from "@/components/WorkspaceContext";
 import type { VehicleLibraryEntry } from "@/lib/vehicleLibrary";
 
 const VEHICLE_COLORS = [

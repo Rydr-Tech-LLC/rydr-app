@@ -131,7 +131,7 @@ function validIdempotencyKey(value) {
 }
 
 async function verifyPaymentReadiness({ authorization, fetchImpl = globalThis.fetch }) {
-  const base = String(process.env.RYDR_STRIPE_BACKEND_URL || "https://rydr-stripe-backend.onrender.com").replace(/\/$/, "");
+  const base = require("../../firebase/functions/src/services/workspacePolicy").workspaceServiceURL(process.env.RYDR_STRIPE_BACKEND_URL || "https://rydr-stripe-backend.onrender.com",require("./workspaceContext").currentWorkspace());
   if (!authorization) throw error("Payment authentication is required", 401);
   let response;
   try {

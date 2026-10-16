@@ -152,7 +152,7 @@ final class ImageModerationService {
 
     private func checkImage(storagePath: String) async throws -> ModerationCheckResponse {
         let backendBase = try resolvedBackendBase()
-        var request = URLRequest(url: backendBase.appendingPathComponent("moderation/profile-photo/finalize"))
+        var request = RydrWorkspace.urlRequest(url: backendBase.appendingPathComponent("moderation/profile-photo/finalize"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["storagePath": storagePath])

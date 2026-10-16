@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import type { RiderRecord } from "@/lib/types";
 import { toDateSafe, fullName } from "@/lib/format";
 import StatusPill from "@/components/StatusPill";
@@ -23,9 +23,9 @@ interface RydrBankCodeRecord {
 export default async function RiderReviewPage(props: { params: Promise<{ uid: string }> }) {
   const params = await props.params;
   const [snap, userSnap, codesSnap, activeRide] = await Promise.all([
-    adminDb.collection("riders").doc(params.uid).get(),
-    adminDb.collection("users").doc(params.uid).get(),
-    adminDb.collection("users").doc(params.uid).collection("rydrBankCodes").orderBy("createdAt", "desc").limit(20).get(),
+    (await getWorkspaceDb()).collection("riders").doc(params.uid).get(),
+    (await getWorkspaceDb()).collection("users").doc(params.uid).get(),
+    (await getWorkspaceDb()).collection("users").doc(params.uid).collection("rydrBankCodes").orderBy("createdAt", "desc").limit(20).get(),
     findActiveRideForRider(params.uid)
   ]);
   if (!snap.exists) notFound();

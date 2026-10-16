@@ -20,7 +20,7 @@ class UserViewModel: ObservableObject {
     func loadUserName() {
         guard let uid = Auth.auth().currentUser?.uid else { return }
 
-        Firestore.firestore().collection("users").document(uid).getDocument { doc, error in
+        RydrWorkspace.firestore.collection("users").document(uid).getDocument { doc, error in
             if let doc = doc, let data = doc.data() {
                 DispatchQueue.main.async {
                     self.userName = data["name"] as? String ?? "Rider"

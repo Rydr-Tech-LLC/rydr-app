@@ -87,7 +87,7 @@ struct RiderRidePreferences: Equatable {
 }
 
 final class RiderRidePreferenceStore {
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
 
     func load(uid: String) async throws -> RiderRidePreferences {
         let snapshot = try await db.collection("riders")

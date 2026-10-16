@@ -68,7 +68,7 @@ final class RydrBankVM: ObservableObject {
     @Published var codes: [RydrBankCode] = []
     @Published var errorMessage: String?
 
-    private let db = Firestore.firestore()
+    private var db: Firestore { RydrWorkspace.firestore }
     private var summaryListener: ListenerRegistration?
     private var codesListener: ListenerRegistration?
 
@@ -192,7 +192,7 @@ final class RydrBankVM: ObservableObject {
             }
             do {
                 let idToken = try await user.getIDToken()
-                var req = URLRequest(url: URL(string: "https://rydr-bank.onrender.com/promo/transfer")!)
+                var req = RydrWorkspace.urlRequest(url: URL(string: "https://rydr-bank.onrender.com/promo/transfer")!)
                 req.httpMethod = "POST"
                 req.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
@@ -1299,7 +1299,7 @@ struct RiderPromotionPanel: View {
     @MainActor private func request(path: String, body: [String: String]? = nil) async throws -> Data {
         guard let user = Auth.auth().currentUser else { throw NSError(domain: "Promotions", code: 401, userInfo: [NSLocalizedDescriptionKey: "Sign in to view your promotions."]) }
         let token = try await user.getIDToken()
-        var request = URLRequest(url: URL(string: "https://rydr-stripe-backend.onrender.com\(path)")!)
+        var request = RydrWorkspace.urlRequest(url: URL(string: "https://rydr-stripe-backend.onrender.com\(path)")!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body { request.httpMethod = "POST"; request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try JSONSerialization.data(withJSONObject: body) }
         let (data, response) = try await URLSession.shared.data(for: request)

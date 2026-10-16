@@ -197,7 +197,7 @@ struct SignupCoordinator: View {
     /// Merge-writes into `riders/{uid}` so the document exists early and stays current.
     private func upsertRider(_ fields: [String: Any]) {
         guard let uid = Auth.auth().currentUser?.uid else { return }
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("riders").document(uid)
             .setData(fields, merge: true) { err in
                 if let err = err { print("❌ upsertRider error: \(err)") }
@@ -205,7 +205,7 @@ struct SignupCoordinator: View {
     }
 
     private func betaInviteApproved(phoneE164: String, completion: @escaping (Bool) -> Void) {
-        Firestore.firestore()
+        RydrWorkspace.firestore
             .collection("betaInvites")
             .document("rider")
             .collection("phones")
@@ -351,7 +351,7 @@ struct SignupCoordinator: View {
             return
         }
 
-        Firestore.firestore().collection("riders").document(uid).getDocument { snap, _ in
+        RydrWorkspace.firestore.collection("riders").document(uid).getDocument { snap, _ in
             let data = snap?.data() ?? [:]
             let address = data["address"] as? [String: Any] ?? [:]
 
@@ -385,7 +385,7 @@ struct SignupCoordinator: View {
     ) {
         guard let user = Auth.auth().currentUser else { return }
         user.getIDTokenForcingRefresh(true) { token, _ in
-            var req = URLRequest(url: backendBase.appendingPathComponent("create-customer"))
+            var req = RydrWorkspace.urlRequest(url: backendBase.appendingPathComponent("create-customer"))
             req.httpMethod = "POST"
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             if let token = token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }

@@ -2,7 +2,7 @@ import { evaluateDriverCompliance } from "../../../../../../rydr-backend/firebas
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminSession } from "@/lib/session";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 
 type Decision = "approved" | "needs_attention" | "rejected";
@@ -31,13 +31,13 @@ export async function POST(request: NextRequest, props: { params: Promise<{ uid:
     return NextResponse.json({ error: "Invalid decision" }, { status: 400 });
   }
 
-  const driverRef = adminDb.collection("drivers").doc(params.uid);
+  const driverRef = (await getWorkspaceDb()).collection("drivers").doc(params.uid);
   const driverSnap = await driverRef.get();
   if (!driverSnap.exists) {
     return NextResponse.json({ error: "Driver not found" }, { status: 404 });
   }
 
-  const policy = (await adminDb.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
+  const policy = (await (await getWorkspaceDb()).collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
   const compliance = evaluateDriverCompliance(driverSnap.data() ?? {}, policy);
   if (decision === "approved" && !compliance.drivingAllowed) return NextResponse.json({ error: "Current verified documents and required background screening are needed before enabling driving." }, { status: 409 });
 

@@ -1,4 +1,5 @@
 "use client";
+import {useWorkspaceRouter as useRouter} from "@/components/WorkspaceContext";
 
 import { useState } from "react";
 import {
@@ -6,7 +7,7 @@ import {
   validateOffer,
   localTimeToISO,
 } from "@/lib/promotionPolicy";
-import { useRouter } from "next/navigation";
+
 
 export interface PromotionFormInitial {
   id?: string;

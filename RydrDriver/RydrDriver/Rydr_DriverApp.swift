@@ -119,13 +119,14 @@ struct Rydr_DriverApp: App {
 
   var body: some Scene {
     WindowGroup {
-      NavigationStack {
+      RydrWorkspaceGate { NavigationStack {
         DriverRootView()
       }
       .environmentObject(session)
       .hideKeyboardOnTap()
       .onOpenURL { url in
         _ = GIDSignIn.sharedInstance.handle(url) || Auth.auth().canHandle(url)
+      }
       }
     }
   }

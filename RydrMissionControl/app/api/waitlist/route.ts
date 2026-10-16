@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
-import { adminDb } from "@/lib/firebaseAdmin";
+import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { notificationService } from "@/src/services/notifications/NotificationService";
 
 type WaitlistRole = "rider" | "driver";
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   }
 
   const waitlistRole = role as WaitlistRole;
-  const waitlistRef = adminDb.collection("betaWaitlist");
+  const waitlistRef = (await getWorkspaceDb()).collection("betaWaitlist");
   const existing = await waitlistRef
     .where("emailLower", "==", email)
     .where("role", "==", waitlistRole)
