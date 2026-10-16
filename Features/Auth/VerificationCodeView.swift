@@ -30,6 +30,7 @@ final class RiderSMSRequests: ObservableObject {
     private let defaults: UserDefaults
     private let cooldown: TimeInterval
     private var timer: Timer?
+    private var requestGeneration = 0
     private var deadlineKey: String { "rydr.sms.nextRequest.\(RydrWorkspace.selected ?? "unresolved")" }
     var secondsRemaining: Int { max(0, Int(ceil(defaults.double(forKey: deadlineKey) - now.timeIntervalSince1970))) }
     var canSend: Bool { !isSending && secondsRemaining == 0 }
@@ -54,6 +55,16 @@ final class RiderSMSRequests: ObservableObject {
         }
     }
 
+    /// Only call after Firebase accepts authentication, never when abandoning a challenge.
+    func authenticationDidSucceed() {
+        requestGeneration += 1
+        defaults.removeObject(forKey: deadlineKey)
+        latestSession = nil
+        errorMessage = ""
+        isSending = false
+        now = Date()
+    }
+
     @discardableResult
     func send(phone: String, onFinished: @escaping () -> Void = {}, completion: @escaping (PhoneVerificationSession) -> Void) -> Bool {
         now = Date()
@@ -64,12 +75,13 @@ final class RiderSMSRequests: ObservableObject {
         }
         let workspace = RydrWorkspace.selected
         let key = deadlineKey
+        let generation = requestGeneration
         isSending = true
         errorMessage = ""
         defaults.set(now.addingTimeInterval(cooldown).timeIntervalSince1970, forKey: key)
         let finished: (String?, Error?) -> Void = { [weak self] id, error in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, generation == self.requestGeneration else { return }
                 self.isSending = false
                 self.now = Date()
                 guard workspace == RydrWorkspace.selected else { return }
@@ -177,6 +189,7 @@ struct VerificationCodeView: View {
                     #if DEBUG && targetEnvironment(simulator)
                     if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
                         Text("SMS transport calls: \(sms.testRequestCount)").accessibilityIdentifier("smsCodeRequestCount")
+                        Button("Complete simulated authentication") { sms.authenticationDidSucceed() }.accessibilityIdentifier("smsCompleteAuthentication")
                         Text(activeVerificationID).accessibilityIdentifier("smsActiveSession")
                     }
                     #endif
@@ -478,6 +491,7 @@ struct VerificationCodeView: View {
                         errorMessage = "Verification failed: \(error.localizedDescription)"
                     }
                 } else if let user = result?.user {
+                    sms.authenticationDidSucceed()
                     print("✅ Phone verified and signed in")
                     if let onCredentialSuccess {
                         onCredentialSuccess(credential, user)

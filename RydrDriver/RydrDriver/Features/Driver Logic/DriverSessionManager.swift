@@ -53,6 +53,7 @@ final class DriverSessionManager: ObservableObject {
     }
 
     func login(name: String, email: String) {
+        Task { @MainActor in DriverSMSRequests.shared.authenticationDidSucceed() }
         driverName = name
         driverEmail = email
         isLoggedIn = true
@@ -78,6 +79,7 @@ final class DriverSessionManager: ObservableObject {
                 return
             }
 
+            if uid != nil { await MainActor.run { DriverSMSRequests.shared.authenticationDidSucceed() } }
             DriverSocialAuthService.signOutFromGoogle()
 
             await MainActor.run {

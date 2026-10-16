@@ -85,6 +85,7 @@ class UserSessionManager: ObservableObject {
         startingTab: MainAppTab = .ride,
         access: RydrAccountAccess? = nil
     ) {
+        RiderSMSRequests.shared.authenticationDidSucceed()
         userName = name
         userEmail = email
         selectedTab = startingTab
@@ -118,6 +119,7 @@ class UserSessionManager: ObservableObject {
             // Firebase and Google maintain separate local sessions. Clearing
             // both prevents the next Google login from silently reusing the
             // account that just logged out.
+            if uid != nil { RiderSMSRequests.shared.authenticationDidSucceed() }
             GIDSignIn.sharedInstance.signOut()
             clearLocalAccountState()
 

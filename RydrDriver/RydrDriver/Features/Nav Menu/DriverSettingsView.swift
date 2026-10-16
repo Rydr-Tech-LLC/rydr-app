@@ -642,6 +642,7 @@ private struct DriverLinkPhoneView: View {
                 }
 
                 do {
+                    sms.authenticationDidSucceed()
                     try await RydrBackendService.syncAccountIdentity()
                     onFinished(true)
                     dismiss()

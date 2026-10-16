@@ -71,6 +71,7 @@ struct DriverPhoneCodeEntryView: View {
                 #if DEBUG && targetEnvironment(simulator)
                 if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
                     Text("SMS transport calls: \(sms.testRequestCount)").accessibilityIdentifier("smsCodeRequestCount")
+                    Button("Complete simulated authentication") { sms.authenticationDidSucceed() }.accessibilityIdentifier("smsCompleteAuthentication")
                     Text(verificationID).accessibilityIdentifier("smsActiveSession")
                 }
                 #endif
@@ -292,7 +293,7 @@ struct DriverPhoneCodeEntryView: View {
                 isVerifying = false
                 switch result {
                 case .success:
-                    break // caller handles navigation/dismissal
+                    sms.authenticationDidSucceed() // caller handles navigation/dismissal
                 case .failure(let error):
                     if let authCode = AuthErrorCode(rawValue: (error as NSError).code),
                        authCode == .credentialAlreadyInUse || authCode == .providerAlreadyLinked {

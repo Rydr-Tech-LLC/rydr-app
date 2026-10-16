@@ -58,6 +58,20 @@ final class RydrPlaygroundUITests: XCTestCase {
         XCTAssertTrue(NSPredicate(format: "label == %@", "simulator-session-3").evaluateEventually(on: session, timeout: 8))
         XCTAssertFalse(error.exists)
         XCTAssertEqual(app.staticTexts["smsCodeRequestCount"].label, "SMS transport calls: 3")
+        // A completed authentication clears the deadline immediately, before its natural expiry.
+        let complete = app.buttons["smsCompleteAuthentication"]
+        if !complete.isHittable { app.swipeUp() }
+        complete.tap()
+        XCTAssertTrue(resend.waitForEnabled(timeout: 2))
+        app.terminate()
+        app.launchArguments = ["-RydrSMSUITest"]
+        app.launch()
+
+        let freshPhone = app.textFields["smsPhoneNumber"]
+        XCTAssertTrue(freshPhone.waitForExistence(timeout: 15))
+        freshPhone.tap(); freshPhone.typeText("2025550123")
+        XCTAssertTrue(app.buttons["smsSend"].isEnabled)
+
     }
 
     @MainActor

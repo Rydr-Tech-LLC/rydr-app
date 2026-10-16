@@ -34,6 +34,7 @@ final class DriverSMSRequests: ObservableObject {
     private let defaults: UserDefaults
     private let cooldown: TimeInterval
     private var timer: Timer?
+    private var requestGeneration = 0
     private var deadlineKey: String { "rydr.sms.nextRequest.\(RydrWorkspace.selected ?? "unresolved")" }
     var secondsRemaining: Int { max(0, Int(ceil(defaults.double(forKey: deadlineKey) - now.timeIntervalSince1970))) }
     var canSend: Bool { !isSending && secondsRemaining == 0 }
@@ -58,6 +59,16 @@ final class DriverSMSRequests: ObservableObject {
         }
     }
 
+    /// Only call after Firebase accepts authentication, never when abandoning a challenge.
+    func authenticationDidSucceed() {
+        requestGeneration += 1
+        defaults.removeObject(forKey: deadlineKey)
+        latestSession = nil
+        errorMessage = ""
+        isSending = false
+        now = Date()
+    }
+
     @discardableResult
     func send(phone: String, onFinished: @escaping () -> Void = {}, completion: @escaping (DriverSMSVerificationSession) -> Void) -> Bool {
         now = Date()
@@ -68,12 +79,13 @@ final class DriverSMSRequests: ObservableObject {
         }
         let workspace = RydrWorkspace.selected
         let key = deadlineKey
+        let generation = requestGeneration
         isSending = true
         errorMessage = ""
         defaults.set(now.addingTimeInterval(cooldown).timeIntervalSince1970, forKey: key)
         let finished: (String?, Error?) -> Void = { [weak self] id, error in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, generation == self.requestGeneration else { return }
                 self.isSending = false
                 self.now = Date()
                 guard workspace == RydrWorkspace.selected else { return }
