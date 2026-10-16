@@ -1,3 +1,4 @@
+import AccountAccessSupport from "@/components/AccountAccessSupport";
 import DriverDocumentReviewPanel from "./DriverDocumentReviewPanel";
 import {
   latestDriverDocument,
@@ -622,6 +623,7 @@ export default async function DriverReviewPage(props: {
             />
           </Section>
 
+          <AccountAccessSupport uid={driver.uid} role="driver" />
           <DriverProfileAdminTools
             uid={driver.uid}
             initial={adminProfileInitial}

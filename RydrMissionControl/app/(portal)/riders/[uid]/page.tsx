@@ -1,3 +1,4 @@
+import AccountAccessSupport from "@/components/AccountAccessSupport";
 import { notFound } from "next/navigation";
 import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import type { RiderRecord } from "@/lib/types";
@@ -148,6 +149,7 @@ export default async function RiderReviewPage(props: { params: Promise<{ uid: st
             )}
           </Section>
 
+          <AccountAccessSupport uid={rider.uid} role="rider" />
           <RydrBankMintPanel uid={rider.uid} />
           <RiderActions
             uid={rider.uid}
