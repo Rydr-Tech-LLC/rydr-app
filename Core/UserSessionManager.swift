@@ -50,9 +50,17 @@ enum RydrAppAppearance: String, CaseIterable, Identifiable {
 
 @MainActor
 class UserSessionManager: ObservableObject {
-    @AppStorage("isLoggedIn") var isLoggedIn: Bool = false
-    @AppStorage("userName") var userName: String = ""
-    @AppStorage("userEmail") var userEmail: String = ""
+    @AppStorage var isLoggedIn: Bool
+    @AppStorage var userName: String
+    @AppStorage var userEmail: String
+
+    init() {
+        let workspace = RydrWorkspace.selected ?? "unresolved"
+        _isLoggedIn = AppStorage(wrappedValue: false, "rydr.session.\(workspace).isLoggedIn")
+        _userName = AppStorage(wrappedValue: "", "rydr.session.\(workspace).userName")
+        _userEmail = AppStorage(wrappedValue: "", "rydr.session.\(workspace).userEmail")
+        if !RydrWorkspace.isReady || RydrWorkspace.auth.currentUser == nil { isLoggedIn = false }
+    }
     @Published var selectedTab: MainAppTab = .ride
     @Published private(set) var accountAccess: RydrAccountAccess?
     @Published var verifiedBadge: Bool = false
@@ -141,6 +149,7 @@ class UserSessionManager: ObservableObject {
             return
         }
         let uid = user.uid
+        let workspace = RydrWorkspace.identifier
         let displayName = user.displayName
         let authEmail = user.email
         RydrWorkspace.firestore
@@ -148,6 +157,7 @@ class UserSessionManager: ObservableObject {
             .getDocument { snap, _ in
                 guard let data = snap?.data() else {
                     Task { @MainActor in
+                        guard RydrWorkspace.identifier == workspace, RydrWorkspace.auth.currentUser?.uid == uid else { return }
                         self.userName = displayName ?? "Rydr User"
                         self.userEmail = authEmail ?? ""
                         self.accountAccess = .cashHubOnly
@@ -182,6 +192,7 @@ class UserSessionManager: ObservableObject {
                     .trimmingCharacters(in: .whitespaces)
 
                 Task { @MainActor in
+                        guard RydrWorkspace.identifier == workspace, RydrWorkspace.auth.currentUser?.uid == uid else { return }
                     self.userName = preferred.isEmpty
                         ? (legal.isEmpty ? "Rydr User" : legal)
                         : preferred

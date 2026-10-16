@@ -120,11 +120,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 struct Rydr_DriverApp: App {
   // register app delegate for Firebase setup
   @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
-  @StateObject private var session = DriverSessionManager()
-
   var body: some Scene {
-    WindowGroup {
-      RydrWorkspaceGate { NavigationStack {
+    WindowGroup { RydrWorkspaceGate { DriverWorkspaceContent() } }
+  }
+}
+
+private struct DriverWorkspaceContent: View {
+  @StateObject private var session = DriverSessionManager()
+  var body: some View {
+      NavigationStack {
         DriverRootView()
       }
       .environmentObject(session)
@@ -132,8 +136,6 @@ struct Rydr_DriverApp: App {
       .onOpenURL { url in
         _ = GIDSignIn.sharedInstance.handle(url) || RydrWorkspace.auth.canHandle(url)
       }
-      }
-    }
   }
 }
 

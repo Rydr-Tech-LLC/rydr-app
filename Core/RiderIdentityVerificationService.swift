@@ -133,6 +133,7 @@ struct RydrWorkspaceGate<Content: View>: View {
     private func clearSelection() {
         try? RydrWorkspace.auth.signOut()
         UserDefaults.standard.set(false, forKey: "isLoggedIn")
+        UserDefaults.standard.set(false, forKey: "rydr.session.\(RydrWorkspace.selected ?? "unresolved").isLoggedIn")
         signedInUID = nil
         selection = ""
     }
@@ -140,6 +141,8 @@ struct RydrWorkspaceGate<Content: View>: View {
         Button {
             try? RydrWorkspace.auth.signOut()
             UserDefaults.standard.set(false, forKey: "isLoggedIn")
+        UserDefaults.standard.set(false, forKey: "rydr.session.\(RydrWorkspace.selected ?? "unresolved").isLoggedIn")
+            UserDefaults.standard.set(false, forKey: "rydr.session.\(value).isLoggedIn")
             selection = value
         } label: {
             HStack(spacing: 16) {

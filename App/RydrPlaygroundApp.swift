@@ -12,14 +12,19 @@ import Firebase
 struct RydrApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+    var body: some Scene {
+        WindowGroup { RydrWorkspaceGate { RiderWorkspaceContent() } }
+    }
+}
+
+private struct RiderWorkspaceContent: View {
     @StateObject private var session = UserSessionManager()
     @State private var showSplash = true
     @State private var prestineLightAppearance = false
     @AppStorage("appAppearance") private var appAppearance = RydrAppAppearance.system.rawValue
 
-    var body: some Scene {
-        WindowGroup {
-            RydrWorkspaceGate { Group {
+    var body: some View {
+            Group {
                 #if DEBUG && targetEnvironment(simulator)
                 if ProcessInfo.processInfo.arguments.contains("-RydrSignupUITest") {
                     SignupAccountUIFixture()
@@ -39,8 +44,6 @@ struct RydrApp: App {
             .onPreferenceChange(PrestineLightAppearancePreference.self) { prestineLightAppearance = $0 }
             .preferredColorScheme(prestineLightAppearance && session.selectedTab == .ride ? .light : RydrAppAppearance(rawValue: appAppearance)?.colorScheme)
             .hideKeyboardOnTap()
-            }
-        }
     }
 
     private var appContent: some View {
