@@ -23,6 +23,35 @@ final class RydrPlaygroundUITests: XCTestCase {
     }
 
     @MainActor
+    func testIdentitySubmittedAndVerifiedContinueOnboarding() {
+        for scenario in ["-IdentityProcessing", "-IdentityVerified", "-IdentityReturnFailure"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-RydrIdentityOnboardingUITest", scenario]
+            app.launch()
+            let verify = app.buttons["riderVerifyIdentity"]
+            XCTAssertTrue(verify.waitForExistence(timeout: 15))
+            for _ in 0..<5 where !verify.isHittable { app.swipeUp() }
+            verify.tap()
+            XCTAssertTrue(app.staticTexts["identityOnboardingComplete"].waitForExistence(timeout: 10))
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testIdentityIncompleteReturnFailureStaysOnOnboarding() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-RydrIdentityOnboardingUITest", "-IdentityIncomplete"]
+        app.launch()
+        let verify = app.buttons["riderVerifyIdentity"]
+        XCTAssertTrue(verify.waitForExistence(timeout: 15))
+        for _ in 0..<5 where !verify.isHittable { app.swipeUp() }
+        verify.tap()
+        XCTAssertFalse(app.staticTexts["identityOnboardingComplete"].exists)
+        XCTAssertTrue(app.staticTexts["riderIdentityErrorOrStatus"].waitForExistence(timeout: 5))
+        XCTAssertTrue(verify.isEnabled)
+    }
+
+    @MainActor
     func testSMSDuplicateRequestsCooldownAndPersistentResendError() {
         let app = XCUIApplication()
         app.launchArguments = ["-RydrSMSUITest", "-RydrSMSResetUITest"]

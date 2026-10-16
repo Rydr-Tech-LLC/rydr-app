@@ -3,6 +3,17 @@ import Testing
 @testable import RydrPlayground
 
 struct RydrPlaygroundTests {
+    @Test func submittedIdentityCanContinueWithoutAwardingVerification() {
+        for value in ["processing", "verified"] {
+            let status = RiderIdentityStatus(identityVerified: false, verifiedRider: false, verifiedBadge: false, identityStatus: value)
+            #expect(status.allowsOnboardingContinuation)
+            #expect(!status.verifiedBadge)
+        }
+        for value in ["not_started", "requires_input", "canceled", "failed"] {
+            #expect(!RiderIdentityStatus(identityVerified: false, verifiedRider: false, verifiedBadge: false, identityStatus: value).allowsOnboardingContinuation)
+        }
+    }
+
     @Test func relativeBackendURLsRemainAbsoluteAndWorkspaceScoped() throws {
         let workspace = RydrWorkspace.identifier ?? "unresolved"
         for host in ["rydr-backend-2cl9.onrender.com", "rydr-stripe-backend.onrender.com", "rydr-bank.onrender.com"] {

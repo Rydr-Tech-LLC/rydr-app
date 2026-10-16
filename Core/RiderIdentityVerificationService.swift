@@ -256,6 +256,12 @@ struct RiderIdentityStatus: Decodable {
     let verifiedRider: Bool
     let verifiedBadge: Bool
     let identityStatus: String
+
+    // Submission can finish onboarding; only the backend can award the verified badge.
+    var allowsOnboardingContinuation: Bool {
+        identityVerified || verifiedRider || verifiedBadge
+            || ["verified", "processing"].contains(identityStatus.lowercased())
+    }
 }
 
 private struct RiderIdentitySessionResponse: Decodable {

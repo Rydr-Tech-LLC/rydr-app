@@ -10,6 +10,13 @@ struct TermsAndVerificationView: View {
     @Binding var termsAccepted: Bool
     @Binding var wantsVerification: Bool
     var onSubmit: () -> Void
+    var loadIdentityStatus: () async throws -> RiderIdentityStatus = {
+        try await RiderIdentityVerificationService.shared.fetchStatus()
+    }
+    var runIdentityVerification: () async throws -> IdentityVerificationSheet.VerificationFlowResult = {
+        let secret = try await RiderIdentityVerificationService.shared.createSession()
+        return try await RiderIdentityVerificationService.shared.presentVerification(clientSecret: secret)
+    }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -67,6 +74,7 @@ struct TermsAndVerificationView: View {
 
                         if let verificationMessage {
                             Text(verificationMessage)
+                                .accessibilityIdentifier("riderIdentityErrorOrStatus")
                                 .font(.caption.weight(.bold))
                                 .foregroundStyle(verificationIsError ? SignupPalette.red : SignupPalette.success)
                                 .multilineTextAlignment(.center)
@@ -88,6 +96,7 @@ struct TermsAndVerificationView: View {
                         }
                         .buttonStyle(SignupPrimaryButtonStyle())
                         .disabled(isStartingIdentityVerification)
+                        .accessibilityIdentifier("riderVerifyIdentity")
                         .padding(.top, 4)
 
                         Button {
@@ -202,6 +211,10 @@ private extension TermsAndVerificationView {
         wantsVerification = false
         showError = false
         verificationMessage = nil
+        finishOnboarding()
+    }
+
+    func finishOnboarding() {
         onSubmit()
     }
 
@@ -218,38 +231,48 @@ private extension TermsAndVerificationView {
         verificationIsError = false
         isStartingIdentityVerification = true
 
-        Task {
+        Task { @MainActor in
+            // Reopening onboarding must not create another session for an already
+            // submitted or verified identity.
+            if let status = try? await loadIdentityStatus(), status.allowsOnboardingContinuation {
+                isStartingIdentityVerification = false
+                finishOnboarding()
+                return
+            }
             do {
-                let clientSecret = try await RiderIdentityVerificationService.shared.createSession()
-                let result = try await RiderIdentityVerificationService.shared.presentVerification(clientSecret: clientSecret)
-                await MainActor.run {
+                let result = try await runIdentityVerification()
+                switch result {
+                case .flowCompleted:
+                    verificationIsError = false
+                    verificationMessage = "Verification submitted. Your badge will update after review."
                     isStartingIdentityVerification = false
-                    handleStripeIdentityResult(result)
+                    finishOnboarding()
+                case .flowCanceled:
+                    await recoverSubmittedVerification(or: "Verification was canceled. You can try again or skip for now.")
+                case .flowFailed(let error):
+                    await recoverSubmittedVerification(or: error.localizedDescription)
                 }
             } catch {
-                await MainActor.run {
-                    isStartingIdentityVerification = false
-                    verificationIsError = true
-                    verificationMessage = error.localizedDescription
-                }
+                await recoverSubmittedVerification(or: error.localizedDescription)
             }
         }
     }
 
-    func handleStripeIdentityResult(_ result: IdentityVerificationSheet.VerificationFlowResult) {
-        switch result {
-        case .flowCompleted:
+    @MainActor
+    func recoverSubmittedVerification(or message: String) async {
+        // A return-link failure or dismissed confirmation must not strand a
+        // submission that the backend already records as processing/verified.
+        let status = try? await loadIdentityStatus()
+        isStartingIdentityVerification = false
+        if status?.allowsOnboardingContinuation == true {
             verificationIsError = false
-            verificationMessage = "Verification submitted. Stripe will confirm your verified rider badge."
-            onSubmit()
-        case .flowCanceled:
+            finishOnboarding()
+        } else {
             verificationIsError = true
-            verificationMessage = "Verification was canceled. You can try again or skip for now."
-        case .flowFailed(let error):
-            verificationIsError = true
-            verificationMessage = error.localizedDescription
+            verificationMessage = message
         }
     }
+
 }
 
 private struct CompletionHero: View {

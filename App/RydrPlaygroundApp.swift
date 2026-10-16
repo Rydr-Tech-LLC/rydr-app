@@ -17,6 +17,8 @@ struct RydrApp: App {
             #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
                 NavigationStack { LoginView().environmentObject(UserSessionManager()) }
+            } else if ProcessInfo.processInfo.arguments.contains("-RydrIdentityOnboardingUITest") {
+                IdentityOnboardingUITestFixture()
             } else { RydrWorkspaceGate { RiderWorkspaceContent() } }
             #else
             RydrWorkspaceGate { RiderWorkspaceContent() }
@@ -89,6 +91,29 @@ private struct SignupAccountUIFixture: View {
                     } else { advanced = true }
                 }
             }
+        }
+    }
+}
+#endif
+
+#if DEBUG && targetEnvironment(simulator)
+private struct IdentityOnboardingUITestFixture: View {
+    @State private var complete = false
+    @State private var accepted = true
+    @State private var requested = false
+    @State private var reads = 0
+    var body: some View {
+        if complete {
+            Text("Onboarding complete").accessibilityIdentifier("identityOnboardingComplete")
+        } else {
+            TermsAndVerificationView(termsAccepted: $accepted, wantsVerification: $requested, onSubmit: { complete = true }, loadIdentityStatus: {
+                reads += 1
+                let args = ProcessInfo.processInfo.arguments
+                let value = args.contains("-IdentityVerified") ? "verified" : args.contains("-IdentityReturnFailure") && reads == 1 ? "requires_input" : args.contains("-IdentityIncomplete") ? "requires_input" : "processing"
+                return RiderIdentityStatus(identityVerified: value == "verified", verifiedRider: value == "verified", verifiedBadge: value == "verified", identityStatus: value)
+            }, runIdentityVerification: {
+                .flowFailed(error: URLError(.unsupportedURL))
+            })
         }
     }
 }
