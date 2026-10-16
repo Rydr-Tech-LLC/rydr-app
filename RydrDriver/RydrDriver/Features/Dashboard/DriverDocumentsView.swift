@@ -251,9 +251,9 @@ private struct DriverDocumentDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
-    @State private var frontItem: PhotosPickerItem?
-    @State private var backItem: PhotosPickerItem?
-    @State private var singleItem: PhotosPickerItem?
+    @State private var frontItem: Data?
+    @State private var backItem: Data?
+    @State private var singleItem: Data?
     @State private var isUploading = false
     @State private var message: String?
 
@@ -371,18 +371,13 @@ private struct DriverDocumentDetailView: View {
 
             if kind == .driverLicense {
                 HStack(spacing: 12) {
-                    PhotosPicker(selection: $frontItem, matching: .images) {
-                        documentUploadButton(title: "Front", icon: "rectangle.and.text.magnifyingglass", isUploading: isUploading)
-                    }
-                    PhotosPicker(selection: $backItem, matching: .images) {
-                        documentUploadButton(title: "Back", icon: "rectangle.stack.fill", isUploading: isUploading)
-                    }
+                    DriverDocumentPhotoPicker(title: "License Front", identifier: "licenseFront", data: $frontItem)
+                    DriverDocumentPhotoPicker(title: "License Back", identifier: "licenseBack", data: $backItem)
                 }
             } else {
-                PhotosPicker(selection: $singleItem, matching: .images) {
-                    documentUploadButton(title: "Upload \(kind.uploadTitle)", icon: kind.icon, isUploading: isUploading)
-                }
+                DriverDocumentPhotoPicker(title: kind.uploadTitle, identifier: "document", data: $singleItem)
             }
+
 
             Text("New uploads are marked pending review until Rydr approves them.")
                 .font(.caption)
@@ -394,6 +389,8 @@ private struct DriverDocumentDetailView: View {
 
     private var backgroundCheckCard: some View {
         VStack(alignment: .leading, spacing: 14) {
+            Text("Background reports are provided through Rydr’s screening process. Do not upload your own report.")
+                .font(.subheadline).foregroundStyle(.secondary)
             Text(record.status.isApproved ? "Background check cleared" : "Complete or check background status")
                 .font(.headline.weight(.black))
             Text(snapshot.backgroundChecksRequired ? "Complete screening through Rydr’s approved provider. Your report must be verified before driving in the open pilot. Contact support for screening instructions if you have not received them." : "Screening is deferred during beta. Before the open pilot, Rydr will require all drivers to complete a verified background check, including beta-approved drivers.")
@@ -463,7 +460,7 @@ private struct DriverDocumentDetailView: View {
         )
     }
 
-    private func handlePicker(_ item: PhotosPickerItem?, side: DriverDocumentSide) {
+    private func handlePicker(_ item: Data?, side: DriverDocumentSide) {
         guard let item else { return }
         Task {
             do {
@@ -472,7 +469,7 @@ private struct DriverDocumentDetailView: View {
                     isUploading = true
                     message = nil
                 }
-                _ = try await DriverDocumentUploadService.upload(item: item, kind: uploadKind, side: side.uploadSide)
+                _ = try await DriverDocumentUploadService.upload(data: item, kind: uploadKind, side: side.uploadSide)
                 await MainActor.run {
                     isUploading = false
                     message = "\(kind.title) uploaded. Rydr is reviewing it now."

@@ -93,6 +93,8 @@ struct BackgroundCheckView: View {
 
     private var infoCard: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("Rydr obtains and reviews background reports. You do not need to upload a report.")
+                .font(.subheadline)
             Text("Rydr is committed to rider and driver safety.")
                 .font(.headline.weight(.bold))
 

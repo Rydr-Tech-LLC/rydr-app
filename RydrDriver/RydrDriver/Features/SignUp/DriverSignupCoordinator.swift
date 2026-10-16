@@ -106,8 +106,8 @@ struct DriverSignupCoordinator: View {
     // License
     @State private var licenseNumber: String = ""
     @State private var licenseState: String = "GA"
-    @State private var licenseFront: PhotosPickerItem?
-    @State private var licenseBack: PhotosPickerItem?
+    @State private var licenseFront: Data?
+    @State private var licenseBack: Data?
 
     // Vehicle — VIN-decoded (Vehicle Library System) instead of manual entry.
     // See VehicleLibraryClient.swift and VehicleInfoView.swift.
@@ -116,8 +116,8 @@ struct DriverSignupCoordinator: View {
     @State private var selectedVehicleColor: VehicleColor?
     @State private var vehicleImageInfo: VehicleImageInfo?
     @State private var plateNumber: String = ""
-    @State private var registrationDoc: PhotosPickerItem?
-    @State private var insuranceCard: PhotosPickerItem?
+    @State private var registrationDoc: Data?
+    @State private var insuranceCard: Data?
 
     // Progress flags
     @State private var identityVerified = false
@@ -415,7 +415,7 @@ struct DriverSignupCoordinator: View {
 
     @MainActor
     private func uploadLicenseDocumentsAndContinue() async {
-        guard licenseFront != nil, licenseBack != nil else {
+        guard let licenseFront, let licenseBack else {
             flowAlertText = "Upload clear photos of the front and back of your driver license before continuing."
             isSubmittingDocuments = false
             return
@@ -425,8 +425,8 @@ struct DriverSignupCoordinator: View {
 
         do {
             try await RydrBackendService.prepareDriverLicense(number: licenseNumber, state: licenseState)
-            let front = try await DriverDocumentUploadService.upload(item: licenseFront, kind: .driverLicense, side: .front)
-            let back = try await DriverDocumentUploadService.upload(item: licenseBack, kind: .driverLicense, side: .back)
+            let front = try await DriverDocumentUploadService.upload(data: licenseFront, kind: .driverLicense, side: .front)
+            let back = try await DriverDocumentUploadService.upload(data: licenseBack, kind: .driverLicense, side: .back)
             try await RydrBackendService.finalizeDriverLicenseDocuments(
                 frontStoragePath: front.storagePath,
                 backStoragePath: back.storagePath
@@ -450,7 +450,7 @@ struct DriverSignupCoordinator: View {
             isSubmittingDocuments = false
             return
         }
-        guard registrationDoc != nil, insuranceCard != nil else {
+        guard let registrationDoc, let insuranceCard else {
             flowAlertText = "Upload your registration and insurance documents before continuing."
             isSubmittingDocuments = false
             return
@@ -459,8 +459,8 @@ struct DriverSignupCoordinator: View {
         defer { isSubmittingDocuments = false }
 
         do {
-            let registration = try await DriverDocumentUploadService.upload(item: registrationDoc, kind: .registration, side: .single)
-            let insurance = try await DriverDocumentUploadService.upload(item: insuranceCard, kind: .insurance, side: .single)
+            let registration = try await DriverDocumentUploadService.upload(data: registrationDoc, kind: .registration, side: .single)
+            let insurance = try await DriverDocumentUploadService.upload(data: insuranceCard, kind: .insurance, side: .single)
             try await RydrBackendService.finalizeDriverVehicleDocuments(
                 plate: plateNumber,
                 registrationStoragePath: registration.storagePath,

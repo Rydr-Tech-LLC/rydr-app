@@ -125,6 +125,8 @@ struct Rydr_DriverApp: App {
       #if DEBUG && targetEnvironment(simulator)
       if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
         NavigationStack { DriverLoginView().environmentObject(DriverSessionManager()) }
+      } else if ProcessInfo.processInfo.arguments.contains("-DriverDocumentUITest") {
+        NavigationStack { DriverDocumentUITestFixture() }
       } else { RydrWorkspaceGate { DriverWorkspaceContent() } }
       #else
       RydrWorkspaceGate { DriverWorkspaceContent() }

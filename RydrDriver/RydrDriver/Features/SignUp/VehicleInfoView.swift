@@ -19,8 +19,8 @@ struct VehicleInfoView: View {
     @Binding var selectedColor: VehicleColor?
     @Binding var imageInfo: VehicleImageInfo?
     @Binding var plate: String
-    @Binding var registrationDoc: PhotosPickerItem?
-    @Binding var insuranceCard: PhotosPickerItem?
+    @Binding var registrationDoc: Data?
+    @Binding var insuranceCard: Data?
 
     var addToGarage = false
     var currentStep: Int = 5
@@ -131,12 +131,8 @@ struct VehicleInfoView: View {
 
                     if !addToGarage {
                     HStack(spacing: 14) {
-                        PhotosPicker(selection: $registrationDoc, matching: .images) {
-                            UploadBox(label: registrationDoc == nil ? "Upload Registration" : "Registration ✓", systemImage: registrationDoc == nil ? "doc.fill" : "checkmark.circle.fill")
-                        }
-                        PhotosPicker(selection: $insuranceCard, matching: .images) {
-                            UploadBox(label: insuranceCard == nil ? "Upload Insurance" : "Insurance ✓", systemImage: insuranceCard == nil ? "doc.fill" : "checkmark.circle.fill")
-                        }
+                        DriverDocumentPhotoPicker(title: "Registration", identifier: "registration", data: $registrationDoc)
+                        DriverDocumentPhotoPicker(title: "Insurance", identifier: "insurance", data: $insuranceCard)
                     }
                     } else {
                         Text("This saves a separate vehicle card. Your current vehicle stays selected. Documents and approval are required before this vehicle can be used for rides.")
@@ -144,7 +140,12 @@ struct VehicleInfoView: View {
                     }
                 }
 
+                if !isValid {
+                    Text(addToGarage ? "Complete vehicle details, choose a color, and enter the plate to continue." : "Complete vehicle details, choose a color, enter the plate, and confirm registration and insurance photos to continue.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 SignupContinueButton(title: isSubmitting ? "Saving…" : (addToGarage ? "Save Vehicle" : "Continue"), isEnabled: isValid, action: handleContinue)
+                    .accessibilityIdentifier("vehicleDocumentsContinue")
 
                 SignupInfoCard(
                     icon: "lock.shield.fill",

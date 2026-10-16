@@ -9,6 +9,53 @@ import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
     @MainActor
+    func testLicensePhotosRequireConfirmationAndContinueWorks() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-DriverDocumentUITest"]
+        app.launch()
+        let next = app.buttons["licenseContinue"]
+        XCTAssertTrue(next.waitForExistence(timeout: 15))
+        XCTAssertFalse(next.isEnabled)
+        confirmDocument(app, identifier: "licenseFront")
+        XCTAssertTrue(app.images["licenseFrontPreview"].exists)
+        XCTAssertFalse(next.isEnabled)
+        confirmDocument(app, identifier: "licenseBack")
+        XCTAssertTrue(app.images["licenseBackPreview"].exists)
+        XCTAssertTrue(next.isEnabled)
+        for _ in 0..<6 where !next.isHittable { app.swipeUp() }
+        next.tap()
+        XCTAssertTrue(app.staticTexts["licenseStepComplete"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testRegistrationAndInsurancePhotosEnableContinue() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-DriverDocumentUITest", "-DocumentVehicle"]
+        app.launch()
+        let next = app.buttons["vehicleDocumentsContinue"]
+        for _ in 0..<8 where !app.buttons["registrationSource"].isHittable { app.swipeUp() }
+        XCTAssertFalse(next.isEnabled)
+        confirmDocument(app, identifier: "registration")
+        XCTAssertTrue(app.images["registrationPreview"].exists)
+        XCTAssertFalse(next.isEnabled)
+        confirmDocument(app, identifier: "insurance")
+        XCTAssertTrue(app.images["insurancePreview"].exists)
+        XCTAssertTrue(next.isEnabled)
+    }
+
+    @MainActor
+    private func confirmDocument(_ app: XCUIApplication, identifier: String) {
+        let source = app.buttons[identifier + "Source"]
+        XCTAssertTrue(source.waitForExistence(timeout: 15))
+        for _ in 0..<8 where !source.isHittable { app.swipeUp() }
+        source.tap()
+        XCTAssertTrue(app.buttons["Take Photo"].exists)
+        app.buttons["Use sample document"].tap()
+        XCTAssertTrue(app.images["documentReviewPreview"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["documentUsePhoto"].tap()
+    }
+
+    @MainActor
     func testSMSDuplicateRequestsCooldownAndPersistentResendError() {
         let app = XCUIApplication()
         app.launchArguments = ["-RydrSMSUITest", "-RydrSMSResetUITest"]

@@ -14,8 +14,8 @@ import PhotosUI
 struct DriverLicenseView: View {
     @Binding var licenseNumber: String
     @Binding var licenseState: String
-    @Binding var front: PhotosPickerItem?
-    @Binding var back: PhotosPickerItem?
+    @Binding var front: Data?
+    @Binding var back: Data?
 
     var currentStep: Int = 4
     var totalSteps: Int = 8
@@ -75,15 +75,16 @@ struct DriverLicenseView: View {
                 }
 
                 HStack(spacing: 14) {
-                    PhotosPicker(selection: $front, matching: .images) {
-                        UploadBox(label: front == nil ? "Upload Front" : "Front ✓", systemImage: front == nil ? "camera.fill" : "checkmark.circle.fill")
-                    }
-                    PhotosPicker(selection: $back, matching: .images) {
-                        UploadBox(label: back == nil ? "Upload Back" : "Back ✓", systemImage: back == nil ? "camera.fill" : "checkmark.circle.fill")
-                    }
+                    DriverDocumentPhotoPicker(title: "License Front", identifier: "licenseFront", data: $front)
+                    DriverDocumentPhotoPicker(title: "License Back", identifier: "licenseBack", data: $back)
                 }
 
+                if !isValid {
+                    Text("Enter your license number, choose the issuing state, and confirm both photos to continue.")
+                        .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("licenseRequirements")
+                }
                 SignupContinueButton(title: "Continue", isEnabled: isValid, action: onNext)
+                    .accessibilityIdentifier("licenseContinue")
 
                 SignupInfoCard(
                     icon: "lock.shield.fill",

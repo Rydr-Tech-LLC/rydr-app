@@ -392,8 +392,8 @@ private struct AddDriverVehicleSheet: View {
     @State private var selectedColor: VehicleColor?
     @State private var imageInfo: VehicleImageInfo?
     @State private var plate = ""
-    @State private var registrationDoc: PhotosPickerItem?
-    @State private var insuranceCard: PhotosPickerItem?
+    @State private var registrationDoc: Data?
+    @State private var insuranceCard: Data?
     @State private var saveError: String?
 
     var body: some View {
