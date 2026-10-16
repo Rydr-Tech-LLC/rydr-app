@@ -10,6 +10,7 @@ const { FieldValue, getFirestore } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
 const Stripe = require("stripe");
 const { randomInt, timingSafeEqual } = require("crypto");
+const { cleanupAccount } = require("./accountCleanup");
 const { DriverPayoutService, PayoutError } = require("./driverPayouts");
 const { walletSnapshot, accountSessionComponents, instantEligibility, allExternalAccounts, payoutSummary } = require("./driverWallet");
 const { runtimeConfig, modeProfile, canChargeRide, verifyWebhook, StripeModeState } = require("./stripeMode");
@@ -2539,68 +2540,23 @@ app.post("/admin/cleanup-account", async (req, res) => {
     const adminUid = await requireAdminUid(req, res);
     if (!adminUid) return;
 
-    const { role, stripeCustomerId, stripeAccountId, uid } = req.body || {};
+    const { role, uid } = req.body || {};
     const requestId = requireRequestId(req, res, "admin_cleanup_account");
     if (!requestId) return;
-    const cleanupKey = `${uid || role || "account"}_${requestId}`;
-    const result = { role: role || null, customer: "skipped", connectAccount: "skipped" };
-
-    if (stripeCustomerId) {
-      try {
-        await stripe.customers.del(
-          stripeCustomerId,
-          { idempotencyKey: `account_deletion_customer_${cleanupKey}` }
-        );
-        result.customer = "deleted";
-      } catch (err) {
-        if (err.code === "resource_missing") {
-          result.customer = "already_deleted";
-        } else {
-          throw err;
-        }
-      }
+    if (!uid || !["rider", "driver"].includes(role)) return res.status(400).json({ error: "invalid_account" });
+    initializeFirebase();
+    const snapshot = await admin.firestore().collection(role === "driver" ? "drivers" : "riders").doc(uid).get();
+    if (!snapshot.exists) return res.status(404).json({ error: "account_not_found" });
+    const profile = modeProfile(snapshot.data(), stripeConfig.mode);
+    if (role === "driver" && (Number(profile.availableBalance || 0) !== 0 || Number(profile.pendingPayouts || 0) !== 0)) {
+      return res.status(409).json({ error: "unsettled_driver_balance", detail: "Settle driver earnings and pending payouts before deleting this account." });
     }
-
-    if (stripeAccountId) {
-      try {
-        await stripe.accounts.update(
-          stripeAccountId,
-          {
-            metadata: { deactivated_by: adminUid, deactivated_reason: "account_deletion" },
-          },
-          { idempotencyKey: `account_deletion_connect_metadata_${cleanupKey}` }
-        );
-        await stripe.accounts.reject(
-          stripeAccountId,
-          { reason: "fraud" },
-          { idempotencyKey: `account_deletion_connect_reject_${cleanupKey}` }
-        ).catch(async () => {
-          // `accounts.reject` only succeeds for platform-initiated risk
-          // rejections; if Stripe declines it (e.g. account already has
-          // payout history), fall back to disabling payouts/charges
-          // directly so the account can no longer move money.
-          await stripe.accounts.update(
-            stripeAccountId,
-            {
-              capabilities: { transfers: { requested: false } },
-            },
-            { idempotencyKey: `account_deletion_connect_disable_${cleanupKey}` }
-          );
-        });
-        result.connectAccount = "deactivated";
-      } catch (err) {
-        if (err.code === "resource_missing") {
-          result.connectAccount = "already_removed";
-        } else {
-          throw err;
-        }
-      }
-    }
-
+    const result = await cleanupAccount({ stripe, role, uid, requestId, mode: stripeConfig.mode,
+      stripeCustomerId: profile.stripeCustomerId || null, stripeAccountId: profile.stripeAccountId || null });
     res.json({ ok: true, ...result });
   } catch (err) {
     console.error("❌ admin/cleanup-account error", err);
-    res.status(500).json({ error: "cleanup_failed", detail: err.message });
+    res.status(err.statusCode || 500).json({ error: "cleanup_failed", detail: err.message });
   }
 });
 

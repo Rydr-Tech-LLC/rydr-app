@@ -1,5 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getWorkspaceAuth, getWorkspaceDb } from "@/lib/firebaseAdmin";
+import { preserveAccountVehicleHistory } from "@/lib/accountVehicleArchive";
 import { cleanupStripeAccount } from "@/lib/stripeCleanup";
 
 export type AccountRole = "rider" | "driver";
@@ -53,6 +54,10 @@ export async function deleteAccount({
   );
   const existing = profileEntries.filter((entry) => entry.profile);
   if (existing.length === 0) throw new Error("Account profile not found");
+
+  for (const { role, ref, profile } of existing) {
+    if (role === "driver") await preserveAccountVehicleHistory(ref, profile ?? {}, adminUid, requestId);
+  }
 
   const stripe = await Promise.all(existing.map(async ({ role, profile }) => ({
     role,
