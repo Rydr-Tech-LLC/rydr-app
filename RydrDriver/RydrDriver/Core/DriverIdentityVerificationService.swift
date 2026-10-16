@@ -55,7 +55,7 @@ enum RydrWorkspace {
     static func scopedURL(_ url: URL) -> URL {
         guard ["rydr-stripe-backend.onrender.com", "rydr-backend-2cl9.onrender.com", "rydr-backend.onrender.com", "rydr-bank.onrender.com"].contains(url.host ?? "") else { return url }
         guard !["/workspace-bootstrap", "/account-config"].contains(url.path) else { return url }
-        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return url }
         let path = parts.path.replacingOccurrences(of: "^/workspaces/(test|live-beta|unresolved)(?=/|$)", with: "", options: .regularExpression)
         parts.path = "/workspaces/\(identifier ?? "unresolved")" + (path.hasPrefix("/") ? path : "/" + path)
         return parts.url ?? url
