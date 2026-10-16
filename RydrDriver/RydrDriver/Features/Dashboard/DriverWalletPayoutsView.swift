@@ -12,6 +12,7 @@ struct DriverWalletPayoutsView: View {
     @State private var isLoadingBalance = false
     @State private var isRequestingInstantPay = false
     @State private var isManagingPayoutAccount = false
+    @State private var payoutMethodIntent: DriverPayoutMethodsView.Intent = .manage
     @State private var isShowingSchedule = false
     @State private var nextPayoutCursor: String?
     @State private var pendingInstantRequest: InstantPayoutRequest?
@@ -54,7 +55,7 @@ struct DriverWalletPayoutsView: View {
         .refreshable { await refreshWallet(); vm.refreshEarningsSummary() }
         .sheet(isPresented: $showPromotions) { DriverPromotionPanel() }
         .sheet(isPresented: $isManagingPayoutAccount, onDismiss: { Task { await refreshWallet() } }) {
-            DriverPayoutAccountView(purpose: wallet.setupRequired ? .onboarding : .payoutMethods)
+            DriverPayoutMethodsView(initialIntent: payoutMethodIntent, requiresSetup: wallet.setupRequired)
         }
         .alert("Weekly bank payouts", isPresented: $isShowingSchedule) {
             Button("OK", role: .cancel) {}
@@ -281,6 +282,7 @@ struct DriverWalletPayoutsView: View {
     }
 
     private func payoutMethodRow(icon: String, title: String, detail: String, badge: String?) -> some View {
+        Button { Task { await openPayoutMethodManagement() } } label: {
         HStack(spacing: 13) {
             Image(systemName: icon)
                 .font(.headline.weight(.black))
@@ -312,16 +314,17 @@ struct DriverWalletPayoutsView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(14)
+        }.buttonStyle(.plain)
     }
 
     private var quickActionsSection: some View {
         walletSection(title: "Quick Actions") {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
                 quickAction(icon: "building.columns.fill", title: "Add Bank\nAccount", fee: nil) {
-                    Task { await openPayoutMethodManagement() }
+                    Task { await openPayoutMethodManagement(.bank) }
                 }
                 quickAction(icon: "creditcard.fill", title: "Add Debit\nCard", fee: nil) {
-                    Task { await openPayoutMethodManagement() }
+                    Task { await openPayoutMethodManagement(.card) }
                 }
                 quickAction(icon: "bolt.fill", title: "Instant Pay", fee: nil) {
                     isConfirmingInstantPay = true
@@ -495,7 +498,7 @@ struct DriverWalletPayoutsView: View {
                     .font(.headline.weight(.heavy))
                 Spacer()
                 if let trailing {
-                    Button(trailing) {}
+                    Button(trailing) { Task { await openPayoutMethodManagement() } }
                         .font(.caption.weight(.bold))
                         .foregroundStyle(Color.rydrWalletRed)
                     Image(systemName: "chevron.right")
@@ -591,11 +594,12 @@ struct DriverWalletPayoutsView: View {
         Date(timeIntervalSince1970: TimeInterval(unixSeconds)).formatted(date: .abbreviated, time: .shortened)
     }
     @MainActor
-    private func openPayoutMethodManagement() async {
+    private func openPayoutMethodManagement(_ intent: DriverPayoutMethodsView.Intent = .manage) async {
         guard wallet.stripeAccountId?.isEmpty == false else {
             message = "Complete payout setup in your driver onboarding first."
             return
         }
+        payoutMethodIntent = intent
         isManagingPayoutAccount = true
     }
 

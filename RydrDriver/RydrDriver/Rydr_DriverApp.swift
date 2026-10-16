@@ -127,6 +127,8 @@ struct Rydr_DriverApp: App {
         NavigationStack { DriverLoginView().environmentObject(DriverSessionManager()) }
       } else if ProcessInfo.processInfo.arguments.contains("-DriverOnboardingResumeUITest") {
         DriverOnboardingResumeUITestFixture()
+      } else if ProcessInfo.processInfo.arguments.contains("-DriverPayoutMethodsUITest") {
+        DriverPayoutMethodsUITestFixture()
       } else if ProcessInfo.processInfo.arguments.contains("-DriverPayoutErrorUITest") {
         NavigationStack { DriverPayoutErrorUITestFixture() }
       } else if ProcessInfo.processInfo.arguments.contains("-DriverIdentityUITest") {

@@ -21,3 +21,37 @@ test('receipt fees come from a confirmed balance transaction and stay unknown ot
  assert.equal(payoutSummary({currency:'usd',balance_transaction:'txn_pending'}).feeAmount,null);
  assert.equal(payoutSummary({currency:'usd',balance_transaction:{currency:'usd',fee:123}}).feeAmount,123);
 });
+
+const {createDriverAccountSession}=require('../driverWallet');
+test('embedded payout sessions are scoped to the owned account and workspace mode',async()=>{
+ for(const mode of ['test','live']) {
+  let params; const workspace=mode==='test'?'test':'live-beta';
+  const stripe={accountSessions:{create:async p=>{params=p;return {account:p.account,livemode:mode==='live',client_secret:'secret_fixture'};}}};
+  const result=await createDriverAccountSession({stripe,accountId:'acct_owned',purpose:'payout_methods',mode,workspace,publishableKey:`pk_${mode}_fixture`});
+  assert.deepEqual(result,{clientSecret:'secret_fixture',mode,workspace});assert.equal(params.account,'acct_owned');
+  assert.equal(params.components.payouts.features.external_account_collection,true);
+  assert.equal(params.components.payouts.features.disable_stripe_user_authentication,false);
+ }
+});
+test('cross-mode keys, workspaces, sessions and account IDs fail closed',async()=>{
+ let calls=0;const valid={account:'acct_owned',livemode:false,client_secret:'private'};let response=valid;
+ const stripe={accountSessions:{create:async()=>{calls++;return response;}}};
+ const base={stripe,accountId:'acct_owned',purpose:'payout_methods',mode:'test',workspace:'test',publishableKey:'pk_test_fixture'};
+ for(const override of [{publishableKey:'pk_live_fixture'},{workspace:'live-beta'},{mode:'invalid'},{purpose:'admin'}]) {
+  await assert.rejects(createDriverAccountSession({...base,...override}));
+ }
+ assert.equal(calls,0);
+ for(const bad of [{...valid,livemode:true},{...valid,account:'acct_other'},{...valid,client_secret:null}]) {
+  response=bad;await assert.rejects(createDriverAccountSession(base),/stripe_mode_mismatch/);
+ }
+});
+
+test('payout method summaries expose only masked details and confirmed instant eligibility',()=>{
+ const {payoutMethodSummary}=require('../driverWallet');
+ const summary=payoutMethodSummary({...card,number:'4000000000000000',routing_number:'private',account_holder_name:'Private Driver'});
+ assert.deepEqual(summary,{id:'card_debit',brand:'Visa',last4:'4321',isDefault:false,status:null,instantEligible:true});
+ assert.equal(payoutMethodSummary({...card,status:'errored'}).instantEligible,false);
+ assert.equal(payoutMethodSummary({...card,currency:'eur'}).instantEligible,false);
+ assert.equal(payoutMethodSummary({...card,available_payout_methods:undefined}).instantEligible,false);
+ assert.equal(payoutMethodSummary(bank).instantEligible,false);
+});

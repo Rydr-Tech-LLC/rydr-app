@@ -11,56 +11,70 @@ struct DriverPayoutAccountView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var manager: EmbeddedComponentManager?
     @State private var errorMessage: String?
+    @State private var attempt = UUID()
     var body: some View {
         NavigationStack {
             Group {
                 if let manager {
-                    EmbeddedDriverAccount(manager: manager, purpose: purpose, onExit: { dismiss() }, onError: { errorMessage = $0 })
+                    EmbeddedDriverAccount(manager: manager, purpose: purpose, onExit: { dismiss() }, onError: { self.manager = nil; errorMessage = $0 }).id(attempt)
                 } else if let errorMessage {
                     VStack(spacing: 16) {
                         Text(errorMessage).multilineTextAlignment(.center)
-                        Button("Try again") { Task { await prepare() } }
+                        Button("Try again") { Task { await prepare() } }.accessibilityIdentifier("securePayoutRetry")
                     }.padding()
                 } else { ProgressView("Loading payout setup…") }
             }
             .navigationTitle(purpose == .onboarding ? "Payout setup" : "Bank accounts & cards")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
-            .overlay(alignment: .bottom) {
-                if manager != nil, let errorMessage {
-                    Text(errorMessage).font(.footnote).padding().background(.regularMaterial)
-                }
-            }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.accessibilityIdentifier("securePayoutDone") } }
+
         }
         .task { await prepare() }
     }
     @MainActor private func prepare() async {
         errorMessage = nil
+        manager = nil
+        attempt = UUID()
         do {
+            #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("-DriverPayoutMethodsUITest") { throw URLError(.notConnectedToInternet) }
+            #endif
+            guard let workspace = RydrWorkspace.identifier, let uid = RydrWorkspace.auth.currentUser?.uid else { throw URLError(.userAuthenticationRequired) }
             let config: Config = try await DriverConnectAPI.get("config")
-            guard config.publishableKey.hasPrefix(RydrWorkspace.identifier == "test" ? "pk_test_" : "pk_live_") else { throw URLError(.badServerResponse) }
+            guard config.publishableKey.hasPrefix(workspace == "test" ? "pk_test_" : "pk_live_") else { throw URLError(.badServerResponse) }
+            guard config.mode == (workspace == "test" ? "test" : "live") else { throw URLError(.badServerResponse) }
             let apiClient = STPAPIClient(publishableKey: config.publishableKey)
             // Preflight makes backend/session errors visible instead of leaving a spinner.
             let first: Session = try await DriverConnectAPI.session(purpose: purpose.rawValue)
-            let secrets = DriverAccountSessionLoader(first: first.clientSecret, purpose: purpose.rawValue)
+            guard RydrWorkspace.identifier == workspace, RydrWorkspace.auth.currentUser?.uid == uid, first.workspace == workspace, first.mode == config.mode else { throw URLError(.badServerResponse) }
+            let secrets = DriverAccountSessionLoader(first: first.clientSecret, purpose: purpose.rawValue, workspace: workspace, uid: uid)
             var appearance = EmbeddedComponentManager.Appearance()
-            appearance.colors.primary = .systemRed
+            appearance.colors.primary = UIColor(red: 0.85, green: 0.04, blue: 0.20, alpha: 1)
+            appearance.colors.background = .systemBackground
+            appearance.colors.text = .label
+            appearance.colors.secondaryText = .secondaryLabel
             manager = EmbeddedComponentManager(apiClient: apiClient, appearance: appearance, fetchClientSecret: {
                 await secrets.next()
             })
-        } catch { errorMessage = "Couldn't load payout setup. Please try again." }
+        } catch { errorMessage = error is DriverConnectServiceError ? error.localizedDescription : "Couldn't load secure payout setup. Check your connection and try again." }
     }
-    private struct Config: Decodable { let publishableKey: String }
-    fileprivate struct Session: Decodable { let clientSecret: String }
+    private struct Config: Decodable { let publishableKey: String; let mode: String }
+    fileprivate struct Session: Decodable { let clientSecret: String; let mode: String; let workspace: String }
 }
 
 private actor DriverAccountSessionLoader {
     var first: String?
     let purpose: String
-    init(first: String, purpose: String) { self.first = first; self.purpose = purpose }
+    let workspace: String
+    let uid: String?
+    init(first: String, purpose: String, workspace: String, uid: String?) { self.first = first; self.purpose = purpose; self.workspace = workspace; self.uid = uid }
     func next() async -> String? {
+        guard RydrWorkspace.identifier == workspace, let uid, RydrWorkspace.auth.currentUser?.uid == uid else { return nil }
         if let first { self.first = nil; return first }
-        return try? await DriverConnectAPI.session(purpose: purpose).clientSecret
+        guard let session = try? await DriverConnectAPI.session(purpose: purpose),
+              session.workspace == workspace, session.mode == (workspace == "test" ? "test" : "live"),
+              RydrWorkspace.identifier == workspace, RydrWorkspace.auth.currentUser?.uid == uid else { return nil }
+        return session.clientSecret
     }
 }
 
@@ -117,12 +131,15 @@ enum DriverConnectAPI {
         return try await send(request)
     }
     private static func send<T: Decodable>(_ original: URLRequest) async throws -> T {
-        guard let user = RydrWorkspace.auth.currentUser else { throw URLError(.userAuthenticationRequired) }
+        guard let workspace = RydrWorkspace.identifier, let user = RydrWorkspace.auth.currentUser else { throw URLError(.userAuthenticationRequired) }
         var request = original
         request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+        guard RydrWorkspace.identifier == workspace, RydrWorkspace.auth.currentUser?.uid == user.uid else { throw URLError(.userAuthenticationRequired) }
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw DriverConnectServiceError.response(data: data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
         return try JSONDecoder().decode(T.self, from: data)
     }
 }

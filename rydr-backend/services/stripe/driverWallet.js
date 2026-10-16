@@ -12,6 +12,11 @@ function destinationSummary(destination) {
   if(!destination || typeof destination==='string')return {id:typeof destination==='string'?destination:null,type:'unknown',name:'Payout account',last4:null};
   return {id:destination.id,type:destination.object==='card'?'card':'bank_account',name:destination.bank_name||destination.brand||'Payout account',last4:destination.last4||null};
 }
+function payoutMethodSummary(account) {
+  return {id:account.id,...(account.object==='bank_account'?{bankName:account.bank_name||'Bank account'}:{brand:account.brand||'Debit card'}),
+    last4:account.last4||'',isDefault:account.default_for_currency===true,
+    status:account.status||null,instantEligible:account.currency==='usd' && account.available_payout_methods?.includes('instant')===true && !['errored','verification_failed'].includes(account.status)};
+}
 function payoutSummary(payout) {
   return {id:payout.id,amount:payout.amount,currency:payout.currency,status:payout.status,method:payout.method,arrivalDate:payout.arrival_date||null,created:payout.created,destination:destinationSummary(payout.destination),feeAmount:typeof payout.balance_transaction==='object' && payout.balance_transaction?.currency===payout.currency?payout.balance_transaction.fee:null,failureCode:payout.failure_code||null,failureMessage:payout.failure_message||null};
 }
@@ -30,6 +35,20 @@ function accountSessionComponents(purpose) {
   if(purpose==='payout_methods')return {payouts:{enabled:true,features:{external_account_collection:true,disable_stripe_user_authentication:false,instant_payouts:false,standard_payouts:false,edit_payout_schedule:false}}};
   throw new PayoutError('invalid_account_session_purpose',400);
 }
+// A session grants financial-account access: never return it across Stripe modes.
+async function createDriverAccountSession({stripe,accountId,purpose,mode,workspace,publishableKey}) {
+  const components=accountSessionComponents(purpose);
+  const live=mode==='live';
+  if(!['test','live'].includes(mode) || workspace!==(live?'live-beta':'test') ||
+      !String(publishableKey||'').startsWith(live?'pk_live_':'pk_test_')) {
+    throw new PayoutError('stripe_mode_mismatch',503);
+  }
+  const session=await stripe.accountSessions.create({account:accountId,components});
+  if(session.livemode!==live || !session.client_secret || session.account!==accountId) {
+    throw new PayoutError('stripe_mode_mismatch',503);
+  }
+  return {clientSecret:session.client_secret,mode,workspace};
+}
 async function walletSnapshot(stripe,accountId,startingAfter) {
   const [account,balance,externalAccounts]=await Promise.all([stripe.accounts.retrieve(accountId),stripe.balance.retrieve({stripeAccount:accountId}),allExternalAccounts(stripe,accountId)]);
   const instant=instantEligibility(account,balance,externalAccounts);
@@ -44,4 +63,4 @@ async function walletSnapshot(stripe,accountId,startingAfter) {
   const due=account.requirements?.currently_due||[];
   return {accountId,currency:'usd',availableAmount:sum(balance.available),pendingSettlementAmount:sum(balance.pending),inTransitAmount,instantAvailableAmount:instant.amount,instantDestination:instant.destination,payoutsEnabled:!!account.payouts_enabled,setupRequired:due.length>0||!account.details_submitted,verificationPending:(account.requirements?.pending_verification||[]).length>0,disabledReason:account.requirements?.disabled_reason||null,payoutSchedule:{day:'monday',hour:9,timeZone:'America/New_York'},updatedAt:new Date().toISOString(),bankAccounts:externalAccounts.filter(a=>a.object==='bank_account').map(a=>({...destinationSummary(a),isDefault:a.default_for_currency===true})),cards:externalAccounts.filter(a=>a.object==='card').map(a=>({...destinationSummary(a),isDefault:a.default_for_currency===true})),payouts:page.data.map(payoutSummary),nextCursor:page.has_more?page.data.at(-1)?.id:null};
 }
-module.exports={allExternalAccounts,destinationSummary,payoutSummary,instantEligibility,accountSessionComponents,walletSnapshot};
+module.exports={allExternalAccounts,destinationSummary,payoutSummary,instantEligibility,accountSessionComponents,createDriverAccountSession,payoutMethodSummary,walletSnapshot};

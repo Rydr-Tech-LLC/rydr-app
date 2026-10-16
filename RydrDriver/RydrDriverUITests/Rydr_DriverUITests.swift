@@ -9,6 +9,37 @@ import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
     @MainActor
+    func testPayoutMethodsNavigationAndRefreshRecovery() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-DriverPayoutMethodsUITest", "-MethodsError"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["payoutMethodsError"].waitForExistence(timeout: 15))
+        app.buttons["refreshPayoutMethods"].tap()
+        XCTAssertTrue(app.buttons["payoutMethod_ba_fixture"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["payoutMethodsError"].exists)
+        let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = "rydr-payout-methods"; proof.lifetime = .keepAlways; add(proof)
+        for id in ["addPayoutBank", "addPayoutCard"] {
+            let button = app.buttons[id]
+            for _ in 0..<4 where !button.isHittable { app.swipeUp() }
+            button.tap()
+            XCTAssertTrue(app.buttons["securePayoutEntry"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["completePayoutVerification"].exists)
+            app.buttons["cancelPayoutChoice"].tap()
+            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5))
+        }
+        app.buttons["payoutMethod_ba_fixture"].tap()
+        XCTAssertTrue(app.buttons["securePayoutEntry"].waitForExistence(timeout: 5))
+        app.buttons["securePayoutEntry"].tap()
+        let retry = app.buttons["securePayoutRetry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 15))
+        retry.tap()
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        app.buttons["securePayoutDone"].tap()
+        XCTAssertTrue(app.buttons["payoutMethodsDone"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["payoutMethod_ba_fixture"].exists)
+    }
+
+    @MainActor
     func testOnboardingResumeAfterRelaunchAndFailClosed() {
         for scenario in ["-ResumeAddress", "-ResumePayouts", "-ResumeUnavailable", "-ResumeComplete"] {
             let app = XCUIApplication()

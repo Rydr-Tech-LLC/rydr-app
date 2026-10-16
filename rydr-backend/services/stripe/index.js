@@ -14,7 +14,7 @@ const { cleanupAccount } = require("./accountCleanup");
 const { connectAccountError } = require("./connectAccountError");
 const { createConnectAccount, replayed } = require("./connectAccountCreation");
 const { DriverPayoutService, PayoutError } = require("./driverPayouts");
-const { walletSnapshot, accountSessionComponents, instantEligibility, allExternalAccounts, payoutSummary } = require("./driverWallet");
+const { walletSnapshot, payoutMethodSummary, createDriverAccountSession, instantEligibility, allExternalAccounts, payoutSummary } = require("./driverWallet");
 const { runtimeConfig, modeProfile, canChargeRide, verifyWebhook, StripeModeState } = require("./stripeMode");
 const { promotionTransfer } = require("./promotionTransfer");
 const { PromotionEngine } = require("./promotionEngine");
@@ -2379,11 +2379,10 @@ app.get("/connect/status", async (req, res) => {
 app.post("/connect/account-session", async (req,res)=>{
   try {
     const owned=await requireOwnAccountId(req,res);if(!owned)return;
-    const components=accountSessionComponents(req.body?.purpose);
-    const session=await stripe.accountSessions.create({account:owned.accountId,components});
-    const publicKey=String(env.STRIPE_PUBLISHABLE_KEY||"").trim();
-    if(!/^pk_(test|live)_/.test(publicKey) || publicKey.startsWith("pk_live_")!==session.livemode)return res.status(503).json({error:"stripe_mode_mismatch"});
-    res.set("Cache-Control","no-store").json({clientSecret:session.client_secret});
+    res.set("Cache-Control","no-store");
+    const session=await createDriverAccountSession({stripe,accountId:owned.accountId,purpose:req.body?.purpose,
+      mode:stripeConfig.mode,workspace,publishableKey:stripeConfig.publishableKey});
+    res.json(session);
   }catch(error){res.status(error instanceof PayoutError?error.status:500).json({error:error instanceof PayoutError?error.code:"account_session_failed"});}
 });
 app.get("/connect/wallet",async(req,res)=>{
@@ -2441,19 +2440,9 @@ app.get("/connect/external-accounts", async (req, res) => {
       stripe.accounts.listExternalAccounts(accountId, { object: "card", limit: 10 }),
     ]);
 
-    res.json({
-      bankAccounts: bankAccounts.data.map((bank) => ({
-        id: bank.id,
-        bankName: bank.bank_name || "Bank account",
-        last4: bank.last4 || "",
-        isDefault: bank.default_for_currency === true,
-      })),
-      cards: cards.data.map((card) => ({
-        id: card.id,
-        brand: card.brand || "Debit card",
-        last4: card.last4 || "",
-        isDefault: card.default_for_currency === true,
-      })),
+    res.set("Cache-Control", "no-store").json({
+      bankAccounts: bankAccounts.data.map(payoutMethodSummary),
+      cards: cards.data.map(payoutMethodSummary),
     });
   } catch (err) {
     console.error("❌ connect/external-accounts error", err);
