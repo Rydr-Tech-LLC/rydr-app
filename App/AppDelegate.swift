@@ -231,6 +231,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     willPresent notification: UNNotification,
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
   ) {
+    if let workspace = notification.request.content.userInfo["workspace"] as? String,
+       workspace != RydrWorkspace.identifier {
+      completionHandler([])
+      return
+    }
     NotificationManager.shared.handleForegroundNotification(notification.request.content.userInfo)
     completionHandler([.banner, .sound, .badge])
   }

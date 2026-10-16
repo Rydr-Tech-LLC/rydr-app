@@ -37,7 +37,7 @@ Preserve the corresponding Test webhook secrets and Identity flows. Both webhook
 4. Verify Live Beta's `platformConfig/stripeRuntime` is ready, then set `platformConfig/workspace.livePaymentsEnabled=true`. This flag releases Live Beta's scheduled jobs and removes the preparation banner. Real rides are also gated on payment readiness.
 5. Approve real beta invitations, driver documents, and the selected vehicle in the Live Beta workspace; Test approvals do not carry over.
 
-This implementation does not enable Live Beta payments automatically. Test external email/SMS delivery is simulated; Test financial operations use Stripe's Test API. Notifications carry their workspace so an app ignores notifications from the other environment.
+This implementation does not enable Live Beta payments automatically. Test external email/SMS delivery is simulated; Test financial operations use Stripe's Test API. Notifications carry their workspace. The apps reject taps and foreground banners from the other environment; background push delivery continues to rely on the existing device-token registration and logout cleanup.
 
 ## Validation
 
