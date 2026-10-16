@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { normalizePhone, linkedProviders, canonicalRiderProfile, validateDriverFinalization } = require("../src/services/accountIdentityService");
+const { normalizePhone, linkedProviders, canonicalRiderProfile, validateDriverFinalization, driverFinalizationFields } = require("../src/services/accountIdentityService");
 
 test("account identity accepts only normalized verified phone numbers", () => {
   assert.equal(normalizePhone("+16783220004"), "+16783220004");
@@ -49,6 +49,23 @@ test("driver account finalization requires every server-confirmed onboarding gat
     payoutsStepCompleted: true
   };
   assert.doesNotThrow(() => validateDriverFinalization(complete));
+  const pending = { ...complete, identityVerified: false, identityVerificationStepCompleted: false, identityStatus: "processing", stripeIdentityVerificationId: "vs_confirmed123", isApproved: true, driverApprovalStatus: "approved" };
+  assert.doesNotThrow(() => validateDriverFinalization(pending));
+  const patch = driverFinalizationFields(pending, "now");
+  assert.equal(patch.driverSignupCompleted, true);
+  assert.equal(patch.driverApprovalStatus, "pending");
+  assert.equal(patch.isApproved, false);
+  assert.equal(patch.canGoOnline, false);
+  assert.equal(patch.isOnline, false);
+  assert.equal(patch.online, false);
+  assert.equal(patch.identityVerified, undefined);
+  const { isApprovedDriver } = require("../src/services/driverPresenceService");
+  assert.equal(isApprovedDriver({ ...pending, ...patch }), false);
+  assert.equal(driverFinalizationFields({ ...pending, driverApprovalStatus: "rejected" }, "now").driverApprovalStatus, "rejected");
+  assert.throws(() => validateDriverFinalization({ ...pending, stripeIdentityVerificationId: null }), /identity verification/i);
+  for (const identityStatus of ["requires_input", "canceled", "not_started", "unknown"]) {
+    assert.throws(() => validateDriverFinalization({ ...pending, identityStatus }), /identity verification/i);
+  }
   assert.throws(() => validateDriverFinalization({ ...complete, identityVerified: false }), /identity verification/i);
   assert.throws(() => validateDriverFinalization({ ...complete, stripePayoutsEnabled: false }), /payout onboarding/i);
   assert.throws(() => validateDriverFinalization({ ...complete, betaWaiverVersion: "old" }), /beta waiver/i);

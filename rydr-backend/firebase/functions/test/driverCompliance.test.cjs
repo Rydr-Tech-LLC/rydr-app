@@ -109,3 +109,20 @@ test('a new pilot screening hold cancels queued access-restored pushes', async (
   assert.equal(rows.get(restored).pushStatus, 'superseded');
   assert.equal(rows.get('drivers/fixture').backgroundCheckHold, true);
 });
+
+test('strict Live Beta document review allows completed onboarding but blocks driving until all required proof is approved', async () => {
+  seed('2027-02-01', { driverSignupCompleted: true, driverOnboardingStatus: 'completed' });
+  const driver = rows.get('drivers/fixture');
+  driver.documents.insurance.status = 'needs_review';
+  await reconcileDriverCompliance('fixture', { requireVerifiedDocumentExpirations: true }, now);
+  assert.equal(driver.driverSignupCompleted, true);
+  assert.equal(driver.driverOnboardingStatus, 'completed');
+  assert.equal(driver.documentComplianceHold, true);
+  assert.equal(driver.canGoOnline, false);
+  assert.deepEqual(driver.documentComplianceVerificationKinds, ['insurance']);
+  driver.documents.insurance.status = 'approved';
+  await reconcileDriverCompliance('fixture', { requireVerifiedDocumentExpirations: true }, now);
+  assert.equal(driver.documentComplianceHold, false);
+  assert.equal(driver.canGoOnline, true);
+  assert.equal(driver.isOnline, false);
+});

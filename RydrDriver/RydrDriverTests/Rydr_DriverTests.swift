@@ -3,6 +3,18 @@ import Testing
 @testable import RydrDriver
 
 struct Rydr_DriverTests {
+    @Test func pendingIdentityAllowsOnboardingWithoutVerification() {
+        let pending = DriverIdentityStatus(identityVerified: false, identityStatus: "processing")
+        #expect(pending.canContinueOnboarding)
+        #expect(!pending.isVerified)
+        for value in ["requires_input", "canceled", "not_started", "pending", "unknown"] {
+            let status = DriverIdentityStatus(identityVerified: false, identityStatus: value)
+            #expect(!status.canContinueOnboarding)
+            #expect(!status.isVerified)
+        }
+        #expect(DriverIdentityStatus(identityVerified: true, identityStatus: "verified").canContinueOnboarding)
+    }
+
     @Test func relativeBackendURLsRemainAbsoluteAndWorkspaceScoped() throws {
         let workspace = RydrWorkspace.identifier ?? "unresolved"
         for host in ["rydr-backend-2cl9.onrender.com", "rydr-stripe-backend.onrender.com", "rydr-bank.onrender.com"] {

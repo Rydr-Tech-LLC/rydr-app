@@ -9,6 +9,8 @@ struct DriverDocumentPhotoPicker: View {
     let identifier: String
     @Binding var data: Data?
     @State private var item: PhotosPickerItem?
+    @State private var photoLibrary = false
+    @State private var pendingLibraryPhoto: Data?
     @State private var camera = false
     @State private var candidate: Data?
     private struct ReviewPhoto: Identifiable { let id = UUID(); let data: Data }
@@ -27,7 +29,10 @@ struct DriverDocumentPhotoPicker: View {
             Text(title).font(.headline)
             Menu {
                 Button("Take Photo", systemImage: "camera") { openCamera() }
-                PhotosPicker(selection: $item, matching: .images) { Label("Choose from Photo Library", systemImage: "photo") }
+                    .accessibilityIdentifier(identifier + "Camera")
+                // Present from the stable parent view, not a disappearing Menu row.
+                Button("Choose from Photo Library", systemImage: "photo") { photoLibrary = true }
+                    .accessibilityIdentifier(identifier + "Library")
                 #if DEBUG && targetEnvironment(simulator)
                 if ProcessInfo.processInfo.arguments.contains("-DriverDocumentUITest") {
                     Button("Use sample document") {
@@ -49,11 +54,27 @@ struct DriverDocumentPhotoPicker: View {
         }
         .frame(maxWidth: .infinity).padding(14)
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+        .photosPicker(isPresented: $photoLibrary, selection: $item, matching: .images)
+        .onChange(of: photoLibrary) { _, presented in
+            if !presented, let pendingLibraryPhoto {
+                self.pendingLibraryPhoto = nil
+                prepare(pendingLibraryPhoto)
+            }
+        }
         .onChange(of: item) { _, value in
             guard let value else { return }
             loading = true; message = nil
             Task { @MainActor in
-                do { prepare(try await value.loadTransferable(type: Data.self)) }
+                do {
+                    guard let bytes = try await value.loadTransferable(type: Data.self) else {
+                        message = "Unable to read this photo. Please select it again."
+                        loading = false
+                        item = nil
+                        return
+                    }
+                    if photoLibrary { pendingLibraryPhoto = bytes }
+                    else { prepare(bytes) }
+                }
                 catch { message = "Unable to read this photo. Please select it again." }
                 loading = false
                 item = nil

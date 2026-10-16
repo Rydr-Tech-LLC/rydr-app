@@ -121,6 +121,7 @@ struct DriverSignupCoordinator: View {
 
     // Progress flags
     @State private var identityVerified = false
+    @State private var identitySubmitted = false
     @State private var backgroundCheckAcknowledged = false
     @State private var connectOnboarded = false
 
@@ -311,8 +312,8 @@ struct DriverSignupCoordinator: View {
                     .onAppear { markCurrentOnboardingStep(.vehicle) }
 
                 case .identity:
-                    IdentityVerificationView(isVerified: $identityVerified) {
-                        if identityVerified { path.append(.backgroundCheck) }
+                    IdentityVerificationView(isVerified: $identityVerified, isSubmitted: $identitySubmitted) {
+                        if identityVerified || identitySubmitted { path.append(.backgroundCheck) }
                     }
                     .onAppear { markCurrentOnboardingStep(.identity) }
 

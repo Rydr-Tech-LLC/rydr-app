@@ -177,6 +177,11 @@ enum DriverIdentityVerificationError: LocalizedError {
 struct DriverIdentityStatus: Decodable {
     let identityVerified: Bool
     let identityStatus: String
+
+    var isVerified: Bool { identityVerified || identityStatus == "verified" }
+    // Only a trusted backend status can unlock the rest of onboarding.
+    // Processing is a submitted application, never permission to drive.
+    var canContinueOnboarding: Bool { isVerified || identityStatus == "processing" }
 }
 
 private struct DriverIdentitySessionResponse: Decodable {

@@ -9,6 +9,95 @@ import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
     @MainActor
+    func testIdentityPendingAndURLRecoveryContinueWithoutVerification() {
+        for scenario in ["-IdentityProcessing", "-IdentityURLFailure", "-IdentityResume", "-IdentityVerified"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-DriverIdentityUITest", scenario]
+            app.launch()
+            let next = app.buttons["identityContinue"]
+            XCTAssertTrue(next.waitForExistence(timeout: 15))
+            if scenario != "-IdentityResume" {
+                XCTAssertFalse(next.isEnabled)
+                let start = app.buttons["Start Verification"]
+                XCTAssertTrue(start.waitForExistence(timeout: 5))
+                start.tap()
+            }
+            XCTAssertTrue(next.waitForExistence(timeout: 5))
+            let enabled = NSPredicate(format: "enabled == true")
+            expectation(for: enabled, evaluatedWith: next)
+            waitForExpectations(timeout: 10)
+            if scenario != "-IdentityVerified" { XCTAssertTrue(app.staticTexts["identityPendingNotice"].exists) }
+            for _ in 0..<4 where !next.isHittable { app.swipeUp() }
+            let pendingProof = XCTAttachment(screenshot: app.screenshot()); pendingProof.name = scenario + "-before-continue"; pendingProof.lifetime = .keepAlways; add(pendingProof)
+            next.tap()
+            XCTAssertTrue(app.staticTexts["identityNextStep"].waitForExistence(timeout: 5))
+            XCTAssertEqual(app.staticTexts["identityVerificationValue"].label, scenario == "-IdentityVerified" ? "verified" : "unverified")
+            let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = scenario; proof.lifetime = .keepAlways; add(proof)
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testIdentityErrorsAndUnconfirmedSubmissionRemainBlocked() {
+        for scenario in ["-IdentityRequiresInput", "-IdentityUnavailable", "-IdentityCanceled", "-IdentityUnconfirmed"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-DriverIdentityUITest", scenario]
+            app.launch()
+            let next = app.buttons["identityContinue"]
+            XCTAssertTrue(next.waitForExistence(timeout: 15))
+            let start = app.buttons["Start Verification"]
+            XCTAssertTrue(start.waitForExistence(timeout: 5))
+            start.tap()
+            let expectedMessage: String
+            switch scenario {
+            case "-IdentityRequiresInput": expectedMessage = "Stripe needs more information. Complete identity verification to continue."
+            case "-IdentityCanceled": expectedMessage = "Verification was canceled. Please complete identity verification to continue."
+            case "-IdentityUnconfirmed": expectedMessage = "Waiting for submission confirmation. Check verification again before continuing."
+            default: expectedMessage = URLError(.notConnectedToInternet).localizedDescription
+            }
+            let errorLabel = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", expectedMessage)).firstMatch
+            XCTAssertTrue(errorLabel.waitForExistence(timeout: 10))
+            XCTAssertFalse(next.isEnabled)
+            XCTAssertFalse(app.staticTexts["identityNextStep"].exists)
+            XCTAssertFalse(app.staticTexts["identityPendingNotice"].exists)
+            let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = scenario; proof.lifetime = .keepAlways; add(proof)
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testDocumentPhotoLibrarySelectionAndConfirmation() {
+        for vehicle in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = vehicle ? ["-DriverDocumentUITest", "-DocumentVehicle"] : ["-DriverDocumentUITest"]
+            app.launch()
+            for identifier in vehicle ? ["registration", "insurance"] : ["licenseFront", "licenseBack"] {
+                let source = app.buttons[identifier + "Source"]
+                XCTAssertTrue(source.waitForExistence(timeout: 15))
+                for _ in 0..<8 where !source.isHittable { app.swipeUp() }
+                source.tap()
+                XCTAssertTrue(app.buttons["Take Photo"].exists)
+                let library = app.buttons["Choose from Photo Library"]
+                XCTAssertTrue(library.waitForExistence(timeout: 5))
+                library.tap()
+                let photo = app.images.matching(NSPredicate(format: "label CONTAINS[c] 'Photo'")).firstMatch
+                XCTAssertTrue(photo.waitForExistence(timeout: 10), app.debugDescription)
+                // The system photo grid exposes frames but can report false
+                // hittability across the picker service boundary on Simulator.
+                photo.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                XCTAssertTrue(app.images["documentReviewPreview"].waitForExistence(timeout: 10), app.debugDescription)
+                XCTAssertFalse(app.images[identifier + "Preview"].exists)
+                app.buttons["documentUsePhoto"].tap()
+                XCTAssertTrue(app.images[identifier + "Preview"].waitForExistence(timeout: 5))
+            }
+            let next = app.buttons[vehicle ? "vehicleDocumentsContinue" : "licenseContinue"]
+            XCTAssertTrue(next.isEnabled)
+            let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = vehicle ? "gallery-vehicle-documents" : "gallery-license"; proof.lifetime = .keepAlways; add(proof)
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testLicensePhotosRequireConfirmationAndContinueWorks() {
         let app = XCUIApplication()
         app.launchArguments = ["-DriverDocumentUITest"]

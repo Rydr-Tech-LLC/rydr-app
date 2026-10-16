@@ -36,7 +36,7 @@ struct SignupCompleteView: View {
                     .font(.system(size: 26, weight: .heavy, design: .rounded))
                     .foregroundStyle(Styles.rydrGradient)
 
-                Text("If your beta onboarding checks are complete, your account can be approved automatically. Background checks remain required and will be completed when Rydr opens the next screening phase.")
+                Text("You can finish onboarding while Stripe reviews your identity. You can start driving only after identity verification and all required account checks are approved. Background checks will be required when Rydr opens the next screening phase.")
                     .font(.body)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)

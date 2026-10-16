@@ -69,6 +69,22 @@ function canonicalRiderProfile(payload) {
   };
 }
 
+function driverIdentitySubmitted(existing) {
+  return existing?.identityStatus === "processing"
+    && /^vs_[a-zA-Z0-9]+$/.test(existing?.stripeIdentityVerificationId || "");
+}
+
+function driverFinalizationFields(existing, now) {
+  const fields = { driverSignupCompleted: true, driverSignupCompletedAt: now, driverOnboardingStatus: "completed" };
+  if (driverIdentitySubmitted(existing)) {
+    Object.assign(fields, {
+      driverApprovalStatus: ["rejected", "needs_attention"].includes(existing.driverApprovalStatus) ? existing.driverApprovalStatus : "pending",
+      isApproved: false, canGoOnline: false, isOnline: false, online: false
+    });
+  }
+  return fields;
+}
+
 function validateDriverFinalization(existing) {
   const vehicle = existing?.vehicle || {};
   const license = existing?.license || {};
@@ -84,8 +100,8 @@ function validateDriverFinalization(existing) {
   if (existing.betaWaiverAccepted !== true || existing.betaWaiverVersion !== BETA_WAIVER_VERSION) {
     throw error("Accept the current driver beta waiver first", 409);
   }
-  if (existing.identityVerified !== true || existing.identityVerificationStepCompleted !== true) {
-    throw error("Complete server-verified identity verification first", 409);
+  if (!driverIdentitySubmitted(existing) && (existing.identityVerified !== true || existing.identityVerificationStepCompleted !== true)) {
+    throw error("Submit identity verification to Stripe before continuing", 409);
   }
   if (existing.backgroundCheckStepCompleted !== true) {
     throw error("Complete the background-check acknowledgement first", 409);
@@ -144,11 +160,7 @@ async function finalizeAccountProfile({ uid, role, token, payload, db = getFires
           riderSignupCompleted: true,
           riderSignupCompletedAt: now
         }
-      : {
-          driverSignupCompleted: true,
-          driverSignupCompletedAt: now,
-          driverOnboardingStatus: "completed"
-        };
+      : driverFinalizationFields(existing, now);
 
     tx.set(profileRef, {
       uid,
@@ -277,6 +289,8 @@ async function syncAccountIdentity({ uid, role, token, profileData = null, accep
 }
 
 module.exports = {
+  driverIdentitySubmitted,
+  driverFinalizationFields,
   syncAccountIdentity,
   finalizeAccountProfile,
   canonicalRiderProfile,
