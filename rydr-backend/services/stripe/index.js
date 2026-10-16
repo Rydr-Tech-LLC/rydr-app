@@ -12,6 +12,7 @@ const Stripe = require("stripe");
 const { randomInt, timingSafeEqual } = require("crypto");
 const { cleanupAccount } = require("./accountCleanup");
 const { connectAccountError } = require("./connectAccountError");
+const { createConnectAccount, replayed } = require("./connectAccountCreation");
 const { DriverPayoutService, PayoutError } = require("./driverPayouts");
 const { walletSnapshot, accountSessionComponents, instantEligibility, allExternalAccounts, payoutSummary } = require("./driverWallet");
 const { runtimeConfig, modeProfile, canChargeRide, verifyWebhook, StripeModeState } = require("./stripeMode");
@@ -2259,13 +2260,14 @@ app.post("/connect/accounts", async (req, res) => {
         console.warn("⚠️ Stored Stripe account could not be reused", {
           uid: driverUid,
           accountId: existingAccountId,
-          message: err.message,
+          code: err.code,
         });
+        throw err; // Never create a duplicate because retrieval is temporarily unavailable.
       }
     }
 
-    const account = await stripe.accounts.create(
-      {
+    const account = await createConnectAccount({ stripe, db: admin.firestore(), uid: driverUid,
+      params: {
         type: "express",
         country: "US",
         settings: { payouts: { schedule: { interval: "manual" } } },
@@ -2284,9 +2286,8 @@ app.post("/connect/accounts", async (req, res) => {
           address, // { line1, city, state, postal_code, line2? }
         },
         metadata: { uid: driverUid, stripeMode: stripeConfig.mode },
-      },
-      { idempotencyKey: `connect_account_create_${driverUid}` }
-    );
+      }
+    });
 
     await updateDriver(driverUid, driverConnectStatusUpdate(account));
     await updatePublicDriverConnectStatus(driverUid, {
@@ -2296,8 +2297,9 @@ app.post("/connect/accounts", async (req, res) => {
 
     res.json({ accountId: account.id, reused: false });
   } catch (err) {
-    console.error("❌ connect/accounts error", err);
     const failure = connectAccountError(err);
+    console.error("❌ connect/accounts error", { code: failure.body.error, stripeType: err.type,
+      stripeCode: err.code, statusCode: err.statusCode, requestId: err.requestId, idempotentReplayed: replayed(err) });
     res.status(failure.status).json(failure.body);
   }
 });
