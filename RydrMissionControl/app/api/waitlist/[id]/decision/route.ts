@@ -106,20 +106,21 @@ export async function POST(request: NextRequest, props: { params: Promise<{ id: 
     }
   }
 
-  let emailStatus: "not_sent" | "sent" | "failed" = "not_sent";
+  let emailStatus: "not_sent" | "sent" | "simulated" | "failed" = "not_sent";
   let emailError: string | undefined;
   let emailProviderId: string | null | undefined;
 
   if (decision === "approved" && email) {
     const result = await notificationService.sendBetaApproval({ to: email, firstName, role });
-    emailStatus = result.ok ? "sent" : "failed";
+    emailStatus = result.ok ? (result.providerMessageId === "simulated-test-email" ? "simulated" : "sent") : "failed";
     emailError = result.error;
     emailProviderId = result.providerMessageId;
 
     await waitlistRef.set(
       {
         approvalEmailStatus: emailStatus,
-        approvalEmailSentAt: result.ok ? FieldValue.serverTimestamp() : null,
+        approvalEmailSentAt: emailStatus === "sent" ? FieldValue.serverTimestamp() : null,
+        approvalEmailSimulatedAt: emailStatus === "simulated" ? FieldValue.serverTimestamp() : null,
         approvalEmailError: result.ok ? FieldValue.delete() : result.error,
         approvalEmailProviderId: result.providerMessageId ?? null
       },
