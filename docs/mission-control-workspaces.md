@@ -9,6 +9,8 @@ Mission Control has two operational workspaces. The selector stays visible in th
 
 Accounts, ride requests, trips, support disputes, safety flags, rider/driver campaigns, rewards, payment jobs, and driver payouts live in the selected database. Staff authentication and access management remain shared. Live Beta starts with operating configuration and independent vehicle-library assets, without copying Test accounts, rides, promotions, disputes, or balances. The account-reset security archive remains in the control database and outside both operational lists.
 
+The identity policy is an exact snapshot of Firebase’s configured test numbers, rather than a phone-prefix match. If those Firebase test numbers change, synchronize the phone list and hashes in both databases’ `operationalSecurity/liveBetaAccess` records before using the new numbers. Keep previously pinned Test UIDs in the policy.
+
 ## Mobile routing
 
 The rider and driver apps fetch a hashed identity policy before displaying their screens. A signed-in Firebase UID or canonical phone matching the configured Test policy selects Test automatically; other identities select Live Beta. There is no account-controlled environment picker. Every Firestore reference, callable function, and Rydr backend request follows that selection. Backends independently verify the current Firebase identity and reject cross-workspace requests. Rules also enforce the database boundary. Missing policy or payment configuration fails closed.
@@ -33,8 +35,8 @@ Preserve the corresponding Test webhook secrets and Identity flows. Both webhook
 
 1. Install and verify the workspace-aware rider and driver builds. Existing builds only support the legacy Test database.
 2. Configure the complete Live Stripe key, webhook, and Identity set in Render, while retaining Test configuration. Resolve Stripe live payout eligibility before offering unavailable payout methods.
-3. Explicitly enable `LIVE_BETA_ENABLED=true` on the Stripe service and redeploy. Verify authenticated real-account configuration reports Live and Test identities still report Test.
-4. Verify Live Beta's `platformConfig/stripeRuntime` is ready, then set `platformConfig/workspace.livePaymentsEnabled=true`. This flag releases Live Beta's scheduled jobs and removes the preparation banner. Real rides are also gated on payment readiness.
+3. Explicitly enable `LIVE_BETA_ENABLED=true` on the Stripe service and redeploy. Keep the Firestore workspace flag false while checking the configuration; live endpoints remain blocked.
+4. When ready to start the live beta, set `platformConfig/workspace.livePaymentsEnabled=true`. Both switches must be enabled: this releases Live Stripe endpoints, financial operations, and scheduled jobs, and removes the preparation banner. Verify authenticated real-account configuration reports Live and Test identities still report Test. The first Live `/config` request prepares `platformConfig/stripeRuntime`; rides also require this runtime to be ready.
 5. Approve real beta invitations, driver documents, and the selected vehicle in the Live Beta workspace; Test approvals do not carry over.
 
 This implementation does not enable Live Beta payments automatically. Test external email/SMS delivery is simulated; Test financial operations use Stripe's Test API. Notifications carry their workspace. The apps reject taps and foreground banners from the other environment; background push delivery continues to rely on the existing device-token registration and logout cleanup.

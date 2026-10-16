@@ -20,6 +20,13 @@ function isBlockedTestAccount(policy, uid, phone) {
   );
 }
 async function liveBetaContext(db, mode) {
+  const liveWorkspace = db.databaseId === "live-beta";
+  if (liveWorkspace) {
+    if (mode === "test") throw accessError("workspace_stripe_mode_mismatch", 503);
+    const state = (await db.collection("platformConfig").doc("workspace").get()).data();
+    if (state?.enabled !== true || state.livePaymentsEnabled !== true)
+      throw accessError("live_beta_not_enabled", 503);
+  }
   if (mode === "test") return { mode: "test" };
   if (mode === undefined) {
     const runtime = (
@@ -32,7 +39,10 @@ async function liveBetaContext(db, mode) {
     )
       throw accessError("payment_environment_unavailable", 503);
     mode = runtime.mode;
-    if (mode === "test") return { mode: "test" };
+    if (mode === "test") {
+      if (liveWorkspace) throw accessError("workspace_stripe_mode_mismatch", 503);
+      return { mode: "test" };
+    }
   }
   if (mode !== "live")
     throw accessError("payment_environment_unavailable", 503);

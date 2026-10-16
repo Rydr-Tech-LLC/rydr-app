@@ -33,3 +33,8 @@ test('backend authenticates canonical Auth phone and rejects cross-workspace req
  user={uid:'real',disabled:true};assert.equal((await invoke('live-beta')).res.statusCode,403);
  }finally{if(previous)require.cache[configPath]=previous;else delete require.cache[configPath]}
 });
+
+test('real HTTP JSON requests preserve workspace through middleware and concurrent handlers',async()=>{
+ const express=require('express');const {workspaceRouting}=require('../src/services/workspaceContext');const app=express();app.use(workspaceRouting);app.use(express.json());app.post('/echo',async(req,res)=>{await new Promise(resolve=>setTimeout(resolve,Math.random()*15));res.json({workspace:currentWorkspace(),value:req.body.value})});const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));const base=`http://127.0.0.1:${server.address().port}`;
+ try{await Promise.all(Array.from({length:24},async(_,i)=>{const workspace=i%2?'test':'live-beta';const r=await fetch(base+'/workspaces/'+workspace+'/echo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({value:i})});assert.equal(r.status,200);assert.deepEqual(await r.json(),{workspace,value:i})}));assert.equal((await fetch(base+'/workspaces/__proto__/echo',{method:'POST'})).status,404);const legacy=await fetch(base+'/echo',{method:'POST',headers:{'content-type':'application/json'},body:'{"value":"legacy"}'});assert.deepEqual(await legacy.json(),{workspace:'test',value:'legacy'});}finally{await new Promise(resolve=>server.close(resolve))}
+});

@@ -1028,7 +1028,7 @@ app.get("/config", async (_req, res) => {
 async function stripeWebhookHandler(req,res,scope) {
   const sig = req.headers["stripe-signature"];
   try {
-    const verified=verifyWebhook(stripe,req.body,sig,scope==="connect"?stripeConfig.connectSecrets:stripeConfig.platformSecrets,scope,stripeConfig.mode);
+    const verified=verifyWebhook(stripe,req.body,sig,scope==="connect"?stripeConfig.connectWebhookSecret:stripeConfig.platformWebhookSecret,scope,stripeConfig.mode);
     if(!verified.active)return res.status(200).json({ignored:true,reason:"inactive_stripe_mode"});
     await stripeModeState.ensure();
     const event=verified.event;
@@ -2628,15 +2628,19 @@ function createWorkspaceServer(env = process.env, dependencies = {}) {
       const privateKey = (env.FIREBASE_PRIVATE_KEY || env.FIREBASE_ADMIN_PRIVATE_KEY || "").replace(/\\n/g, "\n");
       initializeApp({credential: projectId && clientEmail && privateKey ? cert({projectId, clientEmail, privateKey}) : applicationDefault()});
     }
-    return {auth: getAuth(), db: getFirestore()};
+    return {auth: getAuth(), db: getFirestore(), getWorkspaceState: async workspace =>
+      (await getFirestore(undefined, workspaceDefinition(workspace).databaseId).collection("platformConfig").doc("workspace").get()).data()};
   }
   function liveReady() {
     if (env.LIVE_BETA_ENABLED !== "true") return false;
     try { return runtimeConfig(liveEnv).mode === "live"; } catch { return false; }
   }
-  function live(req, res, next) {
+  async function live(req, res, next) {
     if (!liveReady()) return res.status(503).json({error: "live_beta_not_enabled"});
     try {
+      const state = await control().getWorkspaceState("live-beta");
+      if (state?.enabled !== true || state.livePaymentsEnabled !== true)
+        return res.status(503).json({error: "live_beta_not_enabled"});
       liveApp ??= createApp(liveEnv, "live-beta");
       return liveApp(req, res, next);
     } catch { return res.status(503).json({error: "live_beta_configuration_incomplete"}); }
@@ -2666,7 +2670,8 @@ function createWorkspaceServer(env = process.env, dependencies = {}) {
       const workspace = accountWorkspace(decoded.uid, user.phoneNumber, policy);
       const mode = workspace === "test" ? "test" : "live";
       const config = mode === "test" ? testEnv : liveEnv;
-      const ready = mode === "test" || liveReady();
+      const state = mode === "live" && liveReady() ? await control().getWorkspaceState(workspace) : null;
+      const ready = mode === "test" || (liveReady() && state?.enabled === true && state.livePaymentsEnabled === true);
       res.set("Cache-Control", "private, no-store");
       return res.json({workspace, databaseId: workspaceDefinition(workspace).databaseId, mode,
         publishableKey: ready ? config.STRIPE_PUBLISHABLE_KEY : null, ready,
@@ -2681,10 +2686,18 @@ function createWorkspaceServer(env = process.env, dependencies = {}) {
       try {
         const config = runtimeConfig(testEnv);
         const connect = endpoint.endsWith("connect");
-        const verified = verifyWebhook(new Stripe(testEnv.STRIPE_SECRET_KEY, {apiVersion: config.apiVersion}),
-          req.body, req.header("stripe-signature"), connect ? config.connectSecrets : config.platformSecrets,
-          connect ? "connect" : "platform", "test");
-        return verified.event.livemode ? live(req, res, next) : testApp(req, res, next);
+        const stripe = new Stripe(testEnv.STRIPE_SECRET_KEY, {apiVersion: config.apiVersion});
+        const scope = connect ? "connect" : "platform";
+        const secretName = connect ? "STRIPE_CONNECT_WEBHOOK_SECRET" : "STRIPE_WEBHOOK_SECRET";
+        const secrets = {test: env[secretName + "_TEST"] || env[secretName], live: env[secretName + "_LIVE"]};
+        for (const mode of ["test", "live"]) {
+          let verified;
+          try { verified = verifyWebhook(stripe, req.body, req.header("stripe-signature"), secrets[mode], scope, mode); }
+          catch { continue; }
+          if (!verified.active) return res.status(400).json({error: "webhook_environment_mismatch"});
+          return mode === "live" ? live(req, res, next) : testApp(req, res, next);
+        }
+        return res.status(400).json({error: "invalid_webhook_signature"});
       } catch { return res.status(400).json({error: "invalid_webhook_signature"}); }
     });
   }
