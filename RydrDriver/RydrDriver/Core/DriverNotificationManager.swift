@@ -103,6 +103,16 @@ final class DriverNotificationManager {
     }
 
     func handleNotificationTap(_ userInfo: [AnyHashable: Any]) {
+        // Cold-launch taps arrive before the workspace gate has fetched its policy.
+        if !RydrWorkspace.isReady {
+            Task {
+                do {
+                    try await RydrWorkspace.bootstrap()
+                    handleNotificationTap(userInfo)
+                } catch { Self.log("notification_workspace_verification_failed") }
+            }
+            return
+        }
         if let workspace = userInfo["workspace"] as? String, workspace != RydrWorkspace.identifier { return }
         let route = DriverNotificationRoute(userInfo: userInfo)
         Self.log("notification_tap", route.logFields)
@@ -112,6 +122,10 @@ final class DriverNotificationManager {
     }
 
     private func saveTokenIfAuthenticated(_ token: String) async {
+        guard RydrWorkspace.isReady else {
+            Self.log("token_save_deferred", ["reason": "workspace_not_ready"])
+            return
+        }
         guard let uid = Auth.auth().currentUser?.uid else {
             Self.log("token_save_deferred", ["reason": "missing_authenticated_user"])
             return
