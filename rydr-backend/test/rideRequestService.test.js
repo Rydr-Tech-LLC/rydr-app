@@ -162,9 +162,9 @@ test("backend creates the authoritative request, signal, route, quote, and dispa
   assert.equal(request.driverRatePerMinuteCents, 28);
   assert.equal(request.backendDistanceMiles, 2.3);
   assert.equal(request.backendDurationMinutes, 8);
-  assert.equal(request.estimatedRiderTotalCents, 1000);
+  assert.equal(request.estimatedRiderTotalCents, 1100);
   assert.equal(request.estimatedDriverPayoutCents, 720);
-  assert.equal(request.estimatedPlatformShareCents, 280);
+  assert.equal(request.estimatedPlatformShareCents, 380);
   assert.match(request.quoteFingerprint, /^[a-f0-9]{64}$/);
   assert.equal(signal.driverId, "driver-1");
 });
