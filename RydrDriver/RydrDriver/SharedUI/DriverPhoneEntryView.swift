@@ -10,7 +10,121 @@
 //
 
 import SwiftUI
+import Combine
 import FirebaseAuth
+
+struct DriverSMSVerificationSession {
+    let verificationID: String
+    let phoneNumber: String
+    var workspace: String? = nil
+}
+
+// One controller owns every driver SMS send, including resends from a presented sheet.
+// The deadline is persisted per workspace; leaving a screen never resets it.
+@MainActor
+final class DriverSMSRequests: ObservableObject {
+    static let shared = DriverSMSRequests()
+    @Published private(set) var isSending = false
+    @Published private(set) var errorMessage = ""
+    @Published private(set) var latestSession: DriverSMSVerificationSession?
+    @Published private(set) var now = Date()
+    #if DEBUG && targetEnvironment(simulator)
+    @Published private(set) var testRequestCount = 0
+    #endif
+    private let defaults: UserDefaults
+    private let cooldown: TimeInterval
+    private var timer: Timer?
+    private var deadlineKey: String { "rydr.sms.nextRequest.\(RydrWorkspace.selected ?? "unresolved")" }
+    var secondsRemaining: Int { max(0, Int(ceil(defaults.double(forKey: deadlineKey) - now.timeIntervalSince1970))) }
+    var canSend: Bool { !isSending && secondsRemaining == 0 }
+    var buttonTitle: String {
+        isSending ? "Sending…" : secondsRemaining > 0 ? "Try again in \(secondsRemaining)s" : "Send Code"
+    }
+
+    private init() {
+        #if DEBUG && targetEnvironment(simulator)
+        let testing = ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest")
+        defaults = testing ? UserDefaults(suiteName: "rydr.driver.sms.ui-tests")! : .standard
+        cooldown = testing ? 5 : 60
+        if testing && ProcessInfo.processInfo.arguments.contains("-RydrSMSResetUITest") {
+            defaults.removePersistentDomain(forName: "rydr.driver.sms.ui-tests")
+        }
+        #else
+        defaults = .standard
+        cooldown = 60
+        #endif
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.now = Date() }
+        }
+    }
+
+    @discardableResult
+    func send(phone: String, onFinished: @escaping () -> Void = {}, completion: @escaping (DriverSMSVerificationSession) -> Void) -> Bool {
+        now = Date()
+        guard canSend else { return false }
+        guard phone.count == 12, phone.hasPrefix("+1"), phone.dropFirst().allSatisfy({ $0.isNumber }) else {
+            errorMessage = "Enter a valid 10-digit US phone number."
+            return false
+        }
+        let workspace = RydrWorkspace.selected
+        let key = deadlineKey
+        isSending = true
+        errorMessage = ""
+        defaults.set(now.addingTimeInterval(cooldown).timeIntervalSince1970, forKey: key)
+        let finished: (String?, Error?) -> Void = { [weak self] id, error in
+            Task { @MainActor in
+                guard let self else { return }
+                self.isSending = false
+                self.now = Date()
+                guard workspace == RydrWorkspace.selected else { return }
+                onFinished()
+                if let error {
+                    let code = AuthErrorCode(rawValue: (error as NSError).code)
+                    if code == .tooManyRequests {
+                        // This is a local backoff, not a promise that Firebase's block expires then.
+                        #if DEBUG && targetEnvironment(simulator)
+                        let delay: TimeInterval = ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") ? (ProcessInfo.processInfo.arguments.contains("-RydrSMSPersistenceUITest") ? 30 : 5) : 600
+                        #else
+                        let delay: TimeInterval = 600
+                        #endif
+                        self.defaults.set(self.now.addingTimeInterval(delay).timeIntervalSince1970, forKey: key)
+                        self.errorMessage = "Firebase temporarily blocked SMS requests due to unusual activity. Stop requesting codes and try later, or use email and password to log in. This cooldown does not guarantee Firebase has lifted the block."
+                    } else if code == .invalidPhoneNumber {
+                        self.errorMessage = "Check your phone number and try again."
+                    } else if code == .networkError {
+                        self.errorMessage = "Unable to send a code. Check your connection and try again after the cooldown."
+                    } else {
+                        self.errorMessage = "Unable to send a code: \(error.localizedDescription)"
+                    }
+                    return
+                }
+                guard let id, !id.isEmpty else {
+                    self.errorMessage = "No verification session was returned. Wait for the cooldown, then request another code."
+                    return
+                }
+                let session = DriverSMSVerificationSession(verificationID: id, phoneNumber: phone, workspace: workspace)
+                self.latestSession = session
+                completion(session)
+            }
+        }
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
+            testRequestCount += 1
+            let attempt = testRequestCount
+            let failFirst = ProcessInfo.processInfo.arguments.contains("-RydrSMSBlockedUITest")
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                if failFirst || attempt == 2 {
+                    finished(nil, NSError(domain: AuthErrorDomain, code: AuthErrorCode.tooManyRequests.rawValue))
+                } else { finished("simulator-session-\(attempt)", nil) }
+            }
+            return true
+        }
+        #endif
+        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(phone, uiDelegate: nil, completion: finished)
+        return true
+    }
+}
 
 struct DriverPhoneEntryView: View {
     /// Called once Firebase has accepted the phone number and sent a verification code.
@@ -20,8 +134,7 @@ struct DriverPhoneEntryView: View {
     var onClose: (() -> Void)? = nil
 
     @State private var phoneNumber = ""
-    @State private var isSending = false
-    @State private var errorMessage = ""
+    @ObservedObject private var sms = DriverSMSRequests.shared
     @FocusState private var isFieldFocused: Bool
 
     private func digitsOnly(_ s: String) -> String { s.filter { $0.isNumber } }
@@ -65,14 +178,20 @@ struct DriverPhoneEntryView: View {
                 }
                 .multilineTextAlignment(.center)
 
-                if !errorMessage.isEmpty {
-                    Text(errorMessage)
+                if !sms.errorMessage.isEmpty {
+                    Text(sms.errorMessage)
                         .foregroundColor(.red)
                         .font(.caption)
                         .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("smsLoginError")
                 }
 
                 sendCodeButton
+                #if DEBUG && targetEnvironment(simulator)
+                if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
+                    Text("SMS transport calls: \(sms.testRequestCount)").accessibilityIdentifier("smsRequestCount")
+                }
+                #endif
 
                 decorativeDivider
 
@@ -177,6 +296,7 @@ struct DriverPhoneEntryView: View {
             .padding(.leading, 12)
             .padding(.trailing, 14)
             .accessibilityLabel("Phone Number Field")
+            .accessibilityIdentifier("smsPhoneNumber")
         }
         .frame(maxWidth: .infinity)
         .background(
@@ -189,20 +309,21 @@ struct DriverPhoneEntryView: View {
         Button(action: sendCode) {
             HStack {
                 Image(systemName: "paperplane.fill")
-                Text(isSending ? "Sending..." : "Send Code")
+                Text(sms.buttonTitle)
                     .fontWeight(.semibold)
             }
             .frame(maxWidth: .infinity)
             .frame(height: 54)
         }
-        .disabled(isSending || !isPhoneValid)
+        .disabled(!sms.canSend || !isPhoneValid)
         .foregroundColor(.white)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isPhoneValid && !isSending ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.gray.opacity(0.5)))
+                .fill(isPhoneValid && sms.canSend ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.gray.opacity(0.5)))
         )
         .shadow(color: Color.red.opacity(isPhoneValid ? 0.25 : 0), radius: 12, y: 6)
-        .accessibilityLabel("Send Verification Code")
+        .accessibilityLabel(sms.buttonTitle)
+        .accessibilityIdentifier("smsSend")
     }
 
     private var decorativeDivider: some View {
@@ -251,26 +372,9 @@ struct DriverPhoneEntryView: View {
     // MARK: - Firebase
 
     private func sendCode() {
-        guard isPhoneValid else {
-            errorMessage = "Please enter a valid 10-digit phone number."
-            return
-        }
-        errorMessage = ""
-        isSending = true
-        let phone = e164Phone
-        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(phone, uiDelegate: nil) { verificationID, error in
-            Task { @MainActor in
-                isSending = false
-                if let error {
-                    errorMessage = "Failed to send code: \(error.localizedDescription)"
-                    return
-                }
-                guard let verificationID, !verificationID.isEmpty else {
-                    errorMessage = "Firebase did not return a verification session. Please try again."
-                    return
-                }
-                onCodeSent(verificationID, phone)
-            }
+        guard isPhoneValid else { return }
+        sms.send(phone: e164Phone) { session in
+            onCodeSent(session.verificationID, session.phoneNumber)
         }
     }
 }

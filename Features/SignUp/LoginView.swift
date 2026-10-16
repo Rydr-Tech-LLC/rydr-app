@@ -39,6 +39,7 @@ struct LoginView: View {
 
     @EnvironmentObject var session: UserSessionManager
     
+    @ObservedObject private var sms = RiderSMSRequests.shared
     @State private var isUsingEmail = false
     @State private var phoneNumber = ""
     @State private var email = ""
@@ -66,7 +67,7 @@ struct LoginView: View {
     }
 
     private var canSendPhoneCode: Bool {
-        phoneNumber.filter { $0.isNumber }.count == 10
+        phoneNumber.filter { $0.isNumber }.count == 10 && sms.canSend
     }
     
     var body: some View {
@@ -100,15 +101,20 @@ struct LoginView: View {
                             phoneLoginSection
                         }
 
-                        if !errorMessage.isEmpty {
-                            Text(errorMessage)
+                        if !errorMessage.isEmpty || (!isUsingEmail && !sms.errorMessage.isEmpty) {
+                            Text(sms.errorMessage.isEmpty || isUsingEmail ? errorMessage : sms.errorMessage)
                                 .font(.footnote.weight(.semibold))
                                 .foregroundColor(.red)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 8)
-                                .accessibilityLabel(errorMessage)
+                                .accessibilityIdentifier("smsLoginError")
                         }
 
+                        #if DEBUG && targetEnvironment(simulator)
+                        if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
+                            Text("SMS transport calls: \(sms.testRequestCount)").accessibilityIdentifier("smsRequestCount")
+                        }
+                        #endif
                         divider
                         socialLoginSection
                     }
@@ -216,6 +222,7 @@ struct LoginView: View {
                 ))
                 .keyboardType(.numberPad)
                 .textContentType(.telephoneNumber)
+                .accessibilityIdentifier("smsPhoneNumber")
                 .font(.title3.weight(.semibold))
                 .foregroundColor(Palette.inputInk)
                 .tint(Color.red)
@@ -238,7 +245,7 @@ struct LoginView: View {
             Button {
                 sendCode()
             } label: {
-                Label("Send Code", systemImage: "message")
+                Label(sms.buttonTitle, systemImage: "message")
                     .font(.headline.weight(.bold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 64)
@@ -250,7 +257,8 @@ struct LoginView: View {
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .shadow(color: Color.red.opacity(canSendPhoneCode ? 0.24 : 0.05), radius: 18, x: 0, y: 12)
             .disabled(!canSendPhoneCode)
-            .accessibilityLabel("Send verification code")
+            .accessibilityLabel(sms.buttonTitle)
+            .accessibilityIdentifier("smsSend")
 
             Button {
                 withAnimation(.easeInOut(duration: 0.22)) { isUsingEmail = true }
@@ -457,30 +465,13 @@ struct LoginView: View {
     }
     
     private func sendCode() {
-        let formattedNumber = formattedPhoneNumber // always +1 plus digits
+        guard canSendPhoneCode else { return }
         pendingPhoneLoginRepair = nil
         phoneRepairPassword = ""
         isRepairingPhoneLogin = false
-        
-        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(formattedNumber, uiDelegate: nil) { verificationID, error in
-            Task { @MainActor in
-                if let error = error {
-                    errorMessage = "Failed to send code: \(error.localizedDescription)"
-                    print("❌ Firebase OTP error:", error.localizedDescription)
-                    return
-                }
-
-                guard let verificationID, !verificationID.isEmpty else {
-                    errorMessage = "Firebase did not return a verification session. Please resend the code."
-                    return
-                }
-
-                print("✅ Code sent. VerificationID:", verificationID)
-                self.verificationSession = PhoneVerificationSession(
-                    verificationID: verificationID,
-                    phoneNumber: formattedNumber
-                )
-            }
+        sms.send(phone: formattedPhoneNumber) { session in
+            // Keep the presented sheet alive; it observes the replacement ID directly.
+            if verificationSession == nil { verificationSession = session }
         }
     }
 

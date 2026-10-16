@@ -14,8 +14,7 @@ struct PhoneVerificationView: View {
     @Environment(\.openURL) private var openURL
 
     @State private var nationalNumber: String = ""
-    @State private var sending = false
-    @State private var errorMessage = ""
+    @ObservedObject private var sms = RiderSMSRequests.shared
     @State private var verificationSession: PhoneVerificationSession?
     @State private var contentVisible = false
     private let termsURL = URL(string: "https://rydr-go.com/terms.html")!
@@ -64,8 +63,8 @@ struct PhoneVerificationView: View {
                                 .opacity(contentVisible ? 1 : 0)
                                 .offset(y: contentVisible ? 0 : 28)
 
-                            if !errorMessage.isEmpty {
-                                Text(errorMessage)
+                            if !sms.errorMessage.isEmpty {
+                                Text(sms.errorMessage)
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundStyle(PhoneVerificationPalette.red)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -77,12 +76,12 @@ struct PhoneVerificationView: View {
                                 sendCode()
                             } label: {
                                 PhoneVerificationCTA(
-                                    title: sending ? "Sending..." : "Send Code",
-                                    isEnabled: nationalNumber.count == 10 && !sending
+                                    title: sms.buttonTitle,
+                                    isEnabled: nationalNumber.count == 10 && sms.canSend
                                 )
                             }
                             .buttonStyle(PhoneVerificationPressStyle())
-                            .disabled(sending || nationalNumber.count != 10)
+                            .disabled(!sms.canSend || nationalNumber.count != 10)
                             .opacity(contentVisible ? 1 : 0)
                             .offset(y: contentVisible ? 0 : 32)
 
@@ -120,7 +119,7 @@ struct PhoneVerificationView: View {
                 onSuccess: { user in
                     onVerified(user.phoneNumber ?? "")
                 },
-                onResendCode: { sendCode(resend: true) }
+                onResendCode: { sendCode() }
             )
         }
         .preferredColorScheme(.light)
@@ -292,44 +291,18 @@ struct PhoneVerificationView: View {
         nationalNumber = String(digits.suffix(10))
     }
 
-    private func sendCode(resend: Bool = false) {
-        errorMessage = ""
-        sending = true
+    private func sendCode() {
         let e164 = formattedPhoneNumber
-
         if linkToCurrentUser, RydrWorkspace.auth.currentUser?.phoneNumber == e164 {
-            sending = false
             onVerified(e164)
             return
         }
-
-        // DEBUG/testing on simulator (don't ship enabled):
-        // RydrWorkspace.auth.settings?.isAppVerificationDisabledForTesting = true
-
-        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(e164, uiDelegate: nil) { id, error in
-            Task { @MainActor in
-                sending = false
-                if let error = error {
-                    let nsError = error as NSError
-                    #if DEBUG
-                    print("🔥 verifyPhoneNumber failed — domain: \(nsError.domain), code: \(nsError.code), localizedDescription: \(nsError.localizedDescription), userInfo: \(nsError.userInfo)")
-                    #endif
-                    errorMessage = "Failed to send code: \(error.localizedDescription)"
-                    return
-                }
-
-                guard let id, !id.isEmpty else {
-                    errorMessage = "Firebase did not return a verification session. Please resend the code."
-                    return
-                }
-
-                verificationSession = PhoneVerificationSession(
-                    verificationID: id,
-                    phoneNumber: e164
-                )
-            }
+        guard nationalNumber.count == 10 else { return }
+        sms.send(phone: e164) { session in
+            if verificationSession == nil { verificationSession = session }
         }
     }
+
 }
 
 private enum PhoneVerificationPalette {

@@ -31,9 +31,9 @@ struct DriverPhoneCodeEntryView: View {
     @State private var code = ""
     @State private var isVerifying = false
     @State private var errorMessage = ""
-    @State private var canResend = false
-    @State private var secondsRemaining = 30
-    @State private var countdownTimer: Timer?
+    @ObservedObject private var sms = DriverSMSRequests.shared
+    private var canResend: Bool { sms.canSend && !isVerifying }
+    private var secondsRemaining: Int { sms.secondsRemaining }
     @FocusState private var isCodeFocused: Bool
 
     var body: some View {
@@ -55,11 +55,12 @@ struct DriverPhoneCodeEntryView: View {
                     resendPill
                 }
 
-                if !errorMessage.isEmpty {
-                    Text(errorMessage)
+                if !(errorMessage.isEmpty && sms.errorMessage.isEmpty) {
+                    Text([errorMessage, sms.errorMessage].filter { !$0.isEmpty }.joined(separator: "\n\n"))
                         .foregroundColor(.red)
                         .font(.caption)
                         .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("smsCodeError")
                 }
 
                 verifyButton
@@ -67,6 +68,12 @@ struct DriverPhoneCodeEntryView: View {
                 securityCard
 
                 resendFooter
+                #if DEBUG && targetEnvironment(simulator)
+                if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
+                    Text("SMS transport calls: \(sms.testRequestCount)").accessibilityIdentifier("smsCodeRequestCount")
+                    Text(verificationID).accessibilityIdentifier("smsActiveSession")
+                }
+                #endif
             }
             .padding(.horizontal, 24)
         }
@@ -74,10 +81,11 @@ struct DriverPhoneCodeEntryView: View {
         .hideKeyboardOnTap()
         .onAppear {
             isCodeFocused = true
-            startCountdown()
+
         }
-        .onDisappear {
-            countdownTimer?.invalidate()
+        .onChange(of: verificationID) { _, _ in
+            code = ""
+            errorMessage = ""
         }
     }
 
@@ -200,7 +208,7 @@ struct DriverPhoneCodeEntryView: View {
             .padding(.horizontal, 18)
             .frame(height: 54)
         }
-        .disabled(isVerifying || code.count != 6)
+        .disabled(isVerifying || sms.isSending || code.count != 6)
         .foregroundColor(.white)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -233,10 +241,11 @@ struct DriverPhoneCodeEntryView: View {
         HStack(spacing: 4) {
             Text("Didn't receive the code?")
                 .foregroundStyle(.secondary)
-            Button("Resend Code") {
+            Button(sms.isSending ? "Sending…" : canResend ? "Resend Code" : "Resend Code (\(secondsRemaining)s)") {
                 resendCode()
             }
             .disabled(!canResend)
+            .accessibilityIdentifier("smsResend")
             .foregroundColor(canResend ? .red : .secondary.opacity(0.5))
             .fontWeight(.semibold)
         }
@@ -256,33 +265,13 @@ struct DriverPhoneCodeEntryView: View {
         return "+1 (\(area)) \(mid)-\(last)"
     }
 
-    private func startCountdown() {
-        canResend = false
-        secondsRemaining = 30
-        countdownTimer?.invalidate()
-        countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            Task { @MainActor in
-                if secondsRemaining <= 1 {
-                    secondsRemaining = 0
-                    canResend = true
-                    countdownTimer?.invalidate()
-                    countdownTimer = nil
-                } else {
-                    secondsRemaining -= 1
-                }
-            }
-        }
-    }
-
     private func resendCode() {
         guard canResend else { return }
-        code = ""
-        errorMessage = ""
         onResendCode()
-        startCountdown()
     }
 
     private func verify() {
+        guard !isVerifying, !sms.isSending else { return }
         let trimmedID = verificationID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedID.isEmpty else {
             errorMessage = "Verification session is missing. Please resend the code and try again."

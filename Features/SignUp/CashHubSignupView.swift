@@ -28,6 +28,7 @@ struct CashHubSignupView: View {
     @State private var cashHubTermsVersion = "legacy"
     @State private var isCheckingTermsGate = true
     @State private var isSaving = false
+    @ObservedObject private var sms = RiderSMSRequests.shared
     @State private var errorMessage = ""
     @State private var verificationSession: PhoneVerificationSession?
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -172,8 +173,8 @@ struct CashHubSignupView: View {
                                 .opacity(contentVisible ? 1 : 0)
                                 .offset(y: contentVisible ? 0 : 24)
 
-                            if !errorMessage.isEmpty {
-                                Text(errorMessage)
+                            if !(sms.errorMessage.isEmpty && errorMessage.isEmpty) {
+                                Text(sms.errorMessage.isEmpty ? errorMessage : sms.errorMessage)
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundStyle(CashHubSignupPalette.red)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -683,27 +684,12 @@ struct CashHubSignupView: View {
     }
 
     private func sendCashHubPhoneVerification() {
-        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(normalizedPhone, uiDelegate: nil) { verificationID, error in
-            Task { @MainActor in
-                if let error {
-                    isSaving = false
-                    errorMessage = "Failed to send verification code: \(error.localizedDescription)"
-                    return
-                }
-
-                guard let verificationID, !verificationID.isEmpty else {
-                    isSaving = false
-                    errorMessage = "Firebase did not return a verification session. Please resend the code."
-                    return
-                }
-
-                isSaving = false
-                verificationSession = PhoneVerificationSession(
-                    verificationID: verificationID,
-                    phoneNumber: normalizedPhone
-                )
-            }
+        let started = sms.send(phone: normalizedPhone, onFinished: { isSaving = false }) { session in
+            isSaving = false
+            if verificationSession == nil { verificationSession = session }
         }
+        // The SMS controller owns loading and errors; never strand signup on failure.
+        if !started { isSaving = false }
     }
 
     private func saveCashHubProfile(uid: String) {

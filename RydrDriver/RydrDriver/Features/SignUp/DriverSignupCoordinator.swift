@@ -151,11 +151,8 @@ struct DriverSignupCoordinator: View {
                             if !path.isEmpty { path.removeLast() }
                         },
                         onResendCode: {
-                            PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(phoneNumber, uiDelegate: nil) { id, error in
-                                Task { @MainActor in
-                                    guard let id, !id.isEmpty, error == nil else { return }
-                                    pendingVerificationID = id
-                                }
+                            DriverSMSRequests.shared.send(phone: phoneNumber) { session in
+                                pendingVerificationID = session.verificationID
                             }
                         },
                         onVerify: { credential, completion in

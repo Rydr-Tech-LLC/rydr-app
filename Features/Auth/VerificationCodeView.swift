@@ -10,8 +10,116 @@ import FirebaseAuth
 struct PhoneVerificationSession: Identifiable, Hashable {
     let verificationID: String
     let phoneNumber: String
+    var workspace: String? = nil
 
     var id: String { verificationID }
+}
+
+// One controller owns every rider SMS send, including resends from a presented sheet.
+// The deadline is persisted per workspace; leaving a screen never resets it.
+@MainActor
+final class RiderSMSRequests: ObservableObject {
+    static let shared = RiderSMSRequests()
+    @Published private(set) var isSending = false
+    @Published private(set) var errorMessage = ""
+    @Published private(set) var latestSession: PhoneVerificationSession?
+    @Published private(set) var now = Date()
+    #if DEBUG && targetEnvironment(simulator)
+    @Published private(set) var testRequestCount = 0
+    #endif
+    private let defaults: UserDefaults
+    private let cooldown: TimeInterval
+    private var timer: Timer?
+    private var deadlineKey: String { "rydr.sms.nextRequest.\(RydrWorkspace.selected ?? "unresolved")" }
+    var secondsRemaining: Int { max(0, Int(ceil(defaults.double(forKey: deadlineKey) - now.timeIntervalSince1970))) }
+    var canSend: Bool { !isSending && secondsRemaining == 0 }
+    var buttonTitle: String {
+        isSending ? "Sending…" : secondsRemaining > 0 ? "Try again in \(secondsRemaining)s" : "Send Code"
+    }
+
+    private init() {
+        #if DEBUG && targetEnvironment(simulator)
+        let testing = ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest")
+        defaults = testing ? UserDefaults(suiteName: "rydr.sms.ui-tests")! : .standard
+        cooldown = testing ? 5 : 60
+        if testing && ProcessInfo.processInfo.arguments.contains("-RydrSMSResetUITest") {
+            defaults.removePersistentDomain(forName: "rydr.sms.ui-tests")
+        }
+        #else
+        defaults = .standard
+        cooldown = 60
+        #endif
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.now = Date() }
+        }
+    }
+
+    @discardableResult
+    func send(phone: String, onFinished: @escaping () -> Void = {}, completion: @escaping (PhoneVerificationSession) -> Void) -> Bool {
+        now = Date()
+        guard canSend else { return false }
+        guard phone.count == 12, phone.hasPrefix("+1"), phone.dropFirst().allSatisfy({ $0.isNumber }) else {
+            errorMessage = "Enter a valid 10-digit US phone number."
+            return false
+        }
+        let workspace = RydrWorkspace.selected
+        let key = deadlineKey
+        isSending = true
+        errorMessage = ""
+        defaults.set(now.addingTimeInterval(cooldown).timeIntervalSince1970, forKey: key)
+        let finished: (String?, Error?) -> Void = { [weak self] id, error in
+            Task { @MainActor in
+                guard let self else { return }
+                self.isSending = false
+                self.now = Date()
+                guard workspace == RydrWorkspace.selected else { return }
+                onFinished()
+                if let error {
+                    let code = AuthErrorCode(rawValue: (error as NSError).code)
+                    if code == .tooManyRequests {
+                        // This is a local backoff, not a promise that Firebase's block expires then.
+                        #if DEBUG && targetEnvironment(simulator)
+                        let delay: TimeInterval = ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") ? (ProcessInfo.processInfo.arguments.contains("-RydrSMSPersistenceUITest") ? 30 : 5) : 600
+                        #else
+                        let delay: TimeInterval = 600
+                        #endif
+                        self.defaults.set(self.now.addingTimeInterval(delay).timeIntervalSince1970, forKey: key)
+                        self.errorMessage = "Firebase temporarily blocked SMS requests due to unusual activity. Stop requesting codes and try later, or use email and password to log in. This cooldown does not guarantee Firebase has lifted the block."
+                    } else if code == .invalidPhoneNumber {
+                        self.errorMessage = "Check your phone number and try again."
+                    } else if code == .networkError {
+                        self.errorMessage = "Unable to send a code. Check your connection and try again after the cooldown."
+                    } else {
+                        self.errorMessage = "Unable to send a code: \(error.localizedDescription)"
+                    }
+                    return
+                }
+                guard let id, !id.isEmpty else {
+                    self.errorMessage = "No verification session was returned. Wait for the cooldown, then request another code."
+                    return
+                }
+                let session = PhoneVerificationSession(verificationID: id, phoneNumber: phone, workspace: workspace)
+                self.latestSession = session
+                completion(session)
+            }
+        }
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
+            testRequestCount += 1
+            let attempt = testRequestCount
+            let failFirst = ProcessInfo.processInfo.arguments.contains("-RydrSMSBlockedUITest")
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                if failFirst || attempt == 2 {
+                    finished(nil, NSError(domain: AuthErrorDomain, code: AuthErrorCode.tooManyRequests.rawValue))
+                } else { finished("simulator-session-\(attempt)", nil) }
+            }
+            return true
+        }
+        #endif
+        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(phone, uiDelegate: nil, completion: finished)
+        return true
+    }
 }
 
 struct VerificationCodeView: View {
@@ -38,9 +146,10 @@ struct VerificationCodeView: View {
     @State private var errorMessage = ""
     @FocusState private var isFocused: Bool
 
-    @State private var canResend = false
-    @State private var countdown = 30
-    @State private var timer: Timer?
+    @ObservedObject private var sms = RiderSMSRequests.shared
+    @State private var activeVerificationID = ""
+    private var canResend: Bool { sms.canSend && !isVerifying }
+    private var countdown: Int { sms.secondsRemaining }
 
     var body: some View {
         ZStack {
@@ -65,6 +174,12 @@ struct VerificationCodeView: View {
                     continueButton
                     securityDivider
                     resendSection
+                    #if DEBUG && targetEnvironment(simulator)
+                    if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
+                        Text("SMS transport calls: \(sms.testRequestCount)").accessibilityIdentifier("smsCodeRequestCount")
+                        Text(activeVerificationID).accessibilityIdentifier("smsActiveSession")
+                    }
+                    #endif
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 18)
@@ -77,10 +192,13 @@ struct VerificationCodeView: View {
         .hideKeyboardOnTap()
         .onAppear {
             isFocused = true
-            startCountdown()
+            activeVerificationID = verificationID
         }
-        .onDisappear {
-            timer?.invalidate()
+        .onReceive(sms.$latestSession) { session in
+            guard let session, session.phoneNumber == phoneNumber, session.workspace == RydrWorkspace.selected else { return }
+            activeVerificationID = session.verificationID
+            verificationCode = ""
+            errorMessage = ""
         }
         .environment(\.colorScheme, .light)
         .preferredColorScheme(.light)
@@ -242,13 +360,13 @@ struct VerificationCodeView: View {
 
     @ViewBuilder
     private var errorText: some View {
-        if !errorMessage.isEmpty {
-            Text(errorMessage)
+        if !(sms.errorMessage.isEmpty && errorMessage.isEmpty) {
+            Text([errorMessage, sms.errorMessage].filter { !$0.isEmpty }.joined(separator: "\n\n"))
                 .font(.footnote.weight(.semibold))
                 .foregroundColor(.red)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
-                .accessibilityLabel(errorMessage)
+                .accessibilityIdentifier("smsCodeError")
         }
     }
 
@@ -271,7 +389,7 @@ struct VerificationCodeView: View {
         .foregroundColor(.white)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: Color.red.opacity(verificationCode.count == 6 ? 0.22 : 0.04), radius: 18, x: 0, y: 12)
-        .disabled(isVerifying || verificationCode.count != 6)
+        .disabled(isVerifying || sms.isSending || verificationCode.count != 6)
         .accessibilityLabel(isVerifying ? "Verifying code" : "Continue")
     }
 
@@ -303,20 +421,21 @@ struct VerificationCodeView: View {
                 .foregroundColor(Palette.muted)
 
             Button {
+                guard canResend else { return }
                 onResendCode()
-                startCountdown()
             } label: {
-                Text(canResend ? "Resend Code" : "Resend Code (\(countdown)s)")
+                Text(sms.isSending ? "Sending…" : canResend ? "Resend Code" : "Resend Code (\(countdown)s)")
                     .font(.subheadline.weight(.bold))
                     .foregroundStyle(canResend ? Styles.rydrGradient : LinearGradient(colors: [Palette.muted], startPoint: .leading, endPoint: .trailing))
             }
             .disabled(!canResend)
+            .accessibilityIdentifier("smsResend")
             .accessibilityLabel(canResend ? "Resend code" : "Resend code available in \(countdown) seconds")
         }
     }
 
     private var formattedCountdown: String {
-        String(format: "00:%02d", countdown)
+        String(format: "%02d:%02d", countdown / 60, countdown % 60)
     }
 
     private var formattedPhoneNumber: String {
@@ -332,9 +451,10 @@ struct VerificationCodeView: View {
     }
 
     private func verifyCode() {
+        guard !isVerifying, !sms.isSending, verificationCode.count == 6 else { return }
         isVerifying = true
         errorMessage = ""
-        let trimmedVerificationID = verificationID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedVerificationID = activeVerificationID.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedVerificationID.isEmpty else {
             isVerifying = false
@@ -375,18 +495,4 @@ struct VerificationCodeView: View {
         }
     }
 
-    private func startCountdown() {
-        canResend = false
-        countdown = 30
-        timer?.invalidate()
-
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { t in
-            if countdown > 0 {
-                countdown -= 1
-            } else {
-                canResend = true
-                t.invalidate()
-            }
-        }
-    }
 }

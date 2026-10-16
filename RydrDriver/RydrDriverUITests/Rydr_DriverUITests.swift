@@ -8,6 +8,82 @@
 import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
+    @MainActor
+    func testSMSDuplicateRequestsCooldownAndPersistentResendError() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-RydrSMSUITest", "-RydrSMSResetUITest"]
+        app.launch()
+        let openPhone = app.buttons["Switch to phone login"]
+        XCTAssertTrue(openPhone.waitForExistence(timeout: 15))
+        for _ in 0..<4 where !openPhone.isHittable { app.swipeUp() }
+        openPhone.tap()
+        let phone = app.textFields["smsPhoneNumber"]
+        XCTAssertTrue(phone.waitForExistence(timeout: 15))
+        phone.tap(); phone.typeText("2025550123")
+        let send = app.buttons["smsSend"]
+        if !send.isHittable { app.swipeUp() }
+        send.tap(withNumberOfTaps: 3, numberOfTouches: 1)
+        XCTAssertFalse(send.isEnabled)
+        XCTAssertEqual(app.staticTexts["smsRequestCount"].label, "SMS transport calls: 1")
+        let resend = app.buttons["smsResend"]
+        XCTAssertTrue(resend.waitForExistence(timeout: 10))
+        if !resend.isHittable { app.swipeUp() }
+        XCTAssertFalse(resend.isEnabled)
+        XCTAssertTrue(resend.waitForEnabled(timeout: 8))
+        resend.tap()
+        XCTAssertFalse(resend.isEnabled)
+        let error = app.staticTexts["smsCodeError"]
+        XCTAssertTrue(error.waitForExistence(timeout: 8))
+        XCTAssertTrue(error.label.contains("Firebase temporarily blocked"))
+        XCTAssertEqual(app.staticTexts["smsCodeRequestCount"].label, "SMS transport calls: 2")
+        // The error stays on the visible code screen beyond the local cooldown.
+        XCTAssertTrue(resend.waitForEnabled(timeout: 8))
+        XCTAssertTrue(error.exists)
+        XCTAssertTrue(error.label.contains("email and password"))
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Visible persistent SMS resend error"; attachment.lifetime = .keepAlways
+        add(attachment)
+        resend.tap()
+        let session = app.staticTexts["smsActiveSession"]
+        XCTAssertTrue(NSPredicate(format: "label == %@", "simulator-session-3").evaluateEventually(on: session, timeout: 8))
+        XCTAssertFalse(error.exists)
+        XCTAssertEqual(app.staticTexts["smsCodeRequestCount"].label, "SMS transport calls: 3")
+    }
+
+    @MainActor
+    func testSMSBlockedRequestCooldownSurvivesRelaunchAndEmailRemainsAvailable() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-RydrSMSUITest", "-RydrSMSResetUITest", "-RydrSMSBlockedUITest", "-RydrSMSPersistenceUITest"]
+        app.launch()
+        let openPhone = app.buttons["Switch to phone login"]
+        XCTAssertTrue(openPhone.waitForExistence(timeout: 15))
+        for _ in 0..<4 where !openPhone.isHittable { app.swipeUp() }
+        openPhone.tap()
+        let phone = app.textFields["smsPhoneNumber"]
+        XCTAssertTrue(phone.waitForExistence(timeout: 15))
+        phone.tap(); phone.typeText("2025550123")
+        let send = app.buttons["smsSend"]
+        if !send.isHittable { app.swipeUp() }
+        send.tap()
+        let error = app.staticTexts["smsLoginError"]
+        XCTAssertTrue(error.waitForExistence(timeout: 8))
+        XCTAssertTrue(error.label.contains("Firebase temporarily blocked"))
+        XCTAssertFalse(send.isEnabled)
+        XCTAssertEqual(app.staticTexts["smsRequestCount"].label, "SMS transport calls: 1")
+        app.buttons["Close"].tap()
+        XCTAssertTrue(app.textFields["Email Field"].exists)
+        app.terminate()
+        app.launchArguments = ["-RydrSMSUITest", "-RydrSMSBlockedUITest", "-RydrSMSPersistenceUITest"]
+        app.launch()
+        let reopen = app.buttons["Switch to phone login"]
+        XCTAssertTrue(reopen.waitForExistence(timeout: 10))
+        for _ in 0..<4 where !reopen.isHittable { app.swipeUp() }
+        reopen.tap()
+        XCTAssertTrue(app.buttons["smsSend"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["smsSend"].label.contains("Try again in"))
+    }
+
+
 
     @MainActor
     func testPromotionCodeScreenReturnsToWallet() {
@@ -222,5 +298,16 @@ final class Rydr_DriverUITests: XCTestCase {
         measure(metrics: [XCTApplicationLaunchMetric()]) {
             XCUIApplication().launch()
         }
+    }
+}
+
+private extension XCUIElement {
+    func waitForEnabled(timeout: TimeInterval) -> Bool {
+        NSPredicate(format: "enabled == true").evaluateEventually(on: self, timeout: timeout)
+    }
+}
+private extension NSPredicate {
+    func evaluateEventually(on object: Any, timeout: TimeInterval) -> Bool {
+        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: self, object: object)], timeout: timeout) == .completed
     }
 }

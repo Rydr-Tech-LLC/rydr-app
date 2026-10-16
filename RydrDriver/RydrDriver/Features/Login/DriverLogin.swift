@@ -600,12 +600,8 @@ struct DriverLoginView: View {
     /// number, updating `pendingVerificationID` in place so the presented
     /// DriverPhoneCodeEntryView (bound to it) doesn't need to be recreated.
     private func resendLoginCode() {
-        guard !pendingPhone.isEmpty else { return }
-        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(pendingPhone, uiDelegate: nil) { verificationID, error in
-            Task { @MainActor in
-                guard let verificationID, !verificationID.isEmpty, error == nil else { return }
-                pendingVerificationID = verificationID
-            }
+        DriverSMSRequests.shared.send(phone: pendingPhone) { session in
+            pendingVerificationID = session.verificationID
         }
     }
 

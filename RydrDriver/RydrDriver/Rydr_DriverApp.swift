@@ -121,7 +121,15 @@ struct Rydr_DriverApp: App {
   // register app delegate for Firebase setup
   @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
   var body: some Scene {
-    WindowGroup { RydrWorkspaceGate { DriverWorkspaceContent() } }
+    WindowGroup {
+      #if DEBUG && targetEnvironment(simulator)
+      if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
+        NavigationStack { DriverLoginView().environmentObject(DriverSessionManager()) }
+      } else { RydrWorkspaceGate { DriverWorkspaceContent() } }
+      #else
+      RydrWorkspaceGate { DriverWorkspaceContent() }
+      #endif
+    }
   }
 }
 

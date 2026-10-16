@@ -524,7 +524,7 @@ private struct DriverLinkPhoneView: View {
     @State private var code = ""
     @State private var verificationID: String?
     @State private var sent = false
-    @State private var isSending = false
+    @ObservedObject private var sms = DriverSMSRequests.shared
     @State private var isVerifying = false
     @State private var errorMessage = ""
 
@@ -562,8 +562,8 @@ private struct DriverLinkPhoneView: View {
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Styles.rydrGradient, lineWidth: 2))
 
                 if !sent {
-                    Button(isSending ? "Sending..." : "Send Code") { sendCode() }
-                        .disabled(!isPhoneValid || isSending)
+                    Button(sms.buttonTitle) { sendCode() }
+                        .disabled(!isPhoneValid || !sms.canSend)
                         .buttonStyle(.borderedProminent).tint(.red)
                 } else {
                     TextField("6-digit code", text: Binding(
@@ -573,13 +573,15 @@ private struct DriverLinkPhoneView: View {
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
 
+                    Button(sms.isSending ? "Sending…" : sms.canSend ? "Resend Code" : "Resend Code (\(sms.secondsRemaining)s)") { sendCode() }
+                        .disabled(!sms.canSend || isVerifying)
                     Button(isVerifying ? "Linking..." : "Link Phone") { verifyAndLink() }
-                        .disabled(code.count != 6 || isVerifying)
+                        .disabled(code.count != 6 || isVerifying || sms.isSending)
                         .buttonStyle(.borderedProminent).tint(.red)
                 }
 
-                if !errorMessage.isEmpty {
-                    Text(errorMessage)
+                if !(errorMessage.isEmpty && sms.errorMessage.isEmpty) {
+                    Text([errorMessage, sms.errorMessage].filter { !$0.isEmpty }.joined(separator: "\n\n"))
                         .foregroundStyle(.red)
                         .font(.footnote)
                         .multilineTextAlignment(.center)
@@ -599,27 +601,17 @@ private struct DriverLinkPhoneView: View {
     }
 
     private func sendCode() {
-        guard isPhoneValid else { return }
-        errorMessage = ""
-        isSending = true
-        PhoneAuthProvider.provider(auth: RydrWorkspace.auth).verifyPhoneNumber(e164Phone, uiDelegate: nil) { id, error in
-            Task { @MainActor in
-                isSending = false
-                if let error {
-                    errorMessage = "Failed to send code: \(error.localizedDescription)"
-                    return
-                }
-                guard let id, !id.isEmpty else {
-                    errorMessage = "Firebase did not return a verification session. Please try again."
-                    return
-                }
-                verificationID = id
-                sent = true
-            }
+        guard isPhoneValid, !isVerifying else { return }
+        sms.send(phone: e164Phone) { session in
+            verificationID = session.verificationID
+            code = ""
+            errorMessage = ""
+            sent = true
         }
     }
 
     private func verifyAndLink() {
+        guard !isVerifying, !sms.isSending else { return }
         guard let verificationID, !verificationID.isEmpty else {
             errorMessage = "Verification session is missing. Please resend the code."
             return

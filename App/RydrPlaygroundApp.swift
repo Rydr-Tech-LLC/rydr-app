@@ -13,7 +13,15 @@ struct RydrApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        WindowGroup { RydrWorkspaceGate { RiderWorkspaceContent() } }
+        WindowGroup {
+            #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
+                NavigationStack { LoginView().environmentObject(UserSessionManager()) }
+            } else { RydrWorkspaceGate { RiderWorkspaceContent() } }
+            #else
+            RydrWorkspaceGate { RiderWorkspaceContent() }
+            #endif
+        }
     }
 }
 
