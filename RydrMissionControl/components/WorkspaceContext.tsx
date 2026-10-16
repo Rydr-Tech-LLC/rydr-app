@@ -53,6 +53,7 @@ export function useWorkspaceRouter() {
     replace: (href: string) => router.replace(workspaceHref(href, workspace)),
   };
 }
+// A full navigation discards the prior workspace’s cached server layout and data.
 export function WorkspaceSwitcher() {
   const current = useWorkspace(),
     pathname = usePathname();
@@ -69,14 +70,14 @@ export function WorkspaceSwitcher() {
       </p>
       <div className="grid grid-cols-2 gap-1">
         {(["test", "live-beta"] as const).map((id) => (
-          <Link
+          <a
             key={id}
             href={`/workspaces/${id}${path}`}
             aria-current={id === current ? "page" : undefined}
             className={`rounded-lg px-2 py-2 text-center text-xs font-semibold ${id === current ? "bg-white text-rydr-burgundy shadow-sm" : "text-muted hover:bg-white/70"}`}
           >
             {id === "test" ? "Test" : "Live Beta"}
-          </Link>
+          </a>
         ))}
       </div>
     </div>
