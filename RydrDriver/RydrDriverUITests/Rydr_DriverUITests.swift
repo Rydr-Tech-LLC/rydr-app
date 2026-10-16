@@ -9,6 +9,23 @@ import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
     @MainActor
+    func testPayoutPlatformRestrictionShowsPersistentUsefulError() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-DriverPayoutErrorUITest"]
+        app.launch()
+        let setup = app.buttons["Set Up Payouts"]
+        XCTAssertTrue(setup.waitForExistence(timeout: 15))
+        for _ in 0..<8 where !setup.isHittable { app.swipeUp() }
+        setup.tap()
+        let message = app.staticTexts["payoutSetupMessage"]
+        XCTAssertTrue(message.waitForExistence(timeout: 10))
+        XCTAssertTrue(message.label.contains("Rydr support must resolve a Stripe account restriction"))
+        XCTAssertFalse(message.label.contains("check your connection"))
+        XCTAssertTrue(setup.isEnabled)
+        let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = "payout-platform-restriction"; proof.lifetime = .keepAlways; add(proof)
+    }
+
+    @MainActor
     func testIdentityPendingAndURLRecoveryContinueWithoutVerification() {
         for scenario in ["-IdentityProcessing", "-IdentityURLFailure", "-IdentityResume", "-IdentityVerified"] {
             let app = XCUIApplication()

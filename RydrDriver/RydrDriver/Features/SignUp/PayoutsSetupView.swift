@@ -29,6 +29,7 @@ struct PayoutsSetupView: View {
     /// caller can persist it. Called automatically once payouts are confirmed enabled — no manual
     /// confirmation step is ever required.
     var onNext: (String?) -> Void
+    var createAccount: (() async throws -> String)? = nil
 
     @State private var accountId: String?
     @State private var isPresenting = false
@@ -257,6 +258,7 @@ struct PayoutsSetupView: View {
                 Image(systemName: isError ? "exclamationmark.triangle.fill" : "info.circle.fill")
                     .foregroundColor(isError ? .orange : .secondary)
                 Text(message)
+                    .accessibilityIdentifier("payoutSetupMessage")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -309,13 +311,14 @@ struct PayoutsSetupView: View {
             if let accountId {
                 resolvedAccountId = accountId
             } else {
-                resolvedAccountId = try await createConnectAccount()
+                if let createAccount { resolvedAccountId = try await createAccount() }
+                else { resolvedAccountId = try await createConnectAccount() }
                 accountId = resolvedAccountId
             }
 
             isPresenting = true
         } catch {
-            message = "Couldn't reach the payouts service. Please check your connection and try again."
+            message = error.localizedDescription
             isError = true
         }
     }
@@ -338,7 +341,7 @@ struct PayoutsSetupView: View {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+            throw DriverConnectServiceError.response(data: data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
         }
         let decoded = try JSONDecoder().decode(ConnectAccountResponse.self, from: data)
         return decoded.accountId
@@ -438,3 +441,34 @@ private struct PayoutInfoRow: View {
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
     }
 }
+
+
+struct DriverConnectServiceError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+    static func response(data: Data, status: Int) -> DriverConnectServiceError {
+        struct Payload: Decodable { let error: String?; let message: String? }
+        let body = try? JSONDecoder().decode(Payload.self, from: data)
+        if let message = body?.message, !message.isEmpty {
+            return DriverConnectServiceError(message: String(message.prefix(500)))
+        }
+        switch status {
+        case 401: return DriverConnectServiceError(message: "Your session has expired. Sign in again before setting up payouts.")
+        case 403: return DriverConnectServiceError(message: "Payout setup is not available for this account in the selected workspace. Contact Rydr support.")
+        case 400: return DriverConnectServiceError(message: "Check your name, date of birth, phone number, and address before setting up payouts.")
+        default: return DriverConnectServiceError(message: "Payout setup is temporarily unavailable. Please try again, or contact Rydr support if this continues.")
+        }
+    }
+}
+
+#if DEBUG && targetEnvironment(simulator)
+struct DriverPayoutErrorUITestFixture: View {
+    @State private var connected = false
+    var body: some View {
+        PayoutsSetupView(uid: "fixture-only", email: "fixture@example.com", firstName: "Test", lastName: "Driver", phone: "+16783220004", dob: Date(), street: "1 Main St", addressLine2: "", city: "Atlanta", state: "GA", zip: "30303", connectOnboarded: $connected, onNext: { _ in }, createAccount: {
+            let data = Data(#"{"error":"connect_account_creation_restricted","message":"Payout setup is temporarily unavailable. Rydr support must resolve a Stripe account restriction. Please try again later."}"#.utf8)
+            throw DriverConnectServiceError.response(data: data, status: 503)
+        })
+    }
+}
+#endif

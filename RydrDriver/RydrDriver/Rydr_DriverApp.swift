@@ -125,6 +125,8 @@ struct Rydr_DriverApp: App {
       #if DEBUG && targetEnvironment(simulator)
       if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
         NavigationStack { DriverLoginView().environmentObject(DriverSessionManager()) }
+      } else if ProcessInfo.processInfo.arguments.contains("-DriverPayoutErrorUITest") {
+        NavigationStack { DriverPayoutErrorUITestFixture() }
       } else if ProcessInfo.processInfo.arguments.contains("-DriverIdentityUITest") {
         NavigationStack { DriverIdentityUITestFixture() }
       } else if ProcessInfo.processInfo.arguments.contains("-DriverDocumentUITest") {

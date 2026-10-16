@@ -11,6 +11,7 @@ const { getAuth } = require("firebase-admin/auth");
 const Stripe = require("stripe");
 const { randomInt, timingSafeEqual } = require("crypto");
 const { cleanupAccount } = require("./accountCleanup");
+const { connectAccountError } = require("./connectAccountError");
 const { DriverPayoutService, PayoutError } = require("./driverPayouts");
 const { walletSnapshot, accountSessionComponents, instantEligibility, allExternalAccounts, payoutSummary } = require("./driverWallet");
 const { runtimeConfig, modeProfile, canChargeRide, verifyWebhook, StripeModeState } = require("./stripeMode");
@@ -2296,7 +2297,8 @@ app.post("/connect/accounts", async (req, res) => {
     res.json({ accountId: account.id, reused: false });
   } catch (err) {
     console.error("❌ connect/accounts error", err);
-    res.status(500).json({ error: "account_create_failed" });
+    const failure = connectAccountError(err);
+    res.status(failure.status).json(failure.body);
   }
 });
 
