@@ -8,7 +8,7 @@ struct SplashCoordinatorView: View {
             if showMainApp {
                 DriverLoginView()
             } else {
-                SplashVideoView {
+                RydrSplashView {
                     withAnimation {
                         showMainApp = true
                     }

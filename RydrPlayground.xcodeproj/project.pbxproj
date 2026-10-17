@@ -18,7 +18,6 @@
 		26B378BE23BF489C32F64306 /* PhoneVerificationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 941FECF16AF9F4B7F928EB95 /* PhoneVerificationView.swift */; };
 		2F2F04163B72C5E454782C7D /* RideDisputeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE2D657045BE016F4304A68 /* RideDisputeView.swift */; };
 		33E4B15852AD6DD4F1D2792F /* UserSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E14E9F10554D229ABE7394E4 /* UserSessionManager.swift */; };
-		34F0A12FDDEC7C4786A1F0D0 /* VideoPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E432533BDB70BE7A5E1A0A8 /* VideoPlayerView.swift */; };
 		39B85C92A5FC65B8A9EC1A77 /* AddLocationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8569111A9E82A8E19B4DE8FB /* AddLocationSheet.swift */; };
 		3BF8EB9DB9C3A6DB471C4BB0 /* SupportChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EDA34C5CB2B348AA5695906 /* SupportChatView.swift */; };
 		3ED5EDA268FECB5C153A8E1A /* DriverSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38FCAAD75C6C33288D219665 /* DriverSelectionView.swift */; };
@@ -34,7 +33,6 @@
 		62A9F73246DA56F16620ADF3 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E568C2DF59088F0C336CD06C /* Assets.xcassets */; };
 		63260A9DDD914621326730FD /* HelpArticleDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DA0227D9397736750F182A1 /* HelpArticleDetailView.swift */; };
 		654AA5510C7DD6E8F93B5910 /* RideTypeSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25A6FAE0FDE63CFC16C5C73D /* RideTypeSelectionView.swift */; };
-		666BC62A2B155A9F28FCB284 /* AnimatedLogo.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = FB1460DFAF8FFE937FE8B65D /* AnimatedLogo.mp4 */; };
 		68727367461BA89E6CDEF557 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D99FB1A4CEA99CB2FBD3FD66 /* ProfileView.swift */; };
 		68988803139FE311F018A213 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80DFFA0B31FD7C4AC0B88A0 /* AppDelegate.swift */; };
 		68B71E7A2E9A100100C0D3F1 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 68B71E792E9A100100C0D3F1 /* GoogleService-Info.plist */; };
@@ -48,7 +46,7 @@
 		7217D14D37E8BB226A7C52BA /* UploadBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69EB15B8CD81D6C4D18B4448 /* UploadBox.swift */; };
 		741995E9713957C59165B4E0 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = B1666486B11656CCAC9AFC92 /* GoogleService-Info.plist */; };
 		77516E5AB253AE4B5EC45B57 /* PersonalInfoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26743B1816CC8B4FD0508D0F /* PersonalInfoView.swift */; };
-		77F8294D47444381137C52E8 /* SplashVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7FCD751A4AFFD8DBC81FB34 /* SplashVideoView.swift */; };
+		77F8294D47444381137C52E8 /* RydrSplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7FCD751A4AFFD8DBC81FB34 /* RydrSplashView.swift */; };
 		78B14A76A107252F067DC96B /* PrivacyModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7E9B5FC68DA5B86A187C2CD /* PrivacyModalView.swift */; };
 		798ABC5C012074036462A9E3 /* NameEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F7A89DEADD42200C775417 /* NameEntryView.swift */; };
 		7A64D31B6E8F4B63A5D79011 /* Waiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81E946B321F74F0A9CE84C55 /* Waiver.swift */; };
@@ -186,7 +184,6 @@
 		75D4705C3E5EA46EBAD4C7EE /* RideInProgressView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RideInProgressView.swift; sourceTree = "<group>"; };
 		7A3DC279138870D7F319633A /* PaymentScreenView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PaymentScreenView.swift; sourceTree = "<group>"; };
 		7C755BB9A84F880B4178786F /* VerificationCodeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VerificationCodeView.swift; sourceTree = "<group>"; };
-		7E432533BDB70BE7A5E1A0A8 /* VideoPlayerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VideoPlayerView.swift; sourceTree = "<group>"; };
 		7F7BF8BC355F87446A6213BB /* GradientColor.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GradientColor.swift; sourceTree = "<group>"; };
 		81E946B321F74F0A9CE84C55 /* Waiver.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Waiver.swift; sourceTree = "<group>"; };
 		850F4A849DEA82B46153FB77 /* RydrMapView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RydrMapView.swift; sourceTree = "<group>"; };
@@ -210,7 +207,7 @@
 		B7F8485368A217A2C4E6007A /* MainTabView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		BE51E864B91D3E4A63E44888 /* RideChatService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RideChatService.swift; sourceTree = "<group>"; };
 		C1165D5996ECE830FDF98AAF /* Styles.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Styles.swift; sourceTree = "<group>"; };
-		C7FCD751A4AFFD8DBC81FB34 /* SplashVideoView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SplashVideoView.swift; sourceTree = "<group>"; };
+		C7FCD751A4AFFD8DBC81FB34 /* RydrSplashView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RydrSplashView.swift; sourceTree = "<group>"; };
 		C80DFFA0B31FD7C4AC0B88A0 /* AppDelegate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		CBE2D657045BE016F4304A68 /* RideDisputeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RideDisputeView.swift; sourceTree = "<group>"; };
 		CC47D4E054870E30C12456B5 /* VehicleImageView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VehicleImageView.swift; sourceTree = "<group>"; };
@@ -224,7 +221,6 @@
 		E568C2DF59088F0C336CD06C /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E7E9B5FC68DA5B86A187C2CD /* PrivacyModalView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PrivacyModalView.swift; sourceTree = "<group>"; };
 		F4EE10E8E09CF14A81A05647 /* CommunityView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommunityView.swift; sourceTree = "<group>"; };
-		FB1460DFAF8FFE937FE8B65D /* AnimatedLogo.mp4 */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = file; path = AnimatedLogo.mp4; sourceTree = "<group>"; };
 		FDACAA1662B485F084C0140B /* RydrPlayground.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = RydrPlayground.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -290,8 +286,7 @@
 			isa = PBXGroup;
 			children = (
 				0395430CE916993430C1E509 /* SplashCoordinatorView.swift */,
-				C7FCD751A4AFFD8DBC81FB34 /* SplashVideoView.swift */,
-				7E432533BDB70BE7A5E1A0A8 /* VideoPlayerView.swift */,
+				C7FCD751A4AFFD8DBC81FB34 /* RydrSplashView.swift */,
 			);
 			path = Splash;
 			sourceTree = "<group>";
@@ -318,7 +313,6 @@
 		4E554489F0BCD4BFD1BB61E1 /* RydrPlayground */ = {
 			isa = PBXGroup;
 			children = (
-				FB1460DFAF8FFE937FE8B65D /* AnimatedLogo.mp4 */,
 				E568C2DF59088F0C336CD06C /* Assets.xcassets */,
 				68B71E792E9A100100C0D3F1 /* GoogleService-Info.plist */,
 				4434A644C09A9A53FE0A8D7E /* Info.plist */,
@@ -655,7 +649,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				62A9F73246DA56F16620ADF3 /* Assets.xcassets in Resources */,
-				666BC62A2B155A9F28FCB284 /* AnimatedLogo.mp4 in Resources */,
 				68B71E7A2E9A100100C0D3F1 /* GoogleService-Info.plist in Resources */,
 				8B9F00022F00000100C0DE01 /* PrivacyInfo.xcprivacy in Resources */,
 				6C2F41A8B8B64D0F8D4A6D99 /* RydrPlayground/Assets/Sounds/trip-transition-chime.mp3 in Resources */,
@@ -766,8 +759,7 @@
 				3F537D15F2B77487650CB322 /* TermsAndVerificationView.swift in Sources */,
 				7A64D31B6E8F4B63A5D79011 /* Waiver.swift in Sources */,
 				022FA2286ACA9A982515313D /* SplashCoordinatorView.swift in Sources */,
-				77F8294D47444381137C52E8 /* SplashVideoView.swift in Sources */,
-				34F0A12FDDEC7C4786A1F0D0 /* VideoPlayerView.swift in Sources */,
+				77F8294D47444381137C52E8 /* RydrSplashView.swift in Sources */,
 				C85D078776598FD319377B38 /* ContactSupportView.swift in Sources */,
 				5C6119715553F55493648AE5 /* HelpArticle.swift in Sources */,
 				63260A9DDD914621326730FD /* HelpArticleDetailView.swift in Sources */,

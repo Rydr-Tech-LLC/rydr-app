@@ -9,6 +9,19 @@ import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
     @MainActor
+    func testNativeSplashLightAndDark() {
+        for mode in ["-SplashLight", "-SplashDark"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-RydrSplashUITest", mode]
+            app.launch()
+            XCTAssertTrue(app.descendants(matching: .any)["rydrSplashLogo"].waitForExistence(timeout: 5))
+            let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = "native-splash" + mode; proof.lifetime = .keepAlways; add(proof)
+            XCTAssertTrue(app.staticTexts["splashComplete"].waitForExistence(timeout: 15))
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testBrandedRestorationLoading() {
         let app = XCUIApplication()
         app.launchArguments = ["-DriverOnboardingResumeUITest", "-ResumeLoading", "-ResumeComplete"]

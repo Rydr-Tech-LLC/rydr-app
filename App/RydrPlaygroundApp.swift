@@ -15,7 +15,9 @@ struct RydrApp: App {
     var body: some Scene {
         WindowGroup {
             #if DEBUG && targetEnvironment(simulator)
-            if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
+            if ProcessInfo.processInfo.arguments.contains("-RydrSplashUITest") {
+                SplashPreviewFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
                 NavigationStack { LoginView().environmentObject(UserSessionManager()) }
             } else if ProcessInfo.processInfo.arguments.contains("-RiderCardSaveUITest") {
                 RiderCardSaveUITestFixture()
@@ -63,7 +65,7 @@ private struct RiderWorkspaceContent: View {
     private var appContent: some View {
         Group {
                 if showSplash {
-                    SplashVideoView { showSplash = false }
+                    RydrSplashView { showSplash = false }
                 } else {
                     if session.isLoggedIn {
                         RiderOnboardingGate {
@@ -181,6 +183,18 @@ private struct RiderCardSaveUITestFixture: View {
             if completed { Text("Card save completed once").accessibilityIdentifier("cardSaveCompleted") }
             else { PaymentScreenView(onComplete: { completed = true }) }
         }
+    }
+}
+#endif
+
+#if DEBUG && targetEnvironment(simulator)
+private struct SplashPreviewFixture: View {
+    @State private var complete = false
+    var body: some View {
+        Group {
+            if complete { Text("Ready").accessibilityIdentifier("splashComplete") }
+            else { RydrSplashView { complete = true } }
+        }.preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-SplashDark") ? .dark : .light)
     }
 }
 #endif

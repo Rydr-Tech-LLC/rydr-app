@@ -123,7 +123,9 @@ struct Rydr_DriverApp: App {
   var body: some Scene {
     WindowGroup {
       #if DEBUG && targetEnvironment(simulator)
-      if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
+      if ProcessInfo.processInfo.arguments.contains("-RydrSplashUITest") {
+                SplashPreviewFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
         NavigationStack { DriverLoginView().environmentObject(DriverSessionManager()) }
       } else if ProcessInfo.processInfo.arguments.contains("-DriverManagedPayoutE2E") {
         DriverManagedPayoutE2E()
@@ -178,7 +180,7 @@ private struct DriverRootView: View {
             if simulatorWalletNavigationTest {
                 DriverDashboardView()
             } else if !didFinishSplash {
-                SplashVideoView {
+                RydrSplashView {
                     didFinishSplash = true
                 }
             } else if session.isLoggedIn {
@@ -281,6 +283,18 @@ private struct DriverSubmittedUITestFixture: View {
                 }, onCompleted: { submitted = false }).environmentObject(session)
             }.sheet(isPresented: $showNotice) { DriverDrivingAccessSheet(access: access) }
         }
+    }
+}
+#endif
+
+#if DEBUG && targetEnvironment(simulator)
+private struct SplashPreviewFixture: View {
+    @State private var complete = false
+    var body: some View {
+        Group {
+            if complete { Text("Ready").accessibilityIdentifier("splashComplete") }
+            else { RydrSplashView { complete = true } }
+        }.preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-SplashDark") ? .dark : .light)
     }
 }
 #endif

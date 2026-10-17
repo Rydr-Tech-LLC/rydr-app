@@ -21,7 +21,7 @@ struct SplashCoordinatorView: View {
                         .environmentObject(session)
                 }
             } else {
-                SplashVideoView {
+                RydrSplashView {
                     withAnimation {
                         showMainApp = true
                     }
