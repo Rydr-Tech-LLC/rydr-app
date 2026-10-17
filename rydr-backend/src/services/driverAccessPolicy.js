@@ -12,7 +12,7 @@ function driverAccess(driver = {}, policy = {}) {
   add('payout_setup','Payout setup','Finish payout setup and any required account verification before accepting rides. You can manage your payout details from your Dashboard.');
  const compliance = evaluateDriverCompliance(driver, policy);
  if (driver.documentComplianceHold === true || compliance.documentHold)
-  add('documents','Document review',compliance.expiredKinds.length ? 'One or more required documents have expired. Upload current documents for approval before driving.' : 'Your required documents are awaiting review or need an update. Driving unlocks after all required documents are approved.');
+  add('documents','Document review',compliance.rejectedKinds.length ? 'A required document was declined. Open Documents to see the reason and upload a replacement for review.' : compliance.expiredKinds.length ? 'One or more required documents have expired. Upload current documents for approval before driving.' : 'Your required documents are awaiting review or need an update. Driving unlocks after all required documents are approved.');
  if (driver.backgroundCheckHold === true || compliance.backgroundHold)
   add('background_check','Background screening','Complete the required background screening and wait for approval before driving. Your Dashboard will remain available.');
  if (!((status === 'approved' || driver.isApproved === true) && !['rejected','needs_attention'].includes(status)))

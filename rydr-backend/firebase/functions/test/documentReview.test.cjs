@@ -59,3 +59,12 @@ test('unrelated readable upload cannot be inferred as the requested document', a
  assert.equal(rows.get('drivers/test').documents.insurance.status,'needs_review');
  } finally {text=original;}
 });
+test('late OCR cannot reverse a manual decline; a newer replacement can still be reviewed',async()=>{
+ seed();let release;blockedOCR=new Promise(resolve=>{release=resolve;});const pending=upload('900','manual.jpg');
+ await new Promise(resolve=>setImmediate(resolve));
+ Object.assign(rows.get('drivers/test').documents.insurance,{status:'rejected',reviewReason:'Blurry photo',manualReviewId:'manual-1',manualReviewStoragePath:'driverDocuments/test/insurance/manual.jpg',manualReviewGeneration:'900'});
+ release();await pending;
+ assert.equal(rows.get('drivers/test').documents.insurance.status,'rejected');
+ await upload('900','manual.jpg');assert.equal(rows.get('drivers/test').documents.insurance.status,'rejected');
+ await upload('901','replacement.jpg');assert.equal(rows.get('drivers/test').documents.insurance.status,'approved');
+});

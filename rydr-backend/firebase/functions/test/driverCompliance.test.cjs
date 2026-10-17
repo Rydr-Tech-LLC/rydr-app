@@ -61,7 +61,7 @@ test('expired documents pause driving; verified replacements restore only the do
   assert.equal(driver.documentComplianceHold, false);
   assert.equal(driver.canGoOnline, true);
   assert.equal(driver.isOnline, false);
-  assert.equal(pushes.some(message => message.notification.title === 'Driving access restored'), true);
+  assert.equal(pushes.some(message => message.notification.title === 'Document checks cleared'), true);
   driver.safetyHold = true; driver.documentComplianceHold = true;
   await reconcileDriverCompliance('fixture', {}, now);
   assert.equal(driver.canGoOnline, false);
@@ -125,4 +125,23 @@ test('strict Live Beta document review allows completed onboarding but blocks dr
   assert.equal(driver.documentComplianceHold, false);
   assert.equal(driver.canGoOnline, true);
   assert.equal(driver.isOnline, false);
+});
+test('manual decline sends one reason-specific inbox and push notification, then suppresses duplicates',async()=>{
+ seed('2027-02-01');const driver=rows.get('drivers/fixture');
+ Object.assign(driver.documents.insurance,{status:'rejected',reviewReason:'The photo is blurry. Upload a clear, focused photo.',manualReviewId:'decision-1',storagePath:'driverDocuments/fixture/insurance/new.jpg'});
+ await reconcileDriverCompliance('fixture',{},now);
+ assert.equal(driver.documentComplianceHold,true);assert.equal(driver.canGoOnline,false);
+ const declined=[...rows.entries()].filter(([key])=>key.includes('/notifications/document_declined_'));
+ assert.equal(declined.length,1);assert.match(declined[0][1].body,/blurry/);assert.equal(declined[0][1].target,'documents');assert.equal(pushes.length,1);
+ await reconcileDriverCompliance('fixture',{},now);assert.equal(pushes.length,1);
+ Object.assign(driver.documents.insurance,{status:'pending',reviewReason:'Replacement uploaded'});
+ await reconcileDriverCompliance('fixture',{requireVerifiedDocumentExpirations:true},now);assert.equal(driver.documentComplianceHold,true);
+ driver.documents.insurance.status='approved';await reconcileDriverCompliance('fixture',{requireVerifiedDocumentExpirations:true},now);assert.equal(driver.documentComplianceHold,false);
+});
+test('declined replacement notifies but preserves still-current approved proof',async()=>{
+ seed('2027-02-01');const driver=rows.get('drivers/fixture');
+ Object.assign(driver.documents.insurance,{status:'rejected',reviewReason:'Incorrect document.',manualReviewId:'decision-2',approvedRecord:{status:'approved',expirationDate:'2027-02-01'}});
+ await reconcileDriverCompliance('fixture',{requireVerifiedDocumentExpirations:true},now);
+ assert.equal(driver.documentComplianceHold,false);assert.equal(driver.canGoOnline,true);
+ assert.equal([...rows.keys()].some(key=>key.includes('/notifications/document_declined_')),true);
 });

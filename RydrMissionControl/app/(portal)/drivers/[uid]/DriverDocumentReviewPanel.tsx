@@ -1,3 +1,5 @@
+import DeclineDocumentForm from "./DeclineDocumentForm";
+import { DOCUMENT_REJECTION_LABELS } from "../../../../../rydr-backend/firebase/functions/src/services/documentReviewFeedback";
 import ImageViewer from "@/components/ImageViewer";
 import { driverDocumentReviewItems, uploadedDocumentPath } from "@/lib/driverDocumentReview";
 import { toDateSafe } from "@/lib/format";
@@ -16,6 +18,7 @@ export default function DriverDocumentReviewPanel({ uid, driver, history }: { ui
         <p className="mt-2 text-sm text-muted">{record.reviewReason || (item.uploaded ? "The upload is available. Automated review details will appear here." : "No upload has been recorded.")}</p>
         <div className="mt-3 grid grid-cols-2 gap-2">{previews.map(side => <ImageViewer key={side} label={`${item.label} ${side}`} url={`/api/drivers/${encodeURIComponent(uid)}/documents/${item.kind}/${side}`} />)}</div>
         <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">{Object.entries(fields).filter(([key]) => !item.processing && item.status !== "awaiting_automation" && record.extractedFields?.[key]).map(([key, label]) => <div key={key}><dt className="text-muted">{label}</dt><dd className="break-all font-medium">{String(record.extractedFields[key])}</dd></div>)}</dl>
+        {record.storagePath && <DeclineDocumentForm uid={uid} kind={item.kind} storagePath={record.storagePath} reviewId={record.reviewId ?? ""} reasons={DOCUMENT_REJECTION_LABELS} />}
         {reviewed && <p className="mt-2 text-xs text-muted">Reviewed {reviewed.toLocaleString("en-US", { timeZone: "America/New_York" })} ET</p>}
         {record.approvedRecord && item.status !== "approved" && <p className="mt-2 rounded-lg bg-grouped p-2 text-xs">Previous approved proof retained. Its validity and driving holds are evaluated separately.</p>}
       </article>;

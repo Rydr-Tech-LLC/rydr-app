@@ -28,7 +28,7 @@ function documentDeadline(value) {
   return Date.parse(`${nextDate}T00:00:00${offset}`);
 }
 /** @param {any} driver @param {string} kind */
-function currentDocument(driver, kind) {
+function latestDocument(driver, kind) {
   const nested = driver.documents?.[kind] ?? (kind === 'driverLicense' ? driver.documents?.license : null) ?? {};
   const record = { ...nested };
   // Read legacy dotted fields while new uploads use canonical nested maps.
@@ -39,8 +39,10 @@ function currentDocument(driver, kind) {
   if (!record.expirationDate && !record.extractedFields?.expirationDate) {
     record.expirationDate = kind === 'driverLicense' ? driver.driverLicenseExpiresAt ?? driver.licenseExpiresAt ?? driver.license?.expirationDate : kind === 'insurance' ? driver.insuranceExpiresAt ?? driver.vehicle?.insuranceExpiresAt : kind === 'registration' ? driver.registrationExpiresAt ?? driver.vehicle?.registrationExpiresAt : undefined;
   }
-  return record.approvedRecord ?? record;
+  return record;
 }
+/** @param {any} driver @param {string} kind */
+function currentDocument(driver, kind) { const record = latestDocument(driver, kind); return record.approvedRecord ?? record; }
 /** @param {any} driver @param {any} [config] @param {number} [now] */
 function evaluateDriverCompliance(driver, config = {}, now = Date.now()) {
   const today = georgiaDate(now);
@@ -67,14 +69,15 @@ function evaluateDriverCompliance(driver, config = {}, now = Date.now()) {
     && report.requirementVersion === requirementVersion;
   const verificationRequired = config.requireVerifiedDocumentExpirations === true || config.backgroundChecksRequired === true;
   const unverifiedKinds = verificationRequired ? documents.filter(doc => doc.kind !== "vehicleInspection" && !doc.verifiedCurrent).map(doc => doc.kind) : [];
+  const rejectedKinds = documents.filter(doc => latestDocument(driver, doc.kind).status === 'rejected' && !doc.verifiedCurrent).map(doc => doc.kind);
   const expiredKinds = documents.filter(doc => doc.expired).map(doc => doc.kind);
   return {
-    documents, documentHold: expiredKinds.length > 0 || unverifiedKinds.length > 0, expiredKinds, unverifiedKinds, verificationRequired,
+    documents, documentHold: expiredKinds.length > 0 || unverifiedKinds.length > 0 || rejectedKinds.length > 0, rejectedKinds, expiredKinds, unverifiedKinds, verificationRequired,
     expiringKinds: documents.filter(doc => !doc.expired && doc.reminderStage).map(doc => doc.kind),
     needsReviewKinds: documents.filter(doc => doc.needsReview).map(doc => doc.kind),
     backgroundChecksRequired: required, backgroundRequirementVersion: requirementVersion,
     backgroundPassed: passed, backgroundHold: required && !passed,
-    drivingAllowed: expiredKinds.length === 0 && unverifiedKinds.length === 0 && (!required || passed)
+    drivingAllowed: expiredKinds.length === 0 && unverifiedKinds.length === 0 && rejectedKinds.length === 0 && (!required || passed)
   };
 }
 /** @param {Record<string, any>} fields */
@@ -89,4 +92,4 @@ function nestedFields(fields) {
   }
   return result;
 }
-module.exports = { nestedFields, DOCUMENT_KINDS, DOCUMENT_LABELS, timestamp, georgiaDate, documentDeadline, currentDocument, evaluateDriverCompliance };
+module.exports = { nestedFields, DOCUMENT_KINDS, DOCUMENT_LABELS, timestamp, georgiaDate, documentDeadline, latestDocument, currentDocument, evaluateDriverCompliance };

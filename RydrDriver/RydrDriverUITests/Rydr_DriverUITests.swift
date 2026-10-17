@@ -9,6 +9,21 @@ import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
     @MainActor
+    func testDeclinedDocumentNotificationShowsReplacementReason() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-RydrWalletNavigationUITest", "-RydrDocumentReminderUITest", "-RydrDocumentFixtureUITest", "-DocumentDeclinedFixture"]
+        app.launch()
+        XCTAssertTrue(app.buttons["documentsBack"].waitForExistence(timeout: 15))
+        let insurance = app.buttons["documentRow_insurance"]
+        for _ in 0..<5 where !insurance.isHittable { app.swipeUp() }
+        insurance.tap()
+        let reason = app.descendants(matching: .any)["documentDeclineReason"]
+        XCTAssertTrue(reason.waitForExistence(timeout: 10))
+        XCTAssertTrue(reason.label.contains("blurry"))
+        let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = "document-decline-instructions"; proof.lifetime = .keepAlways; add(proof)
+    }
+
+    @MainActor
     func testDrivingChecklistHighlightsOnlyBlockersAndStopsWhenClear() {
         for flag in ["-ChecklistMixed", "-ChecklistClear"] {
             let app = XCUIApplication()

@@ -1,3 +1,4 @@
+import { documentDeclines } from "./documentReviewFeedback";
 import { createHash } from "node:crypto";
 import { db, FieldValue, Timestamp } from "../admin";
 import { evaluateDriverCompliance, timestamp, georgiaDate } from "./driverCompliancePolicy";
@@ -41,6 +42,12 @@ export async function reconcileDriverCompliance(uid: string, policy?: Record<str
   if (!result) return;
   const { driver, compliance } = result;
   const activeReminderIds = new Set<string>();
+  for (const declined of documentDeclines(driver)) {
+    const id = 'document_declined_' + createHash('sha256').update(`${declined.kind}|${declined.revision}|${declined.reason}`).digest('hex');
+    activeReminderIds.add(id);
+    await sendPushToUser({ audience: 'driver', uid, notificationId: id, title: `${declined.label}: new upload needed`, body: `${declined.reason} Open Documents in Rydr to upload a replacement for review.`, route: { type: 'driverDocumentReminder', target: 'documents' } });
+  }
+
   for (const document of compliance.documents) {
     if (!document.reminderStage) continue;
     const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", hourCycle: "h23" }).format(new Date(now)));
@@ -77,6 +84,6 @@ export async function reconcileDriverCompliance(uid: string, policy?: Record<str
   }
   if ((driver.documentComplianceHold === true || driver.backgroundCheckHold === true) && compliance.drivingAllowed && baseApprovalAllowsDriving(driver)) {
     const id = createHash("sha256").update(JSON.stringify(compliance.documents.map(doc => [doc.kind, doc.expirationDate])) + String(driver.backgroundScreening?.validUntil ?? "")).digest("hex");
-    await sendPushToUser({ audience: "driver", uid, notificationId: `compliance_restored_${id}`, title: "Driving access restored", body: "Your updated documents and required screening have been verified. You can go online again when you are ready.", route: { type: "driverDocumentReminder", target: "documents" } });
+    await sendPushToUser({ audience: "driver", uid, notificationId: `compliance_restored_${id}`, title: "Document checks cleared", body: "Your updated documents and required screening have been verified. You can go online once all remaining account checks are cleared.", route: { type: "driverDocumentReminder", target: "documents" } });
   }
 }

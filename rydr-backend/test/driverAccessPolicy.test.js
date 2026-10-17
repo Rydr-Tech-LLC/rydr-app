@@ -24,3 +24,9 @@ test('checklist highlights only blockers and marks inactive screening as not req
  const cleared=driverAccess(approved);
  assert.equal(cleared.allowed,true);assert.equal(cleared.checks.some(x=>x.blocking),false);assert.deepEqual(cleared.reasons,[]);
 });
+test('manual decline blocks even without strict OCR policy and sheet does not expose detailed decline reason',()=>{
+ const d={...approved,documents:{insurance:{status:'rejected',driverFacingReason:'The photo is blurry.',reviewReason:'The photo is blurry.'}}};
+ const result=driverAccess(d);assert.equal(result.allowed,false);assert.equal(result.checks.find(x=>x.code==='documents').blocking,true);assert.doesNotMatch(JSON.stringify(result),/blurry/);
+ d.documents.insurance.approvedRecord={status:'approved',expirationDate:'2099-01-01'};
+ assert.equal(driverAccess(d).allowed,true);
+});

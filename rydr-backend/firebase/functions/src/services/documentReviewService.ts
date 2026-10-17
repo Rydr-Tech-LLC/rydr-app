@@ -470,6 +470,7 @@ async function writePendingReview(
       const current = driver.documents?.[parsed.kind] ?? {};
       tx.set(driverRef.collection("documentReviews").doc(reviewId), payload, { merge: true });
       if (generation && typeof current.latestGeneration === "string" && /^\d+$/.test(generation) && /^\d+$/.test(current.latestGeneration) && BigInt(generation) < BigInt(current.latestGeneration)) return;
+      if (current.manualReviewId && current.manualReviewStoragePath === parsed.storagePath && String(current.manualReviewGeneration ?? '') === String(generation ?? '')) return;
       const prior = currentDocument(driver, parsed.kind);
       const previousApproved = prior.status === "approved" ? { status: "approved", extractedFields: prior.extractedFields ?? {}, expirationDate: prior.expirationDate ?? prior.extractedFields?.expirationDate ?? null, storagePath: prior.storagePath ?? null, reviewId: prior.reviewId ?? null, generation: prior.generation ?? null } : null;
       tx.set(driverRef, nestedFields({
@@ -552,6 +553,8 @@ async function writeFinalReview(
       };
       tx.set(driverRef.collection("documentReviews").doc(options.reviewId), reviewPayload, { merge: true });
       const fields: Record<string, unknown> = {};
+      if (current.manualReviewId && current.manualReviewStoragePath === parsed.storagePath && String(current.manualReviewGeneration ?? '') === String(options.generation ?? '')) return;
+
       if (isAtLeast(options.generation, current.latestGeneration)) {
         Object.assign(fields, {
           [`documents.${parsed.kind}.status`]: options.decision.status,

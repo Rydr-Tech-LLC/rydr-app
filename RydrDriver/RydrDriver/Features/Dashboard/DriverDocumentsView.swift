@@ -148,7 +148,7 @@ struct DriverDocumentsView: View {
                         } label: {
                             DriverDocumentRow(kind: kind, record: snapshot.record(for: kind))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.plain).accessibilityIdentifier("documentRow_" + kind.rawValue)
 
                         if kind != DriverDocumentKind.allCases.last {
                             Divider().padding(.leading, 80)
@@ -178,6 +178,9 @@ struct DriverDocumentsView: View {
         #if DEBUG && targetEnvironment(simulator)
         if ProcessInfo.processInfo.arguments.contains("-RydrDocumentFixtureUITest") {
             snapshot = DriverDocumentsSnapshot(data: ["documents": ["driverLicense": ["status": "approved", "extractedFields": ["expirationDate": "2026-11-13"]], "insurance": ["status": "expired", "extractedFields": ["expirationDate": "2026-10-13"]], "registration": ["status": "approved", "extractedFields": ["expirationDate": "2027-02-01"]]], "backgroundCheckStatus": "beta_deferred"] )
+            if ProcessInfo.processInfo.arguments.contains("-DocumentDeclinedFixture") {
+                snapshot = DriverDocumentsSnapshot(data: ["documents": ["insurance": ["status": "rejected", "driverFacingReason": "The photo is blurry. Upload a clear, focused photo."]]])
+            }
             complianceMessage = "Driving is temporarily paused because a document expired. Upload a current replacement. Access returns after verification."
             isLoading = false
             return
@@ -330,6 +333,12 @@ private struct DriverDocumentDetailView: View {
                 DriverDocumentStatusPill(status: record.status, isBackgroundCheck: kind == .backgroundCheck)
             }
 
+            if let reason = record.declineReason {
+                Label("New upload needed: " + reason, systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline).foregroundStyle(.red).padding(14)
+                    .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                    .accessibilityIdentifier("documentDeclineReason")
+            }
             if let previewURL = record.previewURL {
                 AsyncImage(url: previewURL) { phase in
                     switch phase {
@@ -674,7 +683,7 @@ private struct DriverDocumentsSnapshot {
 
         for kind in DriverDocumentKind.allCases {
             var raw = docs[kind.rawValue] as? [String: Any] ?? [:]
-            for field in ["status", "frontURL", "backURL", "documentURL", "extractedFields", "reviewedAt", "expirationDate"] where raw[field] == nil { raw[field] = data["documents.\(kind.rawValue).\(field)"] }
+            for field in ["status", "frontURL", "backURL", "documentURL", "extractedFields", "reviewedAt", "expirationDate", "driverFacingReason", "reviewReason"] where raw[field] == nil { raw[field] = data["documents.\(kind.rawValue).\(field)"] }
             parsed[kind] = DriverDocumentRecord(kind: kind, data: raw, driverData: data)
         }
 
@@ -705,9 +714,11 @@ private struct DriverDocumentRecord {
     let frontURL: URL?
     let backURL: URL?
     let documentURL: URL?
+    let declineReason: String?
 
     init(kind: DriverDocumentKind, data: [String: Any], driverData: [String: Any]) {
         status = DriverDocumentStatus(raw: kind == .backgroundCheck && (driverData["backgroundCheckHold"] as? Bool) == true ? "pending" : kind == .backgroundCheck ? (driverData["backgroundScreening"] as? [String: Any])?["status"] as? String ?? Self.legacyStatus(for: kind, driverData: driverData) : data["status"] as? String ?? Self.legacyStatus(for: kind, driverData: driverData))
+        declineReason = (data["status"] as? String) == "rejected" ? (data["driverFacingReason"] as? String ?? data["reviewReason"] as? String) : nil
         updatedAt = Self.date(data["reviewedAt"] ?? data["updatedAt"])
         expiresAt = Self.date((kind == .backgroundCheck ? (driverData["backgroundScreening"] as? [String: Any])?["validUntil"] : nil) ?? data["expiresAt"] ?? data["expirationDate"] ?? (data["extractedFields"] as? [String: Any])?["expirationDate"] ?? Self.legacyExpiry(for: kind, driverData: driverData))
         completedAt = Self.date(data["completedAt"] ?? (kind == .backgroundCheck ? (driverData["backgroundScreening"] as? [String: Any])?["completedAt"] : nil) ?? Self.legacyCompletedAt(for: kind, driverData: driverData))
@@ -726,6 +737,7 @@ private struct DriverDocumentRecord {
     }
 
     func subtitle(for kind: DriverDocumentKind) -> String {
+        if let declineReason { return "New upload needed: " + declineReason }
         if kind == .backgroundCheck {
             if let completedAt {
                 return "Completed on \(Self.dateFormatter.string(from: completedAt))"

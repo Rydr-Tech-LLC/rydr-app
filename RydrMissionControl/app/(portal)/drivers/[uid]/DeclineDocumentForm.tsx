@@ -1,0 +1,12 @@
+'use client';
+import {useState} from 'react';
+import {useWorkspaceRouter} from '@/components/WorkspaceContext';
+export default function DeclineDocumentForm({uid, kind, storagePath, reviewId, reasons}: {uid:string;kind:string;storagePath:string;reviewId:string;reasons:Record<string,string>}) {
+ const router=useWorkspaceRouter(), [reasonCode,setReason]=useState(''), [note,setNote]=useState(''), [busy,setBusy]=useState(false), [message,setMessage]=useState('');
+ return <details className="mt-4 rounded-xl border border-red-100 bg-red-50/40 p-3"><summary className="cursor-pointer text-sm font-semibold text-red-700">Decline & request a new upload</summary><form className="mt-3 space-y-3" onSubmit={async event=>{event.preventDefault();setBusy(true);setMessage('');try{const r=await fetch(`/api/drivers/${encodeURIComponent(uid)}/document-verification`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision:'reject',kind,storagePath,reviewId,reasonCode,note})});const data=await r.json();if(!r.ok)throw Error(data.error);setMessage('Declined. The backend will send the driver a notification with the reason and replacement instructions.');router.refresh();}catch(e){setMessage(e instanceof Error?e.message:'Unable to save the decision');}finally{setBusy(false);}}}>
+ <label className="block text-sm font-medium">Reason for the driver<select required disabled={busy} value={reasonCode} onChange={e=>setReason(e.target.value)} className="mt-1 w-full rounded-lg border border-line bg-white p-2"><option value="">Select a reason</option>{Object.entries(reasons).map(([code,label])=><option key={code} value={code}>{label}</option>)}</select></label>
+ <label className="block text-sm">Additional instructions sent to the driver<textarea disabled={busy} required={reasonCode==='other'} maxLength={300} value={note} onChange={e=>setNote(e.target.value)} className="mt-1 w-full rounded-lg border border-line bg-white p-2" placeholder="Optional clarification, such as which side to retake" /></label>
+ <p className="text-xs text-muted">The reason is visible to the driver. Existing approved proof and review history are retained. Driving access is evaluated separately.</p>
+ <button disabled={busy||!reasonCode} className="rounded-full bg-gradient-to-r from-red-500 to-rydr-burgundy px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{busy?'Saving…':'Decline & notify driver'}</button>{message&&<p role="status" className="text-sm">{message}</p>}
+ </form></details>;
+}
