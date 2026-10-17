@@ -34,6 +34,7 @@ async function run({stripe,db,auth,uid,accountId,apply=false,fieldValue}) {
   tx.set(ref,profilePatch(current,{stripeAccountId:null,stripeConnectStatus:'not_started',stripeChargesEnabled:false,stripePayoutsEnabled:false,stripeRequirementsDue:[],payoutsStepCompleted:false,payoutsStepCompletedAt:null,payoutBankName:null,payoutBankLast4:null,payoutCardName:null,payoutCardLast4:null,updatedAt:fieldValue.serverTimestamp()},'live'),{merge:true});
   // Fresh creation must not recover the deleted account from the old idempotency record.
   tx.set(attempt,{accountId:null,status:'reset',generation:(a?.generation||0)+1,previousAccountId:accountId,updatedAt:fieldValue.serverTimestamp()},{merge:true});
+  tx.set(db.collection('publicDriverProfiles').doc(uid),{stripeMode:'live',stripeAccountId:null,stripeChargesEnabled:false,updatedAt:fieldValue.serverTimestamp()},{merge:true});
   tx.set(audit,{status:'complete',completedAt:fieldValue.serverTimestamp(),loginPreserved:true},{merge:true});
  });
  await auth.getUser(uid);
