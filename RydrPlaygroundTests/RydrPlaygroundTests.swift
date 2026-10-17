@@ -40,3 +40,21 @@ struct RydrPlaygroundTests {
         #expect(RydrWorkspace.scopedURL(external) == external)
     }
 }
+
+struct CardSaveAttemptTests {
+    @Test func repeatedTapsAndNetworkRetriesKeepOneSaveAttempt() {
+        var attempt = CardSaveAttempt()
+        let id = attempt.begin()
+        #expect(id != nil)
+        #expect(attempt.begin() == nil)
+        #expect(attempt.begin() == nil)
+        attempt.failed()
+        #expect(attempt.begin() == id)
+        attempt.confirmed("seti_fixture")
+        attempt.failed()
+        #expect(attempt.begin() == id)
+        #expect(attempt.confirmedIntentID == "seti_fixture")
+        attempt.succeeded()
+        #expect(attempt.begin() == nil)
+    }
+}

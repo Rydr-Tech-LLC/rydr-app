@@ -41,3 +41,15 @@ struct Rydr_DriverTests {
         #expect(RydrWorkspace.scopedURL(external) == external)
     }
 }
+
+struct DriverManagedPayoutConfigurationTests {
+    @Test func managedAndLegacyAccountsRemainExplicit() throws {
+        let managed = try JSONDecoder().decode(DriverPayoutSetupConfiguration.self, from: Data(#"{"managed":true,"requiresMigration":false,"mode":"test","workspace":"test"}"#.utf8))
+        #expect(managed.managed)
+        #expect(!managed.requiresMigration)
+        let legacy = try JSONDecoder().decode(DriverPayoutSetupConfiguration.self, from: Data(#"{"managed":false,"requiresMigration":true,"mode":"live","workspace":"live-beta"}"#.utf8))
+        #expect(!legacy.managed)
+        #expect(legacy.requiresMigration)
+        #expect(legacy.mode != managed.mode)
+    }
+}

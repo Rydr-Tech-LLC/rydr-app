@@ -14,6 +14,7 @@ struct PaymentScreenView: View {
     private let backendBase = RydrStripeBackendConfig.baseURL
 
     // State
+    @State private var saveAttempt = CardSaveAttempt()
     @State private var customerId: String?
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -21,6 +22,11 @@ struct PaymentScreenView: View {
     @State private var cardParams: STPPaymentMethodParams?
     @State private var presentingVC: UIViewController?
     @Environment(\.dismiss) private var dismiss
+
+    #if DEBUG && targetEnvironment(simulator)
+    @State private var fixtureSaveCount = 0
+    @State private var fixtureFirstKey: String?
+    #endif
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -40,7 +46,7 @@ struct PaymentScreenView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
-                    SignupBackButton(action: { dismiss() })
+                    SignupBackButton(action: { dismiss() }).disabled(saveAttempt.isBusy)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     PaymentHeader()
@@ -60,7 +66,7 @@ struct PaymentScreenView: View {
                         .accessibilityHidden(true)
                         .padding(.top, 6)
 
-                    paymentForm
+                    paymentForm.disabled(saveAttempt.isBusy)
 
                     Button(isLoading ? "Working..." : "Save & Continue") {
                         addCard()
@@ -71,7 +77,7 @@ struct PaymentScreenView: View {
                     .padding(.top, 4)
 
                     if showSkip {
-                        Button("Add Payment Later") { onSkip() }
+                        Button("Add Payment Later") { onSkip() }.disabled(saveAttempt.isBusy)
                             .font(.system(size: 14, weight: .bold, design: .rounded))
                             .foregroundStyle(SignupPalette.muted)
                     }
@@ -98,10 +104,23 @@ struct PaymentScreenView: View {
                 .frame(maxWidth: .infinity)
             }
         }
+        .interactiveDismissDisabled(saveAttempt.isBusy)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .preferredColorScheme(.light)
-        .onAppear { bootstrap() }
+        .onAppear {
+            #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("-RiderCardSaveUITest") { customerId = "fixture"; canSubmitCard = true; return }
+            #endif
+            bootstrap()
+        }
+        #if DEBUG && targetEnvironment(simulator)
+        .overlay(alignment: .top) {
+            if ProcessInfo.processInfo.arguments.contains("-RiderCardSaveUITest") {
+                Text("Requests: \(fixtureSaveCount)").accessibilityIdentifier("cardSaveRequestCount").font(.caption).padding().background(.regularMaterial)
+            }
+        }
+        #endif
         .background(PresenterResolver_Signup { vc in presentingVC = vc })
         .hideKeyboardOnTap()
     }
@@ -185,6 +204,15 @@ struct PaymentScreenView: View {
         body: [String: Any],
         completion: @escaping (Result<T, Error>) -> Void
     ) {
+        let deliver = completion
+        let workspace = RydrWorkspace.identifier
+        let uid = RydrWorkspace.auth.currentUser?.uid
+        let completion: (Result<T, Error>) -> Void = { result in DispatchQueue.main.async {
+            guard RydrWorkspace.identifier == workspace, RydrWorkspace.auth.currentUser?.uid == uid else {
+                deliver(.failure(simple("Your account changed. Reopen payment setup before saving a card."))); return
+            }
+            deliver(result)
+        } }
         var req = RydrWorkspace.urlRequest(url: backendBase.appendingPathComponent(path))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -245,6 +273,22 @@ struct PaymentScreenView: View {
     }
 
     private func addCard() {
+        guard !isLoading, !saveAttempt.isBusy, !saveAttempt.completed else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-RiderCardSaveUITest") {
+            guard let key = saveAttempt.begin() else { return }
+            if fixtureFirstKey == nil { fixtureFirstKey = key }
+            guard fixtureFirstKey == key else { finishCardSave(.failure(simple("Retry changed the save attempt."))); return }
+            fixtureSaveCount += 1
+            let fails = fixtureSaveCount == 1
+            isLoading = true
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                finishCardSave(fails ? .failure(simple("Network unavailable. Retry your card save.")) : .success(()))
+            }
+            return
+        }
+        #endif
         guard RydrStripeBackendConfig.hasConfiguredPublishableKey else {
             error("Payment setup is still loading. Try again in a moment.")
             Task { @MainActor in
@@ -261,10 +305,12 @@ struct PaymentScreenView: View {
             return
         }
 
+        guard let requestID = saveAttempt.begin() else { return }
         errorMessage = nil
         isLoading = true
+        if let confirmed = saveAttempt.confirmedIntentID { finalizeCard(confirmed); return }
 
-        requestJSON(path: "create-setup-intent", body: ["requestId": UUID().uuidString]) { (result: Result<SetupIntentResponse_Signup, Error>) in
+        requestJSON(path: "create-setup-intent", body: ["requestId": requestID]) { (result: Result<SetupIntentResponse_Signup, Error>) in
             let setupIntent: SetupIntentResponse_Signup
             switch result {
             case .success(let response):
@@ -274,6 +320,10 @@ struct PaymentScreenView: View {
                 return
             }
 
+            if setupIntent.status == "succeeded" { saveAttempt.confirmed(setupIntent.setupIntentId); finalizeCard(setupIntent.setupIntentId); return }
+            guard setupIntent.status == "requires_payment_method" || setupIntent.status == "requires_confirmation" || setupIntent.status == "requires_action" else {
+                finishCardSave(.failure(simple("Your card is still being saved. Try again shortly."))); return
+            }
             let confirm = STPSetupIntentConfirmParams(clientSecret: setupIntent.clientSecret)
             confirm.paymentMethodParams = pmParams
 
@@ -283,7 +333,8 @@ struct PaymentScreenView: View {
             handler.confirmSetupIntent(confirm, with: context) { status, _, error in
                 switch status {
                 case .succeeded:
-                    finishCardSave(.success(()))
+                    saveAttempt.confirmed(setupIntent.setupIntentId)
+                    finalizeCard(setupIntent.setupIntentId)
                 case .failed:
                     finishCardSave(.failure(error ?? simple("Confirmation failed")))
                 case .canceled:
@@ -295,13 +346,26 @@ struct PaymentScreenView: View {
         }
     }
 
+    private func finalizeCard(_ id: String) {
+        requestJSON(path: "finish-card-setup", body: ["setupIntentId": id]) { (result: Result<CardSaveResult, Error>) in
+            switch result {
+            case .success: finishCardSave(.success(()))
+            case .failure(let error): finishCardSave(.failure(error))
+            }
+        }
+    }
+    private struct CardSaveResult: Decodable { let paymentMethodId: String }
+
     private func finishCardSave(_ result: Result<Void, Error>) {
         DispatchQueue.main.async {
+            guard !saveAttempt.completed else { return }
             isLoading = false
             switch result {
             case .success:
+                saveAttempt.succeeded()
                 onComplete()
             case .failure(let error):
+                saveAttempt.failed()
                 errorMessage = error.localizedDescription
             }
         }
@@ -697,4 +761,4 @@ private struct PresenterResolver_Signup: UIViewControllerRepresentable {
 // DTOs with unique names in this file
 private struct BackendErrorResponse_Signup: Decodable { let error: String }
 private struct CreateCustomerResponse_Signup: Decodable { let customerId: String }
-private struct SetupIntentResponse_Signup: Decodable { let clientSecret: String }
+private struct SetupIntentResponse_Signup: Decodable { let clientSecret: String; let setupIntentId: String; let status: String }

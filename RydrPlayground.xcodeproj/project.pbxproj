@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CD873681628E4D3F95313B21 /* CardSaveAttempt.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD873681628E4D3F95313B22 /* CardSaveAttempt.swift */; };
 		00D5ACBA4CCAFA0275DF58D4 /* View+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE7F150DACBCB949A66F8EE5 /* View+Extension.swift */; };
 		022FA2286ACA9A982515313D /* SplashCoordinatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0395430CE916993430C1E509 /* SplashCoordinatorView.swift */; };
 		0A3D861D4FAAAE635BA842A0 /* PaymentMethodView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CD7CE10B7D1AB994E052AB7 /* PaymentMethodView.swift */; };
@@ -135,6 +136,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		CD873681628E4D3F95313B22 /* CardSaveAttempt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardSaveAttempt.swift; sourceTree = "<group>"; };
 		02F57963D5A8B8EC4332266F /* TermsAndVerificationView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TermsAndVerificationView.swift; sourceTree = "<group>"; };
 		0395430CE916993430C1E509 /* SplashCoordinatorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SplashCoordinatorView.swift; sourceTree = "<group>"; };
 		048C273382D125D833EEFCF9 /* RideChatView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RideChatView.swift; sourceTree = "<group>"; };
@@ -301,6 +303,7 @@
 				05EF7375856D6A00788F623D /* LocationManager.swift */,
 				09C32831495CD5DA9E4FB049 /* LocationSearchService.swift */,
 				25FF86D04887DC18C6318715 /* NotificationManager.swift */,
+				CD873681628E4D3F95313B22 /* CardSaveAttempt.swift */,
 				A823F3EC96FAD1F8AC3CA2E0 /* RiderIdentityVerificationService.swift */,
 				61C1E1A68C2D4C2B91287131 /* RiderRidePreferences.swift */,
 				57F389897522773F5954E49F /* RydrBankAPIError.swift */,
@@ -716,6 +719,7 @@
 				C8C1728020684818AB847A47 /* LocationManager.swift in Sources */,
 				6EF480E63614778D43742DA3 /* LocationSearchService.swift in Sources */,
 				C24EAA107832D35CD645C882 /* NotificationManager.swift in Sources */,
+				CD873681628E4D3F95313B21 /* CardSaveAttempt.swift in Sources */,
 				12A202063F07B6133867B622 /* RiderIdentityVerificationService.swift in Sources */,
 				E8D1D04E214EFE1F2DD25416 /* RydrBankAPIError.swift in Sources */,
 				33E4B15852AD6DD4F1D2792F /* UserSessionManager.swift in Sources */,

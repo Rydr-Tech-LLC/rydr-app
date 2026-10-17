@@ -145,8 +145,9 @@ struct PaymentMethodView: View {
                         showAddCard = false
                         switch result {
                         case .success(let newPMId):
-                            setDefault(newPMId) { _ in
-                                detach(editingPMId) { _ in reloadIfPossible() }
+                            setDefault(newPMId) { saved in
+                                if saved && newPMId != editingPMId { detach(editingPMId) { _ in reloadIfPossible() } }
+                                else { reloadIfPossible() }
                             }
                         case .failure(let e):
                             errorMessage = e.localizedDescription
@@ -357,7 +358,7 @@ private extension PaymentMethodView {
             path: "set-default-payment-method",
             body: ["paymentMethodId": pmId],
             decode: SimpleOK.self
-        ) { _ in completion(true) }
+        ) { response in completion(response?.ok == true) }
     }
 
     func detach(_ pmId: String, completion: ((Bool) -> Void)? = nil) {
@@ -381,14 +382,21 @@ private func requestJSON<T: Decodable>(
     decode: T.Type,
     completion: @escaping (T?) -> Void
 ) {
+    let deliver = completion
+    let workspace = RydrWorkspace.identifier
+    let uid = RydrWorkspace.auth.currentUser?.uid
+    let completion: (T?) -> Void = { result in DispatchQueue.main.async {
+        guard RydrWorkspace.identifier == workspace, RydrWorkspace.auth.currentUser?.uid == uid else { deliver(nil); return }
+        deliver(result)
+    } }
     var req = RydrWorkspace.urlRequest(url: backendBase.appendingPathComponent(path))
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
 
     func send(_ r: URLRequest) {
-        URLSession.shared.dataTask(with: r) { data, _, _ in
-            guard let data else { completion(nil); return }
+        URLSession.shared.dataTask(with: r) { data, response, _ in
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), let data else { completion(nil); return }
             completion(try? JSONDecoder().decode(T.self, from: data))
         }.resume()
     }
@@ -802,6 +810,7 @@ private struct AddOrReplaceCardSheet: View {
     let completion: (Result<String, Error>) -> Void   // returns new PM id
 
     @Environment(\.dismiss) private var dismiss
+    @State private var saveAttempt = CardSaveAttempt()
     @State private var canSubmit = false
     @State private var isWorking = false
     @State private var errorText: String?
@@ -812,7 +821,7 @@ private struct AddOrReplaceCardSheet: View {
         NavigationStack {
             VStack(spacing: 16) {
                 CardFormRepresentable(paymentMethodParams: $cardParams, onEditingChanged: { canSubmit = $0 })
-                    .frame(height: 220)
+                    .frame(height: 220).disabled(isWorking)
 
                 if let e = errorText {
                     Text(e).foregroundStyle(.red).font(.footnote)
@@ -834,10 +843,11 @@ private struct AddOrReplaceCardSheet: View {
                 Spacer()
             }
             .padding()
+            .interactiveDismissDisabled(isWorking)
             .navigationTitle(replacePaymentMethodId == nil ? "Add Card" : "Edit Card")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") { dismiss() }.disabled(isWorking)
                 }
             }
             .task {
@@ -848,6 +858,7 @@ private struct AddOrReplaceCardSheet: View {
     }
 
     private func addCard() {
+        guard !isWorking, !saveAttempt.isBusy, !saveAttempt.completed else { return }
         guard RydrStripeBackendConfig.hasConfiguredPublishableKey else {
             errorText = "Payment setup is still loading. Try again in a moment."
             Task { @MainActor in
@@ -856,12 +867,14 @@ private struct AddOrReplaceCardSheet: View {
             return
         }
         guard let pmParams = cardParams else { return }
+        guard let requestID = saveAttempt.begin() else { return }
         errorText = nil; isWorking = true
+        if let confirmed = saveAttempt.confirmedIntentID { finalizeCard(confirmed); return }
 
         requestJSON(
             backendBase: backendBase,
             path: "create-setup-intent",
-            body: ["requestId": UUID().uuidString],
+            body: ["requestId": requestID],
             decode: SetupIntentResponse_Profile.self
         ) { si in
             guard let si else {
@@ -869,6 +882,8 @@ private struct AddOrReplaceCardSheet: View {
                 return
             }
 
+            if si.status == "succeeded" { saveAttempt.confirmed(si.setupIntentId); finalizeCard(si.setupIntentId); return }
+            guard ["requires_payment_method", "requires_confirmation", "requires_action"].contains(si.status) else { finish(.failure(simple("Your card is still being saved. Try again shortly."))); return }
             let confirm = STPSetupIntentConfirmParams(clientSecret: si.clientSecret)
             confirm.paymentMethodParams = pmParams
 
@@ -878,13 +893,8 @@ private struct AddOrReplaceCardSheet: View {
             handler.confirmSetupIntent(confirm, with: ctx) { status, setupIntent, error in
                 switch status {
                 case .succeeded:
-                    // The new payment method should now be attached to the customer
-                    let newPMId = setupIntent?.paymentMethodID ?? ""
-                    if newPMId.isEmpty {
-                        finish(.failure(simple("Card saved but could not resolve payment method id.")))
-                    } else {
-                        finish(.success(newPMId))
-                    }
+                    saveAttempt.confirmed(si.setupIntentId)
+                    finalizeCard(si.setupIntentId)
                 case .failed:
                     finish(.failure(error ?? simple("Confirmation failed")))
                 case .canceled:
@@ -896,11 +906,21 @@ private struct AddOrReplaceCardSheet: View {
         }
     }
 
+    private func finalizeCard(_ id: String) {
+        requestJSON(backendBase: backendBase, path: "finish-card-setup", body: ["setupIntentId": id], decode: SavedCardResult.self) { result in
+            if let result { finish(.success(result.paymentMethodId)) }
+            else { finish(.failure(simple("Your card was submitted, but we couldn't refresh it. Retry to finish saving without adding another card."))) }
+        }
+    }
+    private struct SavedCardResult: Decodable { let paymentMethodId: String }
+
     private func finish(_ result: Result<String, Error>) {
         DispatchQueue.main.async {
+            guard !saveAttempt.completed else { return }
             isWorking = false
-            if case .failure(let e) = result { errorText = e.localizedDescription }
-            completion(result)
+            if case .failure(let e) = result { saveAttempt.failed(); errorText = e.localizedDescription }
+            else { saveAttempt.succeeded() }
+            if case .success = result { completion(result) }
         }
     }
 }
@@ -952,7 +972,7 @@ private struct PresenterResolver: UIViewControllerRepresentable {
 
 // MARK: - DTOs
 private struct CreateCustomerResponse: Decodable { let customerId: String }
-private struct SetupIntentResponse_Profile: Decodable { let clientSecret: String }
+private struct SetupIntentResponse_Profile: Decodable { let clientSecret: String; let setupIntentId: String; let status: String }
 private struct SimpleOK: Decodable { let ok: Bool }
 private struct ListPMsResponse: Decodable { let paymentMethods: [CardPM] }
 private struct CardPM: Decodable, Identifiable {

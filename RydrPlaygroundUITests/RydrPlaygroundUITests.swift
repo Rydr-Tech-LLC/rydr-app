@@ -8,6 +8,23 @@
 import XCTest
 
 final class RydrPlaygroundUITests: XCTestCase {
+    @MainActor
+    func testCardSaveLocksRepeatedTapsAndReusesAttemptAfterNetworkFailure() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-RiderCardSaveUITest"]
+        app.launch()
+        let save = app.buttons["Save & Continue"]
+        XCTAssertTrue(save.waitForExistence(timeout: 15))
+        for _ in 0..<6 where !save.isHittable { app.swipeUp() }
+        save.tap()
+        XCTAssertFalse(app.buttons["Working..."].isEnabled)
+        XCTAssertEqual(app.staticTexts["cardSaveRequestCount"].label, "Requests: 1")
+        XCTAssertTrue(app.staticTexts["Network unavailable. Retry your card save."].waitForExistence(timeout: 10))
+        XCTAssertTrue(save.isEnabled)
+        save.tap()
+        XCTAssertTrue(app.staticTexts["cardSaveCompleted"].waitForExistence(timeout: 10))
+    }
+
 
     @MainActor
     func testOnboardingResumeAfterRelaunchAndFailClosed() {

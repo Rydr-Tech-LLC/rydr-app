@@ -12,6 +12,7 @@ struct DriverPayoutAccountView: View {
     @State private var manager: EmbeddedComponentManager?
     @State private var errorMessage: String?
     @State private var attempt = UUID()
+    @State private var isPreparing = false
     var body: some View {
         NavigationStack {
             Group {
@@ -32,6 +33,9 @@ struct DriverPayoutAccountView: View {
         .task { await prepare() }
     }
     @MainActor private func prepare() async {
+        guard !isPreparing else { return }
+        isPreparing = true
+        defer { isPreparing = false }
         errorMessage = nil
         manager = nil
         attempt = UUID()
@@ -40,6 +44,10 @@ struct DriverPayoutAccountView: View {
             if ProcessInfo.processInfo.arguments.contains("-DriverPayoutMethodsUITest") { throw URLError(.notConnectedToInternet) }
             #endif
             guard let workspace = RydrWorkspace.identifier, let uid = RydrWorkspace.auth.currentUser?.uid else { throw URLError(.userAuthenticationRequired) }
+            let account: DriverPayoutSetupConfiguration = try await DriverConnectAPI.get("connect/setup-configuration")
+            guard account.managed else {
+                throw DriverConnectServiceError(message: "Your existing payout account needs to be migrated to Rydr-managed setup. Contact Rydr support. Your saved payout details and earnings have not been changed.")
+            }
             let config: Config = try await DriverConnectAPI.get("config")
             guard config.publishableKey.hasPrefix(workspace == "test" ? "pk_test_" : "pk_live_") else { throw URLError(.badServerResponse) }
             guard config.mode == (workspace == "test" ? "test" : "live") else { throw URLError(.badServerResponse) }
@@ -142,4 +150,11 @@ enum DriverConnectAPI {
         }
         return try JSONDecoder().decode(T.self, from: data)
     }
+}
+
+struct DriverPayoutSetupConfiguration: Decodable {
+    let managed: Bool
+    let requiresMigration: Bool
+    let mode: String
+    let workspace: String
 }

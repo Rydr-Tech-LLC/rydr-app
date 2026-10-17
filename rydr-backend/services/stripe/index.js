@@ -11,6 +11,9 @@ const { getAuth } = require("firebase-admin/auth");
 const Stripe = require("stripe");
 const { randomInt, timingSafeEqual } = require("crypto");
 const { cleanupAccount } = require("./accountCleanup");
+const { migrationReadiness } = require("./connectMigration");
+const { finishCardSetup } = require("./savedCards");
+const { newAccountConfiguration, setupConfiguration } = require("./connectConfiguration");
 const { connectAccountError } = require("./connectAccountError");
 const { createConnectAccount, replayed } = require("./connectAccountCreation");
 const { DriverPayoutService, PayoutError } = require("./driverPayouts");
@@ -1026,7 +1029,8 @@ app.get("/config", async (_req, res) => {
 
   res.json({
     publishableKey,
-    mode: publishableKey.startsWith("pk_live_") ? "live" : "test"
+    mode: publishableKey.startsWith("pk_live_") ? "live" : "test",
+    payoutSetupForNewAccounts: newAccountConfiguration(env,workspace).controller ? "rydr_managed" : "express"
   });
 });
 
@@ -1061,7 +1065,9 @@ async function stripeWebhookHandler(req,res,scope) {
         await driverPayoutService.webhook(event);
         break;
       case "setup_intent.succeeded":
-        console.log("💳 setup_intent.succeeded:", event.data.object.id);
+        { const si=event.data.object;
+          if(si.metadata?.firebase_uid && typeof si.customer==='string')await finishCardSetup({stripe,db:admin.firestore(),customerId:si.customer,uid:si.metadata.firebase_uid,setupIntentId:si.id});
+        }
         break;
       case "payment_intent.succeeded": {
         const pi = event.data.object;
@@ -1408,11 +1414,24 @@ app.post("/create-setup-intent", async (req, res) => {
       },
       { idempotencyKey: `setup_intent_${uid}_${requestId}` }
     );
-    res.json({ clientSecret: si.client_secret });
+    // A retried request can return a completed intent. The app must finalize it,
+    // rather than creating and confirming another PaymentMethod.
+    const current=await stripe.setupIntents.retrieve(si.id);
+    res.set("Cache-Control","no-store").json({ clientSecret: current.client_secret,setupIntentId:current.id,status:current.status });
   } catch (e) {
     console.error("❌ create-setup-intent:", e);
     res.status(500).json({ error: "setup_intent_failed" });
   }
+});
+
+// Resolve a successful save to one canonical card. No client-supplied customer or PM ID.
+app.post("/finish-card-setup", async(req,res)=>{
+ try {
+  const uid=await requireFirebaseUid(req,res);if(!uid)return;
+  if(rejectIfSuppliedUidMismatch(req,res,uid))return;
+  const customerId=await ownedCustomerId(uid);if(!customerId)return res.status(404).json({error:"no_stripe_customer_on_file"});
+  res.set("Cache-Control","no-store").json(await finishCardSetup({stripe,db:admin.firestore(),uid,customerId,setupIntentId:req.body?.setupIntentId}));
+ }catch(e){res.status(e instanceof PayoutError?e.status:500).json({error:e instanceof PayoutError?e.code:"card_save_finalization_failed"});}
 });
 
 // --- PaymentIntent (charge a ride) ---------------------------------------
@@ -2268,7 +2287,7 @@ app.post("/connect/accounts", async (req, res) => {
 
     const account = await createConnectAccount({ stripe, db: admin.firestore(), uid: driverUid,
       params: {
-        type: "express",
+        ...newAccountConfiguration(env,workspace),
         country: "US",
         settings: { payouts: { schedule: { interval: "manual" } } },
         email,
@@ -2375,12 +2394,20 @@ app.get("/connect/status", async (req, res) => {
   }
 });
 
+app.get("/connect/setup-configuration",async(req,res)=>{
+ try {const owned=await requireOwnAccountId(req,res);if(!owned)return;
+  const account=await stripe.accounts.retrieve(owned.accountId);
+  res.set("Cache-Control","no-store").json({...setupConfiguration(account),mode:stripeConfig.mode,workspace});
+ }catch{res.status(500).json({error:"payout_configuration_unavailable"});}
+});
+
 // Rydr wallet: only the authenticated driver's server-owned Connect account.
 app.post("/connect/account-session", async (req,res)=>{
   try {
     const owned=await requireOwnAccountId(req,res);if(!owned)return;
     res.set("Cache-Control","no-store");
-    const session=await createDriverAccountSession({stripe,accountId:owned.accountId,purpose:req.body?.purpose,
+    const account=await stripe.accounts.retrieve(owned.accountId);
+    const session=await createDriverAccountSession({stripe,account,accountId:owned.accountId,purpose:req.body?.purpose,
       mode:stripeConfig.mode,workspace,publishableKey:stripeConfig.publishableKey});
     res.json(session);
   }catch(error){res.status(error instanceof PayoutError?error.status:500).json({error:error instanceof PayoutError?error.code:"account_session_failed"});}
@@ -2519,6 +2546,18 @@ app.post("/connect/instant-payout", async (req, res) => {
     console.error("❌ connect/instant-payout error", err);
     res.status(err instanceof PayoutError ? err.status : 500).json({ error: err instanceof PayoutError ? err.code : "instant_payout_failed", detail: err.message, canStartNewRequest: err.payoutSubmissionUncertain === false });
   }
+});
+
+// Read-only planning. Never creates, closes or changes a financial account.
+app.post("/admin/payout-migration-readiness",async(req,res)=>{
+ try {
+  const actor=await requireAdminUid(req,res);if(!actor)return;
+  const uid=req.body?.uid;if(typeof uid!=="string"||!uid)return res.status(400).json({error:"driver_uid_required"});
+  initializeFirebase();const snapshot=await admin.firestore().collection("drivers").doc(uid).get();
+  if(!snapshot.exists)return res.status(404).json({error:"driver_not_found"});
+  const profile=modeProfile(snapshot.data(),stripeConfig.mode);
+  res.set("Cache-Control","no-store").json({workspace,mode:stripeConfig.mode,...await migrationReadiness({stripe,profile})});
+ }catch{res.status(500).json({error:"migration_readiness_unavailable"});}
 });
 
 // Admin: Account deletion cleanup (Part 12 — called from Mission Control's

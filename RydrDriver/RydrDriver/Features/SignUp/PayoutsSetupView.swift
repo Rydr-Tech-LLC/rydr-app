@@ -294,6 +294,7 @@ struct PayoutsSetupView: View {
 
     @MainActor
     private func startOnboarding() async {
+        guard !isLoading, !isCheckingStatus, !connectOnboarded else { return }
         guard !uid.isEmpty else {
             message = "Missing account information. Please restart signup."
             isError = true

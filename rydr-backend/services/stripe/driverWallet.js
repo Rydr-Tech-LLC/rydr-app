@@ -1,4 +1,5 @@
 "use strict";
+const {isManagedAccount}=require('./connectConfiguration');
 const { PayoutError } = require('./driverPayouts');
 async function allExternalAccounts(stripe, accountId) {
   const accounts=[];let starting_after;
@@ -30,14 +31,15 @@ function instantEligibility(account,balance,externalAccounts) {
   if(!account.payouts_enabled || !destination)amount=0;
   return {amount,destination:destination?destinationSummary(destination):null};
 }
-function accountSessionComponents(purpose) {
-  if(purpose==='onboarding')return {account_onboarding:{enabled:true,features:{external_account_collection:true,disable_stripe_user_authentication:false}}};
-  if(purpose==='payout_methods')return {payouts:{enabled:true,features:{external_account_collection:true,disable_stripe_user_authentication:false,instant_payouts:false,standard_payouts:false,edit_payout_schedule:false}}};
+function accountSessionComponents(purpose,account) {
+  const disableAuthentication=isManagedAccount(account);
+  if(purpose==='onboarding')return {account_onboarding:{enabled:true,features:{external_account_collection:true,disable_stripe_user_authentication:disableAuthentication}}};
+  if(purpose==='payout_methods')return {payouts:{enabled:true,features:{external_account_collection:true,disable_stripe_user_authentication:disableAuthentication,instant_payouts:false,standard_payouts:false,edit_payout_schedule:false}}};
   throw new PayoutError('invalid_account_session_purpose',400);
 }
 // A session grants financial-account access: never return it across Stripe modes.
-async function createDriverAccountSession({stripe,accountId,purpose,mode,workspace,publishableKey}) {
-  const components=accountSessionComponents(purpose);
+async function createDriverAccountSession({stripe,accountId,account,purpose,mode,workspace,publishableKey}) {
+  const components=accountSessionComponents(purpose,account);
   const live=mode==='live';
   if(!['test','live'].includes(mode) || workspace!==(live?'live-beta':'test') ||
       !String(publishableKey||'').startsWith(live?'pk_live_':'pk_test_')) {

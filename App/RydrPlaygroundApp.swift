@@ -17,6 +17,8 @@ struct RydrApp: App {
             #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.arguments.contains("-RydrSMSUITest") {
                 NavigationStack { LoginView().environmentObject(UserSessionManager()) }
+            } else if ProcessInfo.processInfo.arguments.contains("-RiderCardSaveUITest") {
+                RiderCardSaveUITestFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-RiderOnboardingResumeUITest") {
                 RiderOnboardingResumeUITestFixture()
             } else if ProcessInfo.processInfo.arguments.contains("-RydrIdentityOnboardingUITest") {
@@ -166,6 +168,18 @@ private struct RiderOnboardingResumeUITestFixture: View {
             return try JSONDecoder().decode(RiderOnboardingSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
         }) { Text("Rider dashboard").accessibilityIdentifier("riderDashboardFixture") }
         .environmentObject(session)
+    }
+}
+#endif
+
+#if DEBUG && targetEnvironment(simulator)
+private struct RiderCardSaveUITestFixture: View {
+    @State private var completed = false
+    var body: some View {
+        NavigationStack {
+            if completed { Text("Card save completed once").accessibilityIdentifier("cardSaveCompleted") }
+            else { PaymentScreenView(onComplete: { completed = true }) }
+        }
     }
 }
 #endif
