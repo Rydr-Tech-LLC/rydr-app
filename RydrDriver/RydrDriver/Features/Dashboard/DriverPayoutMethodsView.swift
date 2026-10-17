@@ -111,7 +111,7 @@ struct DriverPayoutMethodsView: View {
                             .font(.footnote).foregroundStyle(.secondary)
                         Button("Continue to secure entry") {
                             // Presented on the sheet's dismissal, avoiding overlapping presentations.
-                            securePurpose = .payoutMethods
+                            securePurpose = .onboarding
                             intent = nil
                         }.buttonStyle(.borderedProminent).tint(.red).accessibilityIdentifier("securePayoutEntry")
                         Button("Complete payout verification") { securePurpose = .onboarding; intent = nil }
@@ -121,12 +121,12 @@ struct DriverPayoutMethodsView: View {
                         .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Cancel") { intent = nil }.accessibilityIdentifier("cancelPayoutChoice") } }
                 }.presentationDetents([.large])
             }
-            .sheet(isPresented: $showingSecureForm, onDismiss: {
+            .fullScreenCover(isPresented: $showingSecureForm, onDismiss: {
                 securePurpose = nil
                 returnedFromEntry = true
                 Task { await refresh() }
             }) {
-                DriverPayoutAccountView(purpose: securePurpose ?? .payoutMethods)
+                DriverPayoutAccountView(purpose: securePurpose ?? .onboarding)
             }
         }
         .tint(.red)

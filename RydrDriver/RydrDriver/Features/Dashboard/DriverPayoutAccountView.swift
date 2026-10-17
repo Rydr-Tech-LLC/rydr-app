@@ -1,7 +1,7 @@
 import SwiftUI
 import FirebaseAuth
 import StripePayments
-@_spi(PreviewConnect) import StripeConnect
+import StripeConnect
 
 /// Sensitive account details go directly through Stripe's embedded component.
 /// Rydr controls the session, navigation, and payout policy; no Express dashboard link.
@@ -33,7 +33,7 @@ struct DriverPayoutAccountView: View {
         .task { await prepare() }
     }
     @MainActor private func prepare() async {
-        guard !isPreparing else { return }
+        guard !isPreparing, manager == nil else { return }
         isPreparing = true
         defer { isPreparing = false }
         errorMessage = nil
@@ -44,11 +44,12 @@ struct DriverPayoutAccountView: View {
             if ProcessInfo.processInfo.arguments.contains("-DriverPayoutMethodsUITest") { throw URLError(.notConnectedToInternet) }
             #endif
             guard let workspace = RydrWorkspace.identifier, let uid = RydrWorkspace.auth.currentUser?.uid else { throw URLError(.userAuthenticationRequired) }
-            let account: DriverPayoutSetupConfiguration = try await DriverConnectAPI.get("connect/setup-configuration")
+            async let accountRequest: DriverPayoutSetupConfiguration = DriverConnectAPI.get("connect/setup-configuration")
+            async let configRequest: Config = DriverConnectAPI.get("config")
+            let (account, config) = try await (accountRequest, configRequest)
             guard account.managed else {
                 throw DriverConnectServiceError(message: "Your existing payout account needs to be migrated to Rydr-managed setup. Contact Rydr support. Your saved payout details and earnings have not been changed.")
             }
-            let config: Config = try await DriverConnectAPI.get("config")
             guard config.publishableKey.hasPrefix(workspace == "test" ? "pk_test_" : "pk_live_") else { throw URLError(.badServerResponse) }
             guard config.mode == (workspace == "test" ? "test" : "live") else { throw URLError(.badServerResponse) }
             let apiClient = STPAPIClient(publishableKey: config.publishableKey)
@@ -143,6 +144,7 @@ enum DriverConnectAPI {
         var request = original
         request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
         request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 25
         let (data, response) = try await URLSession.shared.data(for: request)
         guard RydrWorkspace.identifier == workspace, RydrWorkspace.auth.currentUser?.uid == user.uid else { throw URLError(.userAuthenticationRequired) }
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {

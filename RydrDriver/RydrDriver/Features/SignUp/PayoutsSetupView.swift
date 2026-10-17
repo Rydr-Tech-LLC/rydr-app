@@ -87,7 +87,7 @@ struct PayoutsSetupView: View {
                     isLoading: isLoading,
                     action: { Task { await startOnboarding() } }
                 )
-                .sheet(isPresented: $isPresenting, onDismiss: {
+                .fullScreenCover(isPresented: $isPresenting, onDismiss: {
                     Task { await refreshStatus() }
                 }) {
                     DriverPayoutAccountView(purpose: .onboarding)
