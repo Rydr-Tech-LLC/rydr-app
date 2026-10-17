@@ -22,21 +22,30 @@ final class Rydr_DriverUITests: XCTestCase {
             let button = app.buttons[id]
             for _ in 0..<4 where !button.isHittable { app.swipeUp() }
             button.tap()
-            XCTAssertTrue(app.buttons["securePayoutEntry"].waitForExistence(timeout: 5))
-            XCTAssertTrue(app.buttons["completePayoutVerification"].exists)
-            app.buttons["cancelPayoutChoice"].tap()
+            let save = app.buttons["saveNativePayoutMethod"]
+            XCTAssertTrue(save.waitForExistence(timeout: 5))
+            XCTAssertFalse(save.isEnabled)
+            if id == "addPayoutBank" {
+                XCTAssertTrue(app.textFields["payoutBankHolder"].exists)
+                XCTAssertTrue(app.textFields["payoutBankRouting"].exists)
+                XCTAssertTrue(app.secureTextFields["payoutBankConfirm"].exists)
+            } else {
+                XCTAssertTrue(app.otherElements["payoutDebitCardFields"].exists || app.textFields.count > 0)
+            }
+            XCTAssertFalse(app.staticTexts["Industry"].exists)
+            XCTAssertFalse(app.staticTexts["Your website"].exists)
+            app.buttons["Cancel"].tap()
             XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5))
         }
+        app.swipeDown()
         app.buttons["payoutMethod_ba_fixture"].tap()
-        XCTAssertTrue(app.buttons["securePayoutEntry"].waitForExistence(timeout: 5))
-        app.buttons["securePayoutEntry"].tap()
-        let retry = app.buttons["securePayoutRetry"]
-        XCTAssertTrue(retry.waitForExistence(timeout: 15))
-        retry.tap()
-        XCTAssertTrue(retry.waitForExistence(timeout: 10))
-        app.buttons["securePayoutDone"].tap()
-        XCTAssertTrue(app.buttons["payoutMethodsDone"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["payoutMethod_ba_fixture"].exists)
+        XCTAssertTrue(app.staticTexts["This is your default destination. Choose another default before removing it."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Remove payout method"].exists)
+        app.buttons["Add a replacement"].tap()
+        XCTAssertTrue(app.buttons["saveNativePayoutMethod"].waitForExistence(timeout: 5))
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["payoutMethodsDone"].exists)
+
     }
 
     @MainActor

@@ -21,10 +21,10 @@ struct DriverManagedPayoutE2E: View {
                     Button("Manage bank accounts & cards") { managing = true }
                     if completed { Text("Payout setup complete").accessibilityIdentifier("managedPayoutE2EComplete") }
                     else {
-                        PayoutsSetupView(uid: uid, email: "payout-qa-20261016@example.com", firstName: "Rydr", lastName: "Sandbox", phone: "+15555550199", dob: dob, street: "address_full_match", addressLine2: "", city: "Atlanta", state: "GA", zip: "30303", connectOnboarded: $connected, onNext: { _ in completed = true })
+                        PayoutsSetupView(uid: uid, email: "payout-qa-20261016@example.com", firstName: "Rydr", lastName: "Sandbox", phone: "+12025550199", dob: dob, street: "address_full_match", addressLine2: "", city: "Atlanta", state: "GA", zip: "30303", connectOnboarded: $connected, onNext: { _ in completed = true })
                     }
                 }
-                .sheet(isPresented: $managing) { DriverPayoutMethodsView() }
+                .sheet(isPresented: $managing) { DriverPayoutMethodsView(requiresSetup: !completed) }
             } else if let error { Text(error).padding() }
             else { ProgressView("Signing in to Test driver…") }
         }
@@ -33,7 +33,7 @@ struct DriverManagedPayoutE2E: View {
                 struct LocalAuth: Decodable { let customToken: String; let uid: String; let workspace: String }
                 let data = try Data(contentsOf: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("rydr-managed-e2e-auth.json"))
                 let input = try JSONDecoder().decode(LocalAuth.self, from: data)
-                guard input.workspace == "test", input.uid == "qa-managed-payouts-20261016" else { throw URLError(.userAuthenticationRequired) }
+                guard input.workspace == "test", ["qa-managed-payouts-20261016", "qa-native-payouts-20261016"].contains(input.uid) else { throw URLError(.userAuthenticationRequired) }
                 UserDefaults.standard.set("test", forKey: RydrWorkspace.selectionKey)
                 try await RydrWorkspace.bootstrap()
                 guard RydrWorkspace.identifier == "test" else { throw URLError(.userAuthenticationRequired) }

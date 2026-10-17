@@ -1,17 +1,12 @@
 import SwiftUI
 
-/// Rydr owns navigation and masked summaries. Stripe's embedded component owns all
-/// sensitive entry, verification and destination edits; no hosted account links.
+/// Rydr owns native payout entry, navigation and masked summaries. Stripe handles
+/// tokenization directly and supplies the remaining verification component.
 struct DriverPayoutMethodsView: View {
     enum Intent: String, Identifiable {
         case bank, card, manage
         var id: String { rawValue }
-        var title: String { self == .bank ? "Bank account (ACH)" : self == .card ? "Debit card" : "Manage payout methods" }
-        var detail: String {
-            self == .bank ? "Add or replace your bank account for Monday direct deposits. In the secure form, choose bank account."
-            : self == .card ? "Add or replace an eligible debit card for instant cash-out. In the secure form, choose debit card. A bank account may be required first."
-            : "Add, replace or choose your default payout destination in the secure form."
-        }
+
     }
     var initialIntent: Intent = .manage
     var requiresSetup = false
@@ -24,6 +19,9 @@ struct DriverPayoutMethodsView: View {
     @State private var securePurpose: DriverPayoutAccountView.Purpose?
     @State private var showingSecureForm = false
     @State private var returnedFromEntry = false
+    @State private var selectedMethod: DriverPayoutMethods.Method?
+    @State private var showingActions = false
+    @State private var updatingMethod = false
 
     var body: some View {
         NavigationStack {
@@ -37,12 +35,15 @@ struct DriverPayoutMethodsView: View {
                     .foregroundStyle(.white).frame(maxWidth: .infinity, alignment: .leading).padding(24)
                     .background(Styles.rydrGradient, in: RoundedRectangle(cornerRadius: 24))
 
-                    if requiresSetup {
+                    if methods?.verificationPending == true && methods?.payoutsEnabled != true {
+                        Label("Payout verification in progress. We’ll update your wallet when it’s ready.", systemImage: "clock.fill")
+                            .font(.subheadline).padding().background(Color.red.opacity(0.07), in: RoundedRectangle(cornerRadius: 18))
+                    } else if methods?.setupRequired ?? requiresSetup {
                         VStack(alignment: .leading, spacing: 10) {
-                            Label("Finish setting up your payouts", systemImage: "info.circle.fill").font(.headline)
-                            Text("Review the information needed to receive earnings.").font(.subheadline)
-                            Button("Finish payout setup") { securePurpose = .onboarding; showingSecureForm = true }
-                                .buttonStyle(.borderedProminent).tint(.red).accessibilityIdentifier("finishPayoutSetup")
+                            Label("Confirm your payout information", systemImage: "info.circle.fill").font(.headline)
+                            Text(methods?.bankAccounts.isEmpty == false ? "Your payout methods are saved. Confirm the remaining information to finish setup." : "Add your bank account below, then confirm any remaining information needed to receive earnings.").font(.subheadline)
+                            Button("Confirm payout information") { securePurpose = .onboarding; showingSecureForm = true }
+                                .buttonStyle(.borderedProminent).tint(.red).disabled(methods?.bankAccounts.isEmpty != false).accessibilityIdentifier("finishPayoutSetup")
                         }.padding().frame(maxWidth: .infinity, alignment: .leading)
                             .background(Color.red.opacity(0.07), in: RoundedRectangle(cornerRadius: 18))
                     }
@@ -56,8 +57,8 @@ struct DriverPayoutMethodsView: View {
                         Label(message, systemImage: "exclamationmark.triangle.fill")
                             .font(.footnote).foregroundStyle(.red).accessibilityIdentifier("payoutMethodsError")
                     }
-                    if returnedFromEntry {
-                        Text("Payout details refresh from Stripe. Closing the form does not confirm that a method was saved or verified.")
+                    if returnedFromEntry && message == nil {
+                        Text("Your saved payout methods are up to date.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                     if let methods {
@@ -65,7 +66,7 @@ struct DriverPayoutMethodsView: View {
                             Text("No payout methods yet. Choose an option below to get started.").foregroundStyle(.secondary)
                         }
                         ForEach(methods.bankAccounts + methods.cards) { method in
-                            Button { intent = .manage } label: {
+                            Button { selectedMethod = method; showingActions = true } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: method.bankName == nil ? "creditcard.fill" : "building.columns.fill")
                                         .foregroundStyle(Styles.rydrGradient).font(.title2)
@@ -87,7 +88,7 @@ struct DriverPayoutMethodsView: View {
                     }
                     action(.bank, icon: "building.columns.fill", subtitle: "Monday direct deposits")
                     action(.card, icon: "creditcard.fill", subtitle: "Eligible cards for instant cash-out")
-                    Button("Manage all payout methods") { intent = .manage }.accessibilityIdentifier("manageAllPayoutMethods")
+                    Text("Tap a saved method to manage its default status or remove it. To replace account details, add the new method first.").font(.footnote).foregroundStyle(.secondary)
                     Label("Your bank and card details are securely collected by Stripe. Rydr displays only masked details.", systemImage: "lock.shield.fill")
                         .font(.footnote).foregroundStyle(.secondary)
                     Text("Monday payouts and instant cash-out stay in your Rydr wallet. A debit card must support Instant Payouts to receive an instant cash-out.")
@@ -98,28 +99,22 @@ struct DriverPayoutMethodsView: View {
             .navigationTitle("Bank accounts & cards").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.accessibilityIdentifier("payoutMethodsDone") } }
             .refreshable { await refresh() }
-            .sheet(item: $intent, onDismiss: {
-                if securePurpose != nil { showingSecureForm = true }
-            }) { choice in
-                NavigationStack {
-                    VStack(alignment: .leading, spacing: 22) {
-                        Image(systemName: choice == .card ? "creditcard.fill" : "building.columns.fill")
-                            .font(.system(size: 48)).foregroundStyle(Styles.rydrGradient)
-                        Text(choice.title).font(.title.bold())
-                        Text(choice.detail)
-                        Text("Stripe may ask you to confirm your identity before changing payout details. Bank authentication may open your bank's app or secure sign-in.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                        Button("Continue to secure entry") {
-                            // Presented on the sheet's dismissal, avoiding overlapping presentations.
-                            securePurpose = .onboarding
-                            intent = nil
-                        }.buttonStyle(.borderedProminent).tint(.red).accessibilityIdentifier("securePayoutEntry")
-                        Button("Complete payout verification") { securePurpose = .onboarding; intent = nil }
-                            .accessibilityIdentifier("completePayoutVerification")
-                        Spacer()
-                    }.padding(24)
-                        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Cancel") { intent = nil }.accessibilityIdentifier("cancelPayoutChoice") } }
-                }.presentationDetents([.large])
+            .sheet(item: $intent, onDismiss: { returnedFromEntry = true; Task { await refresh() } }) { choice in
+                DriverPayoutEntryView(kind: choice)
+            }
+            .confirmationDialog("Manage payout method", isPresented: $showingActions, titleVisibility: .visible) {
+                if let selectedMethod, !selectedMethod.isDefault {
+                    Button("Make default") { Task { await update(selectedMethod, action: "default") } }
+                    Button("Remove payout method", role: .destructive) { Task { await update(selectedMethod, action: "remove") } }
+                }
+                if let selectedMethod, selectedMethod.isDefault {
+                    Button("Add a replacement") { intent = selectedMethod.bankName == nil ? .card : .bank }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                if let selectedMethod {
+                    Text(selectedMethod.isDefault ? "This is your default destination. Choose another default before removing it." : "Manage the account ending in \(selectedMethod.last4).")
+                }
             }
             .fullScreenCover(isPresented: $showingSecureForm, onDismiss: {
                 securePurpose = nil
@@ -130,6 +125,7 @@ struct DriverPayoutMethodsView: View {
             }
         }
         .tint(.red)
+        .disabled(updatingMethod)
         .task {
             await refresh()
             if initialIntent != .manage { intent = initialIntent }
@@ -149,6 +145,17 @@ struct DriverPayoutMethodsView: View {
                 Image(systemName: "plus.circle.fill").foregroundStyle(.red)
             }.padding(18).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
         }.buttonStyle(.plain).accessibilityIdentifier(choice == .bank ? "addPayoutBank" : "addPayoutCard")
+    }
+
+    @MainActor private func update(_ method: DriverPayoutMethods.Method, action: String) async {
+        guard !updatingMethod else { return }
+        updatingMethod = true; message = nil
+        defer { updatingMethod = false }
+        do {
+            struct Updated: Decodable { }
+            let _: Updated = try await DriverConnectAPI.post("connect/payout-method-action", body: ["id": method.id, "action": action, "requestId": UUID().uuidString])
+            await refresh()
+        } catch { message = "Couldn't update this method. Check for pending payouts and choose another default before removing a default method." }
     }
 
     @MainActor private func refresh() async {
@@ -172,6 +179,9 @@ struct DriverPayoutMethods: Decodable {
     }
     let bankAccounts: [Method]
     let cards: [Method]
+    var payoutsEnabled: Bool? = nil
+    var setupRequired: Bool? = nil
+    var verificationPending: Bool? = nil
 }
 
 #if DEBUG && targetEnvironment(simulator)

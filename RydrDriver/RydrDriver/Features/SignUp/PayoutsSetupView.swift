@@ -90,7 +90,7 @@ struct PayoutsSetupView: View {
                 .fullScreenCover(isPresented: $isPresenting, onDismiss: {
                     Task { await refreshStatus() }
                 }) {
-                    DriverPayoutAccountView(purpose: .onboarding)
+                    DriverPayoutMethodsView(requiresSetup: true)
                 }
                 .opacity(connectOnboarded ? 0.4 : 1)
                 .disabled(connectOnboarded)
@@ -452,6 +452,12 @@ struct DriverConnectServiceError: LocalizedError {
         let body = try? JSONDecoder().decode(Payload.self, from: data)
         if let message = body?.message, !message.isEmpty {
             return DriverConnectServiceError(message: String(message.prefix(500)))
+        }
+        switch body?.error {
+        case "debit_card_required": return DriverConnectServiceError(message: "Use a debit card for payouts. Credit and prepaid cards aren’t supported.")
+        case "stripe_mode_mismatch": return DriverConnectServiceError(message: "These payment details don’t match the selected workspace. Close this screen and try again.")
+        case "payout_method_save_failed": return DriverConnectServiceError(message: "Couldn't save this payout method. Check the details and try again.")
+        default: break
         }
         switch status {
         case 401: return DriverConnectServiceError(message: "Your session has expired. Sign in again before setting up payouts.")

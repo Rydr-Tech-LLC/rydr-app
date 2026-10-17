@@ -100,8 +100,10 @@ private struct EmbeddedDriverAccount: UIViewControllerRepresentable {
             return controller
         }
         let host = OnboardingHost()
-        let onboarding = manager.createAccountOnboardingController()
-        onboarding.title = "Rydr payout setup"
+        var options = AccountCollectionOptions()
+        options.requirements = .exclude(["business_profile.mcc", "business_profile.url", "business_profile.product_description", "external_account"])
+        let onboarding = manager.createAccountOnboardingController(collectionOptions: options)
+        onboarding.title = "Confirm payout information"
         onboarding.delegate = context.coordinator
         host.onboarding = onboarding
         return host
@@ -132,6 +134,13 @@ enum DriverConnectAPI {
     static func get<T: Decodable>(_ path: String) async throws -> T {
         try await send(RydrWorkspace.urlRequest(url: base.appendingPathComponent(path)))
     }
+    static func post<T: Decodable>(_ path: String, body: [String: String]) async throws -> T {
+        var request = RydrWorkspace.urlRequest(url: base.appendingPathComponent(path))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await send(request)
+    }
     fileprivate static func session(purpose: String) async throws -> DriverPayoutAccountView.Session {
         var request = RydrWorkspace.urlRequest(url: base.appendingPathComponent("connect/account-session"))
         request.httpMethod = "POST"
@@ -155,6 +164,7 @@ enum DriverConnectAPI {
 }
 
 struct DriverPayoutSetupConfiguration: Decodable {
+    let accountId: String?
     let managed: Bool
     let requiresMigration: Bool
     let mode: String
