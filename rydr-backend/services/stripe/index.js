@@ -2480,14 +2480,18 @@ app.get("/connect/external-accounts", async (req, res) => {
     if (!owned) return;
     const { accountId } = owned;
 
-    const [bankAccounts, cards] = await Promise.all([
+    const [bankAccounts, cards, account] = await Promise.all([
       stripe.accounts.listExternalAccounts(accountId, { object: "bank_account", limit: 10 }),
       stripe.accounts.listExternalAccounts(accountId, { object: "card", limit: 10 }),
+      stripe.accounts.retrieve(accountId),
     ]);
 
     res.set("Cache-Control", "no-store").json({
       bankAccounts: bankAccounts.data.map(payoutMethodSummary),
       cards: cards.data.map(payoutMethodSummary),
+      payoutsEnabled: !!account.payouts_enabled,
+      setupRequired: (account.requirements?.currently_due || []).length > 0 || !account.details_submitted,
+      verificationPending: (account.requirements?.pending_verification || []).length > 0,
     });
   } catch (err) {
     console.error("❌ connect/external-accounts error", err);
