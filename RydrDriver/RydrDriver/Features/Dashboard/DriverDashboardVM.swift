@@ -508,10 +508,30 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         UserDefaults.standard.set(data, forKey: rateCardCacheKey)
     }
 
+    #if DEBUG && targetEnvironment(simulator)
+    var drivingAccessTestResponse: DriverDrivingAccess?
+    #endif
+
+    private func showDrivingSetupNotice(code: String, title: String, message: String) {
+        statusMessage = message
+        drivingAccessNotice = DriverDrivingAccess(allowed: false, title: "Before you go online", message: "Complete the highlighted item, then try Go Online again.", buttonTitle: "Got it", reasons: [.init(code: code, title: title, message: message)], checks: nil)
+    }
+
     func requestOnlineToggle() {
         if isOnline { toggleOnline(); return }
         guard !checkingDrivingAccess else { return }
-        guard let uid = RydrWorkspace.auth.currentUser?.uid, let workspace = RydrWorkspace.identifier else { return }
+        #if DEBUG && targetEnvironment(simulator)
+        if let access = drivingAccessTestResponse {
+            canGoOnline = access.allowed
+            if !access.allowed { drivingAccessNotice = access; return }
+            toggleOnline()
+            return
+        }
+        #endif
+        guard let uid = RydrWorkspace.auth.currentUser?.uid, let workspace = RydrWorkspace.identifier else {
+            showDrivingSetupNotice(code: "session", title: "Sign in again", message: "Your session is unavailable. Sign out and sign back in to check driving access.")
+            return
+        }
         checkingDrivingAccess = true
         Task { @MainActor in
             defer { checkingDrivingAccess = false }
@@ -524,7 +544,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             } catch {
                 // No cached approval can replace a fresh backend decision.
                 canGoOnline = false
-                statusMessage = "We couldn’t check your driving access. Please check your connection and try again."
+                drivingAccessNotice = DriverDrivingAccess(allowed: false, title: "Let’s reconnect", message: "We couldn’t check your driving access. Please check your connection and try again.", buttonTitle: "Got it", reasons: [.init(code: "connection", title: "Connection needed", message: "Your approval has not changed. Rydr needs a fresh connection before you can go online.")], checks: nil)
             }
         }
     }
@@ -535,18 +555,18 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             return
         }
         guard hasSavedRateSettings else {
-            statusMessage = "Set and save a rate before going online."
+            showDrivingSetupNotice(code: "rate_card", title: "Save your rate card", message: "Open Rate Card, choose your rates, and tap Save before going online.")
             return
         }
         guard !selectedRideTypes.isEmpty else {
-            statusMessage = "Select at least one approved ride type before going online."
+            showDrivingSetupNotice(code: "ride_types", title: "Choose your ride types", message: "Open Rate Card and select at least one approved ride type before going online.")
             return
         }
         guard hasReceivedDriverLocation else {
             requestLocationAuth()
-            statusMessage = locationPermissionDenied
-                ? "Allow location access before going online."
-                : "Waiting for your current location. Try again in a moment."
+            showDrivingSetupNotice(code: "location", title: "Location needed", message: locationPermissionDenied
+                ? "Allow Rydr location access in Settings before going online."
+                : "Waiting for your current location. Try again in a moment.")
             return
         }
 

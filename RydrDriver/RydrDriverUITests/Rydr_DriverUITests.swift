@@ -9,6 +9,25 @@ import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
     @MainActor
+    func testActualOnlineDockExplainsMissingRatesAndReviewHold() {
+        for flag in ["-ChecklistClear", "-ChecklistMixed"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-DriverSubmittedUITest", "-RealOnlineDock", flag]
+            app.launch()
+            XCTAssertTrue(app.buttons["signupDashboard"].waitForExistence(timeout: 15))
+            app.buttons["signupDashboard"].tap()
+            let online = app.buttons["dashboardGoOnline"]
+            XCTAssertTrue(online.waitForExistence(timeout: 10))
+            XCTAssertTrue(online.isEnabled)
+            online.tap()
+            let code = flag == "-ChecklistClear" ? "rate_card" : "documents"
+            XCTAssertTrue(app.descendants(matching: .any)["drivingReason_" + code].waitForExistence(timeout: 10))
+            let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = "actual-online-dock" + flag; proof.lifetime = .keepAlways; add(proof)
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testDeclinedDocumentNotificationShowsReplacementReason() {
         let app = XCUIApplication()
         app.launchArguments = ["-RydrWalletNavigationUITest", "-RydrDocumentReminderUITest", "-RydrDocumentFixtureUITest", "-DocumentDeclinedFixture"]

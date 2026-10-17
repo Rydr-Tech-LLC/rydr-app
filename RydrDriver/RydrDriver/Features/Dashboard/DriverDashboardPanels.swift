@@ -458,7 +458,7 @@ private struct DriverGoOnlinePowerButton: View {
 
     @State private var pulse = false
 
-    private var canInteract: Bool { vm.isOnline || vm.hasSavedRateSettings }
+    private var canInteract: Bool { !vm.checkingDrivingAccess }
 
     private var glowColor: Color {
         guard canInteract else { return Color(.systemGray3) }
@@ -505,6 +505,8 @@ private struct DriverGoOnlinePowerButton: View {
             .frame(width: size, height: size)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("dashboardGoOnline")
+        .accessibilityLabel(vm.isOnline ? "Go Offline" : "Go Online")
         .accessibilityHint(vm.goOnlineBlockReason ?? (vm.isOnline ? "Tap to go offline" : "Tap to go online"))
         .onAppear { startPulsing() }
         .onChange(of: vm.isOnline) { _, _ in startPulsing() }

@@ -254,6 +254,7 @@ private struct DriverSubmittedUITestFixture: View {
     }
     @State private var submitted = true
     @State private var showNotice = false
+    @StateObject private var dashboard = DriverDashboardVM()
     private var access: DriverDrivingAccess {
         let json: String
         if ProcessInfo.processInfo.arguments.contains("-ChecklistClear") { json = #"{"allowed":true,"title":"Ready to drive","message":"Your required account checks are complete.","buttonTitle":"Got it","reasons":[],"checks":[{"code":"identity","title":"Identity verification","message":"No current identity restriction.","blocking":false,"status":"cleared","statusLabel":"Cleared"},{"code":"documents","title":"Document review","message":"No current document restriction.","blocking":false,"status":"cleared","statusLabel":"Cleared"},{"code":"background_check","title":"Background screening","message":"Screening is not required in the current beta phase.","blocking":false,"status":"not_required","statusLabel":"Not required"},{"code":"safety_review","title":"Safety review","message":"There is no active safety hold on your account.","blocking":false,"status":"cleared","statusLabel":"No hold"},{"code":"payout_setup","title":"Payout setup","message":"No current payout setup restriction.","blocking":false,"status":"cleared","statusLabel":"Ready"},{"code":"account_approval","title":"Rydr account review","message":"Your account is approved to drive.","blocking":false,"status":"cleared","statusLabel":"Approved"}]}"# }
@@ -265,8 +266,14 @@ private struct DriverSubmittedUITestFixture: View {
         NavigationStack {
             VStack(spacing: 24) {
                 Text("Driver dashboard").font(.largeTitle).accessibilityIdentifier("submittedDashboard")
-                Button("Go Online") { showNotice = !access.allowed }.accessibilityIdentifier("submittedGoOnline")
-            }.sheet(isPresented: $submitted) {
+                if ProcessInfo.processInfo.arguments.contains("-RealOnlineDock") {
+                    DriverDashboardActionDock(vm: dashboard, onFiltersTapped: {}, onRateCardTapped: {}, onCashHubTapped: {}, onProfileTapped: {})
+                } else {
+                    Button("Go Online") { showNotice = !access.allowed }.accessibilityIdentifier("submittedGoOnline")
+                }
+            }.onAppear { dashboard.drivingAccessTestResponse = access }
+            .sheet(item: $dashboard.drivingAccessNotice) { DriverDrivingAccessSheet(access: $0) }
+            .sheet(isPresented: $submitted) {
                 DriverSignupCoordinator(resumeSnapshot: submittedSnapshot, verifyCompletion: {
                     if ProcessInfo.processInfo.arguments.contains("-CompletionUnavailable") { throw URLError(.notConnectedToInternet) }
                     return true
