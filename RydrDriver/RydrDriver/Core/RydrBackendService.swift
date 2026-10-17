@@ -575,6 +575,13 @@ struct DriverDrivingAccess: Decodable, Identifiable {
     let title: String
     let message: String
     let buttonTitle: String
+    struct Check: Decodable, Identifiable {
+        let code: String; let title: String; let message: String
+        let blocking: Bool; let status: String; let statusLabel: String
+        var id: String { code }
+    }
     let reasons: [Reason]
+    let checks: [Check]?
+    var displayChecks: [Check] { checks ?? reasons.map { Check(code: $0.code, title: $0.title, message: $0.message, blocking: true, status: "blocking", statusLabel: "Needs attention") } }
     var id: String { reasons.map(\.code).joined(separator: ",") }
 }

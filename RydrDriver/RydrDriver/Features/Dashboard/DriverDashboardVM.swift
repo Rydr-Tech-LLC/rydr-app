@@ -1067,6 +1067,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                     if let access = try? await RydrBackendService.drivingAccess(), RydrWorkspace.auth.currentUser?.uid == uid {
                         self.complianceHoldReason = access.allowed ? nil : access.reasons.map(\.message).joined(separator: " ")
                         self.canGoOnline = access.allowed
+                        if self.drivingAccessNotice != nil { self.drivingAccessNotice = access.allowed ? nil : access }
                         if !access.allowed {
                             self.isOnline = false; self.isSearchingForRides = false; self.pendingRequests = []
                             self.stopPushingDriverPresence(); self.stopRequestListener()
@@ -2206,7 +2207,7 @@ struct DriverDashboardView: View {
             vm.startDashboard()
         }
         .sheet(item: $activeSheet, content: sheetContent(_:))
-        .sheet(item: $vm.drivingAccessNotice) { DriverDrivingAccessSheet(access: $0) }
+        .sheet(item: $vm.drivingAccessNotice) { original in DriverDrivingAccessSheet(access: vm.drivingAccessNotice ?? original) }
         .onReceive(NotificationCenter.default.publisher(for: .driverNotificationRouteRequested)) { notification in
             switch notification.userInfo?["target"] as? String {
             case "documents": activeSheet = .menu(.documents)

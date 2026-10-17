@@ -14,3 +14,13 @@ test('screening is only required when enabled and approved account cannot bypass
  assert.equal(driverAccess(approved,{backgroundChecksRequired:true}).reasons.some(x=>x.code==='background_check'),true);
  for(const patch of [{identityStatus:'processing',identityVerified:false},{accountStatus:'paused'},{safetyReviewStatus:'under_review'},{driverApprovalStatus:'needs_attention'},{driverSignupCompleted:false},{stripePayoutsEnabled:false}])assert.equal(driverAccess({...approved,...patch}).allowed,false);
 });
+test('checklist highlights only blockers and marks inactive screening as not required',()=>{
+ const result=driverAccess({...approved,documentComplianceHold:true});
+ assert.equal(result.allowed,false);
+ assert.deepEqual(result.checks.filter(x=>x.blocking).map(x=>x.code),['documents']);
+ assert.equal(result.checks.find(x=>x.code==='identity').status,'cleared');
+ assert.equal(result.checks.find(x=>x.code==='background_check').status,'not_required');
+ assert.equal(result.checks.find(x=>x.code==='safety_review').statusLabel,'No hold');
+ const cleared=driverAccess(approved);
+ assert.equal(cleared.allowed,true);assert.equal(cleared.checks.some(x=>x.blocking),false);assert.deepEqual(cleared.reasons,[]);
+});

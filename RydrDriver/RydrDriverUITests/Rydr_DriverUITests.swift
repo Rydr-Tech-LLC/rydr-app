@@ -9,6 +9,31 @@ import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
     @MainActor
+    func testDrivingChecklistHighlightsOnlyBlockersAndStopsWhenClear() {
+        for flag in ["-ChecklistMixed", "-ChecklistClear"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-DriverSubmittedUITest", flag]
+            app.launch()
+            XCTAssertTrue(app.buttons["signupDashboard"].waitForExistence(timeout: 15))
+            app.buttons["signupDashboard"].tap()
+            XCTAssertTrue(app.buttons["submittedGoOnline"].waitForExistence(timeout: 10))
+            app.buttons["submittedGoOnline"].tap()
+            if flag == "-ChecklistClear" {
+                XCTAssertFalse(app.buttons["drivingAccessDone"].waitForExistence(timeout: 3))
+                XCTAssertTrue(app.buttons["submittedGoOnline"].isHittable)
+            } else {
+                for (code, status) in [("documents", "Blocking"), ("identity", "Cleared"), ("background_check", "Not required"), ("safety_review", "No hold")] {
+                    let row = app.descendants(matching: .any)["drivingReason_" + code]
+                    XCTAssertTrue(row.waitForExistence(timeout: 5))
+                    XCTAssertEqual(row.value as? String, status)
+                }
+                let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = "rydr-mixed-driving-checklist"; proof.lifetime = .keepAlways; add(proof)
+            }
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testSubmittedDriverReachesDashboardAndSeesReviewReasons() {
         let app = XCUIApplication()
         app.launchArguments = ["-DriverSubmittedUITest"]

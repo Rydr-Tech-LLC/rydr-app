@@ -670,6 +670,8 @@ struct DriverLocationPermissionBanner: View {
 struct DriverDrivingAccessSheet: View {
     let access: DriverDrivingAccess
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var glow = false
     private func icon(_ code: String) -> String {
         switch code { case "identity": return "person.text.rectangle"; case "documents": return "doc.text.magnifyingglass"; case "background_check": return "checkmark.shield"; case "safety_review": return "hand.raised.fill"; default: return "clock.badge.checkmark" }
     }
@@ -677,22 +679,40 @@ struct DriverDrivingAccessSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 VStack(alignment: .leading, spacing: 14) {
-                    Image(systemName: "shield.lefthalf.filled").font(.system(size: 36, weight: .semibold))
-                    Text(access.title).font(.system(.title, design: .rounded, weight: .bold))
+                    Image(systemName: "shield.lefthalf.filled").font(.system(size: 26, weight: .semibold))
+                    Text(access.title).font(.system(.title2, design: .rounded, weight: .bold))
                     Text(access.message).font(.subheadline).lineSpacing(4)
                 }.foregroundStyle(.white).padding(26).frame(maxWidth: .infinity, alignment: .leading)
                     .background(Styles.rydrGradient, in: RoundedRectangle(cornerRadius: 28))
-                ForEach(access.reasons) { reason in
-                    HStack(alignment: .top, spacing: 16) {
-                        Image(systemName: icon(reason.code)).font(.title3).foregroundStyle(Styles.rydrGradient)
-                            .frame(width: 46, height: 46).background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text(reason.title).font(.headline)
-                            Text(reason.message).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                ForEach(access.displayChecks) { check in
+                    HStack(alignment: .top, spacing: 14) {
+                        ZStack {
+                            if check.blocking {
+                                RoundedRectangle(cornerRadius: 14).fill(Styles.rydrGradient).blur(radius: glow ? 12 : 7).opacity(0.4)
+                            }
+                            RoundedRectangle(cornerRadius: 14).fill(check.blocking ? Color.red.opacity(0.08) : Color.gray.opacity(0.09))
+                            Image(systemName: check.blocking ? icon(check.code) : check.status == "not_required" ? "minus.circle" : "checkmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(check.blocking ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.secondary))
+                        }.frame(width: 44, height: 44)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(check.title).font(.headline)
+                                Spacer(minLength: 6)
+                                if check.blocking { Circle().fill(Styles.rydrGradient).frame(width: 9, height: 9).shadow(color: .red.opacity(0.8), radius: 5) }
+                            }
+                            Text(check.statusLabel).font(.caption.weight(.bold))
+                                .foregroundStyle(check.blocking ? AnyShapeStyle(Styles.rydrGradient) : AnyShapeStyle(Color.secondary))
+                            Text(check.message).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
-                    }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                    }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22))
-                        .accessibilityElement(children: .combine).accessibilityIdentifier("drivingReason_" + reason.code)
+                        .overlay { if check.blocking { RoundedRectangle(cornerRadius: 22).stroke(Styles.rydrGradient, lineWidth: 1.3) } }
+                        .shadow(color: check.blocking ? .red.opacity(glow ? 0.16 : 0.08) : .clear, radius: glow ? 10 : 5)
+                        .opacity(check.blocking ? 1 : 0.55)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("drivingReason_" + check.code)
+                        .accessibilityValue(check.blocking ? "Blocking" : check.statusLabel)
                 }
                 Button { dismiss() } label: {
                     Text(access.buttonTitle).font(.headline).foregroundStyle(.white).frame(maxWidth: .infinity).padding(18).background(Styles.rydrGradient, in: Capsule())
@@ -700,5 +720,6 @@ struct DriverDrivingAccessSheet: View {
             }.padding(22)
         }.background(Color(.systemGroupedBackground)).presentationDragIndicator(.visible)
             .accessibilityIdentifier("drivingAccessSheet")
+            .onAppear { if !reduceMotion { withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) { glow = true } } }
     }
 }

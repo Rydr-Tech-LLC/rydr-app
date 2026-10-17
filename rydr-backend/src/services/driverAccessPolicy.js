@@ -17,6 +17,19 @@ function driverAccess(driver = {}, policy = {}) {
   add('background_check','Background screening','Complete the required background screening and wait for approval before driving. Your Dashboard will remain available.');
  if (!((status === 'approved' || driver.isApproved === true) && !['rejected','needs_attention'].includes(status)))
   add('account_approval','Rydr account review',status === 'rejected' || status === 'needs_attention' ? 'Your application needs attention from Rydr. Contact support to review the next steps.' : 'Rydr is reviewing your application. We will notify you when your account is approved to drive.');
- return { allowed: reasons.length === 0, title: reasons.length ? 'A few things before you drive' : 'Ready to drive', message: reasons.length ? 'You’re welcome on your Dashboard. Going online will unlock once the items below are cleared.' : 'Your required account checks are complete.', buttonTitle: 'Got it', reasons };
+ const definitions = [
+  ['identity', 'Identity verification', 'No current identity restriction.', 'Cleared'],
+  ['documents', 'Document review', 'No current document restriction.', 'Cleared'],
+  ['background_check', 'Background screening', compliance.backgroundChecksRequired ? 'Your required screening is current.' : 'Screening is not required in the current beta phase.', compliance.backgroundChecksRequired ? 'Cleared' : 'Not required'],
+  ['safety_review', 'Safety review', 'There is no active safety hold on your account.', 'No hold'],
+  ['payout_setup', 'Payout setup', 'No current payout setup restriction.', 'Ready'],
+  ['account_approval', 'Rydr account review', 'Your account is approved to drive.', 'Approved']
+ ];
+ if (reasons.some(reason => reason.code === 'onboarding')) definitions.unshift(['onboarding','Driver setup','','Needs attention']);
+ const checks = definitions.map(([code, title, message, statusLabel]) => {
+  const reason = reasons.find(item => item.code === code);
+  return {code, title, message: reason?.message ?? message, blocking: Boolean(reason), status: reason ? 'blocking' : code === 'background_check' && !compliance.backgroundChecksRequired ? 'not_required' : 'cleared', statusLabel: reason ? code === 'identity' && driver.identityStatus === 'processing' ? 'In review' : code === 'safety_review' ? 'Paused' : 'Needs attention' : statusLabel};
+ });
+ return { allowed: reasons.length === 0, title: reasons.length ? 'Your driving checklist' : 'Ready to drive', message: reasons.length ? `${reasons.length} ${reasons.length === 1 ? 'item needs' : 'items need'} attention before you can go online. Highlighted items are the only checks blocking access.` : 'Your required account checks are complete.', buttonTitle: 'Got it', reasons, checks };
 }
 module.exports = { driverAccess };
