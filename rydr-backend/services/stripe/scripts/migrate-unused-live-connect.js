@@ -55,9 +55,9 @@ async function run({stripe,db,uid,expectedAccountId,apply=false,operator,env,fie
 }
 module.exports={inspect,run};
 if(require.main===module)(async()=>{
- require('dotenv').config();const admin=require('firebase-admin');const {getFirestore,FieldValue}=require('firebase-admin/firestore');
- const credential=admin.credential.cert({projectId:process.env.FIREBASE_ADMIN_PROJECT_ID,clientEmail:process.env.FIREBASE_ADMIN_CLIENT_EMAIL,privateKey:process.env.FIREBASE_ADMIN_PRIVATE_KEY.replace(/\\n/g,'\n')});
- const app=admin.initializeApp({projectId:'rydrapp-c7ec1',credential});const db=getFirestore(app,'live-beta');
+ require('dotenv').config();const {initializeApp,cert}=require('firebase-admin/app');const {getFirestore,FieldValue}=require('firebase-admin/firestore');
+ const credential=cert({projectId:process.env.FIREBASE_ADMIN_PROJECT_ID,clientEmail:process.env.FIREBASE_ADMIN_CLIENT_EMAIL,privateKey:process.env.FIREBASE_ADMIN_PRIVATE_KEY.replace(/\\n/g,'\n')});
+ const app=initializeApp({projectId:'rydrapp-c7ec1',credential});const db=getFirestore(app,'live-beta');
  const stripe=require('stripe')(process.env.STRIPE_SECRET_KEY_LIVE,{apiVersion:'2024-06-20'});
  const [uid,expectedAccountId]=process.argv.slice(2);
  if(!uid||!/^acct_\w+$/.test(expectedAccountId||''))throw Error('usage: node scripts/migrate-unused-live-connect.js UID OLD_ACCOUNT_ID [--apply]');

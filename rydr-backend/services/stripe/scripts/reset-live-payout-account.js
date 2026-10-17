@@ -41,9 +41,9 @@ async function run({stripe,db,auth,uid,accountId,apply=false,fieldValue}) {
 }
 module.exports={run};
 if(require.main===module)(async()=>{
- require('dotenv').config();const admin=require('firebase-admin');const {getFirestore,FieldValue}=require('firebase-admin/firestore');
+ require('dotenv').config();const {initializeApp,cert}=require('firebase-admin/app');const {getFirestore,FieldValue}=require('firebase-admin/firestore');
  if(!/^sk_live_/.test(process.env.STRIPE_SECRET_KEY_LIVE||''))throw Error('live_key_required');
- const app=admin.initializeApp({projectId:'rydrapp-c7ec1',credential:admin.credential.cert({projectId:process.env.FIREBASE_ADMIN_PROJECT_ID,clientEmail:process.env.FIREBASE_ADMIN_CLIENT_EMAIL,privateKey:process.env.FIREBASE_ADMIN_PRIVATE_KEY.replace(/\\n/g,'\n')})});
+ const app=initializeApp({projectId:'rydrapp-c7ec1',credential:cert({projectId:process.env.FIREBASE_ADMIN_PROJECT_ID,clientEmail:process.env.FIREBASE_ADMIN_CLIENT_EMAIL,privateKey:process.env.FIREBASE_ADMIN_PRIVATE_KEY.replace(/\\n/g,'\n')})});
  const [uid,accountId]=process.argv.slice(2);if(!uid||!/^acct_\w+$/.test(accountId||''))throw Error('uid_and_account_required');
- const db=getFirestore(app,'live-beta');console.log(JSON.stringify(await run({stripe:require('stripe')(process.env.STRIPE_SECRET_KEY_LIVE,{apiVersion:'2024-06-20'}),db,auth:admin.auth(app),uid,accountId,apply:process.argv.includes('--apply'),fieldValue:FieldValue})));await db.terminate();
+ const db=getFirestore(app,'live-beta');console.log(JSON.stringify(await run({stripe:require('stripe')(process.env.STRIPE_SECRET_KEY_LIVE,{apiVersion:'2024-06-20'}),db,auth:require('firebase-admin/auth').getAuth(app),uid,accountId,apply:process.argv.includes('--apply'),fieldValue:FieldValue})));await db.terminate();
 })().catch(e=>{console.error(e.code||e.message);process.exitCode=1});
