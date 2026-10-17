@@ -11,6 +11,7 @@ const { getAuth } = require("firebase-admin/auth");
 const Stripe = require("stripe");
 const { randomInt, timingSafeEqual } = require("crypto");
 const { cleanupAccount } = require("./accountCleanup");
+const {BUSINESS,prefillBusiness,addMethod,editMethod}=require("./payoutSetup");
 const { migrationReadiness } = require("./connectMigration");
 const { finishCardSetup } = require("./savedCards");
 const { newAccountConfiguration, setupConfiguration } = require("./connectConfiguration");
@@ -2292,6 +2293,7 @@ app.post("/connect/accounts", async (req, res) => {
         settings: { payouts: { schedule: { interval: "manual" } } },
         email,
         business_type: "individual",
+        business_profile: BUSINESS,
         capabilities: {
           card_payments: { requested: true },
           transfers: { requested: true },
@@ -2397,7 +2399,7 @@ app.get("/connect/status", async (req, res) => {
 app.get("/connect/setup-configuration",async(req,res)=>{
  try {const owned=await requireOwnAccountId(req,res);if(!owned)return;
   const account=await stripe.accounts.retrieve(owned.accountId);
-  res.set("Cache-Control","no-store").json({...setupConfiguration(account),mode:stripeConfig.mode,workspace});
+  res.set("Cache-Control","no-store").json({...setupConfiguration(account),accountId:owned.accountId,mode:stripeConfig.mode,workspace});
  }catch{res.status(500).json({error:"payout_configuration_unavailable"});}
 });
 
@@ -2406,11 +2408,27 @@ app.post("/connect/account-session", async (req,res)=>{
   try {
     const owned=await requireOwnAccountId(req,res);if(!owned)return;
     res.set("Cache-Control","no-store");
-    const account=await stripe.accounts.retrieve(owned.accountId);
+    const account=await prefillBusiness(stripe,await stripe.accounts.retrieve(owned.accountId));
     const session=await createDriverAccountSession({stripe,account,accountId:owned.accountId,purpose:req.body?.purpose,
       mode:stripeConfig.mode,workspace,publishableKey:stripeConfig.publishableKey});
     res.json(session);
   }catch(error){res.status(error instanceof PayoutError?error.status:500).json({error:error instanceof PayoutError?error.code:"account_session_failed"});}
+});
+// Only tokenized details from the driver's mode-pinned Stripe SDK reach Rydr.
+app.post("/connect/payout-method",async(req,res)=>{
+ try {const owned=await requireOwnAccountId(req,res);if(!owned)return;
+  if(Object.keys(req.body||{}).some(k=>!['tokenId','kind','requestId'].includes(k)))return res.status(400).json({error:"tokenized_details_required"});
+  const requestId=requireRequestId(req,res,"payout_method");if(!requestId)return;
+  const account=await stripe.accounts.retrieve(owned.accountId);
+  res.set("Cache-Control","no-store").json(await addMethod({stripe,account,tokenId:req.body.tokenId,kind:req.body.kind,mode:stripeConfig.mode,requestId}));
+ }catch(e){res.status(e instanceof PayoutError?e.status:400).json({error:e instanceof PayoutError?e.code:"payout_method_save_failed"});}
+});
+app.post("/connect/payout-method-action",async(req,res)=>{
+ try {const owned=await requireOwnAccountId(req,res);if(!owned)return;
+  const requestId=requireRequestId(req,res,"payout_method_action");if(!requestId)return;
+  const account=await stripe.accounts.retrieve(owned.accountId);
+  res.set("Cache-Control","no-store").json(await editMethod({stripe,account,id:req.body.id,action:req.body.action,requestId}));
+ }catch(e){res.status(e instanceof PayoutError?e.status:400).json({error:e instanceof PayoutError?e.code:"payout_method_update_failed"});}
 });
 app.get("/connect/wallet",async(req,res)=>{
   try {
