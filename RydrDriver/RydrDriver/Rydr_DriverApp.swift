@@ -217,7 +217,7 @@ private struct DriverOnboardingGate<Content: View>: View {
                     Button("Retry") { Task { await reload() } }
                     Button("Sign out") { session.logout() }
                 }.padding()
-            } else { ProgressView("Restoring your onboarding…") }
+            } else { RydrLoadingView() }
         }.task { await reload() }
     }
     @MainActor private func reload() async {
@@ -236,6 +236,7 @@ private struct DriverOnboardingResumeUITestFixture: View {
     var body: some View {
         DriverOnboardingGate(fetchStatus: {
             let args = ProcessInfo.processInfo.arguments
+            if args.contains("-ResumeLoading") { try await Task.sleep(for: .seconds(6)) }
             if args.contains("-ResumeUnavailable") { throw URLError(.notConnectedToInternet) }
             let step = args.contains("-ResumeAddress") ? "address" : "payouts"
             let object: [String: Any] = ["completed": args.contains("-ResumeComplete"), "nextStep": step, "cashHubOnly": false, "profile": ["firstName": "Test", "lastName": "Driver", "email": "fixture@example.com", "phoneNumber": "+16783220004", "address": ["street": "1 Main St", "city": "Atlanta", "state": "GA", "zip": "30303"]]]

@@ -96,12 +96,19 @@ struct RydrWorkspaceGate<Content: View>: View {
                 }.padding(28).frame(maxWidth: 520)
             } else if ready {
                 content().id(selection).safeAreaInset(edge: .top, spacing: 0) {
-                    HStack {
-                        Text(selection == "test" ? "TEST WORKSPACE · Simulated payments" : "LIVE BETA · Real payments")
+                    if selection == "test" {
+                      HStack {
+                        Text("TEST WORKSPACE · Simulated payments")
                             .font(.system(size: 10, weight: .semibold)).tracking(1)
                         Spacer()
                         if signedInUID == nil { Button("Switch") { clearSelection() }.font(.caption.bold()) }
-                    }.padding(.horizontal, 16).padding(.vertical, 7).foregroundStyle(.white).background(gradient)
+                      }.padding(.horizontal, 16).padding(.vertical, 7).foregroundStyle(.white).background(gradient)
+                    } else if signedInUID == nil {
+                        HStack {
+                            Spacer()
+                            Button("Switch workspace") { clearSelection() }.font(.caption.bold()).tint(.red)
+                        }.padding(.horizontal, 16).padding(.vertical, 7)
+                    }
                 }
             } else {
                 VStack(spacing: 18) {
@@ -111,7 +118,7 @@ struct RydrWorkspaceGate<Content: View>: View {
                         Text("Check your connection and try again.").foregroundStyle(.secondary)
                         Button("Try again") { retry += 1 }.buttonStyle(.borderedProminent).tint(.red)
                         Button("Change workspace") { clearSelection() }
-                    } else { ProgressView("Connecting securely…") }
+                    } else { RydrLoadingView() }
                 }.padding(28).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -310,5 +317,36 @@ private extension UIApplication {
             return rydrTopViewController(base: presented)
         }
         return base
+    }
+}
+
+
+/// Quiet app restoration screen using the same R mark and breathing ring as ride matching.
+struct RydrLoadingView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var animate = false
+    private let gradient = LinearGradient(colors: [.red, .pink, .purple], startPoint: .topLeading, endPoint: .bottomTrailing)
+    var body: some View {
+        ZStack {
+            Color(.systemBackground).ignoresSafeArea()
+            ZStack {
+                Circle().stroke(Color.red.opacity(0.12), lineWidth: 6)
+                    .frame(width: 108, height: 108)
+                    .scaleEffect(animate && !reduceMotion ? 1.10 : 0.94)
+                Circle().trim(from: 0.08, to: 0.78)
+                    .stroke(gradient, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .frame(width: 108, height: 108)
+                    .rotationEffect(.degrees(animate && !reduceMotion ? 360 : 0))
+                    .shadow(color: .red.opacity(0.2), radius: 10)
+                    .animation(reduceMotion ? nil : .linear(duration: 1.2).repeatForever(autoreverses: false), value: animate)
+                Image("RydrBankWalletR").resizable().scaledToFit().frame(width: 58, height: 58)
+                    .scaleEffect(animate && !reduceMotion ? 1 : 0.88)
+            }
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: animate)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Loading Rydr")
+            .accessibilityIdentifier("rydrLoading")
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear { animate = true }
     }
 }

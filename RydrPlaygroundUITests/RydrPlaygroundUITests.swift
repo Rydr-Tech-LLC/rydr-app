@@ -27,6 +27,17 @@ final class RydrPlaygroundUITests: XCTestCase {
 
 
     @MainActor
+    func testBrandedRestorationLoading() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-RiderOnboardingResumeUITest", "-ResumeLoading", "-ResumeComplete"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["rydrLoading"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Restoring your onboarding…"].exists)
+        let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = "rider-branded-loading"; proof.lifetime = .keepAlways; add(proof)
+        XCTAssertTrue(app.staticTexts["riderDashboardFixture"].waitForExistence(timeout: 15))
+    }
+
+    @MainActor
     func testOnboardingResumeAfterRelaunchAndFailClosed() {
         for scenario in ["-ResumeAddress", "-ResumeUnavailable", "-ResumeComplete"] {
             let app = XCUIApplication()

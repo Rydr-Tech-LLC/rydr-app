@@ -9,6 +9,17 @@ import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
     @MainActor
+    func testBrandedRestorationLoading() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-DriverOnboardingResumeUITest", "-ResumeLoading", "-ResumeComplete"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["rydrLoading"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Restoring your onboarding…"].exists)
+        let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = "rydr-branded-loading"; proof.lifetime = .keepAlways; add(proof)
+        XCTAssertTrue(app.staticTexts["driverDashboardFixture"].waitForExistence(timeout: 15))
+    }
+
+    @MainActor
     func testActualOnlineDockExplainsMissingRatesAndReviewHold() {
         for flag in ["-ChecklistClear", "-ChecklistMixed"] {
             let app = XCUIApplication()
