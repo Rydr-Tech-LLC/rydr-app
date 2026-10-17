@@ -12,12 +12,14 @@ async function run({stripe,db,auth,uid,accountId,apply=false,fieldValue}) {
  if(profile.stripeAccountId!==accountId)throw Error('account_reference_changed');
  const idle=p=>!p.isOnline&&!p.online&&!p.hasActiveRide&&!p.activeRideId&&Number(p.availableBalance||0)===0&&Number(p.pendingPayouts||0)===0;
  if(!idle(profile))throw Error('driver_must_be_offline_and_settled');
- let account;try{account=await stripe.accounts.retrieve(accountId);}catch(e){if(e.code!=='resource_missing'||!prior)throw e;}
+ let account;try{account=await stripe.accounts.retrieve(accountId);}catch(e){if(!['resource_missing','account_invalid'].includes(e.code)||prior?.status!=='stripe_deleted')throw e;}
  if(account&&!account.deleted){
   if(account.charges_enabled||account.payouts_enabled)throw Error('active_account_requires_separate_review');
-  if(account.type!=='express'||account.metadata?.uid!==uid||account.metadata?.stripeMode!=='live')throw Error('account_owner_mode_or_type_mismatch');
+  const controlled=account.controller?.is_controller===true&&account.controller?.losses?.payments==='application';
+  if(!(account.type==='express'||controlled)||account.metadata?.uid!==uid||account.metadata?.stripeMode!=='live')throw Error('account_owner_mode_or_type_mismatch');
   const balance=await stripe.balance.retrieve({},{stripeAccount:accountId});
-  if(['available','pending','connect_reserved','instant_available'].some(k=>(balance[k]||[]).some(v=>v.amount!==0)))throw Error('stripe_balance_not_zero');
+  const nonzero=v=>Array.isArray(v)?v.some(nonzero):v&&typeof v==='object'?Object.entries(v).some(([k,x])=>k==='amount'?x!==0:nonzero(x)):false;
+  if(nonzero(balance))throw Error('stripe_balance_not_zero');
   let cursor;do{const page=await stripe.payouts.list({limit:100,...(cursor?{starting_after:cursor}:{})},{stripeAccount:accountId});if(page.data.some(p=>['pending','in_transit'].includes(p.status)))throw Error('payout_in_flight');cursor=page.has_more?page.data.at(-1)?.id:null;if(page.has_more&&!cursor)throw Error('invalid_payout_page');}while(cursor);
  }
  const jobs=await db.collection('driverPayouts').where('accountId','==',accountId).get();
