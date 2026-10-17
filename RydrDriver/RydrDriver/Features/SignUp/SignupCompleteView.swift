@@ -10,7 +10,10 @@
 import SwiftUI
 
 struct SignupCompleteView: View {
-    var onFinish: (() -> Void)? = nil
+    var verifyCompletion: () async throws -> Bool = { try await RydrBackendService.onboardingStatus().completed }
+    var onFinish: () -> Void
+    @State private var finishing = false
+    @State private var finishError: String?
 
     @State private var appeared = false
 
@@ -36,14 +39,28 @@ struct SignupCompleteView: View {
                     .font(.system(size: 26, weight: .heavy, design: .rounded))
                     .foregroundStyle(Styles.rydrGradient)
 
-                Text("You can finish onboarding while Stripe reviews your identity. You can start driving only after identity verification and all required account checks are approved. Background checks will be required when Rydr opens the next screening phase.")
+                Text("Your application is submitted. You can explore your Dashboard while your account is reviewed. Going online unlocks after all required checks are approved.")
                     .font(.body)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 12)
             }
 
-            SignupContinueButton(title: "Done") { onFinish?() }
+            if let finishError { Text(finishError).foregroundStyle(.red).accessibilityIdentifier("signupFinishError") }
+            SignupContinueButton(title: "Go to Dashboard", isLoading: finishing) {
+                guard !finishing else { return }
+                finishing = true; finishError = nil
+                Task { @MainActor in
+                    defer { finishing = false }
+                    do {
+                        guard try await verifyCompletion() else {
+                            finishError = "Your setup has not finished saving. Please try again."
+                            return
+                        }
+                        onFinish()
+                    } catch { finishError = "We couldn’t confirm your submitted application. Check your connection and try again." }
+                }
+            }.accessibilityIdentifier("signupDashboard")
                 .padding(.top, 8)
 
             Spacer()

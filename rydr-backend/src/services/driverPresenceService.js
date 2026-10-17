@@ -1,4 +1,4 @@
-const { evaluateDriverCompliance } = require("../../firebase/functions/src/services/driverCompliancePolicy");
+const { driverAccess } = require('./driverAccessPolicy');
 const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
 const { admin, getFirestore } = require("../config/firebase");
 
@@ -21,14 +21,7 @@ function error(message, statusCode) {
 }
 
 function isApprovedDriver(driver, compliancePolicy = driver?.complianceRequirements ?? {}) {
-  const approvalStatus = String(driver?.driverApprovalStatus ?? driver?.approvalStatus ?? "pending").toLowerCase();
-  const approved = (approvalStatus === "approved" || driver?.isApproved === true) && !["rejected", "needs_attention"].includes(approvalStatus);
-  const accountStatus = String(driver?.accountStatus ?? "").toLowerCase();
-  const safetyReviewStatus = String(driver?.safetyReviewStatus ?? "").toLowerCase();
-  const safetySuspended = ["suspended", "deletion_requested", "removed"].includes(accountStatus)
-    || safetyReviewStatus === "suspended"
-    || driver?.safetyHold === true;
-  return driver?.driverSignupCompleted === true && approved && !safetySuspended && driver?.documentComplianceHold !== true && driver?.backgroundCheckHold !== true && evaluateDriverCompliance(driver ?? {}, compliancePolicy).drivingAllowed;
+  return driverAccess(driver, compliancePolicy).allowed;
 }
 
 function normalizedRideTypes(value) {
@@ -74,6 +67,12 @@ async function activeRideForDriver(db, uid) {
   }) || null;
 }
 
+async function getDriverAccess({ uid, db = getFirestore() }) {
+  const [driver, policy] = await Promise.all([db.collection('drivers').doc(uid).get(), db.collection('platformConfig').doc('driverCompliance').get()]);
+  if (!driver.exists) throw error('Driver profile not found', 404);
+  return driverAccess(driver.data(), policy.data() ?? {});
+}
+
 async function updateDriverPresence({ uid, online, selectedRideTypes, location }) {
   if (typeof online !== "boolean") throw error("online must be a boolean", 400);
   const db = getFirestore();
@@ -90,11 +89,11 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   if (!driverSnap.exists) throw error("Driver profile not found", 404);
 
   const driver = driverSnap.data();
-  if (online && driver.driverSignupCompleted !== true) {
-    throw error("Finish driver onboarding before going online", 403);
-  }
-  if (online && !isApprovedDriver(driver, compliancePolicySnap.data() ?? {})) {
-    throw error("Driver approval and safety eligibility are required to go online", 403);
+  const access = driverAccess(driver, compliancePolicySnap.data() ?? {});
+  if (online && !access.allowed) {
+    const denied = error(access.reasons.map(reason => reason.message).join(" "), 403);
+    denied.details = { drivingAccess: access };
+    throw denied;
   }
 
   const requestedRideTypes = normalizedRideTypes(selectedRideTypes);
@@ -219,6 +218,7 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
 
 module.exports = {
   updateDriverPresence,
+  getDriverAccess,
   isApprovedDriver,
   normalizedLocation,
   normalizedRideTypes,

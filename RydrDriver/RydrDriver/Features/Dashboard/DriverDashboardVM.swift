@@ -35,6 +35,8 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var locationPermissionDenied: Bool = false
     @Published var canGoOnline: Bool = false
     @Published var complianceHoldReason: String?
+    @Published var drivingAccessNotice: DriverDrivingAccess?
+    @Published var checkingDrivingAccess = false
     @Published var selectedRideTypes: Set<String> = []
     @Published var eligibleRideTypes: [String] = ["Rydr Go"]
     @Published var tierRates: [String: DriverRateSetting] = [:]
@@ -504,6 +506,27 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         }
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
         UserDefaults.standard.set(data, forKey: rateCardCacheKey)
+    }
+
+    func requestOnlineToggle() {
+        if isOnline { toggleOnline(); return }
+        guard !checkingDrivingAccess else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid, let workspace = RydrWorkspace.identifier else { return }
+        checkingDrivingAccess = true
+        Task { @MainActor in
+            defer { checkingDrivingAccess = false }
+            do {
+                let access = try await RydrBackendService.drivingAccess()
+                guard RydrWorkspace.auth.currentUser?.uid == uid, RydrWorkspace.identifier == workspace else { return }
+                canGoOnline = access.allowed
+                if !access.allowed { drivingAccessNotice = access; return }
+                toggleOnline()
+            } catch {
+                // No cached approval can replace a fresh backend decision.
+                canGoOnline = false
+                statusMessage = "We couldn’t check your driving access. Please check your connection and try again."
+            }
+        }
     }
 
     func toggleOnline() {
@@ -1040,8 +1063,16 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
             DispatchQueue.main.async {
                 self.canGoOnline = DriverApprovalPolicy.isApproved(data: data)
-                self.complianceHoldReason = (data["documentComplianceHold"] as? Bool) == true ? "Upload current documents to restore driving access." : (data["backgroundCheckHold"] as? Bool) == true ? "Complete your required background screening before driving." : nil
-                if self.complianceHoldReason != nil { self.isOnline = false; self.pendingRequests = [] }
+                Task { @MainActor in
+                    if let access = try? await RydrBackendService.drivingAccess(), RydrWorkspace.auth.currentUser?.uid == uid {
+                        self.complianceHoldReason = access.allowed ? nil : access.reasons.map(\.message).joined(separator: " ")
+                        self.canGoOnline = access.allowed
+                        if !access.allowed {
+                            self.isOnline = false; self.isSearchingForRides = false; self.pendingRequests = []
+                            self.stopPushingDriverPresence(); self.stopRequestListener()
+                        }
+                    }
+                }
                 self.driverDisplayName = Self.publicDisplayName(from: data, authUser: RydrWorkspace.auth.currentUser)
                 self.driverRating = Self.doubleValue(data["rating"]) ?? self.driverRating
                 self.driverRatingCount = Self.intValue(data["ratingCount"]) ?? self.driverRatingCount
@@ -1791,6 +1822,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                 await MainActor.run {
                     guard let self else { return }
                     if online {
+                        if let access = (error as NSError).userInfo["drivingAccess"] as? DriverDrivingAccess { self.drivingAccessNotice = access }
                         self.statusMessage = "Could not go online: \(error.localizedDescription)"
                         self.isOnline = false
                         self.isSearchingForRides = false
@@ -2174,6 +2206,7 @@ struct DriverDashboardView: View {
             vm.startDashboard()
         }
         .sheet(item: $activeSheet, content: sheetContent(_:))
+        .sheet(item: $vm.drivingAccessNotice) { DriverDrivingAccessSheet(access: $0) }
         .onReceive(NotificationCenter.default.publisher(for: .driverNotificationRouteRequested)) { notification in
             switch notification.userInfo?["target"] as? String {
             case "documents": activeSheet = .menu(.documents)

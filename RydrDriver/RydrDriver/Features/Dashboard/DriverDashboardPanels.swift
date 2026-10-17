@@ -409,11 +409,7 @@ struct DriverDashboardActionDock: View {
             )
 
             DriverGoOnlinePowerButton(vm: vm, isCompact: isCompact) {
-                if vm.isReadyToGoOnline || vm.isOnline {
-                    vm.toggleOnline()
-                } else if let reason = vm.goOnlineBlockReason {
-                    vm.statusMessage = reason
-                }
+                vm.requestOnlineToggle()
             }
 
             DriverDockIcon(
@@ -499,8 +495,8 @@ private struct DriverGoOnlinePowerButton: View {
                     .frame(width: size, height: size)
 
                 VStack(spacing: 5) {
-                    Image(systemName: vm.isOnline ? "pause.fill" : "power")
-                        .font(.title3.weight(.black))
+                    if vm.checkingDrivingAccess { ProgressView().tint(.red) }
+                    else { Image(systemName: vm.isOnline ? "pause.fill" : "power").font(.title3.weight(.black)) }
                     Text(vm.isOnline ? "Online" : "Offline")
                         .font(.caption2.weight(.black))
                 }
@@ -667,5 +663,42 @@ struct DriverLocationPermissionBanner: View {
                 .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.28), lineWidth: 1))
         )
         .shadow(color: Color.black.opacity(0.12), radius: 16, y: 8)
+    }
+}
+
+
+struct DriverDrivingAccessSheet: View {
+    let access: DriverDrivingAccess
+    @Environment(\.dismiss) private var dismiss
+    private func icon(_ code: String) -> String {
+        switch code { case "identity": return "person.text.rectangle"; case "documents": return "doc.text.magnifyingglass"; case "background_check": return "checkmark.shield"; case "safety_review": return "hand.raised.fill"; default: return "clock.badge.checkmark" }
+    }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Image(systemName: "shield.lefthalf.filled").font(.system(size: 36, weight: .semibold))
+                    Text(access.title).font(.system(.title, design: .rounded, weight: .bold))
+                    Text(access.message).font(.subheadline).lineSpacing(4)
+                }.foregroundStyle(.white).padding(26).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Styles.rydrGradient, in: RoundedRectangle(cornerRadius: 28))
+                ForEach(access.reasons) { reason in
+                    HStack(alignment: .top, spacing: 16) {
+                        Image(systemName: icon(reason.code)).font(.title3).foregroundStyle(Styles.rydrGradient)
+                            .frame(width: 46, height: 46).background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(reason.title).font(.headline)
+                            Text(reason.message).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22))
+                        .accessibilityElement(children: .combine).accessibilityIdentifier("drivingReason_" + reason.code)
+                }
+                Button { dismiss() } label: {
+                    Text(access.buttonTitle).font(.headline).foregroundStyle(.white).frame(maxWidth: .infinity).padding(18).background(Styles.rydrGradient, in: Capsule())
+                }.accessibilityIdentifier("drivingAccessDone")
+            }.padding(22)
+        }.background(Color(.systemGroupedBackground)).presentationDragIndicator(.visible)
+            .accessibilityIdentifier("drivingAccessSheet")
     }
 }

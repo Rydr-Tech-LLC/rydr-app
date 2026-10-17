@@ -127,6 +127,8 @@ struct Rydr_DriverApp: App {
         NavigationStack { DriverLoginView().environmentObject(DriverSessionManager()) }
       } else if ProcessInfo.processInfo.arguments.contains("-DriverManagedPayoutE2E") {
         DriverManagedPayoutE2E()
+      } else if ProcessInfo.processInfo.arguments.contains("-DriverSubmittedUITest") {
+        DriverSubmittedUITestFixture()
       } else if ProcessInfo.processInfo.arguments.contains("-DriverOnboardingResumeUITest") {
         DriverOnboardingResumeUITestFixture()
       } else if ProcessInfo.processInfo.arguments.contains("-DriverPayoutMethodsUITest") {
@@ -240,6 +242,36 @@ private struct DriverOnboardingResumeUITestFixture: View {
             return try JSONDecoder().decode(DriverOnboardingSnapshot.self, from: JSONSerialization.data(withJSONObject: object))
         }) { Text("Driver dashboard").accessibilityIdentifier("driverDashboardFixture") }
         .environmentObject(session)
+    }
+}
+#endif
+
+#if DEBUG && targetEnvironment(simulator)
+private struct DriverSubmittedUITestFixture: View {
+    @StateObject private var session = DriverSessionManager()
+    private var submittedSnapshot: DriverOnboardingSnapshot {
+        try! JSONDecoder().decode(DriverOnboardingSnapshot.self, from: Data("{\"completed\":false,\"nextStep\":\"complete\",\"cashHubOnly\":false,\"profile\":{}}".utf8))
+    }
+    @State private var submitted = true
+    @State private var showNotice = false
+    private var access: DriverDrivingAccess {
+        // Representative backend response; no Firebase account or approval is mutated.
+        try! JSONDecoder().decode(DriverDrivingAccess.self, from: Data("""
+        {"allowed":false,"title":"A few things before you drive","message":"You’re welcome on your Dashboard. Going online will unlock once the items below are cleared.","buttonTitle":"Got it","reasons":[{"code":"identity","title":"Identity verification","message":"Stripe is reviewing your identity."},{"code":"documents","title":"Document review","message":"Your required documents are awaiting review."},{"code":"background_check","title":"Background screening","message":"Complete the required background screening before driving."},{"code":"safety_review","title":"Account access paused","message":"Rydr is reviewing a safety or account concern."}]}
+        """.utf8))
+    }
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Text("Driver dashboard").font(.largeTitle).accessibilityIdentifier("submittedDashboard")
+                Button("Go Online") { showNotice = true }.accessibilityIdentifier("submittedGoOnline")
+            }.sheet(isPresented: $submitted) {
+                DriverSignupCoordinator(resumeSnapshot: submittedSnapshot, verifyCompletion: {
+                    if ProcessInfo.processInfo.arguments.contains("-CompletionUnavailable") { throw URLError(.notConnectedToInternet) }
+                    return true
+                }, onCompleted: { submitted = false }).environmentObject(session)
+            }.sheet(isPresented: $showNotice) { DriverDrivingAccessSheet(access: access) }
+        }
     }
 }
 #endif

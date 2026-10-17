@@ -9,6 +9,40 @@ import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
     @MainActor
+    func testSubmittedDriverReachesDashboardAndSeesReviewReasons() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-DriverSubmittedUITest"]
+        app.launch()
+        let done = app.buttons["signupDashboard"]
+        XCTAssertTrue(done.waitForExistence(timeout: 15))
+        done.tap()
+        XCTAssertTrue(app.buttons["submittedGoOnline"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Application Submitted"].exists)
+        app.buttons["submittedGoOnline"].tap()
+        for code in ["identity", "documents", "background_check", "safety_review"] {
+            let reason = app.descendants(matching: .any)["drivingReason_" + code]
+            XCTAssertTrue(reason.waitForExistence(timeout: 5))
+        }
+        let proof = XCTAttachment(screenshot: app.screenshot()); proof.name = "rydr-driving-review-sheet"; proof.lifetime = .keepAlways; add(proof)
+        let dismiss = app.buttons["drivingAccessDone"]
+        for _ in 0..<4 where !dismiss.isHittable { app.swipeUp() }
+        dismiss.tap()
+        XCTAssertTrue(app.buttons["submittedGoOnline"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testSubmittedDriverCompletionFailureRemainsVisible() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-DriverSubmittedUITest", "-CompletionUnavailable"]
+        app.launch()
+        XCTAssertTrue(app.buttons["signupDashboard"].waitForExistence(timeout: 15))
+        app.buttons["signupDashboard"].tap()
+        XCTAssertTrue(app.staticTexts["signupFinishError"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["signupDashboard"].isEnabled)
+        XCTAssertTrue(app.staticTexts["Application Submitted"].exists)
+    }
+
+    @MainActor
     func testPayoutMethodsNavigationAndRefreshRecovery() {
         let app = XCUIApplication()
         app.launchArguments = ["-DriverPayoutMethodsUITest", "-MethodsError"]

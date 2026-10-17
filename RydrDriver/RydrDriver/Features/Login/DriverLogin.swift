@@ -99,7 +99,7 @@ struct DriverLoginView: View {
             Text("Enter the Google email address you want Rydr Driver to use.")
         }
         .sheet(isPresented: $showingSignup) {
-            DriverSignupCoordinator()
+            DriverSignupCoordinator(onCompleted: { showingSignup = false })
                 .environmentObject(session)
         }
         .fullScreenCover(isPresented: $showPhoneFlow) {

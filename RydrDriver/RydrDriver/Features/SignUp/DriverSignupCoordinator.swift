@@ -89,6 +89,7 @@ enum DriverSignupStep: Hashable {
         case "identity": return .identity
         case "backgroundCheck": return .backgroundCheck
         case "payouts": return .payouts
+        case "complete": return .done
         default: return nil
         }
     }
@@ -100,6 +101,7 @@ struct DriverSignupCoordinator: View {
 
     private let resumeSnapshot: DriverOnboardingSnapshot?
     private let onCompleted: (() -> Void)?
+    private let verifyCompletion: () async throws -> Bool
     @State private var path: [DriverSignupStep] = []
 
     // Shared state
@@ -149,7 +151,8 @@ struct DriverSignupCoordinator: View {
     @State private var isSocialAuthInProgress = false
     @State private var socialAuthAttemptID: UUID?
 
-    init(resumeSnapshot: DriverOnboardingSnapshot? = nil, onCompleted: (() -> Void)? = nil) {
+    init(resumeSnapshot: DriverOnboardingSnapshot? = nil, verifyCompletion: @escaping () async throws -> Bool = { try await RydrBackendService.onboardingStatus().completed }, onCompleted: (() -> Void)? = nil) {
+        self.verifyCompletion = verifyCompletion
         self.resumeSnapshot = resumeSnapshot
         self.onCompleted = onCompleted
         guard let saved = resumeSnapshot else { return }
@@ -417,12 +420,14 @@ struct DriverSignupCoordinator: View {
                     .onAppear { markCurrentOnboardingStep(.payouts) }
 
                 case .done:
-                    SignupCompleteView(onFinish: {
+                    SignupCompleteView(verifyCompletion: verifyCompletion, onFinish: {
                         // Mark the session as logged in and keep Go Online disabled until the check passes
-                        session.login(name: "\(firstName) \(lastName)".trimmingCharacters(in: .whitespaces), email: email)
-                        session.canGoOnline = false
                         onCompleted?()
                         dismiss()
+                        if !session.isLoggedIn {
+                            session.login(name: "\(firstName) \(lastName)".trimmingCharacters(in: .whitespaces), email: email)
+                        }
+                        session.canGoOnline = false
                     })
                     .onAppear { markCurrentOnboardingStep(.done) }
                 }
@@ -737,7 +742,7 @@ struct DriverSignupCoordinator: View {
     // MARK: - Firestore helper
     private func markCurrentOnboardingStep(_ step: DriverSignupStep) {
         #if DEBUG && targetEnvironment(simulator)
-        if ProcessInfo.processInfo.arguments.contains("-DriverOnboardingResumeUITest") { return }
+        if ProcessInfo.processInfo.arguments.contains("-DriverOnboardingResumeUITest") || ProcessInfo.processInfo.arguments.contains("-DriverSubmittedUITest") { return }
         #endif
         guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         RydrWorkspace.firestore.collection("drivers").document(uid).setData([

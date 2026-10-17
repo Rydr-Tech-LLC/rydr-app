@@ -133,14 +133,22 @@ enum RydrBackendService {
         }
     }
 
+    static func drivingAccess() async throws -> DriverDrivingAccess {
+        guard let request = try await makeAuthenticatedRequest(path: "/driver/driving-access", method: "POST", body: [String: String]()) else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+        return try JSONDecoder().decode(DriverDrivingAccess.self, from: data)
+    }
+
     static func updateDriverPresence(_ body: DriverPresenceRequest) async throws -> DriverPresenceResponse {
         guard let request = try await makeAuthenticatedRequest(path: "/driver/presence", method: "POST", body: body) else {
             throw URLError(.badURL)
         }
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            let message = (try? JSONDecoder().decode(BackendError.self, from: data).error) ?? "Backend presence update failed."
-            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
+            let failure = try? JSONDecoder().decode(BackendError.self, from: data)
+            let message = failure?.error ?? "Backend presence update failed."
+            throw NSError(domain: "RydrBackendService", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message, "drivingAccess": failure?.details?.drivingAccess as Any])
         }
         return try JSONDecoder().decode(DriverPresenceResponse.self, from: data)
     }
@@ -542,7 +550,7 @@ enum RydrBackendService {
         let outcome: FinancialOutcome?
     }
 
-    private struct BackendError: Decodable { let error: String }
+    private struct BackendError: Decodable { struct Details: Decodable { let drivingAccess: DriverDrivingAccess? }; let error: String; let details: Details? }
 }
 
 
@@ -559,4 +567,14 @@ struct DriverOnboardingProfile: Decodable {
     struct Address: Decodable { let street: String?, line2: String?, city: String?, state: String?, zip: String? }
     struct License: Decodable { let number: String?, state: String? }
     struct Vehicle: Decodable { let vin: String?, make: String?, model: String?, year: String?, trim: String?, bodyStyle: String?, fuelType: String?, color: String?, plate: String? }
+}
+
+struct DriverDrivingAccess: Decodable, Identifiable {
+    struct Reason: Decodable, Identifiable { let code: String; let title: String; let message: String; var id: String { code } }
+    let allowed: Bool
+    let title: String
+    let message: String
+    let buttonTitle: String
+    let reasons: [Reason]
+    var id: String { reasons.map(\.code).joined(separator: ",") }
 }
