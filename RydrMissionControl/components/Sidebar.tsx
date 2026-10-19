@@ -9,6 +9,7 @@ import {
   Car,
   ShieldCheck,
   Gift,
+  Bell,
   GraduationCap,
   Flag,
   ChartNoAxesCombined,
@@ -24,7 +25,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import {WorkspaceSwitcher} from "./WorkspaceContext";
+import {WorkspaceSwitcher, useWorkspace} from "./WorkspaceContext";
 import type { MissionControlRole } from "@/lib/missionControlAccess";
 
 const CAMPUS_GROWTH_ITEMS = [
@@ -42,6 +43,7 @@ const NAV_ICONS = [
   Users,
   Users,
   Gift,
+  Bell,
   GraduationCap,
   Flag,
   ChartNoAxesCombined,
@@ -61,6 +63,7 @@ const NAV_ITEMS = [
   { href: "/drivers/all", label: "Drivers" },
   { href: "/riders", label: "Riders" },
   { href: "/promotions", label: "Promotions" },
+  { href: "/notifications", label: "Notifications" },
   { href: "/campus-growth", label: "Campus Growth" },
   { href: "/rides", label: "Rides" },
   { href: "/disputes", label: "Disputes" },
@@ -84,6 +87,7 @@ export default function Sidebar({
   email: string | null;
   role: MissionControlRole;
 }) {
+  const workspace = useWorkspace();
   const pathname = usePathname().replace(/^\/workspaces\/(test|live-beta)/, "");
   const router = useRouter();
   const drawer = useRef<HTMLElement>(null);
@@ -173,7 +177,8 @@ export default function Sidebar({
           return (
             <div key={item.href}>
               <Link
-                href={item.href}
+                href={item.href === "/notifications" ? "/workspaces/live-beta/notifications" : item.href}
+                onClick={item.href === "/notifications" && workspace !== "live-beta" ? event => { event.preventDefault(); window.location.assign("/workspaces/live-beta/notifications"); } : undefined}
                 aria-current={active ? "page" : undefined}
                 className={`mc-nav-link flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition ${
                   active

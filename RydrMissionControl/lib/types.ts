@@ -235,6 +235,7 @@ export interface AuditLogEntry {
     | "accountDeletion"
     | "payment"
     | "promotion"
+    | "notificationCampaign"
     | "supportTicket"
     | "campusTarget"
     | "campusStudentOrganization"
