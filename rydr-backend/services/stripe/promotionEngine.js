@@ -1,5 +1,7 @@
 const { getAuth } = require("firebase-admin/auth");
-const { assertLiveBetaAccess } = require("../../firebase/functions/src/services/liveBetaAccessPolicy");
+const {
+  assertLiveBetaAccess,
+} = require("../../firebase/functions/src/services/liveBetaAccessPolicy");
 const { createHash } = require("node:crypto");
 const policy = require("./promotionPolicy");
 const { modeProfile } = require("./stripeMode");
@@ -8,16 +10,107 @@ const key = (...parts) =>
 const number = (v) => (Number.isInteger(v) && v >= 0 ? v : 0);
 const atCapacity = (p, total, user) =>
   (p.maxRedemptions != null && total >= p.maxRedemptions) ||
-  (p.perUserLimit != null && user >= p.perUserLimit);
+  ((p.perUserLimit ?? (p.audienceRule === "new" ? 1 : null)) != null &&
+    user >= (p.perUserLimit ?? 1));
 
 // All amounts and eligibility come from server-owned campaign and financial records.
 // Reservations count against caps immediately and are reused on payment retries.
 class PromotionEngine {
-  constructor({ db, fieldValue, stripe, mode, now = () => Date.now() }) {
-    Object.assign(this, { db, fieldValue, stripe, mode, now });
+  constructor({
+    db,
+    fieldValue,
+    stripe,
+    mode,
+    now = () => Date.now(),
+    getUser = (uid) => getAuth().getUser(uid),
+  }) {
+    Object.assign(this, { db, fieldValue, stripe, mode, now, getUser });
   }
   stamp() {
     return this.fieldValue.serverTimestamp();
+  }
+  // Identity evidence comes from Auth and Stripe, never client-editable hints.
+  async identity(uid) {
+    const [user, profile] = await Promise.all([
+      this.getUser(uid),
+      this.profile(uid, "riders"),
+    ]);
+    const signals = [];
+    if (user?.phoneNumber)
+      signals.push({
+        kind: "shared_verified_phone",
+        hash: key("verified-phone", user.phoneNumber),
+      });
+    const customerId = modeProfile(profile, this.mode).stripeCustomerId;
+    if (customerId) {
+      const customer = await this.stripe.customers.retrieve(customerId);
+      if (!customer.deleted && customer.metadata?.firebase_uid === uid) {
+        const methodId = customer.invoice_settings?.default_payment_method;
+        if (methodId) {
+          const method = await this.stripe.paymentMethods.retrieve(
+            typeof methodId === "string" ? methodId : methodId.id,
+          );
+          const owner =
+            typeof method.customer === "string"
+              ? method.customer
+              : method.customer?.id;
+          if (owner === customerId && method.card?.fingerprint)
+            signals.push({
+              kind: "shared_payment_card",
+              hash: key("card", this.mode, method.card.fingerprint),
+            });
+        }
+      }
+    }
+    return signals;
+  }
+  async guard(tx, p, uid, identities) {
+    const control = await tx.get(
+      this.db.collection("promotionAccountControls").doc(uid),
+    );
+    if (control.data()?.blocked === true) return { blocked: true };
+    if (p.audienceRule !== "new") return {};
+    const exception = await tx.get(
+      this.db.collection("promotionIdentityOverrides").doc(key(p.id, uid)),
+    );
+    if (exception.data()?.allowed === true) return {};
+    const claims = [];
+    for (const identity of identities) {
+      const ref = this.db
+        .collection("promotionIdentityClaims")
+        .doc(key(p.id, identity.hash));
+      const claim = await tx.get(ref);
+      if (claim.exists && claim.data().userId !== uid)
+        return {
+          blocked: true,
+          duplicate: true,
+          reason: identity.kind,
+          otherUserId: claim.data().userId,
+        };
+      if (!claim.exists) claims.push(ref);
+    }
+    return { claims };
+  }
+  flag(tx, p, uid, guard) {
+    if (!guard.duplicate) return;
+    tx.set(
+      this.db
+        .collection("promotionAbuseSignals")
+        .doc(key(p.id, uid, guard.otherUserId, guard.reason)),
+      {
+        promotionId: p.id,
+        userId: uid,
+        relatedUserId: guard.otherUserId,
+        reason: guard.reason,
+        status: "needs_review",
+        updatedAt: this.stamp(),
+      },
+      { merge: true },
+    );
+  }
+  claim(tx, uid, guard) {
+    for (const ref of guard.claims ?? [])
+      tx.create(ref, { userId: uid, createdAt: this.stamp() });
   }
   async profile(uid, audience) {
     const s = await this.db
@@ -56,13 +149,16 @@ class PromotionEngine {
         "Finish driver payout setup before joining this promotion.",
       );
     const prior = await this.hasPriorPaidRide(uid, audience);
-    return this.db.runTransaction(async (tx) => {
+    const identity = await this.identity(uid);
+    const result = await this.db.runTransaction(async (tx) => {
       const [s, old, indexNow, usage, progress] = await Promise.all([
         tx.get(ref),
         tx.get(enrollment),
         tx.get(index.ref),
         tx.get(this.db.collection("promotionUsage").doc(promotionId)),
-        tx.get(this.db.collection("promotionProgress").doc(key(promotionId, uid))),
+        tx.get(
+          this.db.collection("promotionProgress").doc(key(promotionId, uid)),
+        ),
       ]);
       const p = s.data();
       if (
@@ -88,7 +184,23 @@ class PromotionEngine {
         )
       )
         throw new Error("This account is not eligible for this code.");
-      if (atCapacity(p, number(usage.data()?.issuedCount), number(progress.data()?.issuedCount))) throw new Error("This promotion has reached its reward limit.");
+      const guard = await this.guard(tx, p, uid, identity);
+      if (guard.blocked) {
+        this.flag(tx, p, uid, guard);
+        return {
+          status: "held",
+          error: "Promotion access requires account review.",
+        };
+      }
+      if (
+        atCapacity(
+          p,
+          number(usage.data()?.issuedCount),
+          number(progress.data()?.issuedCount),
+        )
+      )
+        throw new Error("This promotion has reached its reward limit.");
+      this.claim(tx, uid, guard);
       if (!old.exists)
         tx.create(enrollment, {
           promotionId,
@@ -105,6 +217,8 @@ class PromotionEngine {
         status: "enrolled",
       };
     });
+    if (result.status === "held") throw new Error(result.error);
+    return result;
   }
   async campaigns() {
     const s = await this.db
@@ -148,6 +262,9 @@ class PromotionEngine {
       )
         choices.push({ promotion: r.offer, rewardId: d.id });
     }
+    const identity = choices.some((c) => c.promotion.audienceRule === "new")
+      ? await this.identity(uid)
+      : [];
     choices.forEach(
       (c) =>
         (c.discountCents = policy.discountCents(c.promotion, outcome, ride)),
@@ -160,6 +277,7 @@ class PromotionEngine {
     return this.db.runTransaction(async (tx) => {
       const old = await tx.get(reservation);
       if (old.exists) return old.data().discountCents > 0 ? old.data() : null;
+      const flags = [];
       for (const choice of choices) {
         if (!choice.discountCents) continue;
         let p = choice.promotion;
@@ -214,8 +332,15 @@ class PromotionEngine {
           )
         )
           continue;
+        const guard = await this.guard(tx, p, uid, identity);
+        if (guard.blocked) {
+          flags.push([p, guard]);
+          continue;
+        }
         const discountCents = policy.discountCents(p, outcome, ride);
         if (!discountCents) continue;
+        for (const [offer, held] of flags) this.flag(tx, offer, uid, held);
+        this.claim(tx, uid, guard);
         const result = {
           promotion: { ...p, id: p.id },
           promotionId: p.id,
@@ -257,6 +382,7 @@ class PromotionEngine {
         }
         return result;
       }
+      for (const [offer, held] of flags) this.flag(tx, offer, uid, held);
       // Persist no-offer too: a retry must never change the Stripe idempotent amount.
       tx.create(reservation, {
         status: "none",
@@ -389,6 +515,8 @@ class PromotionEngine {
       enrollment = this.db
         .collection("promotionEnrollments")
         .doc(key(candidate.id, uid));
+    const identity =
+      candidate.audienceRule === "new" ? await this.identity(uid) : [];
     return this.db.runTransaction(async (tx) => {
       const [live, event, ps, us, es] = await Promise.all([
         tx.get(pRef),
@@ -414,6 +542,11 @@ class PromotionEngine {
         )
       )
         return;
+      const guard = await this.guard(tx, p, uid, identity);
+      if (guard.blocked) {
+        this.flag(tx, p, uid, guard);
+        return;
+      }
       const count = number(ps.data()?.eligibleRideCount) + 1,
         issued = number(ps.data()?.issuedCount),
         total = number(us.data()?.issuedCount);
@@ -422,6 +555,7 @@ class PromotionEngine {
       const reached =
         threshold > 0 && (perRide || count >= threshold * (issued + 1));
       const grant = reached && !atCapacity(p, total, issued);
+      this.claim(tx, uid, guard);
       tx.create(marker, {
         promotionId: p.id,
         userId: uid,
@@ -511,7 +645,12 @@ class PromotionEngine {
         account.details_submitted !== true
       )
         throw new Error("Driver payout ownership or setup needs review.");
-      await assertLiveBetaAccess({db:this.db,uid:reward.driverId,mode:this.mode,getUser:uid=>getAuth().getUser(uid)});
+      await assertLiveBetaAccess({
+        db: this.db,
+        uid: reward.driverId,
+        mode: this.mode,
+        getUser: (uid) => this.getUser(uid),
+      });
       const transfer = await this.stripe.transfers.create(
         {
           amount: reward.rewardCents,
@@ -594,6 +733,23 @@ class PromotionEngine {
         )
         .map((p) => ({
           id: p.id,
+          perUserLimit: p.perUserLimit ?? (p.audienceRule === "new" ? 1 : null),
+          usedOrReservedCount: number(
+            progress.docs.find((d) => d.data().promotionId === p.id)?.data()
+              ?.issuedCount,
+          ),
+          remainingUses:
+            (p.perUserLimit ?? (p.audienceRule === "new" ? 1 : null)) == null
+              ? null
+              : Math.max(
+                  0,
+                  (p.perUserLimit ?? 1) -
+                    number(
+                      progress.docs
+                        .find((d) => d.data().promotionId === p.id)
+                        ?.data()?.issuedCount,
+                    ),
+                ),
           title: p.title,
           description: p.description ?? null,
           type: p.type,
@@ -609,7 +765,8 @@ class PromotionEngine {
           markets: p.markets ?? [],
           rideTypes: p.rideTypes ?? [],
           endsAt: new Date(policy.millis(p.endsAt)).toISOString(),
-        })),
+        }))
+        .filter((p) => p.remainingUses !== 0),
       progress: progress.docs.map((d) => ({ id: d.id, ...d.data() })),
       rewards: rewards.docs
         .filter(
