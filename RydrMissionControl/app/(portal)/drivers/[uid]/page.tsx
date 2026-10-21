@@ -169,6 +169,7 @@ export default async function DriverReviewPage(props: {
   );
   const onboardingProgress = buildDriverOnboardingProgress(driver);
   const adminProfileInitial: DriverProfileAdminInitial = {
+    driverSex: ["male", "female"].includes(driver.driverSex ?? "") ? driver.driverSex! : "undisclosed",
     firstName: driver.firstName ?? driver.legalFirstName ?? "",
     lastName: driver.lastName ?? driver.legalLastName ?? "",
     email: driver.email ?? "",

@@ -585,8 +585,8 @@ struct ProfileView: View {
                                  subtitle: "How much would you like to chat?",
                                  icon: "bubble.left.and.bubble.right",
                                  options: ["Silence", "Light", "Talkative"])
-                PreferencePicker(title: "Gender Preference", selection: $driverPref,
-                                 subtitle: "Prioritize driver cards by gender",
+                PreferencePicker(title: "Driver Sex Preference", selection: $driverPref,
+                                 subtitle: "Prioritize matching drivers when available",
                                  icon: "person.2",
                                  options: ["No preference", "Male", "Female"])
             }

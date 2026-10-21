@@ -156,7 +156,10 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
   const statusById = new Map(statusSnapshots
     .filter((doc) => doc.exists && hasCurrentOnlinePresence(doc.data(), now.toMillis()))
     .map((doc) => [doc.id, doc.data()]));
+  const riderPreferences = (await db.collection("riders").doc(riderId)
+    .collection("ridePreferences").doc("current").get()).data() || {};
   const eligible = await filterLiveBetaCandidates(db, findBestDrivers({
+    riderSexPreference: riderPreferences.genderPreference ?? riderPreferences.driverPreference,
     rideType,
     pickupCoordinate: pickup,
     dropoffCoordinate: dropoff,

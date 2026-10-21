@@ -561,6 +561,7 @@ struct DriverOnboardingSnapshot: Decodable {
     let profile: DriverOnboardingProfile
 }
 struct DriverOnboardingProfile: Decodable {
+    let driverSex: String?
     let firstName: String?, lastName: String?, preferredName: String?, email: String?, phoneNumber: String?, dob: String?
     let betaWaiverAccepted: Bool?, backgroundCheckAcknowledged: Bool?
     let address: Address?, license: License?, vehicle: Vehicle?

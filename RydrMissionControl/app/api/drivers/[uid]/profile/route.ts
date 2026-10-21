@@ -5,6 +5,7 @@ import { getWorkspaceAuth, getWorkspaceDb } from "@/lib/firebaseAdmin";
 import { writeAuditLog } from "@/lib/auditLog";
 
 type ProfilePayload = {
+  driverSex?: unknown;
   firstName?: unknown;
   lastName?: unknown;
   email?: unknown;
@@ -41,6 +42,10 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ uid
   const body = (await request.json().catch(() => null)) as ProfilePayload | null;
   if (!body) return NextResponse.json({ error: "Invalid profile payload." }, { status: 400 });
 
+  if (body.driverSex !== undefined && !["male", "female", "undisclosed"].includes(body.driverSex as string)) {
+    return NextResponse.json({ error: "Select Male, Female, or Not disclosed." }, { status: 400 });
+  }
+
   const driverRef = (await getWorkspaceDb()).collection("drivers").doc(params.uid);
   const driverSnap = await driverRef.get();
   if (!driverSnap.exists) return NextResponse.json({ error: "Driver not found." }, { status: 404 });
@@ -66,6 +71,7 @@ export async function PATCH(request: NextRequest, props: { params: Promise<{ uid
     profileLastEditedByEmail: session.email ?? ""
   };
 
+  if (body.driverSex !== undefined) update.driverSex = body.driverSex;
   if (body.firstName !== undefined) {
     update.firstName = firstName;
     update.legalFirstName = firstName;

@@ -104,3 +104,34 @@ test('a stalled pickup ETA provider cannot hold the match request open indefinit
  const result=await pickupEstimate({candidate:{location:{}},pickup:{},nowMillis:0,timeoutMillis:5,routeProvider:()=>new Promise(()=>{})});
  assert.equal(result,null);
 });
+
+test("sessions rank by saved rider preference and canonical driver disclosures", async () => {
+  const {createRideMatchSession} = require('../src/services/rideMatchService');
+  const now = require('../src/config/firebase').admin.firestore.Timestamp.now();
+  const reads = [], writes = [];
+  const drivers = Object.fromEntries(['a','b'].map((id,i)=>[id, {
+    driverApprovalStatus:'approved',driverSignupCompleted:true,driverSex:i?'female':'male',
+    rateCardUpdatedAt:now,tierRates:{'Rydr Go':{minimumFare:5,perMile:1,perMinute:0.2}},eligibleRideTypes:['Rydr Go']
+  }]));
+  function ref(path) {
+    return {path,id:path.split('/').at(-1),collection:key=>ref(`${path}/${key}`),doc:(id='session')=>ref(`${path}/${id}`),where:()=>ref(path),limit:()=>ref(path),
+      async get() {
+        reads.push(path);
+        if(path==='publicDriverProfiles') return {docs:Object.keys(drivers).map(id=>({id,data:()=>({isOnline:true,driverSex:'female',approximateLocation:{lat:33.749,lng:-84.388}})}))};
+        if(path.endsWith('/scheduledRideLocks')) return {docs:[]};
+        const value=path==='riders/authenticated-rider/ridePreferences/current'?{genderPreference:'Female'}
+          :path==='platformConfig/stripeRuntime'?{status:'ready',mode:'test'}
+          :path.startsWith('drivers/')?drivers[path.split('/')[1]]
+          :path.startsWith('driver_status/')?{isOnline:true,availabilityStatus:'available',presenceExpiresAt:{toMillis:()=>now.toMillis()+60000},location:{lat:33.749,lng:-84.388}}:{};
+        return {id:this.id,exists:true,data:()=>value};
+      },async create(value){writes.push(value);}
+    };
+  }
+  const db={collection:key=>ref(key),getAll:(...refs)=>Promise.all(refs.map(r=>r.get()))};
+  const result=await createRideMatchSession({riderId:'authenticated-rider',now,db,
+    payload:{rideType:'Rydr Go',pickupCoordinate:{lat:33.749,lng:-84.388},dropoffCoordinate:{lat:33.77,lng:-84.36},genderPreference:'Male'},
+    routeProvider:async()=>({route:{distanceMeters:5000,durationSeconds:600}})});
+  assert.deepEqual(result.candidates.map(c=>c.driverId),['b','a']);
+  assert.ok(reads.includes('riders/authenticated-rider/ridePreferences/current'));
+  assert.deepEqual(writes[0].candidateIds,['b','a']);
+});

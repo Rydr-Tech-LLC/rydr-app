@@ -74,6 +74,7 @@ export interface DriverVehicle {
 }
 
 export interface DriverRecord {
+  driverSex?: "male" | "female" | "undisclosed";
   complianceRequirements?: Record<string, unknown>;
   uid: string;
   firstName?: string;

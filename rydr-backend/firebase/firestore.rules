@@ -268,6 +268,7 @@ service cloud.firestore {
         "driverOnboardingTotalSteps",
         "email",
         "emailPasswordStepCompleted",
+        "driverSex",
         "firstName",
         "lastName",
         "legalFirstName",
@@ -1036,14 +1037,21 @@ service cloud.firestore {
       }
     }
 
+    function validDriverSex() {
+      return !("driverSex" in request.resource.data)
+        || request.resource.data.driverSex in ["male", "female", "undisclosed"];
+    }
+
     match /drivers/{uid} {
       allow get: if isSelf(uid) || phoneMatches(resource.data) || isAdmin();
       allow list: if false;
       allow create: if isSelf(uid)
         && hasApprovedBetaInvite("driver")
-        && request.resource.data.keys().hasOnly(driverClientWritableProfileFields());
+        && request.resource.data.keys().hasOnly(driverClientWritableProfileFields())
+        && validDriverSex();
       allow update: if isSelf(uid)
-        && affectedKeys().hasOnly(driverClientWritableProfileFields());
+        && affectedKeys().hasOnly(driverClientWritableProfileFields())
+        && validDriverSex();
       allow delete: if isAdmin();
 
       match /vehicleArchive/{archiveId} {

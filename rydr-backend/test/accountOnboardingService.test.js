@@ -38,3 +38,10 @@ test('checkpoint cannot set completion, approval, identity or another role',asyn
  await assert.rejects(recordOnboardingCheckpoint({uid:'test',role:'driver',step:'done',db:{}}),/Unsupported/);
  await assert.rejects(recordOnboardingCheckpoint({uid:'test',role:'rider',step:'done',db:{}}),/Unsupported/);
 });
+
+test('onboarding restores only explicit driver sex disclosures',()=>{
+ assert.equal(resumeProfile({...basic,driverSex:'female'},token).driverSex,'female');
+ assert.equal(resumeProfile({...basic,driverSex:'male'},token).driverSex,'male');
+ assert.equal(resumeProfile({...basic,gender:'Female'},token).driverSex,'undisclosed');
+ assert.equal(resumeProfile({...basic,driverSex:'invalid'},token).driverSex,'undisclosed');
+});
