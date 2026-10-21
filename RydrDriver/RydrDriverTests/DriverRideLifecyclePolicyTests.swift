@@ -110,3 +110,12 @@ final class NavigationLocationQualityTests: XCTestCase {
         XCTAssertTrue(NavigationRouteGeometry.usableLocation(fix(33.0001), previous:fix(33,age:1), now:now))
     }
 }
+
+
+final class NavigationInstructionProgressTests: XCTestCase {
+    func testInstructionsAdvanceLocallyWithoutRequestingAnotherRoute() {
+        XCTAssertEqual(NavigationRouteGeometry.instructionIndex(progress: 50, stepEnds: [100,200,300]), 0)
+        XCTAssertEqual(NavigationRouteGeometry.instructionIndex(progress: 120, stepEnds: [100,200,300]), 1)
+        XCTAssertEqual(NavigationRouteGeometry.instructionIndex(progress: 350, stepEnds: [100,200,300]), 2)
+    }
+}

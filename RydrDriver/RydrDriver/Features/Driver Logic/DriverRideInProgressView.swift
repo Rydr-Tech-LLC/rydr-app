@@ -51,6 +51,7 @@ struct DriverRideInProgressView: View {
     @State private var showMessageSheet = false
     @State private var calculatedRouteCoordinates: [CLLocationCoordinate2D] = []
     @State private var routeSteps: [String] = []
+    @State private var routeStepEnds: [Double] = []
     @State private var routeDistanceMeters: CLLocationDistance?
     @State private var routeTravelTime: TimeInterval?
     @State private var lastRouteOrigin: CLLocationCoordinate2D?
@@ -635,7 +636,7 @@ struct DriverRideInProgressView: View {
             return "You are at the added stop."
         }
 
-        if let nextStep = routeSteps.first, !nextStep.isEmpty {
+        if let nextStep = remainingRouteSteps.first, !nextStep.isEmpty {
             return nextStep
         }
 
@@ -643,7 +644,7 @@ struct DriverRideInProgressView: View {
     }
 
     private var upcomingInstruction: String {
-        routeSteps.dropFirst().first ?? primaryDestinationAddress
+        remainingRouteSteps.dropFirst().first ?? primaryDestinationAddress
     }
 
     private var instructionIcon: String {
@@ -803,6 +804,13 @@ struct DriverRideInProgressView: View {
         return String(format: "%d:%02d", minutes, seconds)
     }
 
+    private var remainingRouteSteps: [String] {
+        guard let driverCoordinate, routeStepEnds.count == routeSteps.count,
+              let match = NavigationRouteGeometry.match(driverCoordinate, path: calculatedRouteCoordinates) else { return routeSteps }
+        let index = NavigationRouteGeometry.instructionIndex(progress: match.progress, stepEnds: routeStepEnds)
+        return Array(routeSteps.dropFirst(index))
+    }
+
     private var routeHeading: CLLocationDirection { navigationHeading }
 
     private func updateNavigationCamera() {
@@ -857,9 +865,18 @@ struct DriverRideInProgressView: View {
                   NavigationRouteGeometry.distance(currentDestination, destination) < 10,
                   let route = response.routes.first else { return }
             calculatedRouteCoordinates = route.polyline.coordinates
-            routeSteps = route.steps
-                .map(\.instructions)
-                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            var distance = 0.0
+            var instructions: [String] = []
+            var ends: [Double] = []
+            for step in route.steps {
+                distance += step.distance
+                if !step.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    instructions.append(step.instructions)
+                    ends.append(distance)
+                }
+            }
+            routeSteps = instructions
+            routeStepEnds = ends
             routeDistanceMeters = route.distance
             routeTravelTime = route.expectedTravelTime
             updateNavigationCamera()

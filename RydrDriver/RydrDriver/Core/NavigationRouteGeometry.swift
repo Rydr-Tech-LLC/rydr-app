@@ -62,6 +62,10 @@ enum NavigationRouteGeometry {
         let delta = (ahead.longitude - match.coordinate.longitude) * .pi / 180
         return (atan2(sin(delta) * cos(b), cos(a) * sin(b) - sin(a) * cos(b) * cos(delta)) * 180 / .pi + 360).truncatingRemainder(dividingBy: 360)
     }
+    static func instructionIndex(progress: Double, stepEnds: [Double]) -> Int {
+        guard !stepEnds.isEmpty else { return 0 }
+        return stepEnds.firstIndex(where: { progress <= $0 + 5 }) ?? (stepEnds.count - 1)
+    }
     static func easedHeading(from current: Double, to target: Double) -> Double {
         let delta = (target - current + 540).truncatingRemainder(dividingBy: 360) - 180
         return (current + delta * 0.7 + 360).truncatingRemainder(dividingBy: 360)
