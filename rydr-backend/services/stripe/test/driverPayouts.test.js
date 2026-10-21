@@ -30,7 +30,7 @@ test('Connect ownership changes block a queued job',async()=>{const f=fixture();
 test('other currencies and inconsistent source amounts never inflate payouts',()=>{assert.deepEqual(availableUsdParts({available:[{currency:'eur',amount:99999},{currency:'usd',amount:50,source_types:{card:50}}]}),[{amount:50,sourceType:'card'}]);assert.throws(()=>availableUsdParts({available:[{currency:'usd',amount:50,source_types:{card:100}}]}),/inconsistent_available_balance/);});
 
 test('interrupted prepared work retires the owner before releasing the account lock',async()=>{
- const f=fixture(),old={toMillis:()=>Date.now()-20*60*1000};
+ const f=fixture(),old={toMillis:()=>f.service.now()-20*60*1000};
  f.records.set(`driverPayouts/${f.id}`,{...f.job(),status:'processing',owner:'old-owner',startedAt:old,parts:[{amount:10000,currency:'usd',sourceType:'card',status:'prepared'}]});
  f.records.set('driverPayoutLocks/acct_driver',{jobId:f.id,owner:'old-owner',createdAt:old});
  await f.service.reconcile(f.id);
@@ -38,7 +38,7 @@ test('interrupted prepared work retires the owner before releasing the account l
  await assert.rejects(f.service.setPart(f.id,0,{status:'submitting'},'old-owner'),e=>e.code==='payout_worker_claim_lost');assert.equal(f.creates().length,0);
 });
 test('an old unresolved lock blocks a new payout and records the earlier job',async()=>{
- const f=fixture();f.records.set('driverPayoutLocks/acct_driver',{jobId:'earlier-job',owner:'old-owner',createdAt:{toMillis:()=>Date.now()-20*60*1000}});
+ const f=fixture();f.records.set('driverPayoutLocks/acct_driver',{jobId:'earlier-job',owner:'old-owner',createdAt:{toMillis:()=>f.service.now()-20*60*1000}});
  await f.service.processWeekly(f.id);assert.equal(f.job().needsReview,true);assert.equal(f.job().blockedByJobId,'earlier-job');assert.equal(f.creates().length,0);
 });
 test('Stripe account ownership mismatch is flagged',async()=>{
