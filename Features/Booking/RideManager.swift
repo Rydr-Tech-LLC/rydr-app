@@ -34,6 +34,9 @@ struct Driver: Identifiable, Equatable {
     var gender: String? = nil
     var quotedRiderTotalCents: Int? = nil
     var quotedDriverPayoutCents: Int? = nil
+    var pickupDurationSeconds: Double? = nil
+    var pickupDistanceMiles: Double? = nil
+    var pickupEstimateAt: Date? = nil
 
     static func == (lhs: Driver, rhs: Driver) -> Bool { lhs.id == rhs.id }
 }
@@ -429,6 +432,11 @@ final class RideManager: ObservableObject {
     @Published var pickupCoordinate: CLLocationCoordinate2D?
     @Published var dropoffCoordinate: CLLocationCoordinate2D?
     @Published var pickupEtaSecondsRemaining: Int = 0
+    @Published private(set) var pickupETAAvailable = false
+    private var pickupDirections: MKDirections?
+    private var pickupETADestination: CLLocation?
+    private var pickupETARequestedAt = Date.distantPast
+    private var pickupETAGeneration = UUID()
     @Published var destinationEtaSecondsRemaining: Int = 0
     @Published var pickupWaitSecondsRemaining: Int = 180
     @Published var paidPickupWaitSeconds: Int = 0
@@ -486,7 +494,7 @@ final class RideManager: ObservableObject {
         pickupWaitCountdownTask?.cancel()
     }
 
-    // Remaining minutes (toy ETA for the chip)
+    // Display-only road-route ETA; fare duration remains backend-owned.
     var remainingMinutesRounded: Double {
         guard let ride = currentRide else { return 0 }
         switch ride.status {
@@ -980,15 +988,41 @@ final class RideManager: ObservableObject {
         from driverCoordinate: CLLocationCoordinate2D,
         to pickupCoordinate: CLLocationCoordinate2D
     ) -> Int {
-        let driverLocation = CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
-        let pickupLocation = CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)
-        let distanceMeters = max(0, driverLocation.distance(from: pickupLocation))
-        guard distanceMeters > 20 else { return 0 }
-
-        // Conservative city pickup speed. This replaces the old trip-duration
-        // percentage estimate, which made same-device tests look 10+ minutes away.
-        let metersPerSecond = 8.0
-        return Int(ceil(distanceMeters / metersPerSecond))
+        let origin = CLLocation(latitude: driverCoordinate.latitude, longitude: driverCoordinate.longitude)
+        let destination = CLLocation(latitude: pickupCoordinate.latitude, longitude: pickupCoordinate.longitude)
+        if origin.distance(from: destination) <= 20 { pickupETAAvailable = true; return 0 }
+        let destinationChanged = pickupETADestination.map { $0.distance(from: destination) > 20 } ?? true
+        if destinationChanged || Date().timeIntervalSince(pickupETARequestedAt) >= 20 {
+            pickupDirections?.cancel()
+            pickupETARequestedAt = Date()
+            pickupETADestination = destination
+            let generation = UUID()
+            pickupETAGeneration = generation
+            let request = MKDirections.Request()
+            request.source = MKMapItem(placemark: MKPlacemark(coordinate: driverCoordinate))
+            request.destination = MKMapItem(placemark: MKPlacemark(coordinate: pickupCoordinate))
+            request.transportType = .automobile
+            request.departureDate = Date()
+            let directions = MKDirections(request: request)
+            pickupDirections = directions
+            directions.calculate { [weak self] response, _ in
+                Task { @MainActor in
+                    guard let self, self.pickupETAGeneration == generation,
+                          self.currentRide?.status == .enRouteToPickup else { return }
+                    if let seconds = response?.routes.first?.expectedTravelTime {
+                        self.pickupEtaSecondsRemaining = Int(ceil(seconds))
+                        self.pickupETAAvailable = true
+                    } else { self.pickupETAAvailable = false }
+                }
+            }
+        }
+        if !pickupETAAvailable, let driver = currentRide?.driver,
+           let at = driver.pickupEstimateAt, Date().timeIntervalSince(at) < 90,
+           let seconds = driver.pickupDurationSeconds {
+            pickupETAAvailable = true
+            return Int(ceil(seconds))
+        }
+        return pickupEtaSecondsRemaining
     }
 
     func markRiderPickedUp() {
@@ -1048,6 +1082,10 @@ final class RideManager: ObservableObject {
         currentRide = nil
         selectedDriver = nil
         currentServiceRideId = nil
+        pickupDirections?.cancel()
+        pickupETAGeneration = UUID()
+        pickupETAAvailable = false
+        pickupETARequestedAt = .distantPast
         pickupEtaSecondsRemaining = 0
         pickupWaitSecondsRemaining = 180
         paidPickupWaitSeconds = 0
@@ -1118,6 +1156,10 @@ final class RideManager: ObservableObject {
         currentRide = nil
         selectedDriver = nil
         currentServiceRideId = nil
+        pickupDirections?.cancel()
+        pickupETAGeneration = UUID()
+        pickupETAAvailable = false
+        pickupETARequestedAt = .distantPast
         pickupEtaSecondsRemaining = 0
         destinationEtaSecondsRemaining = 0
         pickupWaitSecondsRemaining = 180

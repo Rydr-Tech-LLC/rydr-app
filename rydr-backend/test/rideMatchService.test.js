@@ -86,3 +86,21 @@ test("live matching protects enough time to finish and reach a scheduled pickup"
   });
   assert.equal(allowed, true);
 });
+
+test('pickup ETA uses the driver-to-pickup road route, independently of trip duration', async()=>{
+ const {pickupEstimate}=require('../src/services/rideMatchService');
+ const origin={latitude:33.7,longitude:-84.4}, pickup={latitude:33.8,longitude:-84.3};
+ const eta=await pickupEstimate({candidate:{location:origin},pickup,nowMillis:1000,routeProvider:async request=>{assert.deepEqual(request.origin,origin);assert.deepEqual(request.destination,pickup);return{route:{durationSeconds:960,distanceMeters:16093.44}}}});
+ assert.equal(eta.durationSeconds,960);assert.equal(eta.distanceMiles,10);assert.equal(eta.calculatedAtMillis,1000);
+});
+test('pickup route failure or invalid duration reports unavailable rather than a misleading estimate',async()=>{
+ const {pickupEstimate}=require('../src/services/rideMatchService');const input={candidate:{location:{}},pickup:{},nowMillis:0};
+ assert.equal(await pickupEstimate({...input,routeProvider:async()=>{throw Error('offline')}}),null);
+ assert.equal(await pickupEstimate({...input,routeProvider:async()=>({route:{durationSeconds:NaN,distanceMeters:1}})}),null);
+});
+
+test('a stalled pickup ETA provider cannot hold the match request open indefinitely',async()=>{
+ const {pickupEstimate}=require('../src/services/rideMatchService');
+ const result=await pickupEstimate({candidate:{location:{}},pickup:{},nowMillis:0,timeoutMillis:5,routeProvider:()=>new Promise(()=>{})});
+ assert.equal(result,null);
+});

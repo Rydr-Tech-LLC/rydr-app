@@ -13,22 +13,14 @@ struct RydrDriverNavigationMapView: View {
     let heading: CLLocationDirection
     let onRecenter: () -> Void
 
+    @State private var visibleCameraHeading: Double = 0
     @State private var displayedDriverCoordinate: CLLocationCoordinate2D?
     @State private var markerAnimationTask: Task<Void, Never>?
 
-    /// Route geometry passed in from `MKRoute.polyline`, upsampled with a Catmull-Rom
-    /// spline so curves render as smooth arcs rather than the sparse line segments
-    /// MapKit's raw directions response returns.
-    private var renderedRouteCoordinates: [CLLocationCoordinate2D] {
-        Self.smoothedRouteCoordinates(routeCoordinates)
-    }
+    private var renderedRouteCoordinates: [CLLocationCoordinate2D] { routeCoordinates }
 
-    /// The driver's raw GPS fix, projected onto the nearest point of the route line.
-    /// This keeps the vehicle marker glued to the road even when GPS jitter would
-    /// otherwise place it slightly off the polyline.
     private var snappedDriverCoordinate: CLLocationCoordinate2D? {
-        guard let driverCoordinate else { return nil }
-        return Self.closestPoint(to: driverCoordinate, on: routeCoordinates) ?? driverCoordinate
+        driverCoordinate.map { NavigationRouteGeometry.snapped($0, path: routeCoordinates) }
     }
 
     private var driverCoordinateSignature: String {
@@ -74,7 +66,7 @@ struct RydrDriverNavigationMapView: View {
 
             if let markerCoordinate = displayedDriverCoordinate ?? snappedDriverCoordinate ?? driverCoordinate {
                 Annotation("", coordinate: markerCoordinate, anchor: .center) {
-                    RydrNavigationDriverMarker(heading: heading)
+                    RydrNavigationDriverMarker(heading: heading - visibleCameraHeading)
                 }
             }
 
@@ -90,6 +82,9 @@ struct RydrDriverNavigationMapView: View {
                 }
             }
         }
+        .onMapCameraChange(frequency: .continuous) { context in
+            visibleCameraHeading = context.camera.heading
+        }
         .mapControls {
             MapCompass()
             MapScaleView()
@@ -100,6 +95,10 @@ struct RydrDriverNavigationMapView: View {
         }
         .onChange(of: driverCoordinateSignature) { _, _ in
             animateDriverMarker(to: snappedDriverCoordinate ?? driverCoordinate)
+        }
+        .onChange(of: routeCoordinates.count) { _, _ in
+            markerAnimationTask?.cancel()
+            displayedDriverCoordinate = snappedDriverCoordinate ?? driverCoordinate
         }
         .onDisappear {
             markerAnimationTask?.cancel()
@@ -132,7 +131,15 @@ struct RydrDriverNavigationMapView: View {
             return
         }
 
-        let duration = min(1.8, max(0.55, distanceMeters / 18.0))
+        let path = routeCoordinates
+        guard let from = NavigationRouteGeometry.match(start, path: path),
+              let to = NavigationRouteGeometry.match(target, path: path),
+              from.distance <= 40, to.distance <= 40,
+              to.progress >= from.progress, to.progress - from.progress <= 200 else {
+            displayedDriverCoordinate = target
+            return
+        }
+        let duration = min(1.0, max(0.3, distanceMeters / 18.0))
         markerAnimationTask = Task { @MainActor in
             let steps = 24
             let sleep = UInt64((duration / Double(steps)) * 1_000_000_000)
@@ -140,122 +147,13 @@ struct RydrDriverNavigationMapView: View {
                 if Task.isCancelled { return }
                 let t = Double(step) / Double(steps)
                 let eased = t * t * (3 - 2 * t)
-                displayedDriverCoordinate = Self.interpolate(start: start, end: target, progress: eased)
+                displayedDriverCoordinate = NavigationRouteGeometry.coordinate(at: from.progress + (to.progress - from.progress) * eased, path: path) ?? target
                 try? await Task.sleep(nanoseconds: sleep)
             }
             displayedDriverCoordinate = target
         }
     }
 
-    private static func interpolate(
-        start: CLLocationCoordinate2D,
-        end: CLLocationCoordinate2D,
-        progress: Double
-    ) -> CLLocationCoordinate2D {
-        CLLocationCoordinate2D(
-            latitude: start.latitude + ((end.latitude - start.latitude) * progress),
-            longitude: start.longitude + ((end.longitude - start.longitude) * progress)
-        )
-    }
-
-    /// Inserts Catmull-Rom interpolated points between each pair of route coordinates so
-    /// curves render as smooth arcs instead of the sparse polyline MapKit's directions
-    /// response returns. The underlying points still come straight from `MKRoute.polyline`,
-    /// which is already snapped to the road network — this only adds visual smoothing.
-    private static func smoothedRouteCoordinates(
-        _ coordinates: [CLLocationCoordinate2D],
-        segmentsPerPoint: Int = 8
-    ) -> [CLLocationCoordinate2D] {
-        guard coordinates.count > 2 else { return coordinates }
-
-        var points = coordinates
-        points.insert(points[0], at: 0)
-        points.append(points[points.count - 1])
-
-        var smoothed: [CLLocationCoordinate2D] = []
-        for i in 1..<(points.count - 2) {
-            let p0 = points[i - 1]
-            let p1 = points[i]
-            let p2 = points[i + 1]
-            let p3 = points[i + 2]
-
-            for step in 0..<segmentsPerPoint {
-                let t = Double(step) / Double(segmentsPerPoint)
-                smoothed.append(catmullRom(p0, p1, p2, p3, t))
-            }
-        }
-
-        if let last = coordinates.last {
-            smoothed.append(last)
-        }
-        return smoothed
-    }
-
-    private static func catmullRom(
-        _ p0: CLLocationCoordinate2D,
-        _ p1: CLLocationCoordinate2D,
-        _ p2: CLLocationCoordinate2D,
-        _ p3: CLLocationCoordinate2D,
-        _ t: Double
-    ) -> CLLocationCoordinate2D {
-        let t2 = t * t
-        let t3 = t2 * t
-
-        func interpolate(_ a: Double, _ b: Double, _ c: Double, _ d: Double) -> Double {
-            0.5 * (
-                (2 * b)
-                + (-a + c) * t
-                + (2 * a - 5 * b + 4 * c - d) * t2
-                + (-a + 3 * b - 3 * c + d) * t3
-            )
-        }
-
-        return CLLocationCoordinate2D(
-            latitude: interpolate(p0.latitude, p1.latitude, p2.latitude, p3.latitude),
-            longitude: interpolate(p0.longitude, p1.longitude, p2.longitude, p3.longitude)
-        )
-    }
-
-    /// Projects `coordinate` onto the nearest point of `path`, used to glue the vehicle
-    /// marker to the route line and absorb GPS jitter.
-    private static func closestPoint(
-        to coordinate: CLLocationCoordinate2D,
-        on path: [CLLocationCoordinate2D]
-    ) -> CLLocationCoordinate2D? {
-        guard path.count > 1 else { return path.first }
-
-        var bestPoint: CLLocationCoordinate2D?
-        var bestDistance = Double.greatestFiniteMagnitude
-
-        for index in 0..<(path.count - 1) {
-            let projected = projectOntoSegment(coordinate, start: path[index], end: path[index + 1])
-            let distance = CLLocation(latitude: projected.latitude, longitude: projected.longitude)
-                .distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude))
-            if distance < bestDistance {
-                bestDistance = distance
-                bestPoint = projected
-            }
-        }
-        return bestPoint
-    }
-
-    /// Planar projection of `point` onto the segment `start`-`end`. Adequate accuracy at
-    /// navigation zoom scales, where segment lengths are short relative to Earth's curvature.
-    private static func projectOntoSegment(
-        _ point: CLLocationCoordinate2D,
-        start: CLLocationCoordinate2D,
-        end: CLLocationCoordinate2D
-    ) -> CLLocationCoordinate2D {
-        let dx = end.longitude - start.longitude
-        let dy = end.latitude - start.latitude
-        let lengthSquared = dx * dx + dy * dy
-        guard lengthSquared > 0 else { return start }
-
-        var t = ((point.longitude - start.longitude) * dx + (point.latitude - start.latitude) * dy) / lengthSquared
-        t = max(0, min(1, t))
-
-        return CLLocationCoordinate2D(latitude: start.latitude + t * dy, longitude: start.longitude + t * dx)
-    }
 }
 
 private struct RydrNavigationDriverMarker: View {

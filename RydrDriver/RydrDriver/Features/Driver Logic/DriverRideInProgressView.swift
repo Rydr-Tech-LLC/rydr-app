@@ -52,6 +52,14 @@ struct DriverRideInProgressView: View {
     @State private var routeSteps: [String] = []
     @State private var routeDistanceMeters: CLLocationDistance?
     @State private var routeTravelTime: TimeInterval?
+    @State private var lastRouteOrigin: CLLocationCoordinate2D?
+    @State private var lastRouteDestination: CLLocationCoordinate2D?
+    @State private var lastRouteAt = Date.distantPast
+    @State private var routeRequestInFlight = false
+    @State private var routeGeneration = UUID()
+    @State private var activeDirections: MKDirections?
+    @State private var navigationHeading: Double = 0
+    @State private var hasNavigationHeading = false
     @State private var isRouteTrayExpanded = false
     @State private var isNavigationStarted = false
     @State private var now = Date()
@@ -97,6 +105,7 @@ struct DriverRideInProgressView: View {
         }
         .onReceive(timer) { value in
             now = value
+            Task { await calculateRoute() }
             if lifecyclePhase == .waitingForRider,
                ride.pickupPaidWaitStartedAt == nil,
                pickupPaidWaitActive,
@@ -106,11 +115,19 @@ struct DriverRideInProgressView: View {
             }
         }
         .onChange(of: routeCameraKey) { _, _ in
-            guard isNavigationStarted else { return }
-            camera = .camera(navigationCamera)
+            updateNavigationCamera()
         }
-        .task(id: routeCalculationKey) {
+        .task(id: routeDestinationKey) {
+            activeDirections?.cancel()
+            routeGeneration = UUID()
+            routeRequestInFlight = false
+            lastRouteDestination = nil
             await calculateRoute()
+        }
+        .onDisappear {
+            routeGeneration = UUID()
+            activeDirections?.cancel()
+            routeRequestInFlight = false
         }
         .confirmationDialog("Why are you cancelling?", isPresented: $showCancelConfirm, titleVisibility: .visible) {
             ForEach(driverCancellationReasons, id: \.self) { reason in
@@ -645,7 +662,7 @@ struct DriverRideInProgressView: View {
 
     private var travelTimeText: String {
         guard let routeTravelTime else { return "--" }
-        let minutes = max(1, Int((routeTravelTime / 60).rounded()))
+        let minutes = max(1, Int(ceil(routeTravelTime / 60)))
         return "\(minutes)"
     }
 
@@ -683,7 +700,7 @@ struct DriverRideInProgressView: View {
     }
 
     private var displayedRouteCoordinates: [CLLocationCoordinate2D] {
-        calculatedRouteCoordinates.isEmpty ? routeCoordinates : calculatedRouteCoordinates
+        calculatedRouteCoordinates
     }
 
     private var routeCameraKey: String {
@@ -691,10 +708,9 @@ struct DriverRideInProgressView: View {
         return "\(ride.status)-\(coordinateKey)"
     }
 
-    private var routeCalculationKey: String {
-        let destinationKey = primaryDestinationCoordinate.map { "\($0.latitude),\($0.longitude)" } ?? "none"
-        let driverKey = driverCoordinate.map { "\($0.latitude),\($0.longitude)" } ?? "none"
-        return "\(ride.id)-\(ride.status)-\(driverKey)-\(destinationKey)"
+    private var routeDestinationKey: String {
+        let destination = primaryDestinationCoordinate.map { "\($0.latitude),\($0.longitude)" } ?? "none"
+        return "\(ride.id)-\(ride.status)-\(destination)"
     }
 
     private var region: MKCoordinateRegion {
@@ -720,17 +736,19 @@ struct DriverRideInProgressView: View {
     }
 
     private var navigationCamera: MapCamera {
-        let driver = driverCoordinate ?? displayedRouteCoordinates.first ?? primaryDestinationCoordinate ?? DriverMapDefaults.pilotCoordinate
+        let rawDriver = driverCoordinate ?? displayedRouteCoordinates.first ?? primaryDestinationCoordinate ?? DriverMapDefaults.pilotCoordinate
+        let driver = NavigationRouteGeometry.snapped(rawDriver, path: displayedRouteCoordinates)
         let heading = routeHeading
         // Offset the look-at point ahead of the vehicle (rather than centering directly
         // on it) so the marker settles in the lower third of the screen with more road
         // visible ahead — the cinematic framing Apple Maps uses for turn-by-turn.
-        let lookAheadCenter = driver.offset(bearingDegrees: heading, distanceMeters: 60)
+        let lookAheadCenter = NavigationRouteGeometry.match(driver, path: displayedRouteCoordinates)
+            .flatMap { NavigationRouteGeometry.coordinate(at: $0.progress + 45, path: displayedRouteCoordinates) } ?? driver
         return MapCamera(
             centerCoordinate: lookAheadCenter,
             distance: 800,
             heading: heading,
-            pitch: 65
+            pitch: 45
         )
     }
 
@@ -784,12 +802,17 @@ struct DriverRideInProgressView: View {
         return String(format: "%d:%02d", minutes, seconds)
     }
 
-    private var routeHeading: CLLocationDirection {
-        let coordinates = displayedRouteCoordinates
-        guard coordinates.count >= 2 else { return 0 }
-        let origin = driverCoordinate ?? coordinates[0]
-        let target = coordinates.dropFirst().first ?? coordinates[1]
-        return bearing(from: origin, to: target)
+    private var routeHeading: CLLocationDirection { navigationHeading }
+
+    private func updateNavigationCamera() {
+        if let driverCoordinate,
+           let target = NavigationRouteGeometry.heading(at: driverCoordinate, path: displayedRouteCoordinates),
+           !hasNavigationHeading || (driverSpeedMetersPerSecond ?? 0) >= 2 {
+            navigationHeading = hasNavigationHeading ? NavigationRouteGeometry.easedHeading(from: navigationHeading, to: target) : target
+            hasNavigationHeading = true
+        }
+        guard isNavigationStarted else { return }
+        withAnimation(.linear(duration: 0.5)) { camera = .camera(navigationCamera) }
     }
 
     @MainActor
@@ -802,28 +825,47 @@ struct DriverRideInProgressView: View {
             return
         }
 
+        let destinationChanged = lastRouteDestination.map { NavigationRouteGeometry.distance($0, destination) > 10 } ?? true
+        let moved = lastRouteOrigin.map { NavigationRouteGeometry.distance($0, driverCoordinate) } ?? .greatestFiniteMagnitude
+        let offRoute = NavigationRouteGeometry.match(driverCoordinate, path: calculatedRouteCoordinates).map { $0.distance > 60 } ?? true
+        guard !routeRequestInFlight else { return }
+        guard destinationChanged || (calculatedRouteCoordinates.isEmpty && Date().timeIntervalSince(lastRouteAt) >= 10) || (Date().timeIntervalSince(lastRouteAt) >= (offRoute ? 5 : 20) && moved >= (offRoute ? 30 : 100)) else { return }
+        let generation = UUID()
+        routeGeneration = generation
+        routeRequestInFlight = true
+        defer { if routeGeneration == generation { routeRequestInFlight = false; activeDirections = nil } }
+        lastRouteOrigin = driverCoordinate
+        lastRouteDestination = destination
+        lastRouteAt = Date()
+        let requestedRideID = ride.id
+        if destinationChanged { calculatedRouteCoordinates = []; hasNavigationHeading = false }
+
         let request = MKDirections.Request()
         request.source = MKMapItem(placemark: MKPlacemark(coordinate: driverCoordinate))
         request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
         request.transportType = .automobile
+        request.departureDate = Date()
 
         do {
-            let response = try await MKDirections(request: request).calculate()
-            guard let route = response.routes.first else { return }
+            let directions = MKDirections(request: request)
+            activeDirections = directions
+            let response = try await directions.calculate()
+            guard !Task.isCancelled, routeGeneration == generation, ride.id == requestedRideID,
+                  let currentDestination = primaryDestinationCoordinate,
+                  NavigationRouteGeometry.distance(currentDestination, destination) < 10,
+                  let route = response.routes.first else { return }
             calculatedRouteCoordinates = route.polyline.coordinates
             routeSteps = route.steps
                 .map(\.instructions)
                 .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             routeDistanceMeters = route.distance
             routeTravelTime = route.expectedTravelTime
-            camera = isNavigationStarted
-                ? .camera(navigationCamera)
-                : .region(region(for: calculatedRouteCoordinates))
+            updateNavigationCamera()
+            if !isNavigationStarted { camera = .region(region(for: calculatedRouteCoordinates)) }
         } catch {
-            calculatedRouteCoordinates = []
-            routeSteps = []
-            routeDistanceMeters = nil
-            routeTravelTime = nil
+            guard routeGeneration == generation else { return }
+            // Keep the last usable road route during a transient directions error.
+            if destinationChanged { routeSteps = []; routeDistanceMeters = nil; routeTravelTime = nil }
         }
     }
 

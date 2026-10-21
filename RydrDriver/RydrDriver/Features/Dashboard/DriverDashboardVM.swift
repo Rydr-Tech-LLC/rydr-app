@@ -233,6 +233,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     private var scheduledMapOpportunityListener: ListenerRegistration?
     private var activeRideListener: ListenerRegistration?
     private var activeRideDocumentListener: ListenerRegistration?
+    private var activeRideObservedID: String?
+    private var activeRideRecoveryTimer: Timer?
+    private var activeRideRecoveryInFlight = false
+    private var rideObservation = DriverRideObservationPolicy()
     private var notificationListener: ListenerRegistration?
     private var safetyPenaltyNotificationListener: ListenerRegistration?
     private var appealNotificationListener: ListenerRegistration?
@@ -274,6 +278,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         scheduledMapOpportunityListener?.remove()
         activeRideListener?.remove()
         activeRideDocumentListener?.remove()
+        activeRideRecoveryTimer?.invalidate()
         notificationListener?.remove()
         safetyPenaltyNotificationListener?.remove()
         appealNotificationListener?.remove()
@@ -350,6 +355,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             return
         }
         #endif
+        guard NavigationRouteGeometry.usableLocation(loc, previous: lastLocation) else { return }
         hasReceivedDriverLocation = true
         lastLocation = loc
         mapRegion.center = loc.coordinate
@@ -1690,7 +1696,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
 
         activeRideListener = db.collection("rides")
             .whereField("driverId", isEqualTo: uid)
-            .whereField("status", in: ["accepted", "enRouteToPickup", "navigatingToPickup", "arrived", "arrivedAtPickup", "waitingForRider", "inProgress", "navigatingToStop", "arrivedAtStop", "waitingAtStop"])
+            .whereField("status", in: ["accepted", "enRouteToPickup", "navigatingToPickup", "arrived", "arrivedAtPickup", "waitingForRider", "inProgress", "navigatingToStop", "arrivedAtStop", "waitingAtStop", "navigatingToDropoff"])
             .addSnapshotListener { [weak self] snapshot, error in
                 DispatchQueue.main.async {
                     guard error == nil else {
@@ -1698,12 +1704,13 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                         return
                     }
                     let activeDocuments = snapshot?.documents.filter {
-                        ($0.data()["driverQueueStatus"] as? String) != "queued"
+                        ($0.data()["driverQueueStatus"] as? String) != "queued" && (self?.rideObservation.allows($0.documentID) ?? true)
                     } ?? []
                     guard let doc = activeDocuments.first else {
                         if let removedRide = self?.activeRide {
-                            self?.setActiveRide(nil)
-                            self?.handleActiveRideRemovedFromActiveQuery(removedRide)
+                            // Query removals can race document snapshots or cached results.
+                            // Confirm the terminal server state before clearing this ride.
+                            self?.reconcileActiveRide(rideId: removedRide.id)
                         } else {
                             self?.resumeStandbyIfWaiting()
                         }
@@ -1716,21 +1723,35 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func setActiveRide(_ ride: DriverActiveRide?) {
+        if let ride, !rideObservation.allows(ride.id) { return }
         activeRide = ride
+        // Keep one document listener for a ride. Telemetry/query snapshots must
+        // not tear it down and leave a gap exactly when cancellation arrives.
+        if let ride, activeRideObservedID == ride.id { return }
+        activeRideObservedID = ride?.id
+        lastTripTelemetryAt = nil
+        lastTripTelemetryLocation = nil
+        activeRideRecoveryTimer?.invalidate()
+        activeRideRecoveryTimer = nil
         activeRideDocumentListener?.remove()
         activeRideDocumentListener = nil
 
         guard let ride else { return }
+        activeRideRecoveryTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            self?.reconcileActiveRide(rideId: ride.id)
+        }
         activeRideDocumentListener = db.collection("rides").document(ride.id)
             .addSnapshotListener { [weak self] snapshot, error in
                 DispatchQueue.main.async {
-                    guard let self else { return }
+                    guard let self, self.activeRide?.id == ride.id else { return }
                     if let error {
                         self.statusMessage = "Active ride update error: \(error.localizedDescription)"
                         return
                     }
                     guard let data = snapshot?.data() else {
-                        self.activeRide = nil
+                        guard snapshot?.metadata.isFromCache == false else { return }
+                        self.rideObservation.markTerminal(ride.id)
+                        self.setActiveRide(nil)
                         self.resumeStandbyIfWaiting()
                         self.updateDriverPresence(online: self.isOnline)
                         return
@@ -1739,9 +1760,8 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                     let status = data["status"] as? String ?? ""
                     if Self.isTerminalCancellationStatus(status) {
                         let cancelledRide = DriverActiveRide(id: ride.id, data: data)
-                        self.activeRide = nil
-                        self.activeRideDocumentListener?.remove()
-                        self.activeRideDocumentListener = nil
+                        self.rideObservation.markTerminal(ride.id)
+                        self.setActiveRide(nil)
                         if status == "riderCancelled" || status == "adminCancelled" || status == "cancelled" {
                             self.presentRiderCancellationAlert(for: cancelledRide)
                         }
@@ -1755,22 +1775,31 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             }
     }
 
-    private static func isTerminalCancellationStatus(_ status: String) -> Bool {
-        status == "riderCancelled" || status == "driverCancelled" || status == "adminCancelled" || status == "cancelled"
-    }
-
-    private func handleActiveRideRemovedFromActiveQuery(_ ride: DriverActiveRide) {
-        db.collection("rides").document(ride.id).getDocument { [weak self] snapshot, _ in
+    private func reconcileActiveRide(rideId: String) {
+        guard activeRide?.id == rideId, !activeRideRecoveryInFlight else { return }
+        activeRideRecoveryInFlight = true
+        db.collection("rides").document(rideId).getDocument(source: .server) { [weak self] snapshot, error in
             DispatchQueue.main.async {
                 guard let self else { return }
-                let status = snapshot?.data()?["status"] as? String
-                if status == "riderCancelled" || status == "adminCancelled" || status == "cancelled" {
-                    self.presentRiderCancellationAlert(for: ride)
+                self.activeRideRecoveryInFlight = false
+                guard error == nil, self.activeRide?.id == rideId, let data = snapshot?.data() else { return }
+                let status = data["status"] as? String ?? ""
+                if Self.isTerminalCancellationStatus(status) || status == "completed" {
+                    let ride = DriverActiveRide(id: rideId, data: data)
+                    self.rideObservation.markTerminal(rideId)
+                    self.setActiveRide(nil)
+                    if ["riderCancelled", "adminCancelled", "cancelled"].contains(status) {
+                        self.presentRiderCancellationAlert(for: ride)
+                    }
+                    self.resumeStandbyIfWaiting()
+                    self.updateDriverPresence(online: self.isOnline)
                 }
-                self.resumeStandbyIfWaiting()
-                self.updateDriverPresence(online: self.isOnline)
             }
         }
+    }
+
+    private static func isTerminalCancellationStatus(_ status: String) -> Bool {
+        status == "riderCancelled" || status == "driverCancelled" || status == "adminCancelled" || status == "cancelled"
     }
 
     private func presentRiderCancellationAlert(for ride: DriverActiveRide) {
@@ -2072,7 +2101,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             do {
                 try await RydrBackendService.recordRideTelemetry(rideId: ride.id, body: payload)
             } catch {
-                RydrCrashReporter.record(error, context: "record_trip_telemetry")
+                if (error as NSError).code == 409 {
+                    await MainActor.run { self.reconcileActiveRide(rideId: ride.id) }
+                } else { RydrCrashReporter.record(error, context: "record_trip_telemetry") }
             }
         }
     }
