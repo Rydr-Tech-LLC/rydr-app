@@ -6,6 +6,7 @@ const { hasCurrentOnlinePresence } = require("../src/services/driverPresenceServ
 test("match candidates expose only rider-safe display data", () => {
   const projection = publicDriverProjection({
     displayName: "Taylor Driver",
+    driverSex: "female",
     email: "private@example.com",
     phoneNumber: "+15555550123",
     profilePhotoURL: "https://example.com/profile.jpg",
@@ -20,6 +21,7 @@ test("match candidates expose only rider-safe display data", () => {
   assert.equal(projection.displayName, "Taylor");
   assert.equal(projection.vehicleSummary, "Black 2025 Toyota Camry");
   assert.deepEqual(projection.approximateLocation, { lat: 33.749, lng: -84.388 });
+  assert.equal(projection.driverSex, undefined);
   assert.equal(projection.email, undefined);
   assert.equal(projection.phoneNumber, undefined);
   assert.equal(projection.licensePlate, undefined);
