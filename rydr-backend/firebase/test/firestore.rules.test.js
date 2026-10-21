@@ -283,3 +283,16 @@ test("the original control database denies end-user access after Auth separation
     await environment.withSecurityRulesDisabled(context => setDoc(doc(context.firestore(),"operationalSecurity/liveBetaAccess"), original));
   }
 });
+
+test("driver sex disclosure is optional, constrained, and owner writable only", async () => {
+  const owner = environment.authenticatedContext("driver-1", {phone_number: "+16783225555"}).firestore();
+  const other = environment.authenticatedContext("driver-2", {phone_number: "+16783225555"}).firestore();
+  const ref = doc(owner, "drivers/driver-1");
+  for (const driverSex of ["female", "male", "undisclosed"]) {
+    await assertSucceeds(updateDoc(ref, {driverSex}));
+  }
+  for (const driverSex of ["invalid", "", null, 42]) {
+    await assertFails(updateDoc(ref, {driverSex}));
+  }
+  await assertFails(updateDoc(doc(other, "drivers/driver-1"), {driverSex: "female"}));
+});

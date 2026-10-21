@@ -6,6 +6,7 @@ import FirebaseFirestore
 struct DriverProfileView: View {
     @ObservedObject var dashboardVM: DriverDashboardVM
     @State private var showRideFilters = false
+    @State private var showDriverSex = false
     @StateObject private var vm = DriverProfileViewModel()
 
     init(dashboardVM: DriverDashboardVM) {
@@ -33,6 +34,9 @@ struct DriverProfileView: View {
                     dashboardVM.refreshRideFilters()
                 }
             )
+        }
+        .sheet(isPresented: $showDriverSex) {
+            DriverSexEditor(initialValue: vm.driverSex)
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Profile")
@@ -161,6 +165,12 @@ struct DriverProfileView: View {
 
     private var profileSections: some View {
         VStack(spacing: 10) {
+            Button { showDriverSex = true } label: {
+                DriverProfileLinkRow(title: "Sex designation", subtitle: !vm.sexLoaded ? "Loading…" : vm.driverSex == "male" ? "Male" : vm.driverSex == "female" ? "Female" : "Not disclosed", systemImage: "person.crop.circle")
+            }
+            .buttonStyle(.plain)
+            .disabled(!vm.sexLoaded)
+
             NavigationLink(destination: PublicProfileDetailView(dashboardVM: dashboardVM)) {
                 DriverProfileLinkRow(title: "Public profile details", subtitle: "Photo, name, and rider-facing profile", systemImage: "person.text.rectangle.fill")
             }
@@ -264,6 +274,8 @@ private struct DriverProfileSummary {
 @MainActor
 private final class DriverProfileViewModel: ObservableObject {
     @Published var profile = DriverProfileSummary()
+    @Published var driverSex = "undisclosed"
+    @Published var sexLoaded = false
 
     private var db: Firestore { RydrWorkspace.firestore }
     private var listener: ListenerRegistration?
@@ -274,12 +286,16 @@ private final class DriverProfileViewModel: ObservableObject {
 
     func start() {
         listener?.remove()
+        sexLoaded = false
         guard let uid = RydrWorkspace.auth.currentUser?.uid else { return }
         listener = db.collection("drivers").document(uid).addSnapshotListener { [weak self] snapshot, _ in
             guard let self else { return }
-            let data = snapshot?.data() ?? [:]
+            guard let data = snapshot?.data() else { return }
             let user = RydrWorkspace.auth.currentUser
             Task { @MainActor in
+                self.sexLoaded = true
+                let disclosedSex = data["driverSex"] as? String ?? "undisclosed"
+                self.driverSex = ["male", "female"].contains(disclosedSex) ? disclosedSex : "undisclosed"
                 self.profile = DriverProfileSummary(
                     displayName: Self.publicDisplayName(from: data, authUser: user),
                     email: data["email"] as? String ?? user?.email ?? "",
@@ -341,5 +357,75 @@ private final class DriverProfileViewModel: ObservableObject {
             }
         }
         return []
+    }
+}
+
+private struct DriverSexEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var selection: String
+    @State private var saving = false
+    @State private var errorMessage: String?
+
+    init(initialValue: String) {
+        _selection = State(initialValue: initialValue)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Sex", selection: $selection) {
+                        Text("Prefer not to disclose").tag("undisclosed")
+                        Text("Female").tag("female")
+                        Text("Male").tag("male")
+                    }
+                    .pickerStyle(.inline)
+                    .disabled(saving)
+                } footer: {
+                    Text("Your self-disclosed biological sex helps prioritize rider preferences. This is optional and does not change your eligibility to drive.")
+                }
+                if let errorMessage {
+                    Text(errorMessage).foregroundStyle(.red)
+                }
+                Button {
+                    Task { await save() }
+                } label: {
+                    HStack {
+                        Spacer()
+                        if saving { ProgressView() } else { Text("Save changes").fontWeight(.semibold) }
+                        Spacer()
+                    }
+                }
+                .disabled(saving)
+            }
+            .tint(.red)
+            .navigationTitle("Sex designation")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }.disabled(saving)
+                }
+            }
+            .interactiveDismissDisabled(saving)
+        }
+    }
+
+    @MainActor private func save() async {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid else {
+            errorMessage = "Sign in again to update your profile."
+            return
+        }
+        saving = true
+        errorMessage = nil
+        defer { saving = false }
+        do {
+            try await RydrWorkspace.firestore.collection("drivers").document(uid).updateData([
+                "driverSex": selection,
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+            dismiss()
+        } catch {
+            errorMessage = "Your changes could not be saved. Please try again."
+        }
     }
 }

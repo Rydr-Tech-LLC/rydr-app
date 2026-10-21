@@ -491,7 +491,10 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             acceptanceRate: Self.intValue(data["acceptanceRate"]),
             gender: driverGender(from: data),
             quotedRiderTotalCents: rate.estimatedRiderTotalCents,
-            quotedDriverPayoutCents: rate.estimatedDriverPayoutCents
+            quotedDriverPayoutCents: rate.estimatedDriverPayoutCents,
+            pickupDurationSeconds: (candidate["pickupEstimate"] as? [String: Any]).flatMap { Self.doubleValue($0["durationSeconds"]) },
+            pickupDistanceMiles: (candidate["pickupEstimate"] as? [String: Any]).flatMap { Self.doubleValue($0["distanceMiles"]) },
+            pickupEstimateAt: (candidate["pickupEstimate"] as? [String: Any]).flatMap { Self.doubleValue($0["calculatedAtMillis"]) }.map { Date(timeIntervalSince1970: $0 / 1000) }
         )
     }
 

@@ -118,6 +118,19 @@ async function protectScheduledCommitments({ candidates, db, pickup, dropoff, tr
   return decisions.filter((decision) => decision.allowed).map((decision) => decision.candidate);
 }
 
+async function pickupEstimate({ candidate, pickup, routeProvider, nowMillis, timeoutMillis = 4000 }) {
+  let timeout;
+  try {
+    const result = await Promise.race([
+      routeProvider({ origin: candidate.location, destination: pickup, departureDate: new Date(nowMillis).toISOString() }),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("pickup_eta_timeout")), timeoutMillis); })
+    ]);
+    const seconds = Number(result.route?.durationSeconds), meters = Number(result.route?.distanceMeters);
+    if (!Number.isFinite(seconds) || seconds < 0 || !Number.isFinite(meters) || meters < 0) return null;
+    return { durationSeconds: Math.ceil(seconds), distanceMiles: meters / 1609.344, calculatedAtMillis: nowMillis };
+  } catch { return null; } finally { clearTimeout(timeout); } // Unavailable is honest; never substitute trip time or straight-line distance.
+}
+
 async function createRideMatchSession({ riderId, payload, db = getFirestore(), routeProvider = getDirections, now = admin.firestore.Timestamp.now() }) {
   const pickup = coordinate(payload?.pickupCoordinate, "pickupCoordinate");
   const dropoff = coordinate(payload?.dropoffCoordinate, "dropoffCoordinate");
@@ -143,7 +156,10 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
   const statusById = new Map(statusSnapshots
     .filter((doc) => doc.exists && hasCurrentOnlinePresence(doc.data(), now.toMillis()))
     .map((doc) => [doc.id, doc.data()]));
+  const riderPreferences = (await db.collection("riders").doc(riderId)
+    .collection("ridePreferences").doc("current").get()).data() || {};
   const eligible = await filterLiveBetaCandidates(db, findBestDrivers({
+    riderSexPreference: riderPreferences.genderPreference ?? riderPreferences.driverPreference,
     rideType,
     pickupCoordinate: pickup,
     dropoffCoordinate: dropoff,
@@ -180,7 +196,7 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
   });
   if (onTimeEligible.length === 0) throw error("No nearby drivers can complete this ride without risking a scheduled pickup", 409);
 
-  const candidates = onTimeEligible.map((candidate) => {
+  const candidates = (await Promise.all(onTimeEligible.map(async (candidate, index) => {
     const rates = configuredRateObject(candidate.profile, rideType);
     if (!rates) return null;
     const outcome = calculateOutcome({
@@ -196,14 +212,14 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
       matchScore: candidate.matchScore,
       matchReasons: candidate.matchReasons,
       preferenceMatch: candidate.preferenceMatch,
-      distanceToPickupMiles: Math.round(candidate.distanceToPickupMiles * 10) / 10,
+      pickupEstimate: index < 3 ? await pickupEstimate({ candidate, pickup, routeProvider, nowMillis: now.toMillis() }) : null,
       driver: publicDriverProjection(candidate.profile, candidate.location),
       quoteFingerprint: quoteFingerprint({ riderId, driverId: candidate.id, rideType, pickup, dropoff, route, rates }),
       rates,
       estimatedRiderTotalCents: outcome.finalRiderChargeCents,
       estimatedDriverPayoutCents: outcome.driverPayoutCents
     };
-  }).filter(Boolean);
+  }))).filter(Boolean);
   if (candidates.length === 0) throw error("No nearby drivers with a current rate card are available", 409);
   const sessionRef = db.collection("rideMatchSessions").doc();
   const expiresAt = admin.firestore.Timestamp.fromMillis(now.toMillis() + MATCH_SESSION_TTL_MS);
@@ -237,6 +253,7 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
 
 module.exports = {
   createRideMatchSession,
+  pickupEstimate,
   MATCH_SESSION_TTL_MS,
   SCHEDULED_RIDE_PROTECTION_WINDOW_MS,
   SCHEDULED_RIDE_ARRIVAL_BUFFER_SECONDS,

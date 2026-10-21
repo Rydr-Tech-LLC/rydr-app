@@ -106,3 +106,19 @@ test("Prestine body choices filter actual matches by premium eligibility and sel
   assert.deepEqual(match(candidates, { rideType: "Rydr Prestine SUV" }).map(row => row.id), ["premium-suv"]);
   assert.deepEqual(match(candidates, { rideType: "Rydr Prestine Sedan" }).map(row => row.id), ["premium-sedan"]);
 });
+
+test("rider sex preference prioritizes disclosed matches without excluding other eligible drivers", () => {
+  const candidates = [candidate("near-male", {driverSex: "male"}), candidate("unknown"),
+    candidate("female", {driverSex: "female", approximateLocation: {lat: 33.79, lng: -84.388}}),
+    candidate("offline-female", {driverSex: "female", isOnline: false})];
+  assert.deepEqual(match(candidates, {riderSexPreference: "Female"}).map(x => x.id), ["female", "near-male", "unknown"]);
+  assert.deepEqual(match(candidates, {riderSexPreference: "Male"}).map(x => x.id), ["near-male", "unknown", "female"]);
+  assert.deepEqual(match(candidates, {riderSexPreference: "No preference"}).map(x => x.id), match(candidates).map(x => x.id));
+});
+
+test("legacy gender fields never stand in for a driver sex disclosure", () => {
+  const candidates = [candidate("legacy", {gender: "Female", genderIdentity: "female"}), candidate("disclosed", {driverSex: "female"})];
+  assert.equal(match(candidates, {riderSexPreference: "female"})[0].id, "disclosed");
+  assert.equal(match(candidates, {riderSexPreference: "invalid"}).length, 2);
+  assert.equal(match([candidate("unknown"), candidate("male", {driverSex: "male"})], {riderSexPreference: "female"}).length, 2);
+});

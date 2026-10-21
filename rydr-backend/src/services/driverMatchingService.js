@@ -129,6 +129,7 @@ function findBestDrivers({
   dropoffCoordinate,
   routeDistanceMiles,
   candidates,
+  riderSexPreference = null,
   requireOnline = true,
   maxPickupDistanceMiles = DEFAULT_MAX_PICKUP_DISTANCE_MILES,
   maxResults = DEFAULT_RESULT_LIMIT
@@ -136,6 +137,8 @@ function findBestDrivers({
   const pickup = coordinate(pickupCoordinate);
   const dropoff = coordinate(dropoffCoordinate);
   const tripMiles = Number(routeDistanceMiles);
+  const preferred = ["male", "female"].includes(String(riderSexPreference).toLowerCase()) ? String(riderSexPreference).toLowerCase() : null;
+
   if (!rideType || !pickup || !dropoff || !Number.isFinite(tripMiles) || tripMiles <= 0) return [];
 
   return (Array.isArray(candidates) ? candidates : [])
@@ -174,6 +177,11 @@ function findBestDrivers({
       && candidate.distanceToPickupMiles <= maxPickupDistanceMiles
       && candidate.preferenceMatch !== "rejected")
     .sort((left, right) => {
+      if (preferred) {
+        const leftMatches = left.profile.driverSex === preferred;
+        const rightMatches = right.profile.driverSex === preferred;
+        if (leftMatches !== rightMatches) return leftMatches ? -1 : 1;
+      }
       if (left.preferenceMatch !== right.preferenceMatch) return left.preferenceMatch === "strict" ? -1 : 1;
       if (left.matchScore !== right.matchScore) return right.matchScore - left.matchScore;
       if (left.distanceToPickupMiles !== right.distanceToPickupMiles) return left.distanceToPickupMiles - right.distanceToPickupMiles;

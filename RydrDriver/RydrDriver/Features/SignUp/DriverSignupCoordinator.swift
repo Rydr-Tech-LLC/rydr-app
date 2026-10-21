@@ -107,6 +107,7 @@ struct DriverSignupCoordinator: View {
     // Shared state
     @State private var phoneNumber: String = ""
     @State private var pendingVerificationID: String = ""
+    @State private var driverSex = "undisclosed"
     @State private var firstName: String = ""
     @State private var lastName: String = ""
     @State private var dob: Date = Calendar.current.date(byAdding: .year, value: -26, to: Date()) ?? Date()
@@ -159,6 +160,7 @@ struct DriverSignupCoordinator: View {
         let p = saved.profile
         _path = State(initialValue: saved.nextStep.flatMap(DriverSignupStep.resumeStep).map { [$0] } ?? [])
         _phoneNumber = State(initialValue: p.phoneNumber ?? "")
+        _driverSex = State(initialValue: ["male", "female"].contains(p.driverSex ?? "") ? (p.driverSex ?? "undisclosed") : "undisclosed")
         _firstName = State(initialValue: p.firstName ?? "")
         _lastName = State(initialValue: p.lastName ?? "")
         _email = State(initialValue: p.email ?? "")
@@ -278,7 +280,7 @@ struct DriverSignupCoordinator: View {
                     .onAppear { markCurrentOnboardingStep(.betaWaiver) }
 
                 case .nameDOB:
-                    NameDOBView(firstName: $firstName, lastName: $lastName, dob: $dob) {
+                    NameDOBView(firstName: $firstName, lastName: $lastName, dob: $dob, driverSex: $driverSex) {
                         let legalName = [firstName, lastName]
                             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                             .filter { !$0.isEmpty }
@@ -291,6 +293,7 @@ struct DriverSignupCoordinator: View {
                             "legalName": legalName,
                             "displayName": legalName,
                             "dob": Timestamp(date: dob),
+                            "driverSex": driverSex,
                             "nameDOBStepCompleted": true
                         ]) { path.append(.emailPassword) }
                     }

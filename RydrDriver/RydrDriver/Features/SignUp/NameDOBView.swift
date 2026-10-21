@@ -15,6 +15,7 @@ struct NameDOBView: View {
     @Binding var firstName: String
     @Binding var lastName: String
     @Binding var dob: Date
+    @Binding var driverSex: String
 
     var currentStep: Int = 1
     var totalSteps: Int = 8
@@ -76,6 +77,20 @@ struct NameDOBView: View {
                         RoundedRectangle(cornerRadius: 14)
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
                     )
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("Sex (optional)", selection: $driverSex) {
+                            Text("Prefer not to disclose").tag("undisclosed")
+                            Text("Female").tag("female")
+                            Text("Male").tag("male")
+                        }
+                        .tint(.primary)
+                        Text("Your self-disclosed biological sex helps prioritize rider preferences. You can update this in your profile.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding()
+                    .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 14))
 
                     if !isOldEnough {
                         HStack(spacing: 6) {

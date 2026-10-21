@@ -5,6 +5,7 @@
 //  Created by Khris Nunnally on 6/21/25.
 //
 import SwiftUI
+import Combine
 import MapKit
 
 struct DriverSelectionView: View {
@@ -319,13 +320,24 @@ private struct DriverCard: View {
     let onConfirm: () -> Void
 
     @State private var isFavorite = false
+    @State private var pickupEstimateClock = Date()
 
     private var baseFare: Double {
         Double(driver.quotedRiderTotalCents ?? 0) / 100
     }
 
     private var distanceText: String {
-        String(format: "%.1f mi", estimate.distanceMiles)
+        guard pickupEstimateFresh, let miles = driver.pickupDistanceMiles else { return "Unavailable" }
+        return String(format: "%.1f mi", miles)
+    }
+
+    private var pickupEstimateFresh: Bool {
+        driver.pickupEstimateAt.map { pickupEstimateClock.timeIntervalSince($0) < 90 } ?? false
+    }
+
+    private var pickupETAText: String {
+        guard pickupEstimateFresh, let seconds = driver.pickupDurationSeconds else { return "Unavailable" }
+        return "\(max(1, Int(ceil(seconds / 60)))) min"
     }
 
     private var finalFare: Double {
@@ -363,7 +375,7 @@ private struct DriverCard: View {
             HStack(spacing: 0) {
                 driverMetric(systemName: "mappin.circle.fill", value: distanceText, label: "away")
                 Divider().frame(height: 30)
-                driverMetric(systemName: "timer", value: "\(Int(estimate.durationMinutes)) min", label: "arrival")
+                driverMetric(systemName: "timer", value: pickupETAText, label: "pickup ETA")
                 if let acceptanceRate = driver.acceptanceRate {
                     Divider().frame(height: 30)
                     driverMetric(systemName: "person.badge.shield.checkmark.fill", value: "\(acceptanceRate)%", label: "accept rate")
@@ -413,6 +425,7 @@ private struct DriverCard: View {
                 .stroke(Color.black.opacity(0.06), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.08), radius: 20, y: 10)
+        .onReceive(Timer.publish(every: 30, on: .main, in: .common).autoconnect()) { pickupEstimateClock = $0 }
     }
 
     private func rateLabel(_ value: Double, _ unit: String) -> some View {

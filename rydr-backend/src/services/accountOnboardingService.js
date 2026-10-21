@@ -7,6 +7,7 @@ function resumeProfile(profile, token) {
   try { dob = profile.dob?.toDate?.().toISOString() || (profile.dob ? new Date(profile.dob).toISOString() : undefined); } catch {}
   return {
     firstName: profile.firstName || '', lastName: profile.lastName || '', preferredName: profile.preferredName || '', email: profile.email || token.email || '', phoneNumber: token.phone_number || profile.phoneE164 || profile.phoneNumber || '', dob: dob || null,
+    driverSex: ["male", "female"].includes(profile.driverSex) ? profile.driverSex : "undisclosed",
     address: { street: address.street || address.line1 || '', line2: address.line2 || '', city: address.city || '', state: address.state || '', zip: address.zip || address.postal_code || '' },
     license: { number: license.number || '', state: license.state || '' },
     vehicle: { vin: vehicle.vin || '', make: vehicle.make || '', model: vehicle.model || '', year: String(vehicle.year || ''), trim: vehicle.trim || null, bodyStyle: vehicle.bodyStyle || null, fuelType: vehicle.fuelType || 'gas', color: vehicle.color || '', plate: vehicle.plate || '' },

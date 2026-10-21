@@ -66,14 +66,14 @@ struct PaymentScreenView: View {
                         .accessibilityHidden(true)
                         .padding(.top, 6)
 
-                    paymentForm.disabled(saveAttempt.isBusy)
+                    paymentForm.disabled(saveAttempt.isBusy || saveAttempt.confirmedIntentID != nil)
 
                     Button(isLoading ? "Working..." : "Save & Continue") {
                         addCard()
                     }
                     .buttonStyle(SignupPrimaryButtonStyle())
-                    .disabled(customerId == nil || !canSubmitCard || isLoading)
-                    .opacity(customerId == nil || !canSubmitCard || isLoading ? 0.56 : 1)
+                    .disabled(customerId == nil || (!canSubmitCard && saveAttempt.confirmedIntentID == nil) || isLoading)
+                    .opacity(customerId == nil || (!canSubmitCard && saveAttempt.confirmedIntentID == nil) || isLoading ? 0.56 : 1)
                     .padding(.top, 4)
 
                     if showSkip {
@@ -174,6 +174,7 @@ struct PaymentScreenView: View {
                     self.isLoading = false
                     if case .success(let cid) = result {
                         self.customerId = cid
+                        self.resumePendingCardSave()
                     } else if case .failure(let e) = result {
                         self.error(e.localizedDescription)
                     }
@@ -219,7 +220,7 @@ struct PaymentScreenView: View {
         req.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
 
         func send(_ r: URLRequest) {
-            URLSession.shared.dataTask(with: r) { data, response, requestError in
+            CardSaveTransport.perform(r, retryable: ["create-customer", "create-setup-intent", "finish-card-setup"].contains(path)) { data, response, requestError in
                 if let requestError {
                     completion(.failure(requestError))
                     return
@@ -244,7 +245,7 @@ struct PaymentScreenView: View {
                 let message = backendError.map { "Payment server error (\(http.statusCode)): \($0)" }
                     ?? "Payment server error (\(http.statusCode))."
                 completion(.failure(simple(message)))
-            }.resume()
+            }
         }
 
         guard let user = RydrWorkspace.auth.currentUser else {
@@ -252,7 +253,7 @@ struct PaymentScreenView: View {
             return
         }
 
-        user.getIDTokenForcingRefresh(true) { token, tokenError in
+        user.getIDTokenForcingRefresh(false) { token, tokenError in
             guard let token, tokenError == nil else {
                 let message = tokenError?.localizedDescription ?? "Could not get a Firebase session token."
                 completion(.failure(simple(message)))
@@ -300,15 +301,17 @@ struct PaymentScreenView: View {
             error("Payment setup is still loading.")
             return
         }
-        guard let pmParams = cardParams else {
-            error("Enter a valid card before saving.")
-            return
-        }
-
+        guard let uid = RydrWorkspace.auth.currentUser?.uid,
+              let workspace = RydrWorkspace.identifier else { return }
+        saveAttempt.bind(scope: workspace + ":" + uid + ":add")
         guard let requestID = saveAttempt.begin() else { return }
         errorMessage = nil
         isLoading = true
         if let confirmed = saveAttempt.confirmedIntentID { finalizeCard(confirmed); return }
+        guard let pmParams = cardParams else {
+            finishCardSave(.failure(simple("Enter a valid card before saving.")))
+            return
+        }
 
         requestJSON(path: "create-setup-intent", body: ["requestId": requestID]) { (result: Result<SetupIntentResponse_Signup, Error>) in
             let setupIntent: SetupIntentResponse_Signup
@@ -336,13 +339,40 @@ struct PaymentScreenView: View {
                     saveAttempt.confirmed(setupIntent.setupIntentId)
                     finalizeCard(setupIntent.setupIntentId)
                 case .failed:
-                    finishCardSave(.failure(error ?? simple("Confirmation failed")))
+                    recoverCardSave(requestID: requestID, originalError: error ?? simple("Confirmation failed"))
                 case .canceled:
                     finishCardSave(.failure(simple("Canceled")))
                 @unknown default:
                     finishCardSave(.failure(simple("Unknown payment status")))
                 }
             }
+        }
+    }
+
+    private func resumePendingCardSave() {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid, let workspace = RydrWorkspace.identifier else { return }
+        saveAttempt.bind(scope: workspace + ":" + uid + ":add")
+        guard saveAttempt.restored, let requestID = saveAttempt.begin() else { return }
+        isLoading = true
+        if let confirmed = saveAttempt.confirmedIntentID { finalizeCard(confirmed); return }
+        requestJSON(path: "create-setup-intent", body: ["requestId": requestID]) { (result: Result<SetupIntentResponse_Signup, Error>) in
+            if case .success(let intent) = result, intent.status == "succeeded" {
+                saveAttempt.confirmed(intent.setupIntentId)
+                finalizeCard(intent.setupIntentId)
+            } else {
+                saveAttempt.failed()
+                isLoading = false
+                if case .failure = result { errorMessage = "We couldn't check your previous card submission. Tap Save Card to retry safely." }
+            }
+        }
+    }
+
+    private func recoverCardSave(requestID: String, originalError: Error) {
+        requestJSON(path: "create-setup-intent", body: ["requestId": requestID]) { (result: Result<SetupIntentResponse_Signup, Error>) in
+            if case .success(let intent) = result, intent.status == "succeeded" {
+                saveAttempt.confirmed(intent.setupIntentId)
+                finalizeCard(intent.setupIntentId)
+            } else { finishCardSave(.failure(originalError)) }
         }
     }
 

@@ -395,21 +395,20 @@ private func requestJSON<T: Decodable>(
     req.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
 
     func send(_ r: URLRequest) {
-        URLSession.shared.dataTask(with: r) { data, response, _ in
+        CardSaveTransport.perform(r, retryable: ["create-customer", "create-setup-intent", "finish-card-setup"].contains(path)) { data, response, _ in
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), let data else { completion(nil); return }
             completion(try? JSONDecoder().decode(T.self, from: data))
-        }.resume()
+        }
     }
 
     if let user = RydrWorkspace.auth.currentUser {
-        user.getIDTokenForcingRefresh(true) { token, _ in
+        user.getIDTokenForcingRefresh(false) { token, tokenError in
+            guard let token, tokenError == nil else { completion(nil); return }
             var r = req
-            if let token { r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+            r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             send(r)
         }
-    } else {
-        send(req)
-    }
+    } else { completion(nil) }
 }
 
 private func simple(_ msg: String) -> NSError {
@@ -821,7 +820,7 @@ private struct AddOrReplaceCardSheet: View {
         NavigationStack {
             VStack(spacing: 16) {
                 CardFormRepresentable(paymentMethodParams: $cardParams, onEditingChanged: { canSubmit = $0 })
-                    .frame(height: 220).disabled(isWorking)
+                    .frame(height: 220).disabled(isWorking || saveAttempt.confirmedIntentID != nil)
 
                 if let e = errorText {
                     Text(e).foregroundStyle(.red).font(.footnote)
@@ -838,7 +837,7 @@ private struct AddOrReplaceCardSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!canSubmit || isWorking)
+                .disabled((!canSubmit && saveAttempt.confirmedIntentID == nil) || isWorking)
 
                 Spacer()
             }
@@ -852,6 +851,7 @@ private struct AddOrReplaceCardSheet: View {
             }
             .task {
                 await RydrStripeBackendConfig.configureStripePublishableKeyIfNeeded()
+                resumePendingCardSave()
             }
             .background(PresenterResolver { vc in presentingVC = vc })
         }
@@ -866,10 +866,13 @@ private struct AddOrReplaceCardSheet: View {
             }
             return
         }
-        guard let pmParams = cardParams else { return }
+        guard let uid = RydrWorkspace.auth.currentUser?.uid,
+              let workspace = RydrWorkspace.identifier else { return }
+        saveAttempt.bind(scope: workspace + ":" + uid + ":" + (replacePaymentMethodId ?? "add"))
         guard let requestID = saveAttempt.begin() else { return }
         errorText = nil; isWorking = true
         if let confirmed = saveAttempt.confirmedIntentID { finalizeCard(confirmed); return }
+        guard let pmParams = cardParams else { finish(.failure(simple("Enter a valid card before saving."))); return }
 
         requestJSON(
             backendBase: backendBase,
@@ -878,7 +881,7 @@ private struct AddOrReplaceCardSheet: View {
             decode: SetupIntentResponse_Profile.self
         ) { si in
             guard let si else {
-                finish(.failure(simple("Failed to create SetupIntent")))
+                finish(.failure(simple("Could not reach the payment service. Try saving your card again.")))
                 return
             }
 
@@ -896,13 +899,36 @@ private struct AddOrReplaceCardSheet: View {
                     saveAttempt.confirmed(si.setupIntentId)
                     finalizeCard(si.setupIntentId)
                 case .failed:
-                    finish(.failure(error ?? simple("Confirmation failed")))
+                    recoverCardSave(requestID: requestID, originalError: error ?? simple("Confirmation failed"))
                 case .canceled:
                     finish(.failure(simple("Canceled")))
                 @unknown default:
                     finish(.failure(simple("Unknown status")))
                 }
             }
+        }
+    }
+
+    private func resumePendingCardSave() {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid, let workspace = RydrWorkspace.identifier else { return }
+        saveAttempt.bind(scope: workspace + ":" + uid + ":" + (replacePaymentMethodId ?? "add"))
+        guard saveAttempt.restored, let requestID = saveAttempt.begin() else { return }
+        isWorking = true
+        if let confirmed = saveAttempt.confirmedIntentID { finalizeCard(confirmed); return }
+        requestJSON(backendBase: backendBase, path: "create-setup-intent", body: ["requestId": requestID], decode: SetupIntentResponse_Profile.self) { intent in
+            if let intent, intent.status == "succeeded" {
+                saveAttempt.confirmed(intent.setupIntentId)
+                finalizeCard(intent.setupIntentId)
+            } else { saveAttempt.failed(); isWorking = false }
+        }
+    }
+
+    private func recoverCardSave(requestID: String, originalError: Error) {
+        requestJSON(backendBase: backendBase, path: "create-setup-intent", body: ["requestId": requestID], decode: SetupIntentResponse_Profile.self) { intent in
+            if let intent, intent.status == "succeeded" {
+                saveAttempt.confirmed(intent.setupIntentId)
+                finalizeCard(intent.setupIntentId)
+            } else { finish(.failure(originalError)) }
         }
     }
 

@@ -747,7 +747,7 @@ struct RideInProgressView: View {
                 ? "Complimentary wait \(pickupWaitText)"
                 : "Paid wait time \(paidWaitText)"
         default:
-            return "Arriving in \(etaText)"
+            return rideManager.pickupETAAvailable ? "Arriving in \(etaText)" : "Updating pickup ETA"
         }
     }
 
@@ -854,7 +854,7 @@ struct RideInProgressView: View {
     private var statusHeadline: String {
         switch rideManager.currentRide?.status {
         case .enRouteToPickup?:
-            return "Driver arrives in \(etaText)"
+            return rideManager.pickupETAAvailable ? "Driver arrives in \(etaText)" : "Updating pickup ETA"
         case .waitingForRider?:
             if rideManager.pickupWaitSecondsRemaining > 0 {
                 return "Driver is here · \(pickupWaitText) complimentary wait"
@@ -882,6 +882,7 @@ struct RideInProgressView: View {
     }
 
     private var etaText: String {
+        if rideManager.currentRide?.status == .enRouteToPickup && !rideManager.pickupETAAvailable { return "Updating ETA" }
         let min = max(1, Int(rideManager.remainingMinutesRounded))
         return "\(min) min"
     }
@@ -907,6 +908,7 @@ struct RideInProgressView: View {
     }
     
     private var etaArrivalText: String {
+        if rideManager.currentRide?.status == .enRouteToPickup && !rideManager.pickupETAAvailable { return "Updating ETA" }
         let minutes = max(1, Int(rideManager.remainingMinutesRounded))
         let date = Date().addingTimeInterval(TimeInterval(minutes * 60))
         let formatter = DateFormatter()

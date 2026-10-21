@@ -5,6 +5,7 @@ import { useState } from "react";
 
 
 export interface DriverProfileAdminInitial {
+  driverSex: string;
   firstName: string;
   lastName: string;
   email: string;
@@ -106,6 +107,16 @@ export default function DriverProfileAdminTools({
 
       <div className="space-y-4">
         <FieldGroup title="Identity">
+          <label className="block text-xs text-muted">
+            Sex (self-disclosed)
+            <select value={form.driverSex} onChange={(event) => setForm({ ...form, driverSex: event.target.value })}
+              className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2 text-sm text-ink">
+              <option value="undisclosed">Not disclosed</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+            </select>
+            <span className="mt-1 block text-[11px]">Used to prioritize rider preferences. Update only from the driver’s disclosure.</span>
+          </label>
           <Input label="First name" value={form.firstName} onChange={(value) => setForm({ ...form, firstName: value })} />
           <Input label="Last name" value={form.lastName} onChange={(value) => setForm({ ...form, lastName: value })} />
           <Input label="Email" value={form.email} onChange={(value) => setForm({ ...form, email: value })} />
