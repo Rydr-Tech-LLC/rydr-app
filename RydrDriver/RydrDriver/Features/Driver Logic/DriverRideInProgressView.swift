@@ -26,6 +26,7 @@ struct DriverRideInProgressView: View {
     let currentDriverId: String
     let driverCoordinate: CLLocationCoordinate2D?
     let driverSpeedMetersPerSecond: CLLocationSpeed?
+    var driverCourseDegrees: CLLocationDirection? = nil
     let isUpdatingRide: Bool
     let onStartNavigation: () -> Void
     let onArrivedAtPickup: () -> Void
@@ -805,8 +806,9 @@ struct DriverRideInProgressView: View {
     private var routeHeading: CLLocationDirection { navigationHeading }
 
     private func updateNavigationCamera() {
+        let movingCourse = (driverSpeedMetersPerSecond ?? 0) >= 2 ? driverCourseDegrees : nil
         if let driverCoordinate,
-           let target = NavigationRouteGeometry.heading(at: driverCoordinate, path: displayedRouteCoordinates),
+           let target = movingCourse ?? NavigationRouteGeometry.heading(at: driverCoordinate, path: displayedRouteCoordinates),
            !hasNavigationHeading || (driverSpeedMetersPerSecond ?? 0) >= 2 {
             navigationHeading = hasNavigationHeading ? NavigationRouteGeometry.easedHeading(from: navigationHeading, to: target) : target
             hasNavigationHeading = true

@@ -64,6 +64,6 @@ enum NavigationRouteGeometry {
     }
     static func easedHeading(from current: Double, to target: Double) -> Double {
         let delta = (target - current + 540).truncatingRemainder(dividingBy: 360) - 180
-        return (current + max(-25, min(25, delta)) + 360).truncatingRemainder(dividingBy: 360)
+        return (current + delta * 0.7 + 360).truncatingRemainder(dividingBy: 360)
     }
 }

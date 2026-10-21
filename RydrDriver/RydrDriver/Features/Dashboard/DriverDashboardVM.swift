@@ -2278,6 +2278,7 @@ struct DriverDashboardView: View {
                         currentDriverId: RydrWorkspace.auth.currentUser?.uid ?? "",
                         driverCoordinate: vm.lastLocation?.coordinate,
                         driverSpeedMetersPerSecond: vm.lastLocation?.speed,
+                        driverCourseDegrees: vm.lastLocation.flatMap { $0.course >= 0 && $0.courseAccuracy >= 0 && $0.courseAccuracy <= 35 ? $0.course : nil },
                         isUpdatingRide: vm.isUpdatingActiveRide,
                         onStartNavigation: vm.startActiveRideNavigation,
                         onArrivedAtPickup: vm.markArrivedAtPickup,
