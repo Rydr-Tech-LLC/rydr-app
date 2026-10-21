@@ -3,6 +3,7 @@ import { getWorkspaceDb } from "@/lib/firebaseAdmin";
 import StatusPill from "@/components/StatusPill";
 import { listPromotions } from "@/lib/promotions";
 import PromotionActions from "./PromotionActions";
+import PromotionSafety from "./PromotionSafety";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,12 @@ export default async function PromotionsPage({
       .get(),
   ]);
 
+  const db = await getWorkspaceDb();
+  const [signals, holds] = await Promise.all([
+    db.collection("promotionAbuseSignals").where("status", "==", "needs_review").limit(50).get(),
+    db.collection("promotionAccountControls").where("blocked", "==", true).limit(50).get(),
+  ]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 rounded-3xl bg-gradient-to-br from-red-500 via-fuchsia-700 to-blue-700 p-7 text-white sm:flex-row sm:items-start sm:justify-between">
@@ -49,6 +56,7 @@ export default async function PromotionsPage({
         </Link>
       </div>
 
+      <PromotionSafety signals={signals.docs.map(d=>({id:d.id,userId:String(d.data().userId),relatedUserId:String(d.data().relatedUserId),reason:String(d.data().reason),promotionId:String(d.data().promotionId)}))} holds={holds.docs.map(d=>({userId:d.id,reason:String(d.data().reason)}))}/>
       <div className="flex flex-wrap gap-2">
         {[
           ["", "All promotions"],

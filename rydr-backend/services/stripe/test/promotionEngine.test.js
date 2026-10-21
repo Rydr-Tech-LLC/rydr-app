@@ -96,6 +96,7 @@ function setup() {
     fieldValue: { serverTimestamp: () => new Date(now) },
     stripe,
     mode: "test",
+    getUser: async uid => ({ phoneNumber: docs.get(`auth/${uid}`)?.phoneNumber }),
     now: () => now,
   });
   const offer = {
@@ -391,4 +392,57 @@ test('code validation rejects exhausted global and account capacity before enrol
  await assert.rejects(s.engine.enroll('rider','CAPPED'),/reward limit/);
  assert.equal(s.docs.has(`promotionEnrollments/${key('promo','rider')}`),false);
  s.docs.set('promotionUsage/promo',{issuedCount:0});s.docs.set(`promotionProgress/${key('promo','rider')}`,{issuedCount:1});await assert.rejects(s.engine.enroll('rider','CAPPED'),/reward limit/);
+});
+
+test('next four rides: concurrent attempts stop at four and retries do not consume a fifth use', async () => {
+  const s = setup(); Object.assign(s.offer, {discountKind:'percent', discountPercent:50, perUserLimit:4});
+  const results = await Promise.all(Array.from({length:8},(_,i)=>s.engine.reserveRider({rideId:`ride${i}`,ride:s.ride,outcome:s.outcome,uid:'rider'})));
+  assert.equal(results.filter(Boolean).length,4);
+  assert.equal(results[0].discountCents,1250);
+  assert.equal((await s.engine.reserveRider({rideId:'ride0',ride:s.ride,outcome:s.outcome,uid:'rider'})).discountCents,1250);
+  assert.equal(s.docs.get(`promotionProgress/${key('promo','rider')}`).issuedCount,4);
+});
+test('pay first ride, second free: grants one reward, uses once, never earns another free ride', async () => {
+  const s=setup();Object.assign(s.offer,{type:'rider_milestone_reward',milestoneRideCount:1,rewardKind:'free_ride',limitKind:'amount',maxDiscountCents:2500,audienceRule:'new',perUserLimit:null});
+  s.paid('first');await s.engine.settle('first');await s.engine.settle('first');
+  const second=await s.engine.reserveRider({rideId:'second',ride:s.ride,outcome:s.outcome,uid:'rider'});assert.equal(second.discountCents,2500);
+  s.paid('second',s.ride,{...s.outcome,promotionDiscountCents:2500,finalRiderChargeCents:0});await s.engine.settle('second');
+  s.paid('third');await s.engine.settle('third');
+  assert.equal(await s.engine.reserveRider({rideId:'fourth',ride:s.ride,outcome:s.outcome,uid:'rider'}),null);
+  assert.equal([...s.docs.keys()].filter(k=>k.startsWith('promotionRewards/')).length,1);
+});
+test('verified phone reuse holds new-account promotion atomically and records review evidence',async()=>{
+ const s=setup();s.offer.audienceRule='new';for(const uid of ['a','b'])s.docs.set(`auth/${uid}`,{phoneNumber:'+14045550123'});
+ const results=await Promise.all(['a','b'].map(uid=>s.engine.reserveRider({rideId:uid,ride:{...s.ride,riderId:uid},outcome:s.outcome,uid})));
+ assert.equal(results.filter(Boolean).length,1);assert.equal([...s.docs.keys()].filter(k=>k.startsWith('promotionAbuseSignals/')).length,1);
+});
+test('promotion holds prevent new reservations and milestone grants but keep committed retry amounts stable',async()=>{
+ const s=setup();const input={rideId:'one',ride:s.ride,outcome:s.outcome,uid:'rider'};await s.engine.reserveRider(input);
+ s.docs.set('promotionAccountControls/rider',{blocked:true});assert.equal((await s.engine.reserveRider(input)).discountCents,500);
+ assert.equal(await s.engine.reserveRider({...input,rideId:'two'}),null);
+ Object.assign(s.offer,{type:'rider_milestone_reward',milestoneRideCount:1,rewardKind:'free_ride'});s.paid('three');await s.engine.settle('three');
+ assert.equal([...s.docs.keys()].filter(k=>k.startsWith('promotionRewards/')).length,0);
+});
+test('Stripe-owned matching card fingerprints flag a second new account without trusting profile card hints',async()=>{
+ const s=setup();s.offer.audienceRule='new';
+ for(const uid of ['a','b'])s.docs.set(`users/${uid}`,{stripeCustomerId:`cus_${uid}`,stripeMode:'test'});
+ s.stripe.customers={retrieve:async id=>({id,metadata:{firebase_uid:id.slice(4)},invoice_settings:{default_payment_method:`pm_${id}`}})};
+ s.stripe.paymentMethods={retrieve:async id=>({customer:id.slice(3),card:{fingerprint:'same-card'}})};
+ const a=await s.engine.reserveRider({rideId:'a',ride:s.ride,outcome:s.outcome,uid:'a'});const b=await s.engine.reserveRider({rideId:'b',ride:s.ride,outcome:s.outcome,uid:'b'});
+ assert.ok(a);assert.equal(b,null);assert.equal([...s.docs.values()].find(x=>x.reason)?.reason,'shared_payment_card');
+});
+
+
+test('review exception is campaign-specific and never bypasses a manual account hold',async()=>{
+ const s=setup();s.offer.audienceRule='new';s.docs.set('auth/rider',{phoneNumber:'+14045550123'});
+ s.docs.set(`promotionIdentityClaims/${key('promo',key('verified-phone','+14045550123'))}`,{userId:'other'});
+ s.docs.set(`promotionIdentityOverrides/${key('promo','rider')}`,{allowed:true});
+ const input={rideId:'allowed',ride:s.ride,outcome:s.outcome,uid:'rider'};assert.ok(await s.engine.reserveRider(input));
+ s.docs.set('promotionAccountControls/rider',{blocked:true});assert.equal(await s.engine.reserveRider({...input,rideId:'held'}),null);
+});
+test('duplicate-code enrollment commits a signal and rejects without enrolling the second account',async()=>{
+ const s=setup();Object.assign(s.offer,{audienceRule:'new',applicationMode:'code',promoCode:'WELCOME'});s.docs.set('promotionCodes/WELCOME',{promotionId:'promo'});
+ for(const uid of ['a','b'])s.docs.set(`auth/${uid}`,{phoneNumber:'+14045550123'});
+ await s.engine.enroll('a','WELCOME');await assert.rejects(s.engine.enroll('b','WELCOME'),/review/);
+ assert.equal(s.docs.has(`promotionEnrollments/${key('promo','b')}`),false);assert.equal([...s.docs.keys()].filter(k=>k.startsWith('promotionAbuseSignals/')).length,1);
 });

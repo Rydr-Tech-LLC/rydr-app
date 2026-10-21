@@ -18,3 +18,5 @@ test('published offer terms are immutable and reuse clears code into a draft',as
 test('nonexistent campaign status change cannot create an incomplete promotion',async()=>{await assert.rejects(api.setPromotionStatus('missing','active',admin),/not found/);assert.equal(docs.has('promotions/missing'),false);});
 
 test('moving published offer back to draft cannot bypass immutable financial terms',async()=>{docs.clear();const id=await api.createPromotion(base(),admin);await api.setPromotionStatus(id,'active',admin);await api.setPromotionStatus(id,'draft',admin);await assert.rejects(api.updatePromotion(id,{...base(),maxDistanceMiles:50},admin),/Published promotion terms/);});
+
+test('new-account offers default to a single reward while explicit four-use caps survive normalization',()=>{assert.equal(api.normalizePromotionInput({...base(),audienceRule:'new',perUserLimit:null}).perUserLimit,1);assert.equal(api.normalizePromotionInput({...base(),audienceRule:'new',perUserLimit:4}).perUserLimit,4);});

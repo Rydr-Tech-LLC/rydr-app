@@ -1403,6 +1403,10 @@ service cloud.firestore {
       allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
       allow write: if false;
     }
+    match /promotionAccountControls/{id} { allow read, write: if false; }
+    match /promotionIdentityClaims/{id} { allow read, write: if false; }
+    match /promotionIdentityOverrides/{id} { allow read, write: if false; }
+    match /promotionAbuseSignals/{id} { allow read, write: if false; }
     match /promotionCodes/{id} { allow read, write: if false; }
     match /promotionUsage/{id} { allow read: if isAdmin(); allow write: if false; }
     match /promotionEvents/{id} { allow read: if isAdmin(); allow write: if false; }

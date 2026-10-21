@@ -95,7 +95,7 @@ export default function PromotionForm({
     miles: String(initial?.maxDistanceMiles ?? 10),
     expires: String(initial?.rewardExpiresAfterDays ?? 30),
     payExcess: initial?.payExcessFare !== false,
-    perUser: initial?.id ? String(initial.perUserLimit ?? "") : "1",
+    perUser: initial?.id ? String(initial.perUserLimit ?? (initial.audienceRule === "new" ? 1 : "")) : "1",
     total: initial?.id ? String(initial.maxRedemptions ?? "") : "500",
     startNow: !initial?.id,
     starts: eastern(initial?.startsAt),
@@ -372,7 +372,7 @@ export default function PromotionForm({
                 />
                 <Summary
                   label="Limits"
-                  value={`${f.perUser || "Unlimited"} per account · ${f.total || "Unlimited"} total`}
+                  value={`${f.perUser || (f.audienceRule === "new" ? "1" : "Unlimited")} per account · ${f.total || "Unlimited"} total`}
                 />
                 <Summary
                   label="Starts"
@@ -783,9 +783,11 @@ export default function PromotionForm({
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field
                     label={
-                      driver
-                        ? "Bonus rewards per driver (blank = unlimited)"
-                        : "Rewards per rider (blank = unlimited)"
+                      f.audienceRule === "new"
+                        ? "Rewards per new account (blank = 1)"
+                        : driver
+                          ? "Bonus rewards per driver (blank = unlimited)"
+                          : "Rewards per rider (blank = unlimited)"
                     }
                   >
                     <input

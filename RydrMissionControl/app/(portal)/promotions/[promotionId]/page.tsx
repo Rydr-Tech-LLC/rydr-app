@@ -1,3 +1,4 @@
+import PromotionUsage from "./PromotionUsage";
 import { notFound } from "next/navigation";
 import StatusPill from "@/components/StatusPill";
 import { getPromotion, type PromotionRecord } from "@/lib/promotions";
@@ -26,6 +27,7 @@ export default async function PromotionDetailPage(props: { params: Promise<{ pro
         <PromotionActions id={promotion.id} status={promotion.status} />
       </div>
 
+      <PromotionUsage promotionId={promotion.id} perUserLimit={promotion.perUserLimit ?? (promotion.audienceRule === "new" ? 1 : null)} type={promotion.type}/>
       {promotion.status === "archived" ? (
         <div className="rounded-lg border border-line bg-white p-5 text-sm text-muted">
           This promotion is deleted from active views. Use Reuse to create a new editable draft from it.

@@ -332,7 +332,7 @@ export function normalizePromotionInput(input: PromotionInput) {
         ? rewardCents
         : null,
     maxRedemptions: asNullableInteger(input.maxRedemptions),
-    perUserLimit: asNullableInteger(input.perUserLimit),
+    perUserLimit: asNullableInteger(input.perUserLimit) ?? (input.audienceRule === "new" ? 1 : null),
     betaOnly: input.audienceRule === "beta" || input.betaOnly === true,
   };
   validateOffer(normalized);
