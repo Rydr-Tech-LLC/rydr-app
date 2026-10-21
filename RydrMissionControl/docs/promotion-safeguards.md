@@ -33,7 +33,7 @@ A match is possible abuse, not proof. Families may share a card, phone numbers m
 
 ## Validation and rollout
 
-Run `node --test test/promotionEngine.test.js test/promotionPolicy.test.js test/promotionRoutes.test.js` from the Stripe service; run `node --test test/promotions.test.cjs test/promotionSafety.test.cjs` and `npm run build` from Mission Control. The full Stripe test suite also reports two pre-existing failures in unchanged driver payout-lock tests; do not describe that suite as green.
+Run `node --test test/promotionEngine.test.js test/promotionPolicy.test.js test/promotionRoutes.test.js` from the Stripe service; run `node --test test/promotions.test.cjs test/promotionSafety.test.cjs` and `npm run build` from Mission Control. The integrated full Stripe suite passes 131 tests. The two payout-lock fixtures now use the service’s injected clock rather than the wall clock; payout runtime behavior is unchanged.
 
 Deploy the Stripe service from `rydr-backend/services/stripe` on Render and Mission Control on Vercel. Preserve the separate Notifications changes when assembling the deployed Mission Control source. The added Firestore rule entries explicitly deny mobile access; the existing default-deny already protects these new collections. Avoid deploying unrelated local Firestore-rule changes.
 
