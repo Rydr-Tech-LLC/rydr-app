@@ -9,6 +9,38 @@ import XCTest
 
 final class Rydr_DriverUITests: XCTestCase {
     @MainActor
+    func testFailedAcceptanceShowsErrorAndStillExpiresAtOriginalDeadline() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-DriverOfferRecoveryUITest"]
+        app.launch()
+        let accept = app.buttons["Accept ride request"]
+        XCTAssertTrue(accept.waitForExistence(timeout: 8))
+        accept.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["rideRequestResponseError"].waitForExistence(timeout: 3))
+        XCTAssertTrue(accept.isEnabled)
+        let proof = XCTAttachment(screenshot: app.screenshot())
+        proof.name = "ride-offer-inline-error"
+        proof.lifetime = .keepAlways
+        add(proof)
+        XCTAssertTrue(app.staticTexts["offerExpiredFixture"].waitForExistence(timeout: 12))
+        XCTAssertFalse(accept.exists)
+    }
+
+    @MainActor
+    func testOfferExpiryDoesNotDismissAnAcceptanceStillInFlight() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-DriverOfferRecoveryUITest", "-OfferSlowResponse"]
+        app.launch()
+        let accept = app.buttons["Accept ride request"]
+        XCTAssertTrue(accept.waitForExistence(timeout: 8))
+        accept.tap()
+        XCTAssertTrue(app.staticTexts["0s"].waitForExistence(timeout: 12))
+        XCTAssertTrue(app.buttons["Accepting ride request"].exists)
+        XCTAssertFalse(app.staticTexts["offerExpiredFixture"].exists)
+        XCTAssertTrue(app.staticTexts["offerExpiredFixture"].waitForExistence(timeout: 6))
+    }
+
+    @MainActor
     func testNativeSplashLightAndDark() {
         for mode in ["-SplashLight", "-SplashDark"] {
             let app = XCUIApplication()

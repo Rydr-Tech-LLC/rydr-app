@@ -15,6 +15,7 @@ struct IncomingRideRequestCard: View {
     let driverCoordinate: CLLocationCoordinate2D?
     let rate: DriverRateSetting
     let isResponding: Bool
+    var responseError: String? = nil
     let onAccept: () -> Void
     let onDecline: () -> Void
     let onTimeout: () -> Void
@@ -23,7 +24,7 @@ struct IncomingRideRequestCard: View {
     @State private var pickupLeg: RideRequestLegEstimate?
     @State private var tripLeg: RideRequestLegEstimate?
     @State private var secondsRemaining = 15
-    @State private var didRespond = false
+    @State private var responseInFlight = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -63,10 +64,16 @@ struct IncomingRideRequestCard: View {
                 dropoffEstimate: tripLeg ?? fallbackTripLeg
             )
 
+            if let responseError {
+                Label(responseError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("rideRequestResponseError")
+            }
+
             HStack(spacing: 10) {
                 Button {
                     guard !isResponding else { return }
-                    didRespond = true
                     alertSound.stop()
                     onDecline()
                 } label: {
@@ -77,13 +84,12 @@ struct IncomingRideRequestCard: View {
                 .padding(.vertical, 15)
                 .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Color(.systemGray5)))
                 .foregroundStyle(Color.black)
-                .disabled(isResponding)
+                .disabled(isResponding || secondsRemaining == 0)
                 .accessibilityLabel("Decline ride request")
                 .accessibilityHint("Dismisses this ride request and returns to standby.")
 
                 Button {
                     guard !isResponding else { return }
-                    didRespond = true
                     alertSound.stop()
                     onAccept()
                 } label: {
@@ -102,7 +108,7 @@ struct IncomingRideRequestCard: View {
                 .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Styles.rydrGradient))
                 .foregroundStyle(.white)
                 .shadow(color: Color.red.opacity(0.26), radius: 14, y: 8)
-                .disabled(isResponding)
+                .disabled(isResponding || secondsRemaining == 0)
                 .accessibilityLabel(isResponding ? "Accepting ride request" : "Accept ride request")
                 .accessibilityHint("Accepts this ride and opens the active ride flow.")
             }
@@ -136,9 +142,10 @@ struct IncomingRideRequestCard: View {
             alertSound.restartLoop()
         }
         .onChange(of: isResponding) { _, responding in
+            responseInFlight = responding
             if responding {
                 alertSound.stop()
-            } else if !didRespond {
+            } else if responseError != nil && secondsRemaining > 0 {
                 alertSound.startLoop()
             }
         }
@@ -216,22 +223,19 @@ struct IncomingRideRequestCard: View {
     }
 
     private func runCountdown() async {
-        await MainActor.run {
-            secondsRemaining = 15
-            didRespond = false
-        }
-        for second in stride(from: 14, through: 0, by: -1) {
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            if Task.isCancelled || didRespond { return }
-            await MainActor.run {
-                secondsRemaining = second
+        // Use the server offer deadline. A failed tap must not stop the clock
+        // and leave an expired offer on screen indefinitely.
+        let deadline = request.offerExpiresAt ?? Date().addingTimeInterval(15)
+        responseInFlight = isResponding
+        while !Task.isCancelled {
+            secondsRemaining = max(0, Int(ceil(deadline.timeIntervalSinceNow)))
+            if secondsRemaining == 0 && !responseInFlight {
+                alertSound.stop()
+                onTimeout()
+                return
             }
-        }
-        guard !didRespond else { return }
-        await MainActor.run {
-            didRespond = true
-            alertSound.stop()
-            onTimeout()
+            do { try await Task.sleep(nanoseconds: 250_000_000) }
+            catch { return }
         }
     }
 }

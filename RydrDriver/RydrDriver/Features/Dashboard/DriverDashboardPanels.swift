@@ -163,6 +163,7 @@ struct DriverRideWorkPanel: View {
                     driverCoordinate: vm.pickupEstimateOriginCoordinate,
                     rate: vm.rate(for: request.rideType),
                     isResponding: vm.respondingRequestIDs.contains(request.id),
+                    responseError: vm.requestErrors[request.id],
                     onAccept: { vm.accept(request) },
                     onDecline: { vm.decline(request) },
                     onTimeout: { vm.miss(request) }

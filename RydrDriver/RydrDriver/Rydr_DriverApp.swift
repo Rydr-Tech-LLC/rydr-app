@@ -129,6 +129,8 @@ struct Rydr_DriverApp: App {
         NavigationStack { DriverLoginView().environmentObject(DriverSessionManager()) }
       } else if ProcessInfo.processInfo.arguments.contains("-DriverManagedPayoutE2E") {
         DriverManagedPayoutE2E()
+      } else if ProcessInfo.processInfo.arguments.contains("-DriverOfferRecoveryUITest") {
+        DriverOfferRecoveryUITestFixture()
       } else if ProcessInfo.processInfo.arguments.contains("-DriverSubmittedUITest") {
         DriverSubmittedUITestFixture()
       } else if ProcessInfo.processInfo.arguments.contains("-DriverOnboardingResumeUITest") {
@@ -231,6 +233,41 @@ private struct DriverOnboardingGate<Content: View>: View {
         } catch { failed = true }
     }
 }
+
+#if DEBUG && targetEnvironment(simulator)
+private struct DriverOfferRecoveryUITestFixture: View {
+    @State private var responding = false
+    @State private var error: String?
+    @State private var expired = false
+    @State private var request = DriverRideRequest(
+        id: "offer-regression", riderId: "fixture", riderName: "Test rider",
+        pickup: "Campus", dropoff: "Student living", rideType: "Rydr Go",
+        offerExpiresAt: Date().addingTimeInterval(10)
+    )
+
+    var body: some View {
+        ScrollView {
+            if expired {
+                Text("Offer expired").accessibilityIdentifier("offerExpiredFixture")
+            } else {
+                IncomingRideRequestCard(
+                    request: request, driverCoordinate: nil, rate: .empty,
+                    isResponding: responding, responseError: error,
+                    onAccept: {
+                        responding = true
+                        Task { @MainActor in
+                            let delay: Duration = ProcessInfo.processInfo.arguments.contains("-OfferSlowResponse") ? .seconds(12) : .milliseconds(250)
+                            try? await Task.sleep(for: delay)
+                            error = "Could not accept ride: connection interrupted."
+                            responding = false
+                        }
+                    }, onDecline: { expired = true }, onTimeout: { expired = true }
+                )
+            }
+        }
+    }
+}
+#endif
 
 #if DEBUG && targetEnvironment(simulator)
 private struct DriverOnboardingResumeUITestFixture: View {

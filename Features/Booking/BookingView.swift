@@ -37,6 +37,8 @@ struct BookingView: View {
     @StateObject private var locationManager = LocationManager()
     @State private var pickupCoordinate: CLLocationCoordinate2D?
     @State private var dropoffCoordinate: CLLocationCoordinate2D?
+    @State private var pickupSelectionID = UUID()
+    @State private var dropoffSelectionID = UUID()
     @State private var pickupResolvedAddress = ""
     @State private var dropoffResolvedAddress = ""
     @State private var routeEstimate: RideEstimate?
@@ -181,8 +183,6 @@ struct BookingView: View {
                 slider(availableHeight: geo.size.height)
                     .offset(y: sliderOffset)
                     .animation(.interactiveSpring(), value: sliderOffset)
-                    .contentShape(Rectangle())            // make whole surface draggable
-                    .simultaneousGesture(sheetDrag)
             }
         }
         // 🔹 Present driver selection (RideManager-powered)
@@ -409,7 +409,9 @@ struct BookingView: View {
                 // Grabber
                 Capsule().frame(width: 40, height: 5)
                     .foregroundColor(.secondary)
-                    .padding(.top, 8)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
+                    .gesture(sheetDrag)
 
                 Label(rideType, systemImage: bookingRideIcon)
                     .font(.caption.weight(.bold))
@@ -966,8 +968,7 @@ struct BookingView: View {
         if !items.isEmpty {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(items.indices, id: \.self) { i in
-                        let item = items[i]
+                    ForEach(items, id: \.self) { item in
                         Button {
                             onPick(item)
                         } label: {
@@ -978,10 +979,11 @@ struct BookingView: View {
                                 }
                             }
                             .padding(.vertical, 6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        if i < items.count - 1 { Divider() }
+                        Divider()
                     }
                 }
                 .padding(10)
@@ -1420,34 +1422,54 @@ struct BookingView: View {
 
     @MainActor
     private func selectPickup(_ completion: MKLocalSearchCompletion) async {
+        let selectionID = UUID()
+        pickupSelectionID = selectionID
+        let selectedText = completion.title + (completion.subtitle.isEmpty ? "" : ", " + completion.subtitle)
+        pickupText = selectedText
+        pickupCoordinate = nil
+        pickupResolvedAddress = ""
+        focusedField = nil
+        clearRoutePreview()
         do {
             let item = try await searchMapItem(for: completion)
+            guard pickupSelectionID == selectionID, pickupText == selectedText else { return }
             let address = formattedAddress(for: item, fallback: completion.title + (completion.subtitle.isEmpty ? "" : ", " + completion.subtitle))
             pickupResolvedAddress = address
             pickupCoordinate = item.placemark.coordinate
             pickupText = address
-            focusedField = nil
             clearRoutePreview()
             recenterOnResolvedLocations()
             updateRouteEstimateIfPossible()
         } catch {
+            guard pickupSelectionID == selectionID, pickupText == selectedText else { return }
+            focusedField = .pickup
             showStatus(.failure("That location could not be resolved. Please try another result."))
         }
     }
 
     @MainActor
     private func selectDropoff(_ completion: MKLocalSearchCompletion) async {
+        let selectionID = UUID()
+        dropoffSelectionID = selectionID
+        let selectedText = completion.title + (completion.subtitle.isEmpty ? "" : ", " + completion.subtitle)
+        dropoffText = selectedText
+        dropoffCoordinate = nil
+        dropoffResolvedAddress = ""
+        focusedField = nil
+        clearRoutePreview()
         do {
             let item = try await searchMapItem(for: completion)
+            guard dropoffSelectionID == selectionID, dropoffText == selectedText else { return }
             let address = formattedAddress(for: item, fallback: completion.title + (completion.subtitle.isEmpty ? "" : ", " + completion.subtitle))
             dropoffResolvedAddress = address
             dropoffCoordinate = item.placemark.coordinate
             dropoffText = address
-            focusedField = nil
             clearRoutePreview()
             recenterOnResolvedLocations()
             updateRouteEstimateIfPossible()
         } catch {
+            guard dropoffSelectionID == selectionID, dropoffText == selectedText else { return }
+            focusedField = .dropoff
             showStatus(.failure("That location could not be resolved. Please try another result."))
         }
     }

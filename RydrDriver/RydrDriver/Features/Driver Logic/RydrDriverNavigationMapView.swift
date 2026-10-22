@@ -139,14 +139,14 @@ struct RydrDriverNavigationMapView: View {
             displayedDriverCoordinate = target
             return
         }
-        let duration = min(1.0, max(0.3, distanceMeters / 18.0))
+        let duration = min(0.3, max(0.12, distanceMeters / 60.0))
         markerAnimationTask = Task { @MainActor in
-            let steps = 24
+            let steps = 18
             let sleep = UInt64((duration / Double(steps)) * 1_000_000_000)
             for step in 1...steps {
                 if Task.isCancelled { return }
                 let t = Double(step) / Double(steps)
-                let eased = t * t * (3 - 2 * t)
+                let eased = t
                 displayedDriverCoordinate = NavigationRouteGeometry.coordinate(at: from.progress + (to.progress - from.progress) * eased, path: path) ?? target
                 try? await Task.sleep(nanoseconds: sleep)
             }
