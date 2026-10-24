@@ -13,11 +13,10 @@ const {
 } = require("firebase-admin/firestore");
 const { getStorage } = require("firebase-admin/storage");
 const { getAuth } = require("firebase-admin/auth");
-const { getAppCheck } = require("firebase-admin/app-check");
 
 // Keep the service layer's established `admin.firestore.Timestamp`-style API
 // while using Firebase Admin 14's modular entry points underneath.
-const {configureWorkspaceSDK, appForWorkspace, authForWorkspace, firestoreForWorkspace, storageForWorkspace, projectForWorkspace}=require("../../firebase/functions/src/services/firebaseWorkspace");
+const {configureWorkspaceSDK, appForWorkspace, authForWorkspace, appCheckForWorkspace, firestoreForWorkspace, storageForWorkspace, projectForWorkspace}=require("../../firebase/functions/src/services/firebaseWorkspace");
 configureWorkspaceSDK(require);
 function workspace(){return require("../services/workspaceContext").currentWorkspace();}
 function firestoreFor(appInstance) { return firestoreForWorkspace(workspace(),appInstance); }
@@ -33,7 +32,7 @@ const admin = {
   firestore: firestoreFor,
   storage: (appInstance) => storageForWorkspace(workspace(),appInstance),
   auth: (appInstance) => authForWorkspace(workspace(),appInstance),
-  appCheck: (appInstance) => getAppCheck(appInstance)
+  appCheck: (appInstance) => appCheckForWorkspace(workspace(), appInstance)
 };
 
 let app;

@@ -36,6 +36,9 @@ function appForWorkspace(workspace, baseApp) {
 function authForWorkspace(workspace, baseApp) {
   return load("firebase-admin/auth").getAuth(appForWorkspace(workspace, baseApp));
 }
+function appCheckForWorkspace(workspace, baseApp) {
+  return load("firebase-admin/app-check").getAppCheck(appForWorkspace(workspace, baseApp));
+}
 function firestoreForWorkspace(workspace, baseApp) {
   const app = appForWorkspace(workspace, baseApp);
   const databaseId = workspace === "test" ? "(default)" : "live-beta";
@@ -76,4 +79,4 @@ async function verifyWorkspaceToken(token, workspace, baseApp, allowStaff = fals
     return {decoded, user, staff: true};
   }
 }
-module.exports = {configureWorkspaceSDK, PROJECTS, projectForWorkspace, workspaceFromProject, appForWorkspace, authForWorkspace, firestoreForWorkspace, storageForWorkspace, verifyWorkspaceToken};
+module.exports = {configureWorkspaceSDK, PROJECTS, projectForWorkspace, workspaceFromProject, appForWorkspace, authForWorkspace, appCheckForWorkspace, firestoreForWorkspace, storageForWorkspace, verifyWorkspaceToken};
