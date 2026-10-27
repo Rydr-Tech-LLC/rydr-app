@@ -164,7 +164,7 @@ export default function MarketingAgentClient() {
           <p className="mt-2 text-sm text-muted">Email sender: {config.name} | Rydr Tech LLC &lt;{MARKETING_AGENT_EMAIL}&gt;</p>
           <ul className="mt-3 space-y-2 text-sm">{Object.entries(snapshot?.readiness ?? {}).filter(([name]) => name !== "instagram").map(([name, ready]) => <li key={name} className="flex justify-between gap-3"><span className="capitalize">{name === "scheduler" ? "Scheduler credential" : name}</span><span>{ready ? "Configured" : "Needs setup"}</span></li>)}</ul>
           <p className="mt-3 text-xs text-muted">A configured scheduler credential does not mean a schedule is running. Confirm scheduled runs in the activity log after deployment.</p>
-          <p className="mt-3 text-sm text-muted">Reply-To: support@rydr-go.com · BCC: khris.nunnally@rydr-go.com. Gmail campaign forwarding destination: {snapshot?.inboundAddress || "the receiving address configured during setup"}.</p>
+          <p className="mt-3 text-sm text-muted">Reply-To: support@rydr-go.com | BCC: khris.nunnally@rydr-go.com. Gmail campaign forwarding destination: {snapshot?.inboundAddress || "the receiving address configured during setup"}.</p>
           <button className={`${button} mt-3`} disabled={busy || !snapshot?.readiness.inbound} onClick={() => act("probe")}>Check Gmail reply connection</button>
           <p className="mt-2 text-xs text-muted">{snapshot?.campaign?.inboxVerifiedAt ? `Reply connection verified: ${formatDate(snapshot.campaign.inboxVerifiedAt)}` : "Reply connection has not been verified. Live follow-ups are held."}</p>
         </section>
