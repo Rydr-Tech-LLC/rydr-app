@@ -81,7 +81,7 @@ export default function MarketingAgentClient() {
         method: "POST", headers, body: JSON.stringify({ action, ...extra }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Action failed.");
-      setMessage(data.subject ? `Send an email to Khris's Zoho mailbox with this exact subject within 30 minutes: ${data.subject}. The forwarding rule should deliver its copy here.` : data.reason || (action === "run" ? `Run finished: ${data.drafted ?? 0} drafted, ${data.sent ?? 0} sent, ${data.simulated ?? 0} simulated.` : "Saved."));
+      setMessage(data.subject ? `Send an email to support@rydr-go.com in Gmail with this exact subject within 30 minutes: ${data.subject}. The forwarding rule should deliver its copy here.` : data.reason || (action === "run" ? `Run finished: ${data.drafted ?? 0} drafted, ${data.sent ?? 0} sent, ${data.simulated ?? 0} simulated.` : "Saved."));
       await refresh();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Action failed."); }
     finally { setBusy(false); }
@@ -164,14 +164,14 @@ export default function MarketingAgentClient() {
           <p className="mt-2 text-sm text-muted">Email sender: {config.name} | Rydr Tech LLC &lt;{MARKETING_AGENT_EMAIL}&gt;</p>
           <ul className="mt-3 space-y-2 text-sm">{Object.entries(snapshot?.readiness ?? {}).filter(([name]) => name !== "instagram").map(([name, ready]) => <li key={name} className="flex justify-between gap-3"><span className="capitalize">{name === "scheduler" ? "Scheduler credential" : name}</span><span>{ready ? "Configured" : "Needs setup"}</span></li>)}</ul>
           <p className="mt-3 text-xs text-muted">A configured scheduler credential does not mean a schedule is running. Confirm scheduled runs in the activity log after deployment.</p>
-          <p className="mt-3 text-sm text-muted">Reply-To and BCC: khris.nunnally@rydr-go.com. Zoho forwards campaign replies to {snapshot?.inboundAddress || "the receiving address configured during setup"}.</p>
-          <button className={`${button} mt-3`} disabled={busy || !snapshot?.readiness.inbound} onClick={() => act("probe")}>Check Zoho reply connection</button>
+          <p className="mt-3 text-sm text-muted">Reply-To: support@rydr-go.com � BCC: khris.nunnally@rydr-go.com. Gmail campaign forwarding destination: {snapshot?.inboundAddress || "the receiving address configured during setup"}.</p>
+          <button className={`${button} mt-3`} disabled={busy || !snapshot?.readiness.inbound} onClick={() => act("probe")}>Check Gmail reply connection</button>
           <p className="mt-2 text-xs text-muted">{snapshot?.campaign?.inboxVerifiedAt ? `Reply connection verified: ${formatDate(snapshot.campaign.inboxVerifiedAt)}` : "Reply connection has not been verified. Live follow-ups are held."}</p>
         </section>
         <section className="rounded-2xl border border-line bg-white p-5 shadow-sm">
           <h2 className="text-base font-semibold">Instagram · @rydr_tech</h2>
           <p className="mt-2 text-sm text-muted">Manage Instagram drafts, scheduled posts, incoming replies, and insights in Rowen’s Social Workspace. Check Social Connections for account status. First-contact DMs remain manual; Rowen replies to eligible incoming conversations without scraping profiles.</p>
-          <p className="mt-3 text-sm text-muted">Email conversations appear below once Zoho forwarding is connected. No-reply messages are discarded from Mission Control; Zoho originals are retained.</p>
+          <p className="mt-3 text-sm text-muted">Email conversations appear below once Gmail forwarding is connected. No-reply messages are discarded from Mission Control; Gmail originals are retained.</p>
         </section>
       </div>
     </div>

@@ -118,7 +118,7 @@ test('concurrent runs send each contact once with a stable idempotency key', asy
   assert.match(sent[0].idempotencyKey, /marketing\/live-beta\//);
   assert.match(sent[0].body, /AI campus outreach assistant/); assert.match(sent[0].body, /unsubscribe/);
   assert.equal(sent[0].from, 'Rowen | Rydr Tech LLC <marketing@rydr-go.com>');
-  assert.equal(sent[0].replyTo, actor.email); assert.equal(docs.get(campaignPath).totalReserved, 1);
+  assert.equal(sent[0].replyTo, "support@rydr-go.com"); assert.equal(sent[0].bcc, actor.email); assert.equal(docs.get(campaignPath).totalReserved, 1);
 });
 test('review mode does not send until explicit approval and a subsequent run', async () => {
   docs.set(campaignPath, config({ mode: 'review' })); seed(); await agent.runMarketingAgent();

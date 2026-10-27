@@ -23,8 +23,8 @@ including after it expires, without resetting delivery history or counters.
   Research and drafting follow the same shift; daylight saving changes are automatic.
   Defaults: 10 email reservations/day, 50 total, at most 3 contacts processed/run.
 - Sends as `Rowen | Rydr Tech LLC <marketing@rydr-go.com>` (display name follows the saved agent name).
-  Adds an unsubscribe link, mailing address, reply-to and BCC to
-  `khris.nunnally@rydr-go.com`. Uses existing Resend letterhead delivery.
+  Adds an unsubscribe link and mailing address. Reply-To is `support@rydr-go.com`;
+  BCC is `khris.nunnally@rydr-go.com`. Uses existing Resend letterhead delivery.
 - Prepares Instagram DM drafts for manual first contact from `@rydr_tech`.
   Only verified organization Instagram URLs are linked. Marking a DM sent suppresses
   the queued email. This build does not connect Meta, publish social posts, or auto-send DMs.
@@ -79,17 +79,17 @@ Unsubscribe GET displays a confirmation form; POST validates a signed, workspace
 token and immediately suppresses future agent sends. No login is required. Other manual
 Campus Growth sending tools are not part of this agent's suppression mechanism.
 
-Replies arrive in Khris's Zoho mailbox. Forward campaign copies into Mission Control
+Replies arrive in the support@rydr-go.com Gmail mailbox. Forward campaign copies into Mission Control
 using the setup below. Human replies, opt-outs, bounces and complaints stop follow-ups.
 Automatic replies are discarded and also stop follow-ups; no-reply sender bodies are not
-stored. This does not delete originals from Zoho. Admins can view conversations and send
+stored. This does not delete originals from Gmail. Admins can view conversations and send
 threaded replies from Mission Control. The agent does not autonomously negotiate or book
 meetings. Messages already handed to Resend may arrive after a pause, shift end or opt-out.
 
-## Zoho reply connection
+## Gmail reply connection
 
 1. Create a Resend receiving address per workspace (separate addresses and webhook
-   signing secrets). Use a receiving subdomain or Resend-provided address; retain Zoho's
+   signing secrets). Use a receiving subdomain or Resend-provided address; retain the existing mail provider�s
    existing MX records for `rydr-go.com`.
 2. Set `MARKETING_AGENT_INBOUND_EMAIL_TEST` and `_LIVE_BETA` to the respective
    receiving addresses. Set `MARKETING_AGENT_WEBHOOK_SECRET_TEST` and `_LIVE_BETA`
@@ -99,16 +99,16 @@ meetings. Messages already handed to Resend may arrive after a pause, shift end 
    email.received, email.sent, email.delivered, email.bounced, email.complained,
    email.failed and email.suppressed. The route verifies raw-body signatures and selects
    workspace from its path. Received destination addresses must match that workspace.
-4. In Khris's Zoho Settings → Filters, create a rule for subject containing
+4. In Khris's Gmail Settings → Filters, create a rule for subject containing
    `[Rydr Campus]`, forwarding to the Live Beta receiving address and keeping the original.
-   Complete Zoho destination verification using the code in Resend's receiving dashboard;
+   Complete Gmail destination verification using the code in Resend's receiving dashboard;
    Mission Control deliberately discards unrelated emails, including verification mail.
-   Do not forward the entire mailbox. Zoho plan/admin settings may restrict forwarding.
-5. Click **Check Zoho reply connection** in Mission Control. From another mailbox, send
-   Khris an email with the exact generated subject within 30 minutes. Confirm the panel
+   Do not forward the entire mailbox. Gmail plan/admin settings may restrict forwarding.
+5. Click **Check Gmail reply connection** in Mission Control. From another mailbox, send
+   support@rydr-go.com an email with the exact generated subject within 30 minutes. Confirm the panel
    shows a verification timestamp. Live automatic follow-ups remain held until this passes.
 6. Perform a controlled round trip before activating live outreach. Verify original
-   sender preservation through Zoho forwarding, correct workspace, conversation display,
+   sender preservation through Gmail forwarding, correct workspace, conversation display,
    Reply-To/BCC, threading, suppression and delivery events. No live round trip has been
    performed by the local tests. If forwarding rewrites the sender, do not enable follow-ups
    until that is resolved.
@@ -149,4 +149,4 @@ Run `npm run test:marketing-agent` and `npx tsc --noEmit` in RydrMissionControl.
 Tests use an in-memory transactional database and fake providers: they do not send email
 or require production credentials. Validate a deployed Test run before enabling Live Beta.
 
-Reply setup references: [Zoho forwarding](https://www.zoho.com/mail/help/email-forwarding.html), [Resend webhook verification](https://resend.com/docs/webhooks/verify-webhooks-requests), [Resend receiving](https://resend.com/docs/api-reference/emails/retrieve-received-email).
+Reply setup references: [Gmail forwarding](https://www.zoho.com/mail/help/email-forwarding.html), [Resend webhook verification](https://resend.com/docs/webhooks/verify-webhooks-requests), [Resend receiving](https://resend.com/docs/api-reference/emails/retrieve-received-email).

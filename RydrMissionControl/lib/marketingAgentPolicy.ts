@@ -1,7 +1,8 @@
 export const PILOT_END = "2026-11-01T04:00:00.000Z"; // Initial deadline; editable in Mission Control.
 export const AGENT_TIME_ZONE = "America/New_York";
 export const MARKETING_AGENT_EMAIL = "marketing@rydr-go.com";
-export const MARKETING_REPLY_EMAIL = "khris.nunnally@rydr-go.com";
+export const MARKETING_REPLY_EMAIL = "support@rydr-go.com";
+export const MARKETING_BCC_EMAIL = "khris.nunnally@rydr-go.com";
 export const MARKETING_SUBJECT_TAG = "[Rydr Campus]";
 
 export interface AgentConfig {

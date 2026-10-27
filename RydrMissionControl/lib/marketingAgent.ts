@@ -4,7 +4,7 @@ import { getWorkspaceDb } from "./firebaseAdmin";
 import { currentWorkspace } from "./workspace";
 import { discoverCampusLeads, discoveryFingerprint } from "./ai/campusGrowthAI";
 import { draftMarketingCopy } from "./ai/marketingCopy";
-import { MARKETING_AGENT_EMAIL, MARKETING_REPLY_EMAIL, MARKETING_SUBJECT_TAG, campaignSubject, campaignOpen, easternDay, followUpDueAt, isNoReplyEmail, leadExclusion, normalizeAgentConfig, normalizeFollowUps, withinSendingHours, type AgentConfig, type AgentLead } from "./marketingAgentPolicy";
+import { MARKETING_BCC_EMAIL, MARKETING_AGENT_EMAIL, MARKETING_REPLY_EMAIL, MARKETING_SUBJECT_TAG, campaignSubject, campaignOpen, easternDay, followUpDueAt, isNoReplyEmail, leadExclusion, normalizeAgentConfig, normalizeFollowUps, withinSendingHours, type AgentConfig, type AgentLead } from "./marketingAgentPolicy";
 import { localTimeToISO } from "../../rydr-backend/services/stripe/promotionPolicy";
 import { notificationService } from "../src/services/notifications/NotificationService";
 
@@ -315,7 +315,7 @@ export async function sendAgentMessage(id: string, input: SendAgentMessageInput)
       const due = followUpDueAt(live as AgentConfig, lead.lastSentAt ?? 0, lead.followUpsSent ?? 0);
       if (live.mode !== "automatic" || !["sent", "simulated"].includes(lead.state) || lead.lastReplyAt || !due || due > Date.now()
         || (lead.followUpsSent ?? 0) + 1 !== sequence) return { status: "skipped" };
-      if (workspace === "live-beta" && !live.inboxVerifiedAt) return { status: "skipped", reason: "Verify the Zoho reply connection before follow-ups." };
+      if (workspace === "live-beta" && !live.inboxVerifiedAt) return { status: "skipped", reason: "Verify the Gmail reply connection before follow-ups." };
     } else if (!lead.lastInboundMessageId || lead.state !== "replied") {
       return { status: "skipped", reason: "Receive a contact reply before responding from this inbox." };
     }
@@ -342,7 +342,7 @@ export async function sendAgentMessage(id: string, input: SendAgentMessageInput)
   const threadId = reserved.threadId && /^<[^\s<>]+>$/.test(reserved.threadId) ? reserved.threadId : undefined;
   await campaign.update({ activity: `${input.kind === "followup" ? "Following up with" : input.kind === "reply" ? "Replying to" : "Contacting"} ${captured.name}`, activityAt: Date.now() });
   const result = await notificationService.sendGenericEmail({ from: `${config.name} | Rydr Tech LLC <${MARKETING_AGENT_EMAIL}>`,
-    to: reserved.email!, bcc: replyTo, replyTo, subject: input.kind === "initial" || /^re:/i.test(subject) ? subject : `Re: ${subject}`, body,
+    to: reserved.email!, bcc: MARKETING_BCC_EMAIL, replyTo, subject: input.kind === "initial" || /^re:/i.test(subject) ? subject : `Re: ${subject}`, body,
     ...(threadId ? { headers: { "In-Reply-To": threadId, References: threadId } } : {}),
     eyebrow: "Rydr Live Beta · Campus Invitation", idempotencyKey: `marketing/${workspace}/${CAMPAIGN}/${messageId}` });
   const status = result.ok ? workspace === "test" ? "simulated" : "sent" : "unknown";
