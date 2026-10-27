@@ -209,7 +209,10 @@ async function processReply(ref: FirebaseFirestore.DocumentReference, runId: str
   const config = (await root.get()).data()?.config as SocialConfig;
   if (thread.state === 'pending') {
     if (thread.human) return;
-    const copy = await socialCopy(config.facts,'reply',thread.text);
+    const recent = await ref.collection('messages').orderBy('at','desc').limit(10).get();
+    const history = recent.docs.map(d=>d.data()).filter(m=>!m.deleted).sort((a,b)=>a.at-b.at)
+      .map(m=>({direction:String(m.direction),text:String(m.text ?? '')}));
+    const copy = await socialCopy(config.facts,'reply',thread.text,history);
     const updated = await db.runTransaction(async tx => {
       const fresh = (await tx.get(ref)).data(); if (fresh?.state !== 'pending' || fresh.lastInboundId !== thread!.lastInboundId) return false;
       tx.update(ref,{draft:copy.text,draftFor:fresh.lastInboundId,state:copy.handoff?'human':config.autoReplies?'ready':'review',human:copy.handoff,reason:copy.reason}); return true;

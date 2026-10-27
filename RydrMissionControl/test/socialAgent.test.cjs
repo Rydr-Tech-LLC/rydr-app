@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),Module=require('node:module'),ts=require('typescript'),{createHash}=require('node:crypto');
 const RealDate=Date;let now=RealDate.parse('2026-10-27T16:00:00Z');
 global.Date=class extends RealDate {constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}};
-const docs=new Map();let serial=Promise.resolve(),workspace='live-beta',calls=[],failPublish=false,containerStatus='FINISHED',onDraft=null;
+const docs=new Map();let serial=Promise.resolve(),workspace='live-beta',calls=[],failPublish=false,containerStatus='FINISHED',onDraft=null,draftHistory=[];
 const hash=s=>createHash('sha256').update(s).digest('hex'),copy=x=>x==null?x:structuredClone(x);
 function snap(path){return{id:path.split('/').at(-1),ref:doc(path),exists:docs.has(path),data:()=>copy(docs.get(path))};}
 function merge(a,b){const out={...a};for(const [k,v]of Object.entries(b)){out[k]=v&&typeof v==='object'&&!Array.isArray(v)?merge(out[k]||{},v):v;}return out;}
@@ -17,7 +17,7 @@ Module._load=function(id,parent,...rest){
  if(parent?.filename.endsWith('socialAgent.ts')){
   if(id==='./firebaseAdmin')return{getWorkspaceDb:async()=>db};
   if(id==='./workspace')return{currentWorkspace:async()=>workspace};
-  if(id==='./ai/socialCopy')return{socialCopy:async()=>{if(onDraft)await onDraft();return{text:'Hello, I’m Rowen, Rydr’s AI assistant. Interested in discussing a campus pilot?',visualBrief:'Campus community',handoff:false,reason:''};}};
+  if(id==='./ai/socialCopy')return{socialCopy:async(_facts,_kind,_text,history)=>{draftHistory=history;if(onDraft)await onDraft();return{text:'Hello, I’m Rowen, Rydr’s AI assistant. Interested in discussing a campus pilot?',visualBrief:'Campus community',handoff:false,reason:''};}};
   if(id==='./socialMeta')return{MetaRequestError,socialConnection:async()=>({pageId:'100',instagramId:'200'}),socialGraph:async(path,params,method)=>{calls.push({path,params,method});if(path.endsWith('/media_publish')){if(failPublish)throw new MetaRequestError(true);return{id:'400'};}if(path.endsWith('/media'))return{id:'300'};if(path==='300')return{status_code:containerStatus};if(path.endsWith('/messages'))return{message_id:'m'+calls.length};return{};}};
  }
  return original.call(this,id,parent,...rest);
@@ -40,3 +40,6 @@ test('replies obey review mode, message changes and the 24-hour window',async()=
 test('pausing or an opt-out during AI drafting prevents sending',async()=>{await agent.ingestSocialWebhook(inbound());onDraft=async()=>agent.pauseSocial();await agent.runSocialAgent();assert.equal(calls.length,0);assert.equal(docs.get(root).config.active,false);});
 test('each new reply in a thread counts toward the daily cap',async()=>{docs.get(root).config.dailyReplies=1;await agent.ingestSocialWebhook(inbound());await agent.runSocialAgent();now+=1000;await agent.ingestSocialWebhook(inbound('two'));await agent.runSocialAgent();assert.equal(calls.filter(c=>c.path.endsWith('/messages')).length,1);});
 test('post creation is idempotent and scheduling rejects weekends',async()=>{const input={operationId:'stable',caption:'Hello',mediaUrl:'https://cdn.example.com/photo.jpg',schedule:true,scheduledLocal:'2026-10-28T10:00'};await agent.saveSocialPost(input,actor);await agent.saveSocialPost(input,actor);assert.equal([...docs.keys()].filter(k=>k.includes('/posts/')).length,1);await assert.rejects(agent.saveSocialPost({...input,caption:'Changed'},actor));await assert.rejects(agent.saveSocialPost({...input,operationId:'other',scheduledLocal:'2026-10-31T10:00'},actor));});
+
+test('ordinary support can receive a referral while safety and opt-outs stay held',async()=>{for(const text of ['I need a refund','My payment failed','How do I reset my password?','Can I talk to a person?'])assert.equal(policy.needsHuman(text),false);for(const text of ['I was injured','There is an emergency','Stop contacting me'])assert.equal(policy.needsHuman(text),true);await agent.ingestSocialWebhook(inbound('support','I need a refund'));assert.equal(docs.get(root+'/threads/'+hash('123')).state,'pending');await agent.runSocialAgent();assert.equal(calls.filter(c=>c.path.endsWith('/messages')).length,1);});
+test('reply drafting receives prior conversation turns without deleted messages',async()=>{await agent.ingestSocialWebhook(inbound('first','What is Rydr?'));await agent.runSocialAgent();now+=1000;await agent.ingestSocialWebhook(inbound('second','How can my club join?'));await agent.runSocialAgent();assert(draftHistory.some(m=>m.direction==='outbound'));assert(draftHistory.some(m=>m.text==='What is Rydr?'));});

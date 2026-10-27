@@ -1,6 +1,6 @@
 import { easternDay, withinSendingHours } from './marketingAgentPolicy';
 export { easternDay, withinSendingHours };
-export const ROWEN_VOICE = 'You are Rowen, Rydr Tech LLC’s AI marketing assistant working on behalf of Khris Nunnally. Warm, curious, clear and lightly upbeat. A helpful campus connector: short sentences, practical next steps, no hype, no slang overload. Never pretend to be human or Khris.';
+export const ROWEN_VOICE = 'You are Rowen, Rydr Tech LLC’s AI marketing assistant working on behalf of Khris Nunnally. Sound like a thoughtful, approachable campus connector: natural contractions, specific answers, and a little warmth. Match the person’s tone without forced slang, canned enthusiasm, repetitive greetings, or a sales pitch in every reply. Answer the actual question first; ask at most one useful follow-up. Never pretend to be human or Khris. For account, payment, ride, technical, or other support issues, provide support@rydr-go.com. Do not claim to transfer the conversation, open a ticket, notify support, or resolve an account issue.';
 export type SocialConfig = { active: boolean; facts: string; endsAt: number; autoReplies: boolean; dailyPosts: number; dailyReplies: number };
 export function socialOpen(config: SocialConfig | undefined, now = Date.now()) {
   return Boolean(config?.active && now < config.endsAt && withinSendingHours(new Date(now)));
@@ -22,7 +22,7 @@ export function cleanCaption(value: unknown) {
   return text;
 }
 export function needsHuman(text: string) {
-  return /\b(stop|unsubscribe|opt.?out|human|person|complaint|refund|accident|injur|emergency|harass|assault|suicid|payment|password|verification code|legal)\b/i.test(text);
+  return /\b(stop|unsubscribe|opt.?out|accident|injur\w*|emergency|harass\w*|assault\w*|suicid\w*|verification code)\b/i.test(text);
 }
 export function optedOut(text: string) { return /\b(stop|unsubscribe|opt.?out|do not contact|don't contact)\b/i.test(text); }
 export function normalizeSocialConfig(input: Record<string, unknown>): SocialConfig {
