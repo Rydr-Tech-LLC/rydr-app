@@ -9,7 +9,8 @@
     "lint": "next lint",
     "set-admin": "node scripts/setAdminClaim.mjs",
     "test:auth-compatibility": "node --no-experimental-require-module --test scripts/authCompatibility.test.cjs",
-    "test:promotions": "node --test test/promotions.test.cjs"
+    "test:promotions": "node --test test/promotions.test.cjs",
+    "test:marketing-agent": "node --test test/marketingAgent.test.cjs"
   },
   "dependencies": {
     "@google-cloud/firestore": "^9.3.1",
@@ -18,7 +19,7 @@
     "firebase-admin": "^14.5.0",
     "google-auth-library": "^11.3.1",
     "lucide-react": "^1.57.0",
-    "next": "^16.4.0",
+    "next": "^16.4.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "recharts": "^3.10.1",

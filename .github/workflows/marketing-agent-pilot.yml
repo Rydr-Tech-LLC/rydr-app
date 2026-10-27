@@ -1,0 +1,27 @@
+name: Rydr marketing agent pilot
+on:
+  workflow_dispatch:
+  schedule:
+    # UTC envelope covers both Eastern standard and daylight saving time.
+    # The server enforces the exact 9 a.m.–5 p.m. local shift.
+    - cron: '7,22,37,52 13-21 * * 1-5'
+permissions:
+  contents: read
+concurrency:
+  group: rydr-marketing-agent-pilot
+  cancel-in-progress: false
+jobs:
+  run:
+    if: vars.RYDR_MARKETING_AGENT_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Invoke bounded campaign worker
+        env:
+          MARKETING_AGENT_PUBLIC_URL: ${{ vars.MARKETING_AGENT_PUBLIC_URL }}
+          MARKETING_AGENT_RUN_SECRET: ${{ secrets.MARKETING_AGENT_RUN_SECRET }}
+        run: node RydrMissionControl/scripts/runMarketingAgent.mjs

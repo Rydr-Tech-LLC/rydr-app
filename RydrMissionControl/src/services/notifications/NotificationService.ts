@@ -34,6 +34,9 @@ export interface BetaApprovalInput {
 }
 
 export interface GenericEmailInput {
+  headers?: Record<string, string>;
+  idempotencyKey?: string;
+  replyTo?: string;
   from?: string;
   to: string | string[];
   bcc?: string | string[];
@@ -159,6 +162,9 @@ export class NotificationService {
     return this.toNotificationResult(
       await this.email.sendEmail({
         from: input.from,
+        idempotencyKey: input.idempotencyKey,
+        replyTo: input.replyTo,
+        headers: input.headers,
         to: input.to,
         bcc: input.bcc,
         subject: input.subject,

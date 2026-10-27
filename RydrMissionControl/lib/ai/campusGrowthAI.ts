@@ -119,6 +119,8 @@ export interface AILeadCandidate {
 }
 
 export interface DiscoveryInput {
+  /** Bounded background-agent searches; manual discovery retains its existing cap. */
+  strategyLimit?: number;
   discoveryGoal?: string;
   leadIntents?: string[];
   campusNames?: string[];
@@ -180,7 +182,9 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
   const categories = cleanList(input.categories).length ? cleanList(input.categories) : DEFAULT_PRIORITY_CATEGORIES;
   const maxSearchResults = clamp(Number(input.maxSearchResults) || 5, 1, 20);
   const runId = crypto.randomUUID();
-  const searchStrategies = await planSearchStrategies(campusNames, categories, discoveryGoal, leadIntents);
+  const planned = await planSearchStrategies(campusNames, categories, discoveryGoal, leadIntents);
+  const searchStrategies = input.strategyLimit
+    ? planned.slice(0, Math.max(1, Math.min(4, Math.floor(input.strategyLimit)))) : planned;
   const searchBatch = await runBraveSearches(searchStrategies, maxSearchResults);
   const manualBatch = await manualUrlResults(input.manualUrls);
 
@@ -248,6 +252,7 @@ async function planSearchStrategies(campusNames: string[], categories: string[],
   if (!apiKey) return fallback;
 
   const response = await fetch("https://api.openai.com/v1/responses", {
+    signal: AbortSignal.timeout(45000),
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -424,6 +429,7 @@ async function braveWebSearch(query: string, apiKey: string, maxSearchResults: n
   });
 
   const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${params.toString()}`, {
+    signal: AbortSignal.timeout(15000),
     method: "GET",
     cache: "no-store",
     headers: {
@@ -635,6 +641,7 @@ async function extractLeadsWithAI(input: {
   if (!apiKey) return ruleBasedCandidates(input.searchResults, input.campusNames, input.categories);
 
   const response = await fetch("https://api.openai.com/v1/responses", {
+    signal: AbortSignal.timeout(45000),
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,

@@ -4,6 +4,8 @@ import "server-only";
 import { Resend } from "resend";
 
 export interface SendEmailInput {
+  headers?: Record<string, string>;
+  idempotencyKey?: string;
   from?: string;
   to: string | string[];
   bcc?: string | string[];
@@ -56,8 +58,9 @@ export class EmailService {
         subject: input.subject,
         html: input.html,
         text: input.text,
-        replyTo: input.replyTo
-      });
+        replyTo: input.replyTo,
+        headers: input.headers
+      }, input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined);
 
       if (response.error) {
         return this.fail(response.error.message || "Resend rejected the email request.", input);

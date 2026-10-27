@@ -1,0 +1,15 @@
+# Mission Control also imports shared policies from the backend source tree.
+/*
+!/RydrMissionControl
+!/rydr-backend
+**/node_modules/**
+**/.env*
+**/.git/**
+**/*.p8
+**/*.pem
+**/*.log
+RydrMissionControl/node_modules/**
+RydrMissionControl/.next/**
+RydrMissionControl/.vercel/**
+RydrMissionControl/.env*
+RydrMissionControl/*.tsbuildinfo

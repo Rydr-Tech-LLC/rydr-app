@@ -242,6 +242,7 @@ export interface AuditLogEntry {
     | "campusStudentOrganization"
     | "campusEvent"
     | "campusOutreachDraft"
+    | "marketingAgentCampaign"
     | "campusAmbassador"
     | "campusDiscoveredLead"
     | "missionControlAdmin"

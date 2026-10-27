@@ -29,6 +29,9 @@ import {WorkspaceSwitcher, useWorkspace} from "./WorkspaceContext";
 import type { MissionControlRole } from "@/lib/missionControlAccess";
 
 const CAMPUS_GROWTH_ITEMS = [
+  { href: "/campus-growth/agent", label: "Marketing Agent" },
+  { href: "/campus-growth/social/workflows", label: "Social Workspace" },
+  { href: "/campus-growth/social", label: "Social Connections" },
   { href: "/campus-growth/discovery", label: "AI Discovery" },
   { href: "/campus-growth/outreach", label: "Outreach Inbox" },
   { href: "/campus-growth/organizations", label: "Organizations" },

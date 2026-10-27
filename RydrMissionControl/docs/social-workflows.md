@@ -1,0 +1,88 @@
+# Rowen social workflows
+
+Admin UI: `/workspaces/live-beta/campus-growth/social/workflows`. Connections remain at
+`/workspaces/live-beta/campus-growth/social`. Rowen's illustrated identity and voice are
+shared with the email agent. The voice is warm, curious and concise, explicitly AI.
+
+## Supported workflows
+
+- AI caption and visual-brief drafting from an administrator's approved facts. The media
+  itself must be supplied as a public JPEG URL or MP4 Reel URL; this is not an image/video generator.
+- Durable drafts, weekday Eastern scheduling, automatic publication of scheduled items,
+  cancellation before processing, provider IDs and explicit resolution of uncertain sends.
+- Signed Instagram incoming-DM webhook ingestion with account/recipient checks, event ID
+  deduplication, deletion redaction, opt-outs, AI or reviewed replies, and human handoff.
+  Replies only use the standard 24-hour window (with a one-minute buffer). No cold DMs,
+  Human Agent tag automation, or automatic replies to attachments/support complaints.
+- Instagram follower/media counts, rolling seven-day reach/views, and lifetime reach,
+  likes/comments for published posts. Missing metrics remain null, never manufactured zeroes.
+  Recent post insights rotate in batches of three; at most 30 published posts are considered.
+- Shift activity, queue state, daily delivery counts, scheduler heartbeat and error visibility.
+
+The worker checks active configuration, end date and Mon–Fri 09:00–17:00 America/New_York
+before each outgoing action. DST is handled by the shared policy. Pausing cannot recall a
+request already sent to Meta. Test simulates sends and never issues Meta writes.
+Incoming webhooks are accepted outside shift so the inbox is available next shift; a
+conversation whose reply window has elapsed is handed to Khris, not automatically messaged.
+
+## Delivery reliability
+
+Worker leases serialize bounded batches (two posts, three conversations). Firestore
+transactions claim work and reserve daily capacity. Media containers are saved before
+publication and reused while processing. Ambiguous publish/send outcomes and abandoned
+claims become unknown and are never automatically retried. A successful publication is
+not downgraded by a later analytics failure. Manual resolution does not resend.
+Newer inbound messages invalidate old AI drafts; each distinct inbound reply consumes a
+daily reservation. Provider rejections expose numeric codes, never tokens or raw payloads.
+The queue and inbox use bounded reads; split or archive a backlog beyond the displayed 100
+items. Messages are stored server-side in the workspace database under `socialAgent/rowen`.
+Firestore's existing default-deny client rules protect these collections.
+
+## Activation requirements
+
+Live verification on October 27, 2026: the redesigned screens are deployed, and an
+Instagram analytics sync succeeded. With explicit user approval, `pages_manage_metadata`
+and `pages_messaging` were added to the login configuration. Rydr reauthorized at
+4:33 p.m. Eastern, and the Page subscription succeeded: the UI now shows "Account
+subscription configured". The Instagram app-level `messages` field is subscribed.
+The supplied https://www.rydr-go.com/privacy/ URL was saved and Meta confirmed the app
+was successfully published. A real incoming test DM ("Hello Rydr") was received at
+4:36 p.m. Eastern. An explicitly requested, manually prepared Rowen test reply was
+accepted by Meta and recorded as replied at 4:38 p.m., with one reply in shift analytics.
+The controlled run used automatic AI replies OFF; Rowen was paused again afterward.
+Recipient-side receipt is not yet confirmed. Publication does not establish Advanced
+Access approval. The saved brief currently describes this controlled test, and
+the GitHub scheduler has not been installed/enabled on the default branch.
+
+1. Save the approved brief and campaign end in the UI; extend past November 1 as needed.
+2. Existing Instagram publishing/insights scopes are used. Instagram messaging also needs
+   `pages_manage_metadata` on the connected Page token. Add it to the Meta configuration,
+   reauthorize, and select "Connect incoming message delivery". Enable the Instagram
+   `messages` webhook field in the app dashboard. The live Page subscription also
+   requires `pages_messaging` according to Meta's permission error; obtain authorization
+   before granting that additional access. Publish the app after supplying the required
+   privacy-policy URL. Public conversations require Meta's
+   applicable Advanced Access/App Review; development access is limited to app-role users.
+3. Set `SOCIAL_AGENT_RUN_SECRET` in Vercel Production and the GitHub repository secret.
+   Set repository variable `MARKETING_AGENT_PUBLIC_URL` to the production origin and
+   `RYDR_SOCIAL_AGENT_ENABLED=true`. The `.github/workflows/social-agent.yml` workflow must
+   be on the default branch. It requests a bounded run every 15 minutes inside the UTC
+   envelope; the server enforces local time and campaign status. GitHub schedules can be
+   delayed; scheduled posts run on the next available check, not at an exact guaranteed minute.
+4. Deploy, verify live analytics, and send an inbound DM from an eligible test account.
+   Confirm reception, human handoff, and a controlled reply before automatic public operation.
+
+Facebook Page identity is connected, but Facebook publishing is not part of this module;
+it requires its own publishing permission and workflow. Instagram comments are not treated
+as DMs. No outbound posts or messages are sent merely by deployment or account connection.
+
+## Validation
+
+`node --test test/socialAgent.test.cjs test/metaConnection.test.cjs test/marketingAgent.test.cjs`
+and `npx tsc --noEmit`, `npm run build`.
+
+Primary references consulted October 27, 2026:
+- https://developers.facebook.com/documentation/instagram-platform/content-publishing
+- https://developers.facebook.com/documentation/instagram-platform/insights
+- https://developers.facebook.com/documentation/business-messaging/instagram-messaging/features/send-message
+- https://developers.facebook.com/documentation/business-messaging/instagram-messaging/overview

@@ -7,6 +7,11 @@ export function proxy(request: NextRequest) {
   const isApi = pathname.startsWith("/api/");
   let workspace = match?.[1];
   if (isApi) {
+    // A signed public unsubscribe link has no staff session or workspace referer.
+    if (pathname === "/api/campus-growth/agent/unsubscribe") {
+      const value = request.nextUrl.searchParams.get("workspace");
+      if (value === "test" || value === "live-beta") workspace = value;
+    }
     const explicit = request.headers.get("x-rydr-workspace");
     if (explicit === "test" || explicit === "live-beta") workspace = explicit;
     else {
@@ -16,6 +21,10 @@ export function proxy(request: NextRequest) {
           workspace = ref.pathname.match(prefix)?.[1];
       } catch {}
     }
+    const inbound = pathname.match(/^\/api\/campus-growth\/agent\/inbound\/(test|live-beta)$/);
+    if (inbound) workspace = inbound[1]; // Signed webhook destination determines isolation.
+    const meta = pathname.match(/^\/api\/meta\/(test|live-beta)\/(connect|callback|status|webhook)$/);
+    if (meta) workspace = meta[1]; // OAuth callbacks/webhooks have no workspace referer.
     if (
       !workspace &&
       pathname === "/api/waitlist" &&

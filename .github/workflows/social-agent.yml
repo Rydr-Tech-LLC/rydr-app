@@ -1,0 +1,26 @@
+name: Rowen social shift
+on:
+  workflow_dispatch:
+  schedule:
+    # Exact shift, holidays/campaign end and DST are enforced server-side.
+    - cron: '3,18,33,48 13-21 * * 1-5'
+permissions:
+  contents: read
+concurrency:
+  group: rowen-social-shift
+  cancel-in-progress: false
+jobs:
+  run:
+    if: vars.RYDR_SOCIAL_AGENT_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run Rowen social workflows
+        env:
+          MARKETING_AGENT_PUBLIC_URL: ${{ vars.MARKETING_AGENT_PUBLIC_URL }}
+          SOCIAL_AGENT_RUN_SECRET: ${{ secrets.SOCIAL_AGENT_RUN_SECRET }}
+        run: node RydrMissionControl/scripts/runSocialAgent.mjs
