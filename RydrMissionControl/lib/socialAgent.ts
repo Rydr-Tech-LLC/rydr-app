@@ -6,6 +6,7 @@ import { socialCopy } from './ai/socialCopy';
 import { socialConnection, socialGraph, MetaRequestError } from './socialMeta';
 import { cleanCaption, easternDay, metricValue, needsHuman, normalizeSocialConfig, optedOut, publicMediaUrl, replyWindow, socialOpen, withinSendingHours, type SocialConfig } from './socialPolicy';
 import { localTimeToISO } from '../../rydr-backend/services/stripe/promotionPolicy';
+import { ROWEN_MEDIA } from './rowenMedia';
 
 type Actor = { uid: string; email: string | null };
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -165,7 +166,7 @@ async function reserve(kind: 'posts' | 'replies', runId: string, item: FirebaseF
     const [cfg, tally, saved] = await Promise.all([tx.get(root),tx.get(day),tx.get(item)]), data = cfg.data(), counts = tally.data() ?? {};
     if (!socialOpen(data?.config) || data?.leaseId !== runId || data?.leaseUntil < Date.now()) return false;
     if (saved.data()?.reservedDay === easternDay() && (kind === 'posts' || saved.data()?.reservedFor === saved.data()?.lastInboundId)) return true;
-    const cap = kind === 'posts' ? data.config.dailyPosts : data.config.dailyReplies;
+    const cap = kind === 'posts' ? (data.config.autoPosts ? 1 : data.config.dailyPosts) : data.config.dailyReplies;
     if ((counts[`${kind}Reserved`] ?? 0) >= cap) return false;
     tx.set(day,{[`${kind}Reserved`]:(counts[`${kind}Reserved`] ?? 0)+1},{merge:true}); tx.update(item,{reservedDay:easternDay(),reservedFor:kind==='replies'?saved.data()?.lastInboundId:'post'}); return true;
   });
@@ -173,9 +174,10 @@ async function reserve(kind: 'posts' | 'replies', runId: string, item: FirebaseF
 async function tally(kind: string) { const { db, root } = await refs(), ref = root.collection('days').doc(easternDay()); await db.runTransaction(async tx => { const data = (await tx.get(ref)).data(); tx.set(ref,{[kind]:(data?.[kind] ?? 0)+1},{merge:true}); }); }
 async function stillOpen(runId: string) { const { root } = await refs(); const data = (await root.get()).data(); return socialOpen(data?.config) && data?.leaseId === runId && data?.leaseUntil > Date.now(); }
 async function publishPost(ref: FirebaseFirestore.DocumentReference, runId: string, test: boolean) {
-  const { db } = await refs();
+  const { db, root } = await refs();
   const claimed = await db.runTransaction(async tx => { const p = (await tx.get(ref)).data(); if (p?.state !== 'queued' || p.dueAt > Date.now()) return null; tx.update(ref,{state:'processing',processingAt:Date.now()}); return p; });
   if (!claimed) return;
+  if (claimed.automatic && (claimed.autoDay !== easternDay() || !(await root.get()).data()?.config.autoPosts)) { await ref.update({state:'cancelled',error:'Automatic publishing is off or the original shift ended.'}); return; }
   let attempted = false;
   try {
     if (!await reserve('posts',runId,ref)) { await ref.update({state:'queued'}); return; }
@@ -189,6 +191,7 @@ async function publishPost(ref: FirebaseFirestore.DocumentReference, runId: stri
     if (status.status_code === 'IN_PROGRESS') { await ref.update({state:'queued',dueAt:Date.now()+60000,updatedAt:Date.now()}); return; }
     if (status.status_code !== 'FINISHED') throw new Error(`Media container is ${status.status_code || 'unavailable'}. Review the media before creating another post.`);
     if (!await stillOpen(runId)) { await ref.update({state:'queued'}); return; }
+    if (claimed.automatic && !(await root.get()).data()?.config.autoPosts) { await ref.update({state:'cancelled'}); return; }
     // Once this request starts, never automatically retry an uncertain publish.
     attempted = true;
     const result = await socialGraph(`${instagramId}/media_publish`,{creation_id:container.id},'POST');
@@ -201,6 +204,40 @@ async function publishPost(ref: FirebaseFirestore.DocumentReference, runId: stri
     if ((await ref.get()).data()?.state !== 'published') await ref.update({state:uncertain?'unknown':'failed',error:(error as Error).message,updatedAt:Date.now()});
     await event('error',(error as Error).message,ref.id);
   }
+}
+async function prepareAutomaticPost(runId: string) {
+  const { db, root, posts, threads } = await refs(), day = easternDay();
+  const data = (await root.get()).data();
+  if (!data?.config.autoPosts || !await stillOpen(runId)) return null;
+  // Incoming conversations and an in-progress email batch take precedence over content creation.
+  const [pending, email, recent, tallyDoc] = await Promise.all([
+    threads.where('state','in',['pending','ready','processing']).limit(1).get(),
+    db.collection('marketingAgentCampaigns').doc('student-beta-october-2026').get(),
+    posts.orderBy('createdAt','desc').limit(100).get(), root.collection('days').doc(day).get(),
+  ]);
+  if (pending.docs.length || email.data()?.leaseUntil > Date.now() || (tallyDoc.data()?.postsReserved ?? 0) >= 1) return null;
+  const shiftStart = Date.parse(localTimeToISO(`${day}T00:00`)), shiftEnd = Date.parse(localTimeToISO(`${day}T17:00`));
+  if (recent.docs.some(d => { const p=d.data(); return ['queued','processing','unknown'].includes(p.state) && p.dueAt < shiftEnd || ['published','simulated'].includes(p.state) && (p.publishedAt ?? p.updatedAt) >= shiftStart; })) return null;
+  const ref = posts.doc(`rowen-auto-${day}`);
+  const used = new Map<string,number>();
+  for (const doc of recent.docs) { const p=doc.data(); if(p.assetId) used.set(p.assetId,Math.max(used.get(p.assetId)??0,p.createdAt)); }
+  const asset = [...ROWEN_MEDIA].sort((a,b)=>(used.get(a.id)??0)-(used.get(b.id)??0))[0];
+  const claimed = await db.runTransaction(async tx => {
+    const [existing, cfg] = await Promise.all([tx.get(ref),tx.get(root)]);
+    if (existing.exists || !cfg.data()?.config.autoPosts || !socialOpen(cfg.data()?.config) || cfg.data()?.leaseId !== runId) return false;
+    tx.create(ref,{state:'drafting',automatic:true,autoDay:day,assetId:asset.id,createdAt:Date.now(),updatedAt:Date.now(),caption:'Preparing today’s caption…',mediaType:'image',mediaUrl:`https://rydr-app-missioncontrol.vercel.app/rowen-media/${asset.id}.jpg`,aiGenerated:false,dueAt:Date.now(),createdBy:'Rowen'});
+    return true;
+  });
+  if (!claimed) return null;
+  try {
+    const previous = recent.docs.filter(d=>d.data().automatic).slice(0,6).map(d=>String(d.data().caption).slice(0,1800));
+    const copy = await socialCopy(data.config.facts,'post',JSON.stringify({topic:asset.topic,approvedGraphic:asset.title,previousCaptions:previous,instructions:'Write a fresh caption; do not repeat recent opening lines. One clear invitation or question. Up to three relevant hashtags. Do not claim follower growth or invent news.'}));
+    if (previous.some(c=>c.trim().toLowerCase()===copy.text.trim().toLowerCase())) throw new Error('Repeated caption held for review.');
+    if (!await stillOpen(runId) || !(await root.get()).data()?.config.autoPosts) { await ref.update({state:'cancelled',caption:copy.text,error:'Automation paused or shift ended during drafting.'}); return null; }
+    await ref.update({caption:cleanCaption(copy.text),visualBrief:copy.visualBrief,state:copy.handoff?'draft':'queued',error:copy.handoff?copy.reason:'',updatedAt:Date.now()});
+    await event('autopost',copy.handoff?'Automatic caption held for human review.':`Prepared today’s Instagram post using “${asset.title}”.`,ref.id);
+    return copy.handoff ? null : ref;
+  } catch(error) { await ref.update({state:'failed',error:(error as Error).message,updatedAt:Date.now()}); await event('error',(error as Error).message,ref.id); return null; }
 }
 async function processReply(ref: FirebaseFirestore.DocumentReference, runId: string, test: boolean) {
   const { db, root } = await refs();
@@ -266,6 +303,10 @@ export async function runSocialAgent(scheduled = false) {
     for (const post of queue.docs.sort((a,b)=>a.data().dueAt-b.data().dueAt).slice(0,2)) if (await stillOpen(runId)) await publishPost(post.ref,runId,test);
     const inbox = await threads.where('state','in',['pending','ready']).limit(50).get();
     for (const thread of inbox.docs.sort((a,b)=>a.data().lastInboundAt-b.data().lastInboundAt).slice(0,3)) if (Date.now()-started<150000 && await stillOpen(runId)) await processReply(thread.ref,runId,test);
+    if (Date.now()-started<120000 && await stillOpen(runId)) {
+      const automatic = await prepareAutomaticPost(runId);
+      if (automatic && await stillOpen(runId)) await publishPost(automatic,runId,test);
+    }
     const metrics = (await root.collection('metrics').doc('latest').get()).data();
     if (!test && Date.now()-started<150000 && await stillOpen(runId) && (!metrics?.syncedAt || metrics.syncedAt < started-3600000)) await syncSocialAnalytics();
     await event('run','Shift batch complete. Waiting for the next scheduled check.');

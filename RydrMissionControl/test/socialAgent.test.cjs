@@ -17,7 +17,7 @@ Module._load=function(id,parent,...rest){
  if(parent?.filename.endsWith('socialAgent.ts')){
   if(id==='./firebaseAdmin')return{getWorkspaceDb:async()=>db};
   if(id==='./workspace')return{currentWorkspace:async()=>workspace};
-  if(id==='./ai/socialCopy')return{socialCopy:async(_facts,_kind,_text,history)=>{draftHistory=history;if(onDraft)await onDraft();return{text:'Hello, I’m Rowen, Rydr’s AI assistant. Interested in discussing a campus pilot?',visualBrief:'Campus community',handoff:false,reason:''};}};
+  if(id==='./ai/socialCopy')return{socialCopy:async(_facts,_kind,_text,history)=>{draftHistory=history;if(onDraft)await onDraft();return{text:_kind==='post'?`Campus conversation ${now}`:'Hello, I’m Rowen, Rydr’s AI assistant. Interested in discussing a campus pilot?',visualBrief:'Campus community',handoff:false,reason:''};}};
   if(id==='./socialMeta')return{MetaRequestError,socialConnection:async()=>({pageId:'100',instagramId:'200'}),socialGraph:async(path,params,method)=>{calls.push({path,params,method});if(path.endsWith('/media_publish')){if(failPublish)throw new MetaRequestError(true);return{id:'400'};}if(path.endsWith('/media'))return{id:'300'};if(path==='300')return{status_code:containerStatus};if(path.endsWith('/messages'))return{message_id:'m'+calls.length};return{};}};
  }
  return original.call(this,id,parent,...rest);
@@ -43,3 +43,45 @@ test('post creation is idempotent and scheduling rejects weekends',async()=>{con
 
 test('ordinary support can receive a referral while safety and opt-outs stay held',async()=>{for(const text of ['I need a refund','My payment failed','How do I reset my password?','Can I talk to a person?'])assert.equal(policy.needsHuman(text),false);for(const text of ['I was injured','There is an emergency','Stop contacting me'])assert.equal(policy.needsHuman(text),true);await agent.ingestSocialWebhook(inbound('support','I need a refund'));assert.equal(docs.get(root+'/threads/'+hash('123')).state,'pending');await agent.runSocialAgent();assert.equal(calls.filter(c=>c.path.endsWith('/messages')).length,1);});
 test('reply drafting receives prior conversation turns without deleted messages',async()=>{await agent.ingestSocialWebhook(inbound('first','What is Rydr?'));await agent.runSocialAgent();now+=1000;await agent.ingestSocialWebhook(inbound('second','How can my club join?'));await agent.runSocialAgent();assert(draftHistory.some(m=>m.direction==='outbound'));assert(draftHistory.some(m=>m.text==='What is Rydr?'));});
+
+
+test('automatic content publishes at most once per shift, rotates graphics and shares the manual cap',async()=>{
+ docs.get(root).config.autoPosts=true;
+ await Promise.all([agent.runSocialAgent(),agent.runSocialAgent()]);
+ await agent.runSocialAgent();
+ assert.equal(calls.filter(c=>c.path.endsWith('/media_publish')).length,1);
+ const first=docs.get(root+'/posts/rowen-auto-2026-10-27');assert.equal(first.state,'published');
+ post('manual');await agent.runSocialAgent();assert.equal(calls.filter(c=>c.path.endsWith('/media_publish')).length,1);
+ docs.delete(root+'/posts/manual');now+=86400000;await agent.runSocialAgent();
+ assert.equal(calls.filter(c=>c.path.endsWith('/media_publish')).length,2);
+ assert.notEqual(docs.get(root+'/posts/rowen-auto-2026-10-28').assetId,first.assetId);
+});
+
+test('automatic posts wait for email work and pending replies, and pause during drafting cancels publication',async()=>{
+ docs.get(root).config.autoPosts=true;
+ docs.set('marketingAgentCampaigns/student-beta-october-2026',{leaseUntil:now+60000});
+ await agent.runSocialAgent();assert.equal([...docs.keys()].filter(k=>k.includes('/posts/')).length,0);
+ docs.delete('marketingAgentCampaigns/student-beta-october-2026');
+ for(let i=0;i<4;i++)await agent.ingestSocialWebhook(inbound('in'+i,'Hello',now,String(1000+i)));
+ await agent.runSocialAgent();assert.equal([...docs.keys()].filter(k=>k.includes('/posts/')).length,0);
+ for(const key of [...docs.keys()])if(key.includes('/threads/'))docs.delete(key);
+ onDraft=async()=>agent.pauseSocial();await agent.runSocialAgent();
+ assert.equal(calls.filter(c=>c.path.endsWith('/media_publish')).length,0);
+ assert.equal(docs.get(root+'/posts/rowen-auto-2026-10-27').state,'cancelled');
+});
+
+test('stale or disabled automatic content never publishes later',async()=>{
+ docs.get(root).config.autoPosts=true;post('old');
+ Object.assign(docs.get(root+'/posts/old'),{automatic:true,autoDay:'2026-10-26'});
+ await agent.runSocialAgent();assert.equal(docs.get(root+'/posts/old').state,'cancelled');
+ assert.equal(calls.filter(c=>c.path.endsWith('/media_publish')).length,1);
+ now+=86400000;post('disabled');Object.assign(docs.get(root+'/posts/disabled'),{automatic:true,autoDay:'2026-10-28'});
+ docs.get(root).config.autoPosts=false;await agent.runSocialAgent();
+ assert.equal(docs.get(root+'/posts/disabled').state,'cancelled');
+ assert.equal(calls.filter(c=>c.path.endsWith('/media_publish')).length,1);
+});
+
+test('automatic content in Test is simulated and never contacts Meta',async()=>{
+ workspace='test';docs.get(root).config.autoPosts=true;await agent.runSocialAgent();
+ assert.equal(docs.get(root+'/posts/rowen-auto-2026-10-27').state,'simulated');assert.equal(calls.length,0);
+});

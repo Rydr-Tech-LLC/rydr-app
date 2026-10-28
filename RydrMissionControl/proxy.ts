@@ -38,6 +38,7 @@ export function proxy(request: NextRequest) {
       );
   }
   const publicPath =
+    /^\/rowen-media\/[a-z-]+\.jpg$/.test(pathname) ||
     pathname === "/login" ||
     pathname.startsWith("/api/") ||
     pathname.startsWith("/_next/") ||
