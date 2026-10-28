@@ -326,5 +326,3 @@ test('contact-focused discovery reviews email evidence and automatically sends e
  assert.equal(sent[0].to,lead.publicEmail);
  assert.equal(docs.get(leadPath(lead.publicEmail)).state,'sent');
 });
-
-
