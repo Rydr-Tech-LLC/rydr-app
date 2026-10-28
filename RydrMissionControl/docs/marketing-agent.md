@@ -150,3 +150,16 @@ Tests use an in-memory transactional database and fake providers: they do not se
 or require production credentials. Validate a deployed Test run before enabling Live Beta.
 
 Reply setup references: [Gmail forwarding](https://www.zoho.com/mail/help/email-forwarding.html), [Resend webhook verification](https://resend.com/docs/webhooks/verify-webhooks-requests), [Resend receiving](https://resend.com/docs/api-reference/emails/retrieve-received-email).
+
+## Live status and scheduled pauses
+
+Rowen works weekdays 9 a.m.–5 p.m. America/New_York (DST-aware), with breaks
+10:45–11 a.m. and 3–3:15 p.m., and lunch 12:30–1 p.m. New automated work
+and outbound reservations pause during these windows; already accepted requests
+can finish. The shared status panel refreshes every 15 seconds and shows actual
+worker leases, waiting, breaks, lunch, ending shift, and recorded errors.
+
+Lead discovery may run every 30 minutes during working time. Today's bounded
+manual recovery runner (workflow input recovery_day=2026-10-28) checks cloud
+workers every 15 minutes, ending at 5:50 p.m. Eastern after the report window.
+It does not replace or guarantee future GitHub cron runs.

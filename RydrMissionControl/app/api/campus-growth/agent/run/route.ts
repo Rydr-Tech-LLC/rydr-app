@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/session";
-import { runMarketingAgent } from "@/lib/marketingAgent";
+import { runMarketingAgent, marketingAgentRefs } from "@/lib/marketingAgent";
 import { sendDueShiftReport } from "@/lib/marketingShiftReport";
 
 export const maxDuration = 300;
@@ -14,6 +14,7 @@ export async function POST(request: NextRequest) {
   const scheduler = Boolean(secret && Buffer.byteLength(supplied) === Buffer.byteLength(expected)
     && timingSafeEqual(Buffer.from(supplied), Buffer.from(expected)));
   if (!scheduler && !await getAdminSession()) return NextResponse.json({ error: "Not authorized" }, { status: 401 });
+  if (scheduler) { const { campaign } = await marketingAgentRefs(); if ((await campaign.get()).exists) await campaign.update({ schedulerLastSeen: Date.now() }); }
   const result = await runMarketingAgent();
   // Reporting is allowed after the work shift; it does not send outreach or consume its caps.
   const shiftReport = scheduler ? await sendDueShiftReport() : { skipped: true };

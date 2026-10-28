@@ -1,3 +1,4 @@
+import { rowenShift } from './rowenShift';
 export const PILOT_END = "2026-11-01T04:00:00.000Z"; // Initial deadline; editable in Mission Control.
 export const AGENT_TIME_ZONE = "America/New_York";
 export const MARKETING_AGENT_EMAIL = "marketing@rydr-go.com";
@@ -85,7 +86,7 @@ export function easternDay(now = new Date()): string {
 export function withinSendingHours(now = new Date()): boolean {
   const weekday = new Intl.DateTimeFormat("en-US", { timeZone: AGENT_TIME_ZONE, weekday: "short" }).format(now);
   const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: AGENT_TIME_ZONE, hour: "numeric", hourCycle: "h23" }).format(now));
-  return !["Sat", "Sun"].includes(weekday) && hour >= 9 && hour < 17;
+  return !["Sat", "Sun"].includes(weekday) && hour >= 9 && hour < 17 && rowenShift(now).canWork;
 }
 
 export interface AgentLead {

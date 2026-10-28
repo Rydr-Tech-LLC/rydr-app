@@ -55,7 +55,7 @@ Module._load = function(id, parent, ...rest) {
     if (id === '@/lib/workspace') return { currentWorkspace: async () => workspace };
     if (id === 'resend') return { Resend: class { emails = { send: async (...args) => { resendCalls.push(args); return { data: { id: 'provider-id' } }; } }; } };
   }
-  if (parent?.filename.endsWith('marketingAgent.ts') || parent?.filename.endsWith('marketingShiftReport.ts')) {
+  if (parent?.filename.endsWith('marketingAgent.ts') || parent?.filename.endsWith('marketingShiftReport.ts') || parent?.filename.endsWith('rowenStatus.ts')) {
     if (id === './firebaseAdmin') return { getWorkspaceDb: async () => db };
     if (id === './workspace') return { currentWorkspace: async () => workspace };
     if (id === './ai/campusGrowthAI') return { discoveryFingerprint: () => 'existing-discovery', discoverCampusLeads: async input => {
@@ -280,4 +280,40 @@ test('saving an unstarted campaign preserves activation and verified inbox metad
  assert.equal(saved.totalReserved,3);assert.equal(saved.dayReserved,2);assert.equal(saved.createdBy,'original');assert.equal(saved.dailyLimit,8);
  docs.get(campaignPath).status='paused';await agent.saveAgent(config(),actor);assert.equal(docs.get(campaignPath).status,'paused');
  docs.delete(campaignPath);await agent.saveAgent(config(),actor);assert.equal(docs.get(campaignPath).status,'paused');
+});
+
+
+test('scheduled breaks block sends and lunch follows Eastern daylight saving time', async () => {
+ const {rowenShift}=require('../lib/rowenShift.ts');
+ for(const iso of ['2026-10-28T14:45:00Z','2026-10-28T16:30:00Z','2026-10-28T19:00:00Z','2026-11-02T17:30:00Z']){
+  now=RealDate.parse(iso);assert.equal(policy.withinSendingHours(),false);assert.equal(rowenShift().onShift,true);
+  assert.equal((await agent.runMarketingAgent()).skipped,true);
+ }
+ for(const iso of ['2026-10-28T15:00:00Z','2026-10-28T17:00:00Z','2026-10-28T19:15:00Z','2026-11-02T18:00:00Z'])assert.equal(policy.withinSendingHours(new RealDate(iso)),true);
+ assert.equal(rowenShift(new RealDate('2026-10-28T20:45:00Z')).label,'Ending Shift');
+ assert.equal(rowenShift(new RealDate('2026-10-31T16:30:00Z')).label,'Off shift');
+ assert.equal(sent.length,0);
+});
+
+
+test('live status reports real work, lunch, and scheduler failure distinctly', async () => {
+ const {rowenStatus}=require('../lib/rowenStatus.ts');
+ Object.assign(docs.get(campaignPath),{schedulerLastSeen:now,leaseUntil:now+60000,activity:'Drafting an invitation'});
+ assert.equal((await rowenStatus()).label,'Working · Live Beta Marketing');
+ docs.get(campaignPath).leaseUntil=0;
+ assert.equal((await rowenStatus()).label,'Waiting for next task');
+ docs.get(campaignPath).lastError='Provider unavailable';
+ assert.equal((await rowenStatus()).label,'Needs attention');
+ now=RealDate.parse('2026-10-27T16:30:00Z');
+ assert.equal((await rowenStatus()).label,'On Lunch');
+});
+
+test('provider diagnostics distinguish billing and rate limits without exposing response details', async () => {
+ const {providerError}=require('../lib/ai/providerError.ts');
+ for(const code of ['insufficient_quota','credit_balance_exhausted','organization_spend_limit_exceeded','project_spend_limit_exceeded','organization_usage_limit_exceeded']){
+  const err=await providerError(new Response(JSON.stringify({error:{code,message:'private provider content'}}),{status:429}));
+  assert.match(err.message,/quota exhausted/);assert.doesNotMatch(err.message,/private/);
+ }
+ assert.match((await providerError(new Response(JSON.stringify({error:{code:'rate_limit_exceeded'}}),{status:429}))).message,/rate limit reached/);
+ assert.match((await providerError(new Response('{}',{status:429}))).message,/billing and rate limits/);
 });

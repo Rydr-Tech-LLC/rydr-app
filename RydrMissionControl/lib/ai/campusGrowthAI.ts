@@ -1,3 +1,4 @@
+import { providerError } from './providerError';
 import "server-only";
 
 import crypto from "crypto";
@@ -782,7 +783,8 @@ async function extractLeadsWithAI(input: {
     })
   }).catch(() => null);
 
-  if (!response?.ok) return ruleBasedCandidates(input.searchResults, input.campusNames, input.categories);
+  if (!response) throw new Error('OpenAI lead extraction could not be reached.');
+  if (!response.ok) throw await providerError(response);
   const data = (await response.json()) as { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> };
   const jsonText = data.output_text ?? data.output?.flatMap((part) => part.content ?? []).map((content) => content.text).find(Boolean);
   if (!jsonText) return [];

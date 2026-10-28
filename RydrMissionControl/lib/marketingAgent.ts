@@ -1,3 +1,4 @@
+import { rowenShift } from './rowenShift';
 import "server-only";
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getWorkspaceDb } from "./firebaseAdmin";
@@ -43,7 +44,7 @@ export async function agentSnapshot() {
   const count = (kind: string) => messages.filter(m => m.direction === "outbound" && m.kind === kind && m.status === "sent").length;
   const onShift = withinSendingHours();
   const shift = { day, start, end, onShift,
-    status: !data ? "Not configured" : data.status !== "active" ? "Paused" : !campaignOpen(data as AgentConfig) ? "Outside campaign dates" : !onShift ? "Off shift" : data.leaseUntil > Date.now() ? "Working" : "Available for next run",
+    status: !data ? "Not configured" : data.status !== "active" ? "Paused" : !campaignOpen(data as AgentConfig) ? "Outside campaign dates" : !onShift ? rowenShift().label : data.leaseUntil > Date.now() ? "Working" : "Available for next run",
     activity: data?.activity ?? "Waiting for first run", activityAt: data?.activityAt ?? null,
     discovered: batches.reduce((n, r) => n + (r.discovered ?? 0), 0),
     excluded: batches.reduce((n, r) => n + (r.excluded ?? 0), 0),
@@ -173,7 +174,7 @@ export async function runMarketingAgent() {
   if (!config) return { skipped: true, reason: "Paused, expired, campaign limit reached, scheduled for later, or already running." };
   const report = { startedAt, finishedAt: 0, discovered: 0, excluded: 0, drafted: 0, sent: 0, simulated: 0, error: "", warnings: [] as string[] };
   try {
-    if (!config.lastDiscoveryAt || Date.now() - config.lastDiscoveryAt > 6 * 3600_000) {
+    if (!config.lastDiscoveryAt || Date.now() - config.lastDiscoveryAt > 30 * 60_000) {
       // Rotate schools; public search snippets only. Never invoke manual URL scraping.
       const cursor = config.discoveryCursor ?? 0;
       await campaign.update({ activity: `Researching ${config.campuses[cursor % config.campuses.length]}`, activityAt: Date.now() });

@@ -1,3 +1,4 @@
+import { rowenShift } from './rowenShift';
 import 'server-only';
 import { createHash, randomUUID } from 'node:crypto';
 import { getWorkspaceDb } from './firebaseAdmin';
@@ -20,7 +21,7 @@ export async function socialSnapshot() {
   const config = data?.config ?? { active: false, facts: '', endsAt: Date.parse('2026-11-01T04:00:00Z'), autoReplies: false, dailyPosts: 2, dailyReplies: 30 };
   return { config, posts: queue.docs.map(d => ({ id: d.id, ...d.data() })), threads: inbox.docs.map(d => ({ id: d.id, ...d.data() })),
     events: activity.docs.map(d => ({ id: d.id, ...d.data() })), metrics: metrics.data() ?? null, today: day.data() ?? {},
-    onShift: withinSendingHours(), shiftDay: easternDay(), status: !config.active ? 'Paused' : Date.now() >= config.endsAt ? 'Campaign ended' : !withinSendingHours() ? 'Off shift' : data?.leaseUntil > Date.now() ? 'Working' : 'Ready for next run',
+    onShift: withinSendingHours(), shiftDay: easternDay(), status: !config.active ? 'Paused' : Date.now() >= config.endsAt ? 'Campaign ended' : !withinSendingHours() ? rowenShift().label : data?.leaseUntil > Date.now() ? 'Working' : 'Ready for next run',
     lastRunAt: data?.lastRunAt ?? null, lastError: data?.lastError ?? '', schedulerLastSeen: data?.schedulerLastSeen ?? null,
     aiReady: Boolean(process.env.OPENAI_API_KEY), webhookReady: data?.webhookReady ?? false, webhookError: data?.webhookError ?? '',
     schedulerCredential: Boolean(process.env.SOCIAL_AGENT_RUN_SECRET || process.env.MARKETING_AGENT_RUN_SECRET) };
@@ -333,6 +334,7 @@ export async function runSocialAgent(scheduled = false) {
   });
   if (!acquired) return {skipped:true,reason:'Paused, off shift, outside campaign dates, or another run is active.'};
   try {
+    await root.set({activity:'Reviewing scheduled content and incoming messages',activityAt:Date.now()},{merge:true});
     await event('run','Rowen started a social shift batch.');
     // Recover abandoned claims as unknown, never by sending again.
     for (const collection of [posts,threads]) {
