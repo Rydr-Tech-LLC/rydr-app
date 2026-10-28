@@ -55,7 +55,7 @@ Module._load = function(id, parent, ...rest) {
     if (id === '@/lib/workspace') return { currentWorkspace: async () => workspace };
     if (id === 'resend') return { Resend: class { emails = { send: async (...args) => { resendCalls.push(args); return { data: { id: 'provider-id' } }; } }; } };
   }
-  if (parent?.filename.endsWith('marketingAgent.ts')) {
+  if (parent?.filename.endsWith('marketingAgent.ts') || parent?.filename.endsWith('marketingShiftReport.ts')) {
     if (id === './firebaseAdmin') return { getWorkspaceDb: async () => db };
     if (id === './workspace') return { currentWorkspace: async () => workspace };
     if (id === './ai/campusGrowthAI') return { discoveryFingerprint: () => 'existing-discovery', discoverCampusLeads: async input => {
@@ -71,6 +71,7 @@ require.extensions['.ts'] = (mod, filename) => mod._compile(ts.transpileModule(f
 const policy = require('../lib/marketingAgentPolicy.ts');
 const agent = require('../lib/marketingAgent.ts');
 const inbox = require('../lib/marketingAgentInbox.ts');
+const shiftReports = require('../lib/marketingShiftReport.ts');
 const campaignPath = 'marketingAgentCampaigns/student-beta-october-2026';
 const leadId = email => crypto.createHash('sha256').update(email).digest('hex');
 const leadPath = email => `${campaignPath}/leads/${leadId(email)}`;
@@ -80,10 +81,35 @@ function config(overrides = {}) { return { name: 'Rowen', status: 'active', mode
   dayReserved: 0, totalReserved: 0, lastDiscoveryAt: now, ...overrides }; }
 function seed(email = lead.publicEmail, state = 'queued') { docs.set(leadPath(email), { ...lead, email, publicEmail: email, state, updatedAt: now, subject: 'Pilot invitation', body: 'Hello' }); }
 beforeEach(() => {
+  delete process.env.MARKETING_AGENT_REPORT_DATE; delete process.env.MARKETING_AGENT_REPORT_TO;
   docs.clear(); sent = []; discovered = []; discoveryCalls = 0; copyCalls = 0; workspace = 'live-beta'; onDraft = null;
   providerResult = { ok: true, providerMessageId: 'email-id' }; now = RealDate.parse('2026-10-27T16:00:00Z');
   Object.assign(process.env, { OPENAI_API_KEY: 'fake', BRAVE_SEARCH_API_KEY: 'fake', RESEND_API_KEY: 'fake', MARKETING_AGENT_SECRET: 'unit-test-only', MARKETING_AGENT_PUBLIC_URL: 'https://mc.example.com' });
   docs.set(campaignPath, config());
+});
+
+test('cloud report sends once under concurrency, after shift, without using outreach counters', async () => {
+  process.env.MARKETING_AGENT_REPORT_DATE = '2026-10-27';
+  process.env.MARKETING_AGENT_REPORT_TO = 'khris.nunnally@rydr-go.com';
+  assert.equal((await shiftReports.sendDueShiftReport()).skipped, true);
+  now = RealDate.parse('2026-10-27T21:37:00Z');
+  await Promise.all([shiftReports.sendDueShiftReport(), shiftReports.sendDueShiftReport()]);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, 'khris.nunnally@rydr-go.com');
+  assert.match(sent[0].subject, /Rowen shift report/);
+  assert.equal(docs.get(campaignPath).totalReserved, 0);
+  assert.equal(docs.get(campaignPath + '/shiftReports/2026-10-27').status, 'sent');
+  await inbox.receiveDeliveryEvent('email-id', 'email.delivered');
+  assert.equal(docs.get(campaignPath + '/shiftReports/2026-10-27').deliveryEvent, 'email.delivered');
+  await shiftReports.sendDueShiftReport(); assert.equal(sent.length, 1);
+});
+
+test('ambiguous report delivery remains held and is never blindly retried', async () => {
+  Object.assign(process.env, { MARKETING_AGENT_REPORT_DATE: '2026-10-27', MARKETING_AGENT_REPORT_TO: 'khris.nunnally@rydr-go.com' });
+  now = RealDate.parse('2026-10-27T21:37:00Z'); providerResult = { ok:false, error:'timeout' };
+  await assert.rejects(shiftReports.sendDueShiftReport());
+  await shiftReports.sendDueShiftReport(); assert.equal(sent.length, 1);
+  assert.equal(docs.get(campaignPath + '/shiftReports/2026-10-27').status, 'unknown');
 });
 
 test('initial deadline is November 1 Eastern and campaign can be extended', () => {

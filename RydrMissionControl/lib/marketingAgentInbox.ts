@@ -68,6 +68,10 @@ export async function receiveDeliveryEvent(providerId: string, type: string, mes
   return db.runTransaction(async tx => {
     const index = (await tx.get(indexRef)).data();
     if (!index) throw new Error("Delivery is not recorded yet; retry this webhook.");
+    if (index.reportId) {
+      tx.update(campaign.collection("shiftReports").doc(index.reportId), { deliveryEvent: type, deliveryEventAt: Date.now() });
+      return;
+    }
     const leadRef = leads.doc(index.leadId), contactRef = db.collection("marketingAgentContacts").doc(index.leadId);
     const lead = (await tx.get(leadRef)).data();
     if (!lead) return;
