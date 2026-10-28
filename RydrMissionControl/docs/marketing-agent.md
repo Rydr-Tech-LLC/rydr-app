@@ -1,4 +1,21 @@
-# Rowen: student Live Beta outreach pilot## Cloud first-shift reportThe existing hosted marketing worker checks for a one-time report after 5:30 p.m.Eastern. Production settings `MARKETING_AGENT_REPORT_DATE=2026-10-28` and`MARKETING_AGENT_REPORT_TO=khris.nunnally@rydr-go.com` select the requested firstshift and recipient. On October 28 the next GitHub tick is 5:37 p.m. Eastern;scheduled jobs can be delayed. The user's computer and browser are not required.The report contains accepted initial/follow-up counts, organizations, campuses,addresses, replies by report time, and recorded problems. It distinguishesprovider acceptance from confirmed delivery, excludes setup probes and simulations,and flags missing worker runs. A transactional `shiftReports/YYYY-MM-DD` documentunder the campaign stores the report and prevents duplicate sends. Delivery eventsupdate that document. Ambiguous sends require manual reconciliation. Reports donot consume outreach caps. This is one report, not daily recurring reporting;any future reporting date needs a hosted post-shift invocation after DST changes.
+# Rowen: student Live Beta outreach pilot
+
+## Cloud first-shift report
+
+The existing hosted marketing worker checks for a one-time report after 5:30 p.m.
+Eastern. Production settings `MARKETING_AGENT_REPORT_DATE=2026-10-28` and
+`MARKETING_AGENT_REPORT_TO=khris.nunnally@rydr-go.com` select the requested first
+shift and recipient. On October 28 the next GitHub tick is 5:37 p.m. Eastern;
+scheduled jobs can be delayed. The user's computer and browser are not required.
+
+The report contains accepted initial/follow-up counts, organizations, campuses,
+addresses, replies by report time, and recorded problems. It distinguishes
+provider acceptance from confirmed delivery, excludes setup probes and simulations,
+and flags missing worker runs. A transactional `shiftReports/YYYY-MM-DD` document
+under the campaign stores the report and prevents duplicate sends. Delivery events
+update that document. Ambiguous sends require manual reconciliation. Reports do
+not consume outreach caps. This is one report, not daily recurring reporting;
+any future reporting date needs a hosted post-shift invocation after DST changes.
 
 Open Campus Growth → Marketing Agent in Mission Control. The pilot window is
 October 27, 2026 through October 31, ending **November 1 at 00:00 America/New_York**
