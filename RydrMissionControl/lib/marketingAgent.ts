@@ -270,7 +270,31 @@ export async function runMarketingAgent() {
   return report;
 }
 
-type SendAgentMessageInput = { kind: "initial" | "followup" | "reply"; subject: string; body: string; runToken?: string; operationId?: string; actor?: string };
+type SendAgentMessageInput = { kind: "initial" | "followup" | "reply"; subject: string; body: string; runToken?: string; operationId?: string; actor?: string; manualInitial?: boolean };
+
+export async function prepareRowenCommand(command: string, actor: {uid:string;email:string|null}) {
+  if (typeof command !== 'string' || command.length > 2000) throw new Error('Enter a request under 2,000 characters.');
+  const emails = [...new Set((command.match(/[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) ?? []).map(e=>e.toLowerCase()))];
+  if (emails.length !== 1) throw new Error('Include exactly one recipient email address in your request.');
+  const email=emails[0]; if(isNoReplyEmail(email))throw new Error('Rowen cannot contact a no-reply address.');
+  const {db,campaign,leads}=await refs(), ref=leads.doc(key(email));
+  const config=(await campaign.get()).data() as AgentConfig;
+  if(!config)throw new Error('Configure Rowen’s campaign first.');
+  if((await ref.get()).exists)throw new Error('This contact already exists. Open its conversation in Marketing Agent to avoid duplicate outreach.');
+  if((await db.collection('marketingAgentContacts').doc(key(email)).get()).exists)throw new Error('This contact has prior outreach or suppression history. Review its conversation first.');
+  const lead: AgentLead={name:email,campusName:'Specified by admin',category:'Admin-requested outreach',kind:'organization',publicEmail:email,sourceUrl:'',description:command,relevanceScore:100};
+  const copy=await draftMarketingCopy(config,lead,command);
+  if(!copy.suitable)throw new Error(copy.reason || 'This request does not fit Rowen’s student-group campaign.');
+  await db.runTransaction(async tx=>{const [existing,blocked]=await Promise.all([tx.get(ref),tx.get(db.collection('marketingAgentContacts').doc(key(email)))]);if(existing.exists||blocked.exists)throw new Error('Contact history changed. Review the existing conversation.');tx.create(ref,{...lead,...copy,email,subject:campaignSubject(copy.subject),state:'review',commandDraft:true,sourceType:'admin_provided',createdBy:actor.email??actor.uid,createdAt:Date.now(),updatedAt:Date.now()});});
+  return {id:ref.id,email,subject:campaignSubject(copy.subject),body:copy.body};
+}
+
+export async function sendRowenCommand(id:string, actor:{uid:string;email:string|null}) {
+  if(!/^[a-f0-9]{64}$/.test(id))throw new Error('Invalid command draft.');
+  const {db,leads}=await refs(), ref=leads.doc(id);
+  const draft=await db.runTransaction(async tx=>{const d=(await tx.get(ref)).data();if(!d?.commandDraft || !['review','ready','sending','sent','unknown','simulated'].includes(d.state))throw new Error('Command draft is unavailable.');if(d.state==='review')tx.update(ref,{state:'ready',updatedAt:Date.now()});return d;});
+  return sendAgentMessage(id,{kind:'initial',subject:draft.subject,body:draft.body,manualInitial:true,actor:actor.email??actor.uid});
+}
 
 /** Shared outbox for scheduled outreach, follow-ups, and Mission Control replies. */
 export async function sendAgentMessage(id: string, input: SendAgentMessageInput) {
@@ -282,6 +306,7 @@ export async function sendAgentMessage(id: string, input: SendAgentMessageInput)
   const leadRef = leads.doc(id), contactRef = db.collection("marketingAgentContacts").doc(id);
   const captured = (await leadRef.get()).data();
   if (!captured) throw new Error("Contact not found.");
+  if (input.manualInitial && (input.kind !== 'initial' || !captured.commandDraft)) throw new Error('Only an admin-created command draft can use manual sending.');
   const sequence = input.kind === "followup" ? (captured.followUpsSent ?? 0) + 1 : 0;
   const messageId = `${id}-${input.kind}-${input.kind === "reply" ? input.operationId : sequence}`;
   const messageRef = campaign.collection("messages").doc(messageId);
@@ -298,7 +323,7 @@ export async function sendAgentMessage(id: string, input: SendAgentMessageInput)
     const prior = input.kind === "initial" ? await tx.get(db.collection("campusOutreachDrafts").where("recipientEmail", "==", captured.email).limit(100)) : null;
     if (previous) return { status: previous.status as string };
     if (!live || !lead || !campaignOpen(live as AgentConfig)) return { status: "skipped", reason: "Campaign is paused or outside its dates." };
-    if (input.kind !== "reply" && (live.runToken !== input.runToken || !withinSendingHours())) return { status: "skipped" };
+    if (input.kind !== "reply" && ((!input.manualInitial && live.runToken !== input.runToken) || !withinSendingHours())) return { status: "skipped", reason:'Queued for the next working period.' };
     if (isNoReplyEmail(lead.email)) {
       tx.update(leadRef, { state: "blocked", nextFollowUpAt: null, reason: "No-reply address", updatedAt: Date.now() });
       tx.set(contactRef, { blocked: true, reason: "no_reply", updatedAt: Date.now() }, { merge: true });

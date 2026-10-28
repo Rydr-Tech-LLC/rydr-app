@@ -326,3 +326,22 @@ test('contact-focused discovery reviews email evidence and automatically sends e
  assert.equal(sent[0].to,lead.publicEmail);
  assert.equal(docs.get(leadPath(lead.publicEmail)).state,'sent');
 });
+
+test('admin command saves a review draft and sends it once only after confirmation',async()=>{
+ const draft=await agent.prepareRowenCommand('Email club@example.edu at Example University about a Live Beta for their student robotics club.',actor);
+ assert.equal(docs.get(leadPath(lead.publicEmail)).state,'review');assert.equal(sent.length,0);
+ await agent.runMarketingAgent();assert.equal(sent.length,0);
+ await agent.sendRowenCommand(draft.id,actor);await agent.sendRowenCommand(draft.id,actor);
+ assert.equal(sent.length,1);assert.equal(sent[0].to,lead.publicEmail);
+ await assert.rejects(agent.prepareRowenCommand('Email club@example.edu about the student club.',actor),/already exists/);
+});
+
+test('commands reject missing/multiple/no-reply recipients and honor suppressions and breaks',async()=>{
+ for(const command of ['Email the club','Email a@example.edu and b@example.edu','Email noreply@example.edu'])await assert.rejects(agent.prepareRowenCommand(command,actor));
+ docs.set('marketingAgentContacts/'+leadId('blocked@example.edu'),{blocked:true});
+ await assert.rejects(agent.prepareRowenCommand('Email blocked@example.edu for the student club.',actor));
+ const draft=await agent.prepareRowenCommand('Email club@example.edu for the student club.',actor);
+ now=RealDate.parse('2026-10-27T16:30:00Z');
+ assert.equal((await agent.sendRowenCommand(draft.id,actor)).status,'skipped');assert.equal(sent.length,0);
+ assert.equal(docs.get(leadPath(lead.publicEmail)).state,'ready');
+});
