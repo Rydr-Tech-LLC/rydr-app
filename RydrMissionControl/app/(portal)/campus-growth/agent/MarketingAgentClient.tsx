@@ -7,7 +7,7 @@ import { MARKETING_AGENT_EMAIL, PILOT_END, type AgentConfig } from "@/lib/market
 
 type Contact = { id: string; name: string; campusName: string; email: string; state: string; sourceUrl: string;
   reason?: string; subject?: string; body?: string; emailBody?: string; instagramDraft?: string; instagramUrl?: string };
-type Run = { id: string; startedAt: number; discovered: number; excluded: number; drafted: number; sent: number; simulated: number; error: string; warnings: string[] };
+type Run = { id: string; startedAt: number; discovered: number; excluded: number; exclusionReasons?: Record<string, number>; drafted: number; sent: number; simulated: number; error: string; warnings: string[] };
 type Snapshot = { campaign: (AgentConfig & { firstRunAt?: number; totalReserved: number; lastRunAt?: number; lastError?: string; inboxVerifiedAt?: number }) | null;
   leads: Contact[]; runs: Run[]; readiness: Record<string, boolean | string>; inboundAddress: string;
   shift: { day: string; status: string; onShift: boolean; activity: string; activityAt: number | null; discovered: number; excluded: number; drafted: number; outreach: number; followups: number; responses: number; replies: number; simulated: number; errors: number; batches: number; limited: boolean } };
@@ -195,7 +195,8 @@ export default function MarketingAgentClient() {
     <section className="rounded-2xl border border-line bg-white p-5 shadow-sm"><h2 className="text-base font-semibold">Run history</h2>
       <p className="mt-1 text-xs text-muted">Public search only. Excluded candidates are counted without retaining their contact details.</p>
       {!snapshot?.runs.length && <p className="mt-3 text-sm text-muted">No runs recorded. The agent is not running until configured, activated, and invoked.</p>}
-      {snapshot?.runs.map(run => <div key={run.id} className="mt-3 border-t border-line pt-3 text-sm"><p>{formatDate(run.startedAt)}</p><p className="text-muted">{run.discovered} discovered · {run.excluded} excluded · {run.drafted} drafted · {run.sent} sent · {run.simulated} simulated</p>{run.error && <p className="text-red-700">{run.error}</p>}{run.warnings.map((w, i) => <p key={i} className="text-amber-800">{w}</p>)}</div>)}
+      {snapshot?.runs.map(run => <div key={run.id} className="mt-3 border-t border-line pt-3 text-sm"><p>{formatDate(run.startedAt)}</p><p className="text-muted">{run.discovered} discovered · {run.excluded} excluded · {run.drafted} drafted · {run.sent} sent · {run.simulated} simulated</p>{Object.entries(run.exclusionReasons ?? {}).map(([reason,count]) => <p key={reason} className="text-xs text-muted">{count} skipped: {reason}</p>)}{run.error && <p className="text-red-700">{run.error}</p>}{run.warnings.map((w, i) => <p key={i} className="text-amber-800">{w}</p>)}</div>)}
     </section>
   </div>;
 }
+

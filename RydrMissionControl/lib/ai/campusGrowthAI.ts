@@ -120,6 +120,7 @@ export interface AILeadCandidate {
 }
 
 export interface DiscoveryInput {
+  emailOutreach?: boolean;
   /** Bounded background-agent searches; manual discovery retains its existing cap. */
   strategyLimit?: number;
   discoveryGoal?: string;
@@ -183,7 +184,9 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
   const categories = cleanList(input.categories).length ? cleanList(input.categories) : DEFAULT_PRIORITY_CATEGORIES;
   const maxSearchResults = clamp(Number(input.maxSearchResults) || 5, 1, 20);
   const runId = crypto.randomUUID();
-  const planned = await planSearchStrategies(campusNames, categories, discoveryGoal, leadIntents);
+  const planned = input.emailOutreach
+    ? buildEmailContactQueries(campusNames)
+    : await planSearchStrategies(campusNames, categories, discoveryGoal, leadIntents);
   const searchStrategies = input.strategyLimit
     ? planned.slice(0, Math.max(1, Math.min(4, Math.floor(input.strategyLimit)))) : planned;
   const searchBatch = await runBraveSearches(searchStrategies, maxSearchResults);
@@ -244,6 +247,19 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
     leads: cleaned,
     rejectedSources
   };
+}
+
+/** Search indexed contact information; never fetch or scrape organization pages. */
+export function buildEmailContactQueries(campuses: string[]): string[] {
+  return campuses.flatMap(campus => {
+    const name = campus.replace(/["\r\n]/g, ' ').trim();
+    return [
+      `"${name}" site:edu "student organization" "email"`,
+      `"${name}" site:edu "student government" "contact" "@"`,
+      `"${name}" site:edu "student club" "email"`,
+      `"${name}" site:edu "student life" "contact" "@"`,
+    ];
+  });
 }
 
 async function planSearchStrategies(campusNames: string[], categories: string[], discoveryGoal: string, leadIntents: string[]): Promise<string[]> {

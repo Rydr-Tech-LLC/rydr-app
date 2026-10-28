@@ -59,7 +59,7 @@ Module._load = function(id, parent, ...rest) {
     if (id === './firebaseAdmin') return { getWorkspaceDb: async () => db };
     if (id === './workspace') return { currentWorkspace: async () => workspace };
     if (id === './ai/campusGrowthAI') return { discoveryFingerprint: () => 'existing-discovery', discoverCampusLeads: async input => {
-      discoveryCalls++; assert.deepEqual(input.manualUrls, []); assert.equal(input.strategyLimit, 4);
+      discoveryCalls++; assert.deepEqual(input.manualUrls, []); assert.equal(input.strategyLimit, 4); assert.equal(input.emailOutreach, true); assert.equal(input.maxSearchResults, 10);
       return { leads: discovered, warnings: [], searchResults: discovered.map(l => ({ link: l.sourceUrl, title: l.name, snippet: `Contact ${l.publicEmail}` })) };
     } };
     if (id === './ai/marketingCopy') return { draftMarketingCopy: async () => { copyCalls++; if (onDraft) await onDraft(); return { suitable: true, subject: 'Student Live Beta pilot', body: 'Would your group like to discuss a pilot?', instagramDraft: 'DM draft', reason: 'Student group', model: 'fake' }; } };
@@ -317,3 +317,14 @@ test('provider diagnostics distinguish billing and rate limits without exposing 
  assert.match((await providerError(new Response(JSON.stringify({error:{code:'rate_limit_exceeded'}}),{status:429}))).message,/rate limit reached/);
  assert.match((await providerError(new Response('{}',{status:429}))).message,/billing and rate limits/);
 });
+
+test('contact-focused discovery reviews email evidence and automatically sends eligible outreach', async () => {
+ docs.set(campaignPath, config({lastDiscoveryAt:0}));discovered=[lead,{...lead,name:'Student club without contact',publicEmail:''}];
+ const report=await agent.runMarketingAgent();
+ assert.equal(report.discovered,1);assert.equal(report.sent,1);
+ assert.equal(report.exclusionReasons['No public email'],1);
+ assert.equal(sent[0].to,lead.publicEmail);
+ assert.equal(docs.get(leadPath(lead.publicEmail)).state,'sent');
+});
+
+

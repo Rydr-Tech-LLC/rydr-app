@@ -172,7 +172,7 @@ export async function runMarketingAgent() {
     return data as AgentConfig & { lastDiscoveryAt?: number; discoveryCursor?: number; inboxVerifiedAt?: number };
   });
   if (!config) return { skipped: true, reason: "Paused, expired, campaign limit reached, scheduled for later, or already running." };
-  const report = { startedAt, finishedAt: 0, discovered: 0, excluded: 0, drafted: 0, sent: 0, simulated: 0, error: "", warnings: [] as string[] };
+  const report = { startedAt, finishedAt: 0, discovered: 0, excluded: 0, exclusionReasons: {} as Record<string, number>, drafted: 0, sent: 0, simulated: 0, error: "", warnings: [] as string[] };
   try {
     if (!config.lastDiscoveryAt || Date.now() - config.lastDiscoveryAt > 30 * 60_000) {
       // Rotate schools; public search snippets only. Never invoke manual URL scraping.
@@ -181,12 +181,12 @@ export async function runMarketingAgent() {
       const result = await discoverCampusLeads({ campusNames: [config.campuses[cursor % config.campuses.length]],
         categories: ["student organizations", "student life groups", "student government", "commuter student groups"],
         discoveryGoal: "Find official .edu listings for student groups to discuss a Rydr Live Beta pilot. Exclude deans, administrators and individual students. Need a published organization email, never guess one.",
-        leadIntents: ["Invite for Beta"], manualUrls: [], maxSearchResults: 5, strategyLimit: 4 });
+        leadIntents: ["Invite for Beta"], manualUrls: [], emailOutreach: true, maxSearchResults: 10, strategyLimit: 4 });
       report.warnings = result.warnings.slice(0, 5);
       for (const lead of result.leads) {
         const source = result.searchResults.find(r => r.link === lead.sourceUrl);
         const exclusion = leadExclusion(lead, config.campuses, source ? `${source.title}\n${source.snippet}\n${source.content ?? ""}` : "");
-        if (exclusion) { report.excluded++; continue; }
+        if (exclusion) { report.excluded++; report.exclusionReasons[exclusion] = (report.exclusionReasons[exclusion] ?? 0) + 1; continue; }
         const email = lead.publicEmail!.trim().toLowerCase();
         const ref = leads.doc(key(email));
         const inserted = await db.runTransaction(async tx => {
