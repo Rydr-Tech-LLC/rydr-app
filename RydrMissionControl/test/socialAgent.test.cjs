@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),Module=require('node:module'),ts=require('typescript'),{createHash}=require('node:crypto');
 const RealDate=Date;let now=RealDate.parse('2026-10-27T16:00:00Z');
 global.Date=class extends RealDate {constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}};
-const docs=new Map();let serial=Promise.resolve(),workspace='live-beta',calls=[],failPublish=false,containerStatus='FINISHED',onDraft=null,draftHistory=[];
+const docs=new Map();let serial=Promise.resolve(),workspace='live-beta',calls=[],failPublish=false,containerStatus='FINISHED',onDraft=null,draftHistory=[],failFacebook=false,onFacebook=null;
 const hash=s=>createHash('sha256').update(s).digest('hex'),copy=x=>x==null?x:structuredClone(x);
 function snap(path){return{id:path.split('/').at(-1),ref:doc(path),exists:docs.has(path),data:()=>copy(docs.get(path))};}
 function merge(a,b){const out={...a};for(const [k,v]of Object.entries(b)){out[k]=v&&typeof v==='object'&&!Array.isArray(v)?merge(out[k]||{},v):v;}return out;}
@@ -18,7 +18,7 @@ Module._load=function(id,parent,...rest){
   if(id==='./firebaseAdmin')return{getWorkspaceDb:async()=>db};
   if(id==='./workspace')return{currentWorkspace:async()=>workspace};
   if(id==='./ai/socialCopy')return{socialCopy:async(_facts,_kind,_text,history)=>{draftHistory=history;if(onDraft)await onDraft();return{text:_kind==='post'?`Campus conversation ${now}`:'Hello, I’m Rowen, Rydr’s AI assistant. Interested in discussing a campus pilot?',visualBrief:'Campus community',handoff:false,reason:''};}};
-  if(id==='./socialMeta')return{MetaRequestError,socialConnection:async()=>({pageId:'100',instagramId:'200'}),socialGraph:async(path,params,method)=>{calls.push({path,params,method});if(path.endsWith('/media_publish')){if(failPublish)throw new MetaRequestError(true);return{id:'400'};}if(path.endsWith('/media'))return{id:'300'};if(path==='300')return{status_code:containerStatus};if(path.endsWith('/messages'))return{message_id:'m'+calls.length};return{};}};
+  if(id==='./socialMeta')return{MetaRequestError,socialConnection:async()=>({pageId:'100',instagramId:'200'}),socialGraph:async(path,params,method)=>{calls.push({path,params,method});if(path.endsWith('/photos')){if(onFacebook)await onFacebook();if(failFacebook)throw new MetaRequestError(true);return{id:'500',post_id:'100_501'};}if(path.endsWith('/media_publish')){if(failPublish)throw new MetaRequestError(true);return{id:'400'};}if(path.endsWith('/media'))return{id:'300'};if(path==='300')return{status_code:containerStatus};if(path.endsWith('/messages'))return{message_id:'m'+calls.length};return{};}};
  }
  return original.call(this,id,parent,...rest);
 };
@@ -27,7 +27,7 @@ const policy=require('../lib/socialPolicy.ts'),agent=require('../lib/socialAgent
 const root='socialAgent/rowen',actor={uid:'admin',email:'admin@example.com'};
 function inbound(mid='one',text='Can our student club discuss a pilot?',at=now,sender='123'){return{object:'instagram',entry:[{id:'200',messaging:[{sender:{id:sender},recipient:{id:'200'},timestamp:at,message:{mid,text}}]}]};}
 function post(name='a'){docs.set(`${root}/posts/${name}`,{state:'queued',dueAt:now,caption:'Hello students',mediaUrl:'https://cdn.example.com/photo.jpg',mediaType:'image',aiGenerated:false,createdAt:now});}
-beforeEach(()=>{docs.clear();calls=[];workspace='live-beta';now=RealDate.parse('2026-10-27T16:00:00Z');failPublish=false;containerStatus='FINISHED';onDraft=null;docs.set(root,{config:{active:true,facts:'Rydr seeks student clubs to discuss a Live Beta pilot.',endsAt:now+20*86400000,autoReplies:true,dailyPosts:2,dailyReplies:2}});docs.set(`${root}/metrics/latest`,{syncedAt:now});docs.set('metaConnections/rydr',{instagramId:'200',pageId:'100'});});
+beforeEach(()=>{docs.clear();calls=[];workspace='live-beta';now=RealDate.parse('2026-10-27T16:00:00Z');failPublish=false;failFacebook=false;onFacebook=null;containerStatus='FINISHED';onDraft=null;docs.set(root,{config:{active:true,facts:'Rydr seeks student clubs to discuss a Live Beta pilot.',endsAt:now+20*86400000,autoReplies:true,dailyPosts:2,dailyReplies:2}});docs.set(`${root}/metrics/latest`,{syncedAt:now});docs.set('metaConnections/rydr',{instagramId:'200',pageId:'100'});});
 test('Eastern shift handles DST, weekends and campaign extension',()=>{assert(policy.socialOpen(docs.get(root).config));for(const time of ['2026-10-27T21:00:00Z','2026-10-31T16:00:00Z','2026-11-02T13:59:00Z'])assert(!policy.withinSendingHours(new Date(time)));assert(policy.withinSendingHours(new Date('2026-11-02T14:00:00Z')));assert(!policy.replyWindow(now-24*3600000));assert(!policy.replyWindow(now+1));assert(policy.replyWindow(now-1000));});
 test('media URLs reject nonpublic and credential-bearing URLs; unavailable metrics remain null',()=>{for(const u of ['http://cdn.example.com/a.jpg','https://127.0.0.1/a','https://user:secret@example.com/a','https://x.internal/a'])assert.throws(()=>policy.publicMediaUrl(u));assert.equal(policy.metricValue({data:[]},'reach'),null);assert.equal(policy.metricValue({data:[{name:'reach',total_value:{value:0}}]},'reach'),0);});
 test('concurrent runs publish once and keep a durable provider ID',async()=>{post();await Promise.all([agent.runSocialAgent(),agent.runSocialAgent()]);assert.equal(calls.filter(c=>c.path.endsWith('media_publish')).length,1);assert.equal(docs.get(`${root}/posts/a`).state,'published');assert.equal(docs.get(`${root}/posts/a`).mediaId,'400');});
@@ -84,4 +84,52 @@ test('stale or disabled automatic content never publishes later',async()=>{
 test('automatic content in Test is simulated and never contacts Meta',async()=>{
  workspace='test';docs.get(root).config.autoPosts=true;await agent.runSocialAgent();
  assert.equal(docs.get(root+'/posts/rowen-auto-2026-10-27').state,'simulated');assert.equal(calls.length,0);
+});
+
+
+test('one automatic content slot publishes once per platform across concurrent runs',async()=>{
+ Object.assign(docs.get(root).config,{autoPosts:true,facebookPosts:true});
+ await Promise.all([agent.runSocialAgent(),agent.runSocialAgent()]); await agent.runSocialAgent();
+ assert.equal(calls.filter(c=>c.path.endsWith('/photos')).length,1);
+ assert.equal(calls.filter(c=>c.path.endsWith('/media_publish')).length,1);
+ const item=docs.get(root+'/posts/rowen-auto-2026-10-27');assert.equal(item.facebook.state,'published');assert.equal(item.state,'published');
+ assert.equal(docs.get(root+'/days/2026-10-27').postsReserved,1);
+ assert.equal(docs.get(root+'/days/2026-10-27').facebookPosts,1);
+});
+test('Facebook uncertainty preserves Instagram success and is never automatically retried',async()=>{
+ Object.assign(docs.get(root).config,{autoPosts:true,facebookPosts:true});failFacebook=true;
+ await agent.runSocialAgent(); await agent.runSocialAgent();
+ const item=docs.get(root+'/posts/rowen-auto-2026-10-27');assert.equal(item.state,'published');assert.equal(item.facebook.state,'unknown');
+ assert.equal(calls.filter(c=>c.path.endsWith('/photos')).length,1);
+ await agent.changeSocialPost({id:'rowen-auto-2026-10-27',action:'resolveFacebook'});
+ assert.equal(docs.get(root+'/posts/rowen-auto-2026-10-27').facebook.state,'resolved');
+});
+test('Instagram uncertainty does not block an independently recorded Facebook delivery',async()=>{
+ Object.assign(docs.get(root).config,{autoPosts:true,facebookPosts:true});failPublish=true;
+ await agent.runSocialAgent();await agent.runSocialAgent();
+ const item=docs.get(root+'/posts/rowen-auto-2026-10-27');assert.equal(item.state,'unknown');assert.equal(item.facebook.state,'published');
+ assert.equal(calls.filter(c=>c.path.endsWith('/photos')).length,1);
+});
+test('container polling reuses the Facebook delivery and daily slot',async()=>{
+ Object.assign(docs.get(root).config,{autoPosts:true,facebookPosts:true});containerStatus='IN_PROGRESS';
+ await agent.runSocialAgent();now+=120000;containerStatus='FINISHED';await agent.runSocialAgent();
+ assert.equal(calls.filter(c=>c.path.endsWith('/photos')).length,1);
+ assert.equal(calls.filter(c=>c.path.endsWith('/media_publish')).length,1);
+ assert.equal(docs.get(root+'/days/2026-10-27').postsReserved,1);
+});
+test('Facebook opt-out, shift boundary and Test cannot write to the Page',async()=>{
+ Object.assign(docs.get(root).config,{autoPosts:true,facebookPosts:true});workspace='test';await agent.runSocialAgent();assert.equal(calls.length,0);
+ assert.equal(docs.get(root+'/posts/rowen-auto-2026-10-27').facebook.state,'simulated');
+ workspace='live-beta';now+=86400000;docs.get(root).config.facebookPosts=false;await agent.runSocialAgent();assert.equal(calls.filter(c=>c.path.endsWith('/photos')).length,0);
+ now=RealDate.parse('2026-10-29T21:00:00Z');docs.get(root).config.facebookPosts=true;await agent.runSocialAgent();assert.equal(calls.filter(c=>c.path.endsWith('/photos')).length,0);
+});
+
+
+test('an interrupted unattempted Facebook sibling resumes only in its original shift',async()=>{
+ Object.assign(docs.get(root).config,{autoPosts:true,facebookPosts:true});
+ post('interrupted');Object.assign(docs.get(root+'/posts/interrupted'),{state:'published',automatic:true,facebookTarget:true,autoDay:'2026-10-27',reservedDay:'2026-10-27',publishedAt:now});
+ docs.set(root+'/days/2026-10-27',{postsReserved:1});
+ await agent.runSocialAgent();await agent.runSocialAgent();assert.equal(calls.filter(c=>c.path.endsWith('/photos')).length,1);
+ post('old');Object.assign(docs.get(root+'/posts/old'),{state:'published',facebookTarget:true,autoDay:'2026-10-26',reservedDay:'2026-10-26'});
+ await agent.runSocialAgent();assert.equal(calls.filter(c=>c.path.endsWith('/photos')).length,1);
 });

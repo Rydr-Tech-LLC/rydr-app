@@ -97,3 +97,12 @@ Primary references consulted October 27, 2026:
 - https://developers.facebook.com/documentation/instagram-platform/insights
 - https://developers.facebook.com/documentation/business-messaging/instagram-messaging/features/send-message
 - https://developers.facebook.com/documentation/business-messaging/instagram-messaging/overview
+
+
+### Facebook companion publishing
+
+`facebookPosts` opts automatic weekday graphics into the connected Rydr Facebook Page. Each new automatic item freezes `facebookTarget`; existing manual posts and Reels remain Instagram-only. One daily reservation covers both destinations. The caption and approved JPEG are posted via the Page photos endpoint using the Page token with `pages_manage_posts` and `pages_read_engagement`.
+
+Facebook has a separate durable delivery record (processing, published, failed, unknown, resolved), provider photo/post IDs, and a shift count. It does not overwrite Instagram results. The worker can finish a never-attempted sibling within the same shift; any claimed or uncertain send is held for manual inspection without automatic retry. Turning Facebook publishing off prevents further Page sends. Reconnect Meta after adding the publishing permission to the business login configuration.
+
+The content queue displays both results and Facebook links; failed and uncertain deliveries count toward attention. Facebook reach/follower insights are not included in the existing Instagram analytics panel.

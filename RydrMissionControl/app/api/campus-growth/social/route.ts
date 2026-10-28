@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       case 'pause': await pauseSocial(); break;
       case 'draft': return json(await draftSocialPost(input.topic));
       case 'savePost': return json(await saveSocialPost(input,actor));
-      case 'schedule': case 'cancel': case 'resolve': await changeSocialPost(input); break;
+      case 'schedule': case 'cancel': case 'resolve': case 'resolveFacebook': await changeSocialPost(input); break;
       case 'reply': case 'handoff': case 'resolveReply': await reviewSocialReply(input,actor); break;
       case 'subscribe': if (await currentWorkspace() !== 'live-beta') throw new Error('Connect the live inbox in Live Beta.'); await subscribeSocialInbox(); break;
       case 'analytics': if (await currentWorkspace() !== 'live-beta') throw new Error('Live analytics are available in Live Beta.'); return json(await syncSocialAnalytics());

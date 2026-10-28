@@ -65,6 +65,10 @@ export async function changeSocialPost(input: Record<string,unknown>) {
   await db.runTransaction(async tx => {
     const [snap, cfg] = await Promise.all([tx.get(ref),tx.get(root)]); const post = snap.data(), config = cfg.data()?.config;
     if (!post) throw new Error('Post not found.');
+    if (input.action === 'resolveFacebook') {
+      if (!['failed','unknown','processing'].includes(post.facebook?.state) || (post.facebook?.state === 'processing' && post.facebook.attemptedAt > Date.now()-600000)) throw new Error('Only a failed or uncertain Facebook delivery can be resolved.');
+      tx.update(ref,{facebook:{...post.facebook,state:'resolved',resolution:'Checked manually on the Facebook Page; no automatic retry.'},updatedAt:Date.now()}); return;
+    }
     if (input.action === 'cancel') {
       if (!['draft','queued','failed'].includes(post.state)) throw new Error('This post cannot be cancelled after publishing starts.');
       tx.update(ref,{state:'cancelled',updatedAt:Date.now()}); return;
@@ -173,15 +177,49 @@ async function reserve(kind: 'posts' | 'replies', runId: string, item: FirebaseF
 }
 async function tally(kind: string) { const { db, root } = await refs(), ref = root.collection('days').doc(easternDay()); await db.runTransaction(async tx => { const data = (await tx.get(ref)).data(); tx.set(ref,{[kind]:(data?.[kind] ?? 0)+1},{merge:true}); }); }
 async function stillOpen(runId: string) { const { root } = await refs(); const data = (await root.get()).data(); return socialOpen(data?.config) && data?.leaseId === runId && data?.leaseUntil > Date.now(); }
+// A Facebook delivery belongs to the same content slot as its Instagram sibling.
+// Claim before the external write: ambiguous attempts are never automatically repeated.
+async function publishFacebook(ref: FirebaseFirestore.DocumentReference, runId: string) {
+  const { db, root } = await refs();
+  const claimed = await db.runTransaction(async tx => {
+    const [item, settings] = await Promise.all([tx.get(ref), tx.get(root)]);
+    const p = item.data(), cfg = settings.data();
+    if (!p?.facebookTarget || p.facebook || p.reservedDay !== easternDay() || p.autoDay !== easternDay() ||
+        !cfg?.config.facebookPosts || !cfg.config.autoPosts || !socialOpen(cfg.config) || cfg.leaseId !== runId || cfg.leaseUntil <= Date.now()) return null;
+    tx.update(ref, { facebook: { state: 'processing', attemptedAt: Date.now() } });
+    return p;
+  });
+  if (!claimed) return;
+  let attempted = false;
+  try {
+    const { pageId } = await socialConnection();
+    const fresh = (await root.get()).data();
+    if (!await stillOpen(runId) || !fresh?.config.facebookPosts || !fresh.config.autoPosts) {
+      await ref.update({ facebook: { state: 'cancelled' } }); return;
+    }
+    attempted = true;
+    const result = await socialGraph(`${pageId}/photos`, { url: claimed.mediaUrl, message: claimed.caption, published: true }, 'POST');
+    if (!result.id) throw new Error('Meta returned no Facebook photo ID. Check the Page before resolving.');
+    await ref.update({ facebook: { state: 'published', photoId: String(result.id), postId: result.post_id ? String(result.post_id) : null, publishedAt: Date.now() } });
+    await tally('facebookPosts');
+    await event('published', 'Published today’s content to the Rydr Facebook Page.', ref.id);
+  } catch (error) {
+    if ((await ref.get()).data()?.facebook?.state !== 'published') {
+      await ref.update({ facebook: { state: attempted && (!(error instanceof MetaRequestError) || error.uncertain) ? 'unknown' : 'failed', error: (error as Error).message, attemptedAt: Date.now() } });
+    }
+    await event('error', `Facebook: ${(error as Error).message}`, ref.id);
+  }
+}
 async function publishPost(ref: FirebaseFirestore.DocumentReference, runId: string, test: boolean) {
   const { db, root } = await refs();
   const claimed = await db.runTransaction(async tx => { const p = (await tx.get(ref)).data(); if (p?.state !== 'queued' || p.dueAt > Date.now()) return null; tx.update(ref,{state:'processing',processingAt:Date.now()}); return p; });
   if (!claimed) return;
   if (claimed.automatic && (claimed.autoDay !== easternDay() || !(await root.get()).data()?.config.autoPosts)) { await ref.update({state:'cancelled',error:'Automatic publishing is off or the original shift ended.'}); return; }
-  let attempted = false;
+  let attempted = false, reserved = false;
   try {
     if (!await reserve('posts',runId,ref)) { await ref.update({state:'queued'}); return; }
-    if (test) { await ref.update({state:'simulated',updatedAt:Date.now()}); await tally('simulated'); return; }
+    reserved = true;
+    if (test) { await ref.update({state:'simulated',...(claimed.facebookTarget ? {facebook:{state:'simulated'}} : {}),updatedAt:Date.now()}); await tally('simulated'); return; }
     const { instagramId } = await socialConnection();
     const container = claimed.containerId ? {id:claimed.containerId} : await socialGraph(`${instagramId}/media`,{caption:claimed.caption,
       ...(claimed.mediaType === 'reel' ? {media_type:'REELS',video_url:claimed.mediaUrl} : {image_url:claimed.mediaUrl}), is_ai_generated:claimed.aiGenerated},'POST');
@@ -203,6 +241,8 @@ async function publishPost(ref: FirebaseFirestore.DocumentReference, runId: stri
     // An acknowledged publication is never downgraded by a failed analytics/event write.
     if ((await ref.get()).data()?.state !== 'published') await ref.update({state:uncertain?'unknown':'failed',error:(error as Error).message,updatedAt:Date.now()});
     await event('error',(error as Error).message,ref.id);
+  } finally {
+    if (reserved && !test) await publishFacebook(ref, runId);
   }
 }
 async function prepareAutomaticPost(runId: string) {
@@ -225,7 +265,7 @@ async function prepareAutomaticPost(runId: string) {
   const claimed = await db.runTransaction(async tx => {
     const [existing, cfg] = await Promise.all([tx.get(ref),tx.get(root)]);
     if (existing.exists || !cfg.data()?.config.autoPosts || !socialOpen(cfg.data()?.config) || cfg.data()?.leaseId !== runId) return false;
-    tx.create(ref,{state:'drafting',automatic:true,autoDay:day,assetId:asset.id,createdAt:Date.now(),updatedAt:Date.now(),caption:'Preparing today’s caption…',mediaType:'image',mediaUrl:`https://rydr-app-missioncontrol.vercel.app/rowen-media/${asset.id}.jpg`,aiGenerated:false,dueAt:Date.now(),createdBy:'Rowen'});
+    tx.create(ref,{state:'drafting',automatic:true,facebookTarget:cfg.data()?.config.facebookPosts === true,autoDay:day,assetId:asset.id,createdAt:Date.now(),updatedAt:Date.now(),caption:'Preparing today’s caption…',mediaType:'image',mediaUrl:`https://rydr-app-missioncontrol.vercel.app/rowen-media/${asset.id}.jpg`,aiGenerated:false,dueAt:Date.now(),createdBy:'Rowen'});
     return true;
   });
   if (!claimed) return null;
@@ -235,7 +275,7 @@ async function prepareAutomaticPost(runId: string) {
     if (previous.some(c=>c.trim().toLowerCase()===copy.text.trim().toLowerCase())) throw new Error('Repeated caption held for review.');
     if (!await stillOpen(runId) || !(await root.get()).data()?.config.autoPosts) { await ref.update({state:'cancelled',caption:copy.text,error:'Automation paused or shift ended during drafting.'}); return null; }
     await ref.update({caption:cleanCaption(copy.text),visualBrief:copy.visualBrief,state:copy.handoff?'draft':'queued',error:copy.handoff?copy.reason:'',updatedAt:Date.now()});
-    await event('autopost',copy.handoff?'Automatic caption held for human review.':`Prepared today’s Instagram post using “${asset.title}”.`,ref.id);
+    await event('autopost',copy.handoff?'Automatic caption held for human review.':`Prepared today’s social post using “${asset.title}”.`,ref.id);
     return copy.handoff ? null : ref;
   } catch(error) { await ref.update({state:'failed',error:(error as Error).message,updatedAt:Date.now()}); await event('error',(error as Error).message,ref.id); return null; }
 }
@@ -298,6 +338,14 @@ export async function runSocialAgent(scheduled = false) {
     for (const collection of [posts,threads]) {
       const stale = await collection.where('state','==','processing').limit(100).get();
       for (const doc of stale.docs) if (doc.data().processingAt < started-600000) await doc.ref.update({state:'unknown',reason:'A previous run stopped during a send. Check Instagram before resolving.'});
+    }
+    // Resume only an unattempted sibling delivery after a worker interruption.
+    // Claimed Facebook sends are held for review, never retried.
+    const siblings = await posts.where('state','in',['published','unknown','failed']).limit(100).get();
+    for (const item of siblings.docs) {
+      const p = item.data();
+      if (p.facebook?.state === 'processing' && p.facebook.attemptedAt < started-600000) await item.ref.update({facebook:{...p.facebook,state:'unknown',error:'A run stopped during Facebook delivery. Check the Page before resolving.'}});
+      if (!test && p.facebookTarget && !p.facebook && await stillOpen(runId)) await publishFacebook(item.ref,runId);
     }
     const queue = await posts.where('state','==','queued').limit(100).get();
     for (const post of queue.docs.sort((a,b)=>a.data().dueAt-b.data().dueAt).slice(0,2)) if (await stillOpen(runId)) await publishPost(post.ref,runId,test);
