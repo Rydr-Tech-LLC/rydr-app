@@ -1,10 +1,11 @@
+import { rowenShift } from './rowenShift';
 import "server-only";
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getWorkspaceDb } from "./firebaseAdmin";
 import { currentWorkspace } from "./workspace";
 import { discoverCampusLeads, discoveryFingerprint } from "./ai/campusGrowthAI";
 import { draftMarketingCopy } from "./ai/marketingCopy";
-import { MARKETING_AGENT_EMAIL, MARKETING_REPLY_EMAIL, MARKETING_SUBJECT_TAG, campaignSubject, campaignOpen, easternDay, followUpDueAt, isNoReplyEmail, leadExclusion, normalizeAgentConfig, normalizeFollowUps, withinSendingHours, type AgentConfig, type AgentLead } from "./marketingAgentPolicy";
+import { MARKETING_BCC_EMAIL, MARKETING_AGENT_EMAIL, MARKETING_REPLY_EMAIL, MARKETING_SUBJECT_TAG, campaignSubject, campaignOpen, easternDay, followUpDueAt, isNoReplyEmail, leadExclusion, normalizeAgentConfig, normalizeFollowUps, withinSendingHours, type AgentConfig, type AgentLead } from "./marketingAgentPolicy";
 import { localTimeToISO } from "../../rydr-backend/services/stripe/promotionPolicy";
 import { notificationService } from "../src/services/notifications/NotificationService";
 
@@ -43,7 +44,7 @@ export async function agentSnapshot() {
   const count = (kind: string) => messages.filter(m => m.direction === "outbound" && m.kind === kind && m.status === "sent").length;
   const onShift = withinSendingHours();
   const shift = { day, start, end, onShift,
-    status: !data ? "Not configured" : data.status !== "active" ? "Paused" : !campaignOpen(data as AgentConfig) ? "Outside campaign dates" : !onShift ? "Off shift" : data.leaseUntil > Date.now() ? "Working" : "Available for next run",
+    status: !data ? "Not configured" : data.status !== "active" ? "Paused" : !campaignOpen(data as AgentConfig) ? "Outside campaign dates" : !onShift ? rowenShift().label : data.leaseUntil > Date.now() ? "Working" : "Available for next run",
     activity: data?.activity ?? "Waiting for first run", activityAt: data?.activityAt ?? null,
     discovered: batches.reduce((n, r) => n + (r.discovered ?? 0), 0),
     excluded: batches.reduce((n, r) => n + (r.excluded ?? 0), 0),
@@ -91,7 +92,11 @@ export async function saveAgent(input: Record<string, unknown>, actor: Actor) {
   await db.runTransaction(async tx => {
     const previous = (await tx.get(campaign)).data();
     if (previous?.firstRunAt) throw new Error("Campaign settings are locked after its first run. Pause or resume the existing pilot.");
-    tx.set(campaign, { ...config, totalReserved: 0, dayReserved: 0, day: "", createdBy: actor.email ?? actor.uid, updatedAt: Date.now() });
+    // Editing an unstarted campaign must preserve activation, inbox verification,
+    // counters and operational metadata. Only a new campaign starts paused.
+    tx.set(campaign, { ...config, status: previous?.status ?? config.status,
+      ...(!previous ? { totalReserved: 0, dayReserved: 0, day: "", createdBy: actor.email ?? actor.uid } : {}),
+      updatedAt: Date.now(), updatedBy: actor.email ?? actor.uid }, { merge: true });
   });
 }
 
@@ -167,21 +172,21 @@ export async function runMarketingAgent() {
     return data as AgentConfig & { lastDiscoveryAt?: number; discoveryCursor?: number; inboxVerifiedAt?: number };
   });
   if (!config) return { skipped: true, reason: "Paused, expired, campaign limit reached, scheduled for later, or already running." };
-  const report = { startedAt, finishedAt: 0, discovered: 0, excluded: 0, drafted: 0, sent: 0, simulated: 0, error: "", warnings: [] as string[] };
+  const report = { startedAt, finishedAt: 0, discovered: 0, excluded: 0, exclusionReasons: {} as Record<string, number>, drafted: 0, sent: 0, simulated: 0, error: "", warnings: [] as string[] };
   try {
-    if (!config.lastDiscoveryAt || Date.now() - config.lastDiscoveryAt > 6 * 3600_000) {
+    if (!config.lastDiscoveryAt || Date.now() - config.lastDiscoveryAt > 30 * 60_000) {
       // Rotate schools; public search snippets only. Never invoke manual URL scraping.
       const cursor = config.discoveryCursor ?? 0;
       await campaign.update({ activity: `Researching ${config.campuses[cursor % config.campuses.length]}`, activityAt: Date.now() });
       const result = await discoverCampusLeads({ campusNames: [config.campuses[cursor % config.campuses.length]],
         categories: ["student organizations", "student life groups", "student government", "commuter student groups"],
         discoveryGoal: "Find official .edu listings for student groups to discuss a Rydr Live Beta pilot. Exclude deans, administrators and individual students. Need a published organization email, never guess one.",
-        leadIntents: ["Invite for Beta"], manualUrls: [], maxSearchResults: 5, strategyLimit: 4 });
+        leadIntents: ["Invite for Beta"], manualUrls: [], emailOutreach: true, maxSearchResults: 10, strategyLimit: 4 });
       report.warnings = result.warnings.slice(0, 5);
       for (const lead of result.leads) {
         const source = result.searchResults.find(r => r.link === lead.sourceUrl);
         const exclusion = leadExclusion(lead, config.campuses, source ? `${source.title}\n${source.snippet}\n${source.content ?? ""}` : "");
-        if (exclusion) { report.excluded++; continue; }
+        if (exclusion) { report.excluded++; report.exclusionReasons[exclusion] = (report.exclusionReasons[exclusion] ?? 0) + 1; continue; }
         const email = lead.publicEmail!.trim().toLowerCase();
         const ref = leads.doc(key(email));
         const inserted = await db.runTransaction(async tx => {
@@ -265,7 +270,31 @@ export async function runMarketingAgent() {
   return report;
 }
 
-type SendAgentMessageInput = { kind: "initial" | "followup" | "reply"; subject: string; body: string; runToken?: string; operationId?: string; actor?: string };
+type SendAgentMessageInput = { kind: "initial" | "followup" | "reply"; subject: string; body: string; runToken?: string; operationId?: string; actor?: string; manualInitial?: boolean };
+
+export async function prepareRowenCommand(command: string, actor: {uid:string;email:string|null}) {
+  if (typeof command !== 'string' || command.length > 2000) throw new Error('Enter a request under 2,000 characters.');
+  const emails = [...new Set((command.match(/[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) ?? []).map(e=>e.toLowerCase()))];
+  if (emails.length !== 1) throw new Error('Include exactly one recipient email address in your request.');
+  const email=emails[0]; if(isNoReplyEmail(email))throw new Error('Rowen cannot contact a no-reply address.');
+  const {db,campaign,leads}=await refs(), ref=leads.doc(key(email));
+  const config=(await campaign.get()).data() as AgentConfig;
+  if(!config)throw new Error('Configure Rowen’s campaign first.');
+  if((await ref.get()).exists)throw new Error('This contact already exists. Open its conversation in Marketing Agent to avoid duplicate outreach.');
+  if((await db.collection('marketingAgentContacts').doc(key(email)).get()).exists)throw new Error('This contact has prior outreach or suppression history. Review its conversation first.');
+  const lead: AgentLead={name:email,campusName:'Specified by admin',category:'Admin-requested outreach',kind:'organization',publicEmail:email,sourceUrl:'',description:command,relevanceScore:100};
+  const copy=await draftMarketingCopy(config,lead,command);
+  if(!copy.suitable)throw new Error(copy.reason || 'This request does not fit Rowen’s student-group campaign.');
+  await db.runTransaction(async tx=>{const [existing,blocked]=await Promise.all([tx.get(ref),tx.get(db.collection('marketingAgentContacts').doc(key(email)))]);if(existing.exists||blocked.exists)throw new Error('Contact history changed. Review the existing conversation.');tx.create(ref,{...lead,...copy,email,subject:campaignSubject(copy.subject),state:'review',commandDraft:true,sourceType:'admin_provided',createdBy:actor.email??actor.uid,createdAt:Date.now(),updatedAt:Date.now()});});
+  return {id:ref.id,email,subject:campaignSubject(copy.subject),body:copy.body};
+}
+
+export async function sendRowenCommand(id:string, actor:{uid:string;email:string|null}) {
+  if(!/^[a-f0-9]{64}$/.test(id))throw new Error('Invalid command draft.');
+  const {db,leads}=await refs(), ref=leads.doc(id);
+  const draft=await db.runTransaction(async tx=>{const d=(await tx.get(ref)).data();if(!d?.commandDraft || !['review','ready','sending','sent','unknown','simulated'].includes(d.state))throw new Error('Command draft is unavailable.');if(d.state==='review')tx.update(ref,{state:'ready',updatedAt:Date.now()});return d;});
+  return sendAgentMessage(id,{kind:'initial',subject:draft.subject,body:draft.body,manualInitial:true,actor:actor.email??actor.uid});
+}
 
 /** Shared outbox for scheduled outreach, follow-ups, and Mission Control replies. */
 export async function sendAgentMessage(id: string, input: SendAgentMessageInput) {
@@ -277,6 +306,7 @@ export async function sendAgentMessage(id: string, input: SendAgentMessageInput)
   const leadRef = leads.doc(id), contactRef = db.collection("marketingAgentContacts").doc(id);
   const captured = (await leadRef.get()).data();
   if (!captured) throw new Error("Contact not found.");
+  if (input.manualInitial && (input.kind !== 'initial' || !captured.commandDraft)) throw new Error('Only an admin-created command draft can use manual sending.');
   const sequence = input.kind === "followup" ? (captured.followUpsSent ?? 0) + 1 : 0;
   const messageId = `${id}-${input.kind}-${input.kind === "reply" ? input.operationId : sequence}`;
   const messageRef = campaign.collection("messages").doc(messageId);
@@ -293,7 +323,7 @@ export async function sendAgentMessage(id: string, input: SendAgentMessageInput)
     const prior = input.kind === "initial" ? await tx.get(db.collection("campusOutreachDrafts").where("recipientEmail", "==", captured.email).limit(100)) : null;
     if (previous) return { status: previous.status as string };
     if (!live || !lead || !campaignOpen(live as AgentConfig)) return { status: "skipped", reason: "Campaign is paused or outside its dates." };
-    if (input.kind !== "reply" && (live.runToken !== input.runToken || !withinSendingHours())) return { status: "skipped" };
+    if (input.kind !== "reply" && ((!input.manualInitial && live.runToken !== input.runToken) || !withinSendingHours())) return { status: "skipped", reason:'Queued for the next working period.' };
     if (isNoReplyEmail(lead.email)) {
       tx.update(leadRef, { state: "blocked", nextFollowUpAt: null, reason: "No-reply address", updatedAt: Date.now() });
       tx.set(contactRef, { blocked: true, reason: "no_reply", updatedAt: Date.now() }, { merge: true });
@@ -315,7 +345,7 @@ export async function sendAgentMessage(id: string, input: SendAgentMessageInput)
       const due = followUpDueAt(live as AgentConfig, lead.lastSentAt ?? 0, lead.followUpsSent ?? 0);
       if (live.mode !== "automatic" || !["sent", "simulated"].includes(lead.state) || lead.lastReplyAt || !due || due > Date.now()
         || (lead.followUpsSent ?? 0) + 1 !== sequence) return { status: "skipped" };
-      if (workspace === "live-beta" && !live.inboxVerifiedAt) return { status: "skipped", reason: "Verify the Zoho reply connection before follow-ups." };
+      if (workspace === "live-beta" && !live.inboxVerifiedAt) return { status: "skipped", reason: "Verify the Gmail reply connection before follow-ups." };
     } else if (!lead.lastInboundMessageId || lead.state !== "replied") {
       return { status: "skipped", reason: "Receive a contact reply before responding from this inbox." };
     }
@@ -342,7 +372,7 @@ export async function sendAgentMessage(id: string, input: SendAgentMessageInput)
   const threadId = reserved.threadId && /^<[^\s<>]+>$/.test(reserved.threadId) ? reserved.threadId : undefined;
   await campaign.update({ activity: `${input.kind === "followup" ? "Following up with" : input.kind === "reply" ? "Replying to" : "Contacting"} ${captured.name}`, activityAt: Date.now() });
   const result = await notificationService.sendGenericEmail({ from: `${config.name} | Rydr Tech LLC <${MARKETING_AGENT_EMAIL}>`,
-    to: reserved.email!, bcc: replyTo, replyTo, subject: input.kind === "initial" || /^re:/i.test(subject) ? subject : `Re: ${subject}`, body,
+    to: reserved.email!, bcc: MARKETING_BCC_EMAIL, replyTo, subject: input.kind === "initial" || /^re:/i.test(subject) ? subject : `Re: ${subject}`, body,
     ...(threadId ? { headers: { "In-Reply-To": threadId, References: threadId } } : {}),
     eyebrow: "Rydr Live Beta · Campus Invitation", idempotencyKey: `marketing/${workspace}/${CAMPAIGN}/${messageId}` });
   const status = result.ok ? workspace === "test" ? "simulated" : "sent" : "unknown";

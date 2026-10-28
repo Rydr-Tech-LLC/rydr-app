@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminSession, getCampusGrowthSession } from "@/lib/session";
-import { agentSnapshot, saveAgent, setAgentStatus, actOnAgentLead, updateAgentSchedule, createInboxProbe, sendAgentMessage } from "@/lib/marketingAgent";
+import { agentSnapshot, saveAgent, setAgentStatus, actOnAgentLead, updateAgentSchedule, createInboxProbe, sendAgentMessage, prepareRowenCommand, sendRowenCommand } from "@/lib/marketingAgent";
 import { getAgentConversation } from "@/lib/marketingAgentInbox";
 import { writeAuditLog } from "@/lib/auditLog";
 
@@ -20,7 +20,9 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   try {
     let result: object = {};
-    if (body?.action === "save") await saveAgent(body.config, actor);
+    if (body?.action === 'commandDraft') result = await prepareRowenCommand(body.command,actor);
+    else if(body?.action === 'commandSend') result = await sendRowenCommand(body.id,actor);
+    else if (body?.action === "save") await saveAgent(body.config, actor);
     else if (body?.action === "pause") await setAgentStatus("paused", actor);
     else if (body?.action === "activate") await setAgentStatus("active", actor);
     else if (body?.action === "lead") await actOnAgentLead(body.id, body.leadAction, actor);

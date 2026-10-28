@@ -7,7 +7,7 @@ import { MARKETING_AGENT_EMAIL, PILOT_END, type AgentConfig } from "@/lib/market
 
 type Contact = { id: string; name: string; campusName: string; email: string; state: string; sourceUrl: string;
   reason?: string; subject?: string; body?: string; emailBody?: string; instagramDraft?: string; instagramUrl?: string };
-type Run = { id: string; startedAt: number; discovered: number; excluded: number; drafted: number; sent: number; simulated: number; error: string; warnings: string[] };
+type Run = { id: string; startedAt: number; discovered: number; excluded: number; exclusionReasons?: Record<string, number>; drafted: number; sent: number; simulated: number; error: string; warnings: string[] };
 type Snapshot = { campaign: (AgentConfig & { firstRunAt?: number; totalReserved: number; lastRunAt?: number; lastError?: string; inboxVerifiedAt?: number }) | null;
   leads: Contact[]; runs: Run[]; readiness: Record<string, boolean | string>; inboundAddress: string;
   shift: { day: string; status: string; onShift: boolean; activity: string; activityAt: number | null; discovered: number; excluded: number; drafted: number; outreach: number; followups: number; responses: number; replies: number; simulated: number; errors: number; batches: number; limited: boolean } };
@@ -46,7 +46,7 @@ function AgentConversation({ lead, workspace, onChanged }: { lead: Contact; work
   return <div className="mt-3">
     <button className={button} disabled={busy} onClick={() => load().catch(e => setError(e.message))}>{messages ? "Refresh conversation" : "View conversation"}</button>
     {messages && <div className="mt-3 space-y-3">{!messages.length && <p className="text-sm text-muted">No conversation messages recorded.</p>}{messages.map(m => <div key={m.id} className="rounded-lg bg-grouped p-3"><p className="text-xs text-muted">{m.direction === "inbound" ? "Received" : "Rowen"} · {m.status} · {formatDate(m.createdAt)}</p><p className="mt-1 text-sm font-medium">{m.subject}</p><p className="mt-2 whitespace-pre-wrap text-sm">{m.body}</p></div>)}
-      {lead.state === "replied" && <div><label className="text-sm">Reply from Rowen<textarea rows={4} maxLength={8000} className={field} value={body} disabled={busy || Boolean(operationId)} onChange={e => setBody(e.target.value)} /></label><button className={`${button} mt-2`} disabled={busy || !body.trim()} onClick={reply}>{busy ? "Sending…" : "Send reply"}</button><p className="mt-2 text-xs text-muted">Reply-To and BCC go to Khris. A send with an uncertain outcome requires reconciliation before a new message.</p></div>}
+      {lead.state === "replied" && <div><label className="text-sm">Reply from Rowen<textarea rows={4} maxLength={8000} className={field} value={body} disabled={busy || Boolean(operationId)} onChange={e => setBody(e.target.value)} /></label><button className={`${button} mt-2`} disabled={busy || !body.trim()} onClick={reply}>{busy ? "Sending…" : "Send reply"}</button><p className="mt-2 text-xs text-muted">Reply-To goes to support@rydr-go.com; BCC goes to Khris. A send with an uncertain outcome requires reconciliation before a new message.</p></div>}
     </div>}
     {error && <p role="status" className="mt-2 text-sm text-red-700">{error}</p>}
   </div>;
@@ -81,7 +81,7 @@ export default function MarketingAgentClient() {
         method: "POST", headers, body: JSON.stringify({ action, ...extra }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Action failed.");
-      setMessage(data.subject ? `Send an email to Khris's Zoho mailbox with this exact subject within 30 minutes: ${data.subject}. The forwarding rule should deliver its copy here.` : data.reason || (action === "run" ? `Run finished: ${data.drafted ?? 0} drafted, ${data.sent ?? 0} sent, ${data.simulated ?? 0} simulated.` : "Saved."));
+      setMessage(data.subject ? `Send an email to support@rydr-go.com in Gmail with this exact subject within 30 minutes: ${data.subject}. The forwarding rule should deliver its copy here.` : data.reason || (action === "run" ? `Run finished: ${data.drafted ?? 0} drafted, ${data.sent ?? 0} sent, ${data.simulated ?? 0} simulated.` : "Saved."));
       await refresh();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Action failed."); }
     finally { setBusy(false); }
@@ -126,7 +126,7 @@ export default function MarketingAgentClient() {
           <label className="block text-sm font-medium">Rydr mailing address for email footer<input className={field} placeholder="Required before live outreach" value={config.postalAddress} onChange={e => setConfig({ ...config, postalAddress: e.target.value })} /></label>
           <div className="grid grid-cols-2 gap-4"><label className="text-sm font-medium">Daily email limit<input type="number" min={1} max={50} className={field} value={config.dailyLimit} onChange={e => setConfig({ ...config, dailyLimit: Number(e.target.value) })} /></label>
             <label className="text-sm font-medium">Total email limit<input type="number" min={1} max={10000} className={field} value={config.totalLimit} onChange={e => setConfig({ ...config, totalLimit: Number(e.target.value) })} /></label></div>
-          <button className={button} onClick={() => act("save", { config })}>Save campaign (paused)</button>
+          <button className={button} onClick={() => act("save", { config })}>Save campaign</button>
         </fieldset>
       </section>
       <div className="space-y-5">
@@ -164,22 +164,22 @@ export default function MarketingAgentClient() {
           <p className="mt-2 text-sm text-muted">Email sender: {config.name} | Rydr Tech LLC &lt;{MARKETING_AGENT_EMAIL}&gt;</p>
           <ul className="mt-3 space-y-2 text-sm">{Object.entries(snapshot?.readiness ?? {}).filter(([name]) => name !== "instagram").map(([name, ready]) => <li key={name} className="flex justify-between gap-3"><span className="capitalize">{name === "scheduler" ? "Scheduler credential" : name}</span><span>{ready ? "Configured" : "Needs setup"}</span></li>)}</ul>
           <p className="mt-3 text-xs text-muted">A configured scheduler credential does not mean a schedule is running. Confirm scheduled runs in the activity log after deployment.</p>
-          <p className="mt-3 text-sm text-muted">Reply-To and BCC: khris.nunnally@rydr-go.com. Zoho forwards campaign replies to {snapshot?.inboundAddress || "the receiving address configured during setup"}.</p>
-          <button className={`${button} mt-3`} disabled={busy || !snapshot?.readiness.inbound} onClick={() => act("probe")}>Check Zoho reply connection</button>
+          <p className="mt-3 text-sm text-muted">Reply-To: support@rydr-go.com | BCC: khris.nunnally@rydr-go.com. Gmail campaign forwarding destination: {snapshot?.inboundAddress || "the receiving address configured during setup"}.</p>
+          <button className={`${button} mt-3`} disabled={busy || !snapshot?.readiness.inbound} onClick={() => act("probe")}>Check Gmail reply connection</button>
           <p className="mt-2 text-xs text-muted">{snapshot?.campaign?.inboxVerifiedAt ? `Reply connection verified: ${formatDate(snapshot.campaign.inboxVerifiedAt)}` : "Reply connection has not been verified. Live follow-ups are held."}</p>
         </section>
         <section className="rounded-2xl border border-line bg-white p-5 shadow-sm">
           <h2 className="text-base font-semibold">Instagram · @rydr_tech</h2>
           <p className="mt-2 text-sm text-muted">Manage Instagram drafts, scheduled posts, incoming replies, and insights in Rowen’s Social Workspace. Check Social Connections for account status. First-contact DMs remain manual; Rowen replies to eligible incoming conversations without scraping profiles.</p>
-          <p className="mt-3 text-sm text-muted">Email conversations appear below once Zoho forwarding is connected. No-reply messages are discarded from Mission Control; Zoho originals are retained.</p>
+          <p className="mt-3 text-sm text-muted">Email conversations appear below once Gmail forwarding is connected. No-reply messages are discarded from Mission Control; Gmail originals are retained.</p>
         </section>
       </div>
     </div>
     <section className="space-y-3"><h2 className="text-xl font-semibold">Contact decisions & messages</h2><p className="text-xs text-muted">Most recent 250 contacts. Shift metrics use the current shift’s records independently.</p>
       {!snapshot?.leads.length && <p className="rounded-2xl border border-line bg-white p-5 shadow-sm text-sm text-muted">No contacts yet. A run searches public campus listings, checks published email evidence, and drafts invitations for eligible student groups.</p>}
-      {snapshot?.leads.map(lead => <article key={lead.id} className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+      {snapshot?.leads.map(lead => <article id={`contact-${lead.id}`} key={lead.id} className="rounded-2xl border border-line bg-white p-5 shadow-sm">
         <div className="flex flex-wrap justify-between gap-3"><div><h3 className="font-semibold">{lead.name}</h3><p className="text-sm text-muted">{lead.campusName} · {lead.email}</p></div><span className="text-sm font-semibold">{lead.state === "sending" ? "Sending / awaiting reconciliation" : lead.state}</span></div>
-        <a className="mt-2 inline-block text-sm text-rydr-burgundy underline" href={lead.sourceUrl} target="_blank" rel="noreferrer">Public organization source</a>
+        {lead.sourceUrl ? <a className="mt-2 inline-block text-sm text-rydr-burgundy underline" href={lead.sourceUrl} target="_blank" rel="noreferrer">Public organization source</a> : <p className="mt-2 text-xs text-muted">Recipient provided by a Mission Control admin</p>}
         {lead.reason && <p className="mt-2 text-sm text-muted">{lead.reason}</p>}
         {lead.body && <details className="mt-3"><summary className="cursor-pointer font-medium">Email: {lead.subject}</summary><p className="mt-3 whitespace-pre-wrap text-sm">{lead.emailBody ?? lead.body}</p></details>}
         <AgentConversation lead={lead} workspace={workspace} onChanged={refresh} />
@@ -195,7 +195,7 @@ export default function MarketingAgentClient() {
     <section className="rounded-2xl border border-line bg-white p-5 shadow-sm"><h2 className="text-base font-semibold">Run history</h2>
       <p className="mt-1 text-xs text-muted">Public search only. Excluded candidates are counted without retaining their contact details.</p>
       {!snapshot?.runs.length && <p className="mt-3 text-sm text-muted">No runs recorded. The agent is not running until configured, activated, and invoked.</p>}
-      {snapshot?.runs.map(run => <div key={run.id} className="mt-3 border-t border-line pt-3 text-sm"><p>{formatDate(run.startedAt)}</p><p className="text-muted">{run.discovered} discovered · {run.excluded} excluded · {run.drafted} drafted · {run.sent} sent · {run.simulated} simulated</p>{run.error && <p className="text-red-700">{run.error}</p>}{run.warnings.map((w, i) => <p key={i} className="text-amber-800">{w}</p>)}</div>)}
+      {snapshot?.runs.map(run => <div key={run.id} className="mt-3 border-t border-line pt-3 text-sm"><p>{formatDate(run.startedAt)}</p><p className="text-muted">{run.discovered} discovered · {run.excluded} excluded · {run.drafted} drafted · {run.sent} sent · {run.simulated} simulated</p>{Object.entries(run.exclusionReasons ?? {}).map(([reason,count]) => <p key={reason} className="text-xs text-muted">{count} skipped: {reason}</p>)}{run.error && <p className="text-red-700">{run.error}</p>}{run.warnings.map((w, i) => <p key={i} className="text-amber-800">{w}</p>)}</div>)}
     </section>
   </div>;
 }
