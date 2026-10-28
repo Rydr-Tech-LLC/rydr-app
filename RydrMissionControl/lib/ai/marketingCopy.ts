@@ -1,3 +1,4 @@
+import { providerError } from './providerError';
 import "server-only";
 import type { AgentConfig, AgentLead } from "../marketingAgentPolicy";
 import { ROWEN_VOICE } from '../socialPolicy';
@@ -21,7 +22,7 @@ export async function draftMarketingCopy(config: AgentConfig, lead: AgentLead) {
           required: ["suitable", "reason", "subject", "body", "instagramDraft"] } } }
     })
   });
-  if (!response.ok) throw new Error(`OpenAI drafting failed (${response.status}).`);
+  if (!response.ok) throw await providerError(response);
   const data = await response.json();
   if (data.status !== "completed") throw new Error("AI drafting did not complete.");
   const text = data.output?.flatMap((part: { content?: Array<{ type: string; text?: string }> }) => part.content ?? [])

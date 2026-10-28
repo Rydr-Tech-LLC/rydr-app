@@ -270,3 +270,14 @@ test('shift analytics distinguish sent, simulated, received and excluded work', 
   const snapshot = await agent.agentSnapshot(); assert.equal(snapshot.shift.outreach, 1); assert.equal(snapshot.shift.replies, 1); assert.equal(snapshot.shift.drafted, 1); assert.equal(snapshot.shift.simulated, 0); assert.equal(snapshot.shift.batches, 1);
   now = RealDate.parse('2026-10-28T16:00:00Z'); const next = await agent.agentSnapshot(); assert.equal(next.shift.outreach, 0); assert.equal(next.shift.replies, 0);
 });
+
+
+test('saving an unstarted campaign preserves activation and verified inbox metadata', async () => {
+ Object.assign(docs.get(campaignPath), { inboxVerifiedAt: now-1000, inboxProbeSubject: 'pending probe', totalReserved: 3, dayReserved: 2, createdBy: 'original' });
+ await agent.saveAgent(config({ dailyLimit: 8 }), actor);
+ const saved=docs.get(campaignPath);
+ assert.equal(saved.status,'active');assert.equal(saved.inboxVerifiedAt,now-1000);assert.equal(saved.inboxProbeSubject,'pending probe');
+ assert.equal(saved.totalReserved,3);assert.equal(saved.dayReserved,2);assert.equal(saved.createdBy,'original');assert.equal(saved.dailyLimit,8);
+ docs.get(campaignPath).status='paused';await agent.saveAgent(config(),actor);assert.equal(docs.get(campaignPath).status,'paused');
+ docs.delete(campaignPath);await agent.saveAgent(config(),actor);assert.equal(docs.get(campaignPath).status,'paused');
+});

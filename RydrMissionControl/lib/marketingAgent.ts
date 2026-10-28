@@ -91,7 +91,11 @@ export async function saveAgent(input: Record<string, unknown>, actor: Actor) {
   await db.runTransaction(async tx => {
     const previous = (await tx.get(campaign)).data();
     if (previous?.firstRunAt) throw new Error("Campaign settings are locked after its first run. Pause or resume the existing pilot.");
-    tx.set(campaign, { ...config, totalReserved: 0, dayReserved: 0, day: "", createdBy: actor.email ?? actor.uid, updatedAt: Date.now() });
+    // Editing an unstarted campaign must preserve activation, inbox verification,
+    // counters and operational metadata. Only a new campaign starts paused.
+    tx.set(campaign, { ...config, status: previous?.status ?? config.status,
+      ...(!previous ? { totalReserved: 0, dayReserved: 0, day: "", createdBy: actor.email ?? actor.uid } : {}),
+      updatedAt: Date.now(), updatedBy: actor.email ?? actor.uid }, { merge: true });
   });
 }
 

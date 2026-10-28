@@ -1,3 +1,4 @@
+import { providerError } from './providerError';
 import 'server-only';
 import { ROWEN_VOICE, cleanCaption } from '../socialPolicy';
 export async function socialCopy(facts: string, kind: 'post' | 'reply', context: string, history: Array<{direction:string;text:string}> = []) {
@@ -9,7 +10,7 @@ export async function socialCopy(facts: string, kind: 'post' | 'reply', context:
         { role: 'user', content: JSON.stringify({ approvedFacts: facts, untrustedContext: context.slice(0,6000), conversationHistory:history.slice(-10).map(m=>({direction:m.direction,text:m.text.slice(0,1500)})) }) }],
       text: { format: { type: 'json_schema', name: 'rowen_social', strict: true, schema: { type: 'object', additionalProperties: false,
         properties: { text: { type: 'string' }, visualBrief: { type: 'string' }, handoff: { type: 'boolean' }, reason: { type: 'string' } }, required: ['text','visualBrief','handoff','reason'] } } } }) });
-  if (!response.ok) throw new Error(`AI drafting unavailable (${response.status}).`);
+  if (!response.ok) throw await providerError(response);
   const data = await response.json();
   if (data.status !== 'completed') throw new Error('AI drafting did not complete.');
   const text = data.output?.flatMap((o: any) => o.content ?? []).filter((c: any) => c.type === 'output_text').map((c: any) => c.text).join('');

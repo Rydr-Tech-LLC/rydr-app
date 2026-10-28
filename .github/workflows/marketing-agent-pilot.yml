@@ -1,6 +1,11 @@
 name: Rydr marketing agent pilot
 on:
   workflow_dispatch:
+    inputs:
+      recovery_day:
+        description: 'Optional YYYY-MM-DD: run both workers through this Eastern shift and report'
+        type: string
+        required: false
   schedule:
     # UTC envelope covers both Eastern standard and daylight saving time.
     # The server enforces the exact 9 a.m.–5 p.m. local shift.
@@ -12,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   run:
-    if: vars.RYDR_MARKETING_AGENT_ENABLED == 'true'
+    if: vars.RYDR_MARKETING_AGENT_ENABLED == 'true' && inputs.recovery_day == ''
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
@@ -25,3 +30,36 @@ jobs:
           MARKETING_AGENT_PUBLIC_URL: ${{ vars.MARKETING_AGENT_PUBLIC_URL }}
           MARKETING_AGENT_RUN_SECRET: ${{ secrets.MARKETING_AGENT_RUN_SECRET }}
         run: node RydrMissionControl/scripts/runMarketingAgent.mjs
+  recovery_1:
+    if: ${{ vars.RYDR_MARKETING_AGENT_ENABLED == 'true' && inputs.recovery_day != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 325
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run bounded recovery shift
+        env:
+          RECOVERY_DAY: ${{ inputs.recovery_day }}
+          MARKETING_AGENT_PUBLIC_URL: ${{ vars.MARKETING_AGENT_PUBLIC_URL }}
+          MARKETING_AGENT_RUN_SECRET: ${{ secrets.MARKETING_AGENT_RUN_SECRET }}
+          SOCIAL_AGENT_RUN_SECRET: ${{ secrets.SOCIAL_AGENT_RUN_SECRET }}
+        run: node RydrMissionControl/scripts/runShiftRecovery.mjs
+  recovery_2:
+    if: ${{ always() && vars.RYDR_MARKETING_AGENT_ENABLED == 'true' && inputs.recovery_day != '' }}
+    needs: recovery_1
+    runs-on: ubuntu-latest
+    timeout-minutes: 325
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run bounded recovery shift
+        env:
+          RECOVERY_DAY: ${{ inputs.recovery_day }}
+          MARKETING_AGENT_PUBLIC_URL: ${{ vars.MARKETING_AGENT_PUBLIC_URL }}
+          MARKETING_AGENT_RUN_SECRET: ${{ secrets.MARKETING_AGENT_RUN_SECRET }}
+          SOCIAL_AGENT_RUN_SECRET: ${{ secrets.SOCIAL_AGENT_RUN_SECRET }}
+        run: node RydrMissionControl/scripts/runShiftRecovery.mjs

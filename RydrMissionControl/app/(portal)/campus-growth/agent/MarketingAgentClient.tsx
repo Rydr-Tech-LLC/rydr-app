@@ -46,7 +46,7 @@ function AgentConversation({ lead, workspace, onChanged }: { lead: Contact; work
   return <div className="mt-3">
     <button className={button} disabled={busy} onClick={() => load().catch(e => setError(e.message))}>{messages ? "Refresh conversation" : "View conversation"}</button>
     {messages && <div className="mt-3 space-y-3">{!messages.length && <p className="text-sm text-muted">No conversation messages recorded.</p>}{messages.map(m => <div key={m.id} className="rounded-lg bg-grouped p-3"><p className="text-xs text-muted">{m.direction === "inbound" ? "Received" : "Rowen"} · {m.status} · {formatDate(m.createdAt)}</p><p className="mt-1 text-sm font-medium">{m.subject}</p><p className="mt-2 whitespace-pre-wrap text-sm">{m.body}</p></div>)}
-      {lead.state === "replied" && <div><label className="text-sm">Reply from Rowen<textarea rows={4} maxLength={8000} className={field} value={body} disabled={busy || Boolean(operationId)} onChange={e => setBody(e.target.value)} /></label><button className={`${button} mt-2`} disabled={busy || !body.trim()} onClick={reply}>{busy ? "Sending…" : "Send reply"}</button><p className="mt-2 text-xs text-muted">Reply-To and BCC go to Khris. A send with an uncertain outcome requires reconciliation before a new message.</p></div>}
+      {lead.state === "replied" && <div><label className="text-sm">Reply from Rowen<textarea rows={4} maxLength={8000} className={field} value={body} disabled={busy || Boolean(operationId)} onChange={e => setBody(e.target.value)} /></label><button className={`${button} mt-2`} disabled={busy || !body.trim()} onClick={reply}>{busy ? "Sending…" : "Send reply"}</button><p className="mt-2 text-xs text-muted">Reply-To goes to support@rydr-go.com; BCC goes to Khris. A send with an uncertain outcome requires reconciliation before a new message.</p></div>}
     </div>}
     {error && <p role="status" className="mt-2 text-sm text-red-700">{error}</p>}
   </div>;
@@ -126,7 +126,7 @@ export default function MarketingAgentClient() {
           <label className="block text-sm font-medium">Rydr mailing address for email footer<input className={field} placeholder="Required before live outreach" value={config.postalAddress} onChange={e => setConfig({ ...config, postalAddress: e.target.value })} /></label>
           <div className="grid grid-cols-2 gap-4"><label className="text-sm font-medium">Daily email limit<input type="number" min={1} max={50} className={field} value={config.dailyLimit} onChange={e => setConfig({ ...config, dailyLimit: Number(e.target.value) })} /></label>
             <label className="text-sm font-medium">Total email limit<input type="number" min={1} max={10000} className={field} value={config.totalLimit} onChange={e => setConfig({ ...config, totalLimit: Number(e.target.value) })} /></label></div>
-          <button className={button} onClick={() => act("save", { config })}>Save campaign (paused)</button>
+          <button className={button} onClick={() => act("save", { config })}>Save campaign</button>
         </fieldset>
       </section>
       <div className="space-y-5">
