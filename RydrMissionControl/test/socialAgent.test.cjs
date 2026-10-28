@@ -133,3 +133,22 @@ test('an interrupted unattempted Facebook sibling resumes only in its original s
  post('old');Object.assign(docs.get(root+'/posts/old'),{state:'published',facebookTarget:true,autoDay:'2026-10-26',reservedDay:'2026-10-26'});
  await agent.runSocialAgent();assert.equal(calls.filter(c=>c.path.endsWith('/photos')).length,1);
 });
+
+test('failed AI preparation can retry after cooldown without repeating a Meta attempt',async()=>{
+ docs.get(root).config.autoPosts=true;
+ onDraft=async()=>{throw new Error('API quota exhausted');};await agent.runSocialAgent();
+ const p=root+'/posts/rowen-auto-2026-10-27';assert.equal(docs.get(p).state,'failed');
+ onDraft=null;await agent.runSocialAgent();assert.equal(calls.length,0);
+ now+=61*60000;await agent.runSocialAgent();assert.equal(docs.get(p).state,'published');
+ await agent.runSocialAgent();assert.equal(calls.filter(c=>c.path.endsWith('/media_publish')).length,1);
+});
+
+test('failed automatic preparation never retries reserved or attempted posts',async()=>{
+ docs.get(root).config.autoPosts=true;
+ const p=root+'/posts/rowen-auto-2026-10-27';
+ for(const extra of [{reservedDay:'2026-10-27'},{processingAt:now-3600000},{facebook:{state:'unknown'}},{draftAttempts:3}]){
+ docs.set(p,{state:'failed',automatic:true,autoDay:'2026-10-27',caption:'Preparing today’s caption…',updatedAt:now-3600000,...extra});
+ await agent.runSocialAgent();assert.equal(calls.length,0);
+ }
+});
+

@@ -265,7 +265,16 @@ async function prepareAutomaticPost(runId: string) {
   const asset = [...ROWEN_MEDIA].sort((a,b)=>(used.get(a.id)??0)-(used.get(b.id)??0))[0];
   const claimed = await db.runTransaction(async tx => {
     const [existing, cfg] = await Promise.all([tx.get(ref),tx.get(root)]);
-    if (existing.exists || !cfg.data()?.config.autoPosts || !socialOpen(cfg.data()?.config) || cfg.data()?.leaseId !== runId) return false;
+    if (!cfg.data()?.config.autoPosts || !socialOpen(cfg.data()?.config) || cfg.data()?.leaseId !== runId) return false;
+    if (existing.exists) {
+      const prior = existing.data()!;
+      // Retry only AI preparation: no reservation or Meta attempt has happened.
+      if (prior.state !== 'failed' || prior.caption !== 'Preparing today’s caption…' ||
+          prior.reservedDay || prior.processingAt || prior.facebook || prior.autoDay !== day ||
+          (prior.draftAttempts ?? 1) >= 3 || prior.updatedAt > Date.now()-30*60000) return false;
+      tx.update(ref,{state:'drafting',error:'',draftAttempts:(prior.draftAttempts ?? 1)+1,updatedAt:Date.now()});
+      return true;
+    }
     tx.create(ref,{state:'drafting',automatic:true,facebookTarget:cfg.data()?.config.facebookPosts === true,autoDay:day,assetId:asset.id,createdAt:Date.now(),updatedAt:Date.now(),caption:'Preparing today’s caption…',mediaType:'image',mediaUrl:`https://rydr-app-missioncontrol.vercel.app/rowen-media/${asset.id}.jpg`,aiGenerated:false,dueAt:Date.now(),createdBy:'Rowen'});
     return true;
   });
