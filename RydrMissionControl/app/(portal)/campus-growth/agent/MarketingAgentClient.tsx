@@ -177,7 +177,7 @@ export default function MarketingAgentClient() {
     </div>
     <section className="space-y-3"><h2 className="text-xl font-semibold">Contact decisions & messages</h2><p className="text-xs text-muted">Most recent 250 contacts. Shift metrics use the current shift’s records independently.</p>
       {!snapshot?.leads.length && <p className="rounded-2xl border border-line bg-white p-5 shadow-sm text-sm text-muted">No contacts yet. A run searches public campus listings, checks published email evidence, and drafts invitations for eligible student groups.</p>}
-      {snapshot?.leads.map(lead => <article key={lead.id} className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+      {snapshot?.leads.map(lead => <article id={`contact-${lead.id}`} key={lead.id} className="rounded-2xl border border-line bg-white p-5 shadow-sm">
         <div className="flex flex-wrap justify-between gap-3"><div><h3 className="font-semibold">{lead.name}</h3><p className="text-sm text-muted">{lead.campusName} · {lead.email}</p></div><span className="text-sm font-semibold">{lead.state === "sending" ? "Sending / awaiting reconciliation" : lead.state}</span></div>
         <a className="mt-2 inline-block text-sm text-rydr-burgundy underline" href={lead.sourceUrl} target="_blank" rel="noreferrer">Public organization source</a>
         {lead.reason && <p className="mt-2 text-sm text-muted">{lead.reason}</p>}
