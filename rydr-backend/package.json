@@ -17,6 +17,7 @@
   "license": "ISC",
   "dependencies": {
     "@google-cloud/vision": "^4.3.2",
+    "@rydr/auth-core": "file:../shared/rydr-auth",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",

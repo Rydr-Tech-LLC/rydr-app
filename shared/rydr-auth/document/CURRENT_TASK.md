@@ -115,13 +115,13 @@ No service routes change as part of this task (ADR-004). See [README.md](../READ
 
 ### Checklist
 
-- [ ] `rydr-backend` — installs
-- [ ] `rydr-backend` — `require` returns the four functions
-- [ ] `stripe-backend` — installs (node_modules diff checked)
-- [ ] `stripe-backend` — `require` returns the four functions
-- [ ] `rydr-bank-service` — installs
-- [ ] `rydr-bank-service` — named `import` returns the four functions
-- [ ] `rydr-bank-service` — default `import` returns the four functions
+- [x] `rydr-backend` — installs
+- [x] `rydr-backend` — `require` returns the four functions
+- [x] `stripe-backend` — installs (node_modules diff checked; see Nov 1 comparison)
+- [x] `stripe-backend` — `require` returns the four functions
+- [x] `rydr-bank-service` — installs
+- [x] `rydr-bank-service` — named `import` returns the four functions
+- [x] `rydr-bank-service` — default `import` returns the four functions
 - [ ] Results shared with tech lead
 
 ---
@@ -131,3 +131,17 @@ No service routes change as part of this task (ADR-004). See [README.md](../READ
 1. Commit the package, its tests, and the three services' `package.json` / `package-lock.json` changes on the branch.
 2. Push and confirm all three services build in a **Render preview deployment** (proposal, Part 3, "Gate").
 3. Mark ADR-004 Accepted once all three pass.
+
+---
+
+## Not yet done: the `/rides/complete` fix
+
+**Checked Nov 1:** `rydr-bank-service`'s `POST /rides/complete` ([server.js:273](../../../rydr-bank-service/server.js#L273)) is **unchanged**. It still reads `rideId`, `distanceMi` and `rideType` from the request body and accrues rewards from them, so the reward exploit (proposal, Part 2) is still open.
+
+**Decision (Nov 1):** finish the auth package first (Task 2, then the Render preview), and fix the endpoint afterward, following the rollout order (step 4).
+
+**Worth knowing when we get there:**
+- The fix doesn't depend on the shared package. Per ADR-003 the checks live inline in `rydr-bank-service`, and its existing local `requireAuth` already provides `req.uid`. If priorities change, it can be done earlier on its own branch — confirm with the tech lead first, since it changes the approved order.
+- The checks to implement are in ADR-014 (ride exists, caller is the rider, completed with a driver and `completedAt`, `paymentStatus === "succeeded"`, distance/type from the ride document, ride-level idempotency, distance cap).
+- It needs the testability refactor first (`server.js` initializes Firebase and listens on import), then tests with mock data like the package's.
+- It only fully closes the hole once the Firestore rules are tightened (ADR-015), a separate PR for the rules owner.
