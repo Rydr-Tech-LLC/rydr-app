@@ -1,0 +1,12 @@
+{
+  "name": "@rydr/auth-core",
+  "version": "0.1.0",
+  "description": "Shared Firebase auth/authorization helpers for rydr-backend, stripe-backend, and rydr-bank-service.",
+  "main": "index.js",
+  "type": "commonjs",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {}
+}
