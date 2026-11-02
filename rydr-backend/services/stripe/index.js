@@ -17,6 +17,8 @@ const { finishCardSetup } = require("./savedCards");
 const { newAccountConfiguration, setupConfiguration } = require("./connectConfiguration");
 const { connectAccountError } = require("./connectAccountError");
 const { createConnectAccount, replayed } = require("./connectAccountCreation");
+const { paymentResolution, reconcileFinancialEvent, claimRideSettlement } = require("./ridePaymentReconciliation");
+const { RideAuthorizationService } = require("./rideAuthorization");
 const { DriverPayoutService, PayoutError } = require("./driverPayouts");
 const { walletSnapshot, payoutMethodSummary, createDriverAccountSession, instantEligibility, allExternalAccounts, payoutSummary } = require("./driverWallet");
 const { runtimeConfig, modeProfile, canChargeRide, verifyWebhook, StripeModeState } = require("./stripeMode");
@@ -56,6 +58,9 @@ if(stripeConfig.mode !== (workspace === "test" ? "test" : "live")) throw new Err
 const stripe = new Stripe(env.STRIPE_SECRET_KEY, { apiVersion: stripeConfig.apiVersion });
 const stripeModeState = new StripeModeState({ mode: stripeConfig.mode, fieldValue: FieldValue, getDb: () => { initializeFirebase(); return admin.firestore(); } });
 const driverPayoutService = new DriverPayoutService({ stripe, mode: stripeConfig.mode, getDb: () => { initializeFirebase(); return admin.firestore(); } });
+const rideAuthorization = new RideAuthorizationService({ stripe, mode: stripeConfig.mode,
+  getDb: () => { initializeFirebase(); return admin.firestore(); },
+  customerFor: ownedCustomerId, fieldValue: FieldValue });
 const identityFlows = stripeConfig.identityFlows;
 function promotionsEngine(){initializeFirebase();return new PromotionEngine({db:admin.firestore(),fieldValue:FieldValue,stripe,mode:stripeConfig.mode,getUser:uid=>admin.auth().getUser(uid)});}
 
@@ -821,6 +826,8 @@ async function stripeWebhookHandler(req,res,scope) {
               },
               { merge: true }
             );
+          } else if (pi.metadata?.paymentType === "ride_authorization") {
+            await chargeRideAttempt({ uid: pi.metadata.riderId, rideId, currency: "usd" });
           } else {
             await recordPaymentStatus(rideRef, "succeeded", {
               stripePaymentIntentId: pi.id,
@@ -878,7 +885,12 @@ async function stripeWebhookHandler(req,res,scope) {
               },
               { merge: true }
             );
+          } else if (pi.metadata?.paymentType === "ride_authorization") {
+            // Booking/settlement handles failed holds. Never regress a settled ride
+            // because a superseded authorization failed later.
           } else {
+            const latest = (await rideRef.get()).data();
+            if (latest.paymentStatus === "succeeded" || (latest.stripePaymentIntentId && latest.stripePaymentIntentId !== pi.id)) break;
             await recordPaymentStatus(rideRef, "failed", {
               stripePaymentIntentId: pi.id,
               failureReason: pi.last_payment_error?.message || "Payment failed",
@@ -898,6 +910,13 @@ async function stripeWebhookHandler(req,res,scope) {
         }
         break;
       }
+      case "charge.refunded":
+      case "charge.dispute.created":
+      case "charge.dispute.updated":
+      case "charge.dispute.closed":
+        await reconcileFinancialEvent({ stripe, db: admin.firestore(), fieldValue: FieldValue, mode: stripeConfig.mode,
+          type: event.type, objectId: event.data.object.id });
+        break;
       case "account.external_account.created":
       case "account.external_account.updated":
       case "account.external_account.deleted": {
@@ -1188,6 +1207,8 @@ async function chargeRideAttempt({
   if (!owned) {
     return { httpStatus: 404, body: { error: "ride_not_found_or_not_owned" } };
   }
+  const resolved = paymentResolution(owned.data);
+  if (resolved) return { httpStatus: 200, body: resolved };
   const { ref: rideRef } = owned;
   const outcomeSnap = await rideRef.collection("financial").doc("outcome").get();
   if (!outcomeSnap.exists) {
@@ -1195,12 +1216,40 @@ async function chargeRideAttempt({
   }
   const outcome = outcomeSnap.data();
   const outcomeRef = outcomeSnap.ref;
+  if (owned.data.paymentStatus === "succeeded" && outcome.status !== "paid") {
+    await outcomeRef.set({ status: "paid", paymentIntentId: owned.data.stripePaymentIntentId || null, paidAt: FieldValue.serverTimestamp() }, { merge: true });
+    outcome.status = "paid";
+  }
   if (outcome.status === "paid") {
     await promotionsEngine().settle(rideId);
+    if (owned.data.paymentStatus !== "succeeded") await recordPaymentStatus(rideRef, "succeeded", { stripePaymentIntentId: outcome.paymentIntentId || owned.data.stripePaymentIntentId || null });
+    if (["failed", "pending_driver_connect_account"].includes(owned.data.promoSubsidyTransferStatus)) {
+      const driverAccountId = await driverAccountForRide(owned.data);
+      const result = await transferPromoSubsidyIfNeeded({ rideRef, rideId, ride: owned.data, driverAccountId,
+        targetDriverPayoutCents: owned.data.promoSubsidyTransferCents || 0, amountTransferredFromChargeCents: 0 });
+      await rideRef.set({ promoSubsidyTransferId: result.transferId, promoSubsidyTransferStatus: result.transferStatus, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      if (result.transferStatus === "succeeded" && owned.data.cashHubFeeWithheldCents > 0) {
+        await finalizeCashHubFee({ admin, driverId: owned.data.driverId, rideId, periodId: owned.data.cashHubBillingPeriod, paymentIntentId: outcome.paymentIntentId });
+      }
+    }
     return {
-      httpStatus: 409,
-      body: { error: "ride_already_paid", paymentIntentId: outcome.paymentIntentId || null },
+      httpStatus: 200,
+      body: { status: "succeeded", alreadyPaid: true, paymentIntentId: outcome.paymentIntentId || owned.data.stripePaymentIntentId || null },
     };
+  }
+  if (owned.data.stripePaymentIntentId && owned.data.paymentStatus !== "succeeded") {
+    const existing = await stripe.paymentIntents.retrieve(owned.data.stripePaymentIntentId);
+    if (existing.metadata?.paymentType !== "ride_authorization") {
+      if (existing.status === "succeeded") {
+        await outcomeRef.set({ status: "paid", paymentIntentId: existing.id, paidAt: FieldValue.serverTimestamp() }, { merge: true });
+        await recordPaymentStatus(rideRef, "succeeded", { stripePaymentIntentId: existing.id });
+        return { httpStatus: 200, body: { status: "succeeded", paymentIntentId: existing.id } };
+      }
+      if (["processing", "requires_action"].includes(existing.status)) {
+        return { httpStatus: existing.status === "requires_action" ? 402 : 200, body: { status: existing.status,
+          ...(existing.status === "requires_action" ? { error: "authentication_required", clientSecret: existing.client_secret } : {}), paymentIntentId: existing.id } };
+      }
+    }
   }
   const mappedOutcome = rideWithFinancialOutcome(owned.data, outcome);
   if (!mappedOutcome.ok) {
@@ -1230,11 +1279,20 @@ async function chargeRideAttempt({
     return { httpStatus: 409, body: { error: "fare_not_authoritative", message } };
   }
   const baseAuthoritativeAmount = resolvedCharge.amount;
-  const riderPromotion = paymentType === "ride_fare"
+  let riderPromotion = paymentType === "ride_fare"
     ? await bestRiderFarePromotion({ ride, rideId, outcome, riderId: uid, chargeCents: baseAuthoritativeAmount })
     : null;
-  const backendPromotionDiscountCents = riderPromotion?.discountCents || 0;
-  const authoritativeAmount = Math.max(0, baseAuthoritativeAmount - backendPromotionDiscountCents);
+  let backendPromotionDiscountCents = riderPromotion?.discountCents || 0;
+  let authoritativeAmount = Math.max(0, baseAuthoritativeAmount - backendPromotionDiscountCents);
+  const settlementRef = rideRef.collection("financial").doc("settlement");
+  const plan = await claimRideSettlement({ db: admin.firestore(), rideRef, settlementRef, fieldValue: FieldValue,
+    plan: { amountCents: authoritativeAmount, discountCents: backendPromotionDiscountCents,
+      promotion: riderPromotion ? JSON.parse(JSON.stringify(riderPromotion)) : null, createdAt: FieldValue.serverTimestamp() } });
+  if (plan.resolution) return { httpStatus: 200, body: plan.resolution };
+  if (plan.completed) return { httpStatus: 200, body: { status: "succeeded", paymentIntentId: plan.paymentIntentId } };
+  authoritativeAmount = plan.amountCents;
+  backendPromotionDiscountCents = plan.discountCents;
+  riderPromotion = plan.promotion;
   const existingPromoDiscountCents = nonNegativeIntegerField(ride, "promoDiscountCents") || 0;
   const effectivePromoDiscountCents = existingPromoDiscountCents + backendPromotionDiscountCents;
   const effectiveRide = backendPromotionDiscountCents > 0
@@ -1247,6 +1305,7 @@ async function chargeRideAttempt({
     : ride;
   const targetDriverPayout = driverPayoutCents(effectiveRide, resolvedCharge);
   if (authoritativeAmount <= 0) {
+    await rideAuthorization.release(rideId);
     const driverAccountId = await driverAccountForRide(ride);
     const cashHubReservation = driverAccountId && ride.driverId
       ? await reserveCashHubFee({ admin, driverId: ride.driverId, rideId, driverPayoutCents: targetDriverPayout })
@@ -1371,6 +1430,9 @@ async function chargeRideAttempt({
 
   // Resolve which saved card to charge, and confirm it actually belongs to
   // this rider's customer — a paymentMethodId is never trusted at face value.
+  const authorizationRecord = (await admin.firestore().collection("rideRequests").doc(rideId).get()).data();
+  const authorizedIntent = authorizationRecord?.authorizationPaymentIntentId
+    ? await stripe.paymentIntents.retrieve(authorizationRecord.authorizationPaymentIntentId) : null;
   let resolvedPaymentMethodId = paymentMethodId || null;
   if (resolvedPaymentMethodId) {
     const pm = await stripe.paymentMethods.retrieve(resolvedPaymentMethodId);
@@ -1379,7 +1441,7 @@ async function chargeRideAttempt({
     }
   } else {
     const customer = await stripe.customers.retrieve(customerId);
-    resolvedPaymentMethodId = customer?.invoice_settings?.default_payment_method || null;
+    resolvedPaymentMethodId = authorizedIntent?.payment_method || customer?.invoice_settings?.default_payment_method || null;
   }
   if (!resolvedPaymentMethodId) {
     const message = "No default payment method is on file.";
@@ -1458,7 +1520,11 @@ async function chargeRideAttempt({
   }
 
   try {
-    const pi = await stripe.paymentIntents.create(params, { idempotencyKey });
+    const hasAuthorization = Boolean(authorizationRecord?.authorizationPaymentIntentId);
+    const pi = hasAuthorization
+      ? await rideAuthorization.settle({ rideId, amount: authoritativeAmount, customerId, paymentMethodId: resolvedPaymentMethodId })
+      : await stripe.paymentIntents.create(params, { idempotencyKey });
+    if (hasAuthorization) amountTransferredFromChargeCents = 0;
     let subsidyResult = { subsidyCents: 0, transferId: null, transferStatus: "not_needed" };
     if (pi.status === "succeeded") {
       try {
@@ -1521,16 +1587,18 @@ async function chargeRideAttempt({
     }
     const code = e?.raw?.code || e?.code;
     const message = e?.raw?.message || e.message || "payment_intent_failed";
-    await recordPaymentStatus(rideRef, "failed", {
+    const transient = e?.statusCode >= 500 || ["StripeConnectionError", "StripeAPIError"].includes(e?.type);
+    await recordPaymentStatus(rideRef, transient ? "processing" : "failed", {
       retryCount: attempt,
       failureReason: message,
       failureCode: code || null,
-      stripePaymentIntentId: e?.raw?.payment_intent?.id || null,
+      stripePaymentIntentId: e.paymentIntentId || e?.raw?.payment_intent?.id || e?.payment_intent?.id || ride.stripePaymentIntentId || null,
     });
+    if (transient) return { httpStatus: 503, body: { error: "payment_temporarily_unavailable" } };
     if (code === "authentication_required") {
       return {
         httpStatus: 402,
-        body: { error: "authentication_required", paymentIntentId: e?.raw?.payment_intent?.id || null },
+        body: { error: "authentication_required", clientSecret: e.clientSecret || e?.raw?.payment_intent?.client_secret || e?.payment_intent?.client_secret || null, paymentIntentId: e.paymentIntentId || e?.raw?.payment_intent?.id || e?.payment_intent?.id || null },
       };
     }
     return { httpStatus: 402, body: { error: message } };
@@ -1603,6 +1671,31 @@ app.post("/internal/payout-jobs/:jobId/reconcile", async (req, res) => {
   }
 });
 
+app.post("/internal/rides/:rideId/authorize", async (req, res) => {
+  if (!validInternalServiceToken(req)) return res.status(401).json({ error: "invalid_internal_service_token" });
+  try {
+    await stripeModeState.ensure();
+    res.json(await rideAuthorization.authorize(String(req.params.rideId)));
+  } catch (err) {
+    const pi = err.payment_intent || err.raw?.payment_intent;
+    if ((err.status || err.statusCode) >= 400 && (err.status || err.statusCode) < 500) {
+      const ref = admin.firestore().collection("rideRequests").doc(String(req.params.rideId));
+      await admin.firestore().runTransaction(async tx => {
+        const snap = await tx.get(ref);
+        if (snap.exists && ["authorizing", "authorizationFailed"].includes(snap.data().status)) tx.set(ref, {
+          status: "authorizationFailed", authorizationErrorCode: err.code || "card_authorization_failed"
+        }, { merge: true });
+      });
+    }
+    res.status(err.status || err.statusCode || 503).json({ error: err.code || "card_authorization_failed", clientSecret: err.clientSecret || pi?.client_secret || null, paymentIntentId: err.paymentIntentId || pi?.id || null });
+  }
+});
+app.post("/internal/rides/:rideId/release-authorization", async (req, res) => {
+  if (!validInternalServiceToken(req)) return res.status(401).json({ error: "invalid_internal_service_token" });
+  try { res.json(await rideAuthorization.release(String(req.params.rideId))); }
+  catch { res.status(503).json({ error: "authorization_release_failed" }); }
+});
+
 // Called only by the payment-job Cloud Function. The rider identity and all
 // charge inputs are derived from Firestore; no client credentials are used.
 app.post("/internal/rides/:rideId/charge", async (req, res) => {
@@ -1655,8 +1748,8 @@ app.post("/create-payment-intent", async (req, res) => {
 // Body: { rideId, amount?: <int cents>, currency?, paymentMethodId? } (paymentMethodId
 // lets the rider pick a different saved card after updating their payment method).
 // `amount` is optional and only checked against the authoritative Firestore fare.
-// Auth required. Only allowed when the ride's current paymentStatus is "failed",
-// so this can never be used to double-charge a ride that already succeeded.
+// Auth required. Pending attempts are reconciled before any new charge.
+// A previously successful payment returns success without charging again.
 app.post("/payments/retry", async (req, res) => {
   try {
     const uid = await requireFirebaseUid(req, res);
@@ -1668,7 +1761,8 @@ app.post("/payments/retry", async (req, res) => {
 
     const owned = await ownedRide(uid, rideId);
     if (!owned) return res.status(404).json({ error: "ride_not_found_or_not_owned" });
-    if (owned.data.paymentStatus !== "failed") {
+    if (owned.data.paymentStatus === "succeeded") return res.json({ status: "succeeded", alreadyPaid: true, paymentIntentId: owned.data.stripePaymentIntentId || null });
+    if (!["failed", "processing", "pending"].includes(owned.data.paymentStatus || "pending")) {
       return res.status(409).json({ error: "ride_not_in_failed_state", paymentStatus: owned.data.paymentStatus || "pending" });
     }
 

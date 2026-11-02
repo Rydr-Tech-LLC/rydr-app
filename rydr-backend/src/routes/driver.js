@@ -2,7 +2,7 @@ const { requireLiveBetaAccess } = require("../middleware/liveBetaAccess");
 const express = require("express");
 const driverService = require("../services/driverService");
 const { createAccountDeletionRequest } = require("../services/accountDeletionService");
-const { updateDriverPresence, getDriverAccess } = require("../services/driverPresenceService");
+const { updateDriverPresence, getDriverAccess, setDriverRequestPreference } = require("../services/driverPresenceService");
 const { getDriverDemandSnapshot } = require("../services/driverDemandService");
 const { promoteNextQueuedRide } = require("../services/driverQueueService");
 const { recordBackgroundCheckIntent } = require("../services/driverScreeningService");
@@ -18,6 +18,12 @@ const router = express.Router();
 // security audit). Ownership of the specific uid/driverId in the body is
 // then checked per-route below — the body is never trusted on its own.
 router.use(requireFirebaseAuth);
+
+router.post("/request-preference", async (req, res, next) => {
+  try {
+    res.json({ ok: true, ...(await setDriverRequestPreference({ uid: req.firebaseUid, stopRequestsAfterRide: req.body?.stopRequestsAfterRide })) });
+  } catch (err) { next(err); }
+});
 
 router.post("/driving-access", async (req, res, next) => {
   try { return res.json(await getDriverAccess({ uid: req.firebaseUid })); }

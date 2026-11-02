@@ -140,6 +140,10 @@ enum RydrBackendService {
         return try JSONDecoder().decode(DriverDrivingAccess.self, from: data)
     }
 
+    static func setStopRequestsAfterRide(_ stop: Bool) async throws {
+        try await sendAuthenticatedJSON(path: "/driver/request-preference", body: ["stopRequestsAfterRide": stop])
+    }
+
     static func updateDriverPresence(_ body: DriverPresenceRequest) async throws -> DriverPresenceResponse {
         guard let request = try await makeAuthenticatedRequest(path: "/driver/presence", method: "POST", body: body) else {
             throw URLError(.badURL)

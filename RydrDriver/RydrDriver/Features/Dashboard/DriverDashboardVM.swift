@@ -21,6 +21,8 @@ import FirebaseStorage
 // MARK: - ViewModel
 
 final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDelegate {
+    @Published var stopRequestsAfterRide = false
+    @Published var isUpdatingRequestPreference = false
     @Published var isOnline: Bool = false
     @Published var showMenu: Bool = false
     @Published var earningsToday: Decimal = 0
@@ -66,7 +68,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     @Published var driverDisplayName: String = "Rydr Driver"
     @Published var driverRating: Double = 5.0
     @Published var driverRatingCount: Int = 0
+    @Published var queuedRideIds: [String] = []
     @Published var activeRide: DriverActiveRide?
+    @Published var activeRideActionError: String?
     @Published var isUpdatingActiveRide: Bool = false
     @Published var completedRideForRating: DriverActiveRide?
     @Published var statusMessage: String = "Ready to receive standard Rydr requests."
@@ -561,6 +565,51 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         }
     }
 
+    func toggleRequestsAfterRide() {
+        guard !isUpdatingRequestPreference else { return }
+        activeRideActionError = nil
+        isUpdatingRequestPreference = true
+        let stop = !stopRequestsAfterRide
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { isUpdatingRequestPreference = false }
+            do {
+                try await RydrBackendService.setStopRequestsAfterRide(stop)
+                stopRequestsAfterRide = stop
+                if stop {
+                    pendingRequests = []
+                    statusMessage = "New requests stopped. Accepted rides remain in your queue."
+                } else {
+                    statusMessage = "New ride requests resumed."
+                }
+            } catch { activeRideActionError = error.localizedDescription; statusMessage = "Could not update requests: \(error.localizedDescription)" }
+        }
+    }
+
+    func releaseQueuedRidesForShift() {
+        let rideIds = queuedRideIds
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                for rideId in rideIds {
+                    _ = try await RydrBackendService.transitionRide(rideId: rideId, action: "driver_cancel", reason: "Ending shift before queued pickup")
+                }
+                statusMessage = "Queued rides released. Finish your current ride to go offline."
+            } catch { activeRideActionError = error.localizedDescription; statusMessage = "Could not release queued ride: \(error.localizedDescription)" }
+        }
+    }
+
+    private func finishShiftIfRequested() {
+        guard stopRequestsAfterRide else { return }
+        isOnline = false
+        isSearchingForRides = false
+        stopPushingDriverPresence()
+        stopRequestListener()
+        pendingRequests = []
+        updateDriverPresence(online: false)
+        statusMessage = "Offline. New requests are stopped."
+    }
+
     func toggleOnline() {
         guard canGoOnline else {
             statusMessage = complianceHoldReason ?? "Go Online unlocks after your driver approval is complete."
@@ -582,6 +631,23 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             return
         }
 
+        if !isOnline && stopRequestsAfterRide {
+            guard !isUpdatingRequestPreference else { return }
+            isUpdatingRequestPreference = true
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    try await RydrBackendService.setStopRequestsAfterRide(false)
+                    stopRequestsAfterRide = false
+                    isUpdatingRequestPreference = false
+                    toggleOnline()
+                } catch {
+                    isUpdatingRequestPreference = false
+                    statusMessage = "Could not resume requests: \(error.localizedDescription)"
+                }
+            }
+            return
+        }
         isOnline.toggle()
         if isOnline {
             resumeStandbyIfWaiting(statusMessage: "Standby. Searching for rides.")
@@ -726,9 +792,9 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     func accept(_ request: DriverRideRequest) {
-        guard isOnline else {
-            requestErrors[request.id] = "Go online to accept this ride request."
-            statusMessage = "Go online to accept this ride request."
+        guard isOnline, !stopRequestsAfterRide else {
+            requestErrors[request.id] = "Resume requests and go online to accept this ride request."
+            statusMessage = "Resume requests and go online to accept this ride request."
             return
         }
         accept(request, queued: activeRide != nil)
@@ -850,18 +916,32 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         recordWaitTimeEvent(ride: ride, waitStage: "wait_ended")
     }
 
+    @MainActor
+    private func publishActionLocation(rideId: String) async throws {
+        guard let location = lastLocation, abs(location.timestamp.timeIntervalSinceNow) < 90 else {
+            throw NSError(domain: "DriverRide", code: 409, userInfo: [NSLocalizedDescriptionKey: "Waiting for a fresh GPS location. Try again in a moment."])
+        }
+        try await RydrBackendService.recordRideTelemetry(rideId: rideId, body: .init(
+            eventId: UUID().uuidString, lat: location.coordinate.latitude, lng: location.coordinate.longitude,
+            speed: location.speed, course: location.course, horizontalAccuracy: location.horizontalAccuracy))
+    }
+
     /// Sends a transition intent. The backend validates it and the ride
     /// listener supplies the resulting official status.
     private func performRideAction(_ action: String, successMessage: String) {
         guard let ride = activeRide else { return }
         guard !isUpdatingActiveRide else { return }
+        activeRideActionError = nil
         isUpdatingActiveRide = true
         Task { [weak self] in
             do {
+                if ["arrive_pickup", "arrive_stop", "start_ride"].contains(action) {
+                    try await self?.publishActionLocation(rideId: ride.id)
+                }
                 _ = try await RydrBackendService.transitionRide(rideId: ride.id, action: action)
                 await MainActor.run { self?.isUpdatingActiveRide = false; self?.statusMessage = successMessage }
             } catch {
-                await MainActor.run { self?.isUpdatingActiveRide = false; self?.statusMessage = "Could not update ride: \(error.localizedDescription)" }
+                await MainActor.run { self?.isUpdatingActiveRide = false; self?.activeRideActionError = error.localizedDescription; self?.statusMessage = "Could not update ride: \(error.localizedDescription)" }
             }
         }
     }
@@ -869,10 +949,12 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     func completeActiveRide() {
         guard let ride = activeRide else { return }
         guard !isUpdatingActiveRide else { return }
+        activeRideActionError = nil
         isUpdatingActiveRide = true
 
         Task { [weak self] in
             do {
+                try await self?.publishActionLocation(rideId: ride.id)
                 let response = try await RydrBackendService.transitionRide(rideId: ride.id, action: "complete")
                 var completedRide = ride
                 completedRide.finalDriverPayout = response.outcome.map { Double($0.driverPayoutCents) / 100.0 }
@@ -880,7 +962,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                     self?.isUpdatingActiveRide = false; self?.completedRideForRating = completedRide; self?.setActiveRide(nil)
                     self?.statusMessage = "Ride completed. You are ready for the next request."; self?.promoteNextQueuedRideIfAvailable(); self?.resumeStandbyIfWaiting(); self?.updateDriverPresence(online: self?.isOnline ?? false)
                 }
-            } catch { await MainActor.run { self?.isUpdatingActiveRide = false; self?.statusMessage = "Could not complete ride: \(error.localizedDescription)" } }
+            } catch { await MainActor.run { self?.isUpdatingActiveRide = false; self?.activeRideActionError = error.localizedDescription; self?.statusMessage = "Could not complete ride: \(error.localizedDescription)" } }
         }
     }
 
@@ -1058,9 +1140,10 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
         let cancellationReason = trimmedReason.isEmpty ? "Other" : trimmedReason
         Task { [weak self] in
             do {
+                if cancellationReason == "Rider no-show" { try await self?.publishActionLocation(rideId: ride.id) }
                 _ = try await RydrBackendService.transitionRide(rideId: ride.id, action: "driver_cancel", reason: cancellationReason)
                 await MainActor.run { self?.setActiveRide(nil); self?.statusMessage = "Ride cancelled: \(cancellationReason)."; self?.promoteNextQueuedRideIfAvailable(); self?.resumeStandbyIfWaiting(); self?.updateDriverPresence(online: self?.isOnline ?? false) }
-            } catch { await MainActor.run { self?.statusMessage = "Could not cancel ride: \(error.localizedDescription)" } }
+            } catch { await MainActor.run { self?.activeRideActionError = error.localizedDescription; self?.statusMessage = "Could not cancel ride: \(error.localizedDescription)" } }
         }
     }
 
@@ -1070,7 +1153,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             do {
                 let promotion = try await RydrBackendService.promoteNextQueuedRide()
                 guard promotion.promoted, let rideId = promotion.rideId else {
-                    await MainActor.run { self?.resumeStandbyIfWaiting() }
+                    await MainActor.run { self?.finishShiftIfRequested(); self?.resumeStandbyIfWaiting() }
                     return
                 }
                 let doc = try await self?.db.collection("rides").document(rideId).getDocument()
@@ -1116,6 +1199,8 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
             }
 
             DispatchQueue.main.async {
+                self.stopRequestsAfterRide = data["stopRequestsAfterRide"] as? Bool ?? false
+                if self.stopRequestsAfterRide { self.pendingRequests = [] }
                 self.canGoOnline = DriverApprovalPolicy.isApproved(data: data)
                 Task { @MainActor in
                     if let access = try? await RydrBackendService.drivingAccess(), RydrWorkspace.auth.currentUser?.uid == uid {
@@ -1157,7 +1242,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                         .filter { self?.canPresentAssignedRequest($0) == true }
                         .sorted(by: { lhs, rhs in self?.sortAssignedRequests(lhs, rhs) ?? false }) ?? []
                     self?.applyPendingRideNotifications(requests)
-                    self?.pendingRequests = (self?.isOnline == true) ? requests : []
+                    self?.pendingRequests = (self?.isOnline == true && self?.stopRequestsAfterRide == false) ? requests : []
                     self?.autoAcceptPendingQueuedRequestsIfNeeded()
                     if self?.pendingRequests.isEmpty == false {
                         self?.isSearchingForRides = false
@@ -1169,7 +1254,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
     }
 
     private func autoAcceptPendingQueuedRequestsIfNeeded() {
-        guard isOnline, autoAcceptQueuedRides, activeRide != nil else { return }
+        guard isOnline, !stopRequestsAfterRide, autoAcceptQueuedRides, activeRide != nil else { return }
         guard let request = pendingRequests.first(where: { !respondingRequestIDs.contains($0.id) }) else { return }
         accept(request, queued: true)
     }
@@ -1731,6 +1816,7 @@ final class DriverDashboardVM: NSObject, ObservableObject, CLLocationManagerDele
                         self?.statusMessage = "Active ride listener error: \(error?.localizedDescription ?? "Unknown error")"
                         return
                     }
+                    self?.queuedRideIds = snapshot?.documents.filter { ($0.data()["driverQueueStatus"] as? String) == "queued" }.map(\.documentID) ?? []
                     let activeDocuments = snapshot?.documents.filter {
                         ($0.data()["driverQueueStatus"] as? String) != "queued" && (self?.rideObservation.allows($0.documentID) ?? true)
                     } ?? []
@@ -2311,6 +2397,12 @@ struct DriverDashboardView: View {
                         driverSpeedMetersPerSecond: vm.lastLocation?.speed,
                         driverCourseDegrees: vm.lastLocation.flatMap { $0.course >= 0 && $0.courseAccuracy >= 0 && $0.courseAccuracy <= 35 ? $0.course : nil },
                         isUpdatingRide: vm.isUpdatingActiveRide,
+                        rideActionError: vm.activeRideActionError,
+                        stopRequestsAfterRide: vm.stopRequestsAfterRide,
+                        acceptedQueueCount: vm.queuedRideIds.count,
+                        onReleaseQueuedRides: vm.releaseQueuedRidesForShift,
+                        isUpdatingRequestPreference: vm.isUpdatingRequestPreference,
+                        onToggleRequests: vm.toggleRequestsAfterRide,
                         onStartNavigation: vm.startActiveRideNavigation,
                         onArrivedAtPickup: vm.markArrivedAtPickup,
                         onStartRide: vm.startPassengerRide,
@@ -2328,7 +2420,7 @@ struct DriverDashboardView: View {
                         }
                     )
 
-                    if let request = vm.pendingRequests.first {
+                    if !vm.stopRequestsAfterRide, let request = vm.pendingRequests.first {
                         IncomingRideRequestCard(
                             request: request,
                             driverCoordinate: vm.pickupEstimateOriginCoordinate,

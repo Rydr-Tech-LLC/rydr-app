@@ -137,8 +137,15 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
   const rideType = typeof payload?.rideType === "string" ? payload.rideType.trim() : "";
   if (!rideType) throw error("rideType is required", 422);
   await requireExecutiveEnabled(db, rideType);
-  const routeResult = await routeProvider({ origin: pickup, destination: dropoff, departureDate: new Date().toISOString() });
-  const route = routeResult.route;
+  const stop = payload?.stopCoordinate ? coordinate(payload.stopCoordinate, "stopCoordinate") : null;
+  const stopName = stop ? String(payload.stop || "Added stop").trim().slice(0, 240) : null;
+  const points = [pickup, stop, dropoff].filter(Boolean);
+  const routeLegs = [];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    routeLegs.push((await routeProvider({ origin: points[index], destination: points[index + 1], departureDate: new Date().toISOString() })).route);
+  }
+  const route = { ...routeLegs[0], distanceMeters: routeLegs.reduce((sum, leg) => sum + Number(leg.distanceMeters), 0),
+    durationSeconds: routeLegs.reduce((sum, leg) => sum + Number(leg.durationSeconds), 0) };
   if (!route || route.distanceMeters <= 0 || route.durationSeconds <= 0) throw error("A route could not be calculated", 422);
 
   const snapshot = await db.collection("publicDriverProfiles").where("isOnline", "==", true).limit(200).get();
@@ -214,7 +221,7 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
       preferenceMatch: candidate.preferenceMatch,
       pickupEstimate: index < 3 ? await pickupEstimate({ candidate, pickup, routeProvider, nowMillis: now.toMillis() }) : null,
       driver: publicDriverProjection(candidate.profile, candidate.location),
-      quoteFingerprint: quoteFingerprint({ riderId, driverId: candidate.id, rideType, pickup, dropoff, route, rates }),
+      quoteFingerprint: quoteFingerprint({ riderId, driverId: candidate.id, rideType, pickup, dropoff, stop, route, rates }),
       rates,
       estimatedRiderTotalCents: outcome.finalRiderChargeCents,
       estimatedDriverPayoutCents: outcome.driverPayoutCents
@@ -226,6 +233,8 @@ async function createRideMatchSession({ riderId, payload, db = getFirestore(), r
   await sessionRef.create({
     riderId,
     rideType,
+    stop: stopName,
+    stopCoordinate: stop ? { lat: stop.latitude, lng: stop.longitude } : null,
     pickupCoordinate: { lat: pickup.latitude, lng: pickup.longitude },
     dropoffCoordinate: { lat: dropoff.latitude, lng: dropoff.longitude },
     backendRoute: {

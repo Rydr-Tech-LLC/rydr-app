@@ -20,7 +20,7 @@ export { maintainPremiumVehicleEligibility, onExecutiveAvailabilityChanged, onVe
 export { queueMondayDriverPayouts, dispatchWeeklyDriverPayout, reconcileDriverPayouts } from "./triggers/weeklyDriverPayouts";
 export { onVehicleImageJobWritten, onDriverVehicleImageNeeded, maintainVehicleImageJobs } from "./triggers/vehicleImageJobs";
 export { onRideUpdated } from "./triggers/rideNotifications";
-export { onRideRequestCreated, onRideRequestRematched, onRideChatMessageCreated } from "./triggers/rideRequestNotifications";
+export { onRideRequestCreated, onRideRequestRematched, onRideAuthorizationRequired, onRideChatMessageCreated } from "./triggers/rideRequestNotifications";
 export { onCashHubRequestCreated, onCashHubConversationCreated, onCashHubMessageCreated, onCashHubRequestUpdated } from "./triggers/cashHubNotifications";
 export { maintainCashHubBilling } from "./triggers/cashHubBillingLifecycle";
 export { expireCashHubRequests, onCashHubLateReleaseCreated } from "./triggers/cashHubLifecycle";
@@ -30,7 +30,7 @@ export { onDriverApprovalDecision } from "./triggers/driverApprovalNotifications
 export { onDriverAutoApprovalEligibility } from "./triggers/driverAutoApproval";
 export { onRydrBankCodeCreated, onRydrBankSummaryUpdated } from "./triggers/rydrBankNotifications";
 export { onDocumentUploadedForReview } from "./triggers/documentReview";
-export { onPaymentJobCreated, onPaidRidePromotionSettlement } from "./triggers/paymentJobs";
+export { onPaymentJobCreated, onPaidRidePromotionSettlement, onAuthorizationReleaseJobCreated, maintainRidePayments, maintainStandardRides } from "./triggers/paymentJobs";
 export { onDriverPublicProfileProjection } from "./triggers/driverPublicProfileProjection";
 export { maintainScheduledRides } from "./triggers/scheduledRideJobs";
 export { onScheduledRideOpportunityCreated, onScheduledRideUpdated } from "./triggers/scheduledRideNotifications";

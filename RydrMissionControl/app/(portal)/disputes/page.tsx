@@ -5,7 +5,9 @@ import StatusPill from "@/components/StatusPill";
 import { toDateSafe } from "@/lib/format";
 export const dynamic = "force-dynamic";
 export default async function DisputesPage() {
-  const snap = await (await getWorkspaceDb())
+  const db = await getWorkspaceDb();
+  const financial = await db.collection("financialReviewCases").orderBy("updatedAt", "desc").limit(200).get();
+  const snap = await db
     .collection("supportTickets")
     .orderBy("updatedAt", "desc")
     .limit(500)
@@ -74,6 +76,21 @@ export default async function DisputesPage() {
           };
         })}
       />
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Stripe refunds and disputes</h2>
+        <p className="text-sm text-muted">Review driver transfers and promotion accounting after a refund or bank dispute. Reviewing a case does not move money.</p>
+        <DataTable label="Stripe financial reviews" columns={["Kind", "Status", "Amount", "Ride", "Follow-up"]}
+          rows={financial.docs.map(doc => {
+            const review = doc.data();
+            const amount = Number(review.amountCents || 0);
+            return { id: doc.id, search: [review.kind, review.status, review.rideId, review.stripeObjectId].join(" "),
+              values: [review.kind, review.status, amount, review.rideId, review.driverTransferReviewRequired ? "Driver transfer review" : ""],
+              cells: [review.kind === "refund" ? "Refund" : "Bank dispute", <StatusPill key="status" status={review.status || "open"} />,
+                new Intl.NumberFormat("en-US", {style: "currency", currency: "USD"}).format(amount / 100),
+                <Link key="ride" href={`/rides/${review.rideId}`}>Ride details ↗</Link>,
+                review.driverTransferReviewRequired ? "Review driver transfer and rewards" : "No driver transfer review required"] };
+          })} />
+      </section>
       <p className="text-xs text-muted">
         Search covers dispute cases within the 500 most recently updated support
         tickets.

@@ -1,4 +1,6 @@
 const { requireLiveBetaAccess } = require("../middleware/liveBetaAccess");
+const { admin, getFirestore } = require("../config/firebase");
+const { authorizeRideEstimate } = require("../services/rideAuthorizationClient");
 const express = require("express");
 const { timingSafeEqual } = require("node:crypto");
 const { requireFirebaseAuth } = require("../middleware/firebaseAuth");
@@ -8,7 +10,7 @@ const { calculateAndStoreRideRouteEstimate } = require("../services/rideRouteSer
 const { initializeRideDispatch, refreshRideDispatch } = require("../services/rideDispatchService");
 const { recordRideTelemetry } = require("../services/rideTelemetryService");
 const { submitRideRating } = require("../services/rideRatingService");
-const { createRideRequest } = require("../services/rideRequestService");
+const { createRideRequest, dispatchAuthorizedRequest } = require("../services/rideRequestService");
 const { createRideMatchSession } = require("../services/rideMatchService");
 const { resolvePaymentFailure } = require("../services/adminFinancialService");
 
@@ -27,6 +29,12 @@ function requireInternalService(req, res) {
   }
   return true;
 }
+
+router.post("/internal/maintenance", async (req, res, next) => {
+  if (!requireInternalService(req, res)) return;
+  try { res.json({ ok: true, ...(await require("../services/rideMaintenanceService").maintainRideRequests()) }); }
+  catch (err) { next(err); }
+});
 
 router.post("/internal/:rideId/admin-cancel", async (req, res, next) => {
   if (!requireInternalService(req, res)) return;
@@ -76,6 +84,17 @@ router.post("/request", async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+router.post("/:rideId/authorization/resume", async (req, res, next) => {
+  try {
+    const db = getFirestore();
+    const ref = db.collection("rideRequests").doc(req.params.rideId);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().riderId !== req.firebaseUid) return res.status(404).json({ error: "Ride request not found" });
+    if (!["authorizing", "authorizationFailed", "pending", "accepted"].includes(snap.data().status)) return res.status(409).json({ error: "This ride request is no longer active" });
+    await dispatchAuthorizedRequest({ db, rideId: req.params.rideId, authorizationProvider: authorizeRideEstimate, now: admin.firestore.Timestamp.now() });
+    res.json({ ok: true, status: (await ref.get()).data().status });
+  } catch (err) { next(err); }
 });
 router.post("/:rideId/telemetry", async (req, res, next) => {
   try {

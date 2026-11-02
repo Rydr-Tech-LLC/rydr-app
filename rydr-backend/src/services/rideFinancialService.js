@@ -77,22 +77,28 @@ function calculateOutcome(ride, options = {}) {
   const overtimeMinutes = !midRide && actualMinutes > estimatedMinutes + ETA_GRACE_MINUTES
     ? actualMinutes - estimatedMinutes - ETA_GRACE_MINUTES
     : 0;
-  const billableMinutes = midRide ? Math.max(1, actualMinutes) : estimatedMinutes + overtimeMinutes;
-  const timeAdjustmentMinutes = midRide ? 0 : overtimeMinutes;
+  const stopStart = timestampMillis(ride.stopWaitStartedAt);
+  const stopEnd = timestampMillis(ride.stopWaitEndedAt ?? ride.headedToDropoffAt) || endedAt;
+  const stopWaitMinutes = stopStart && stopEnd > stopStart ? (stopEnd - stopStart) / 60000 : 0;
+  const billableMinutes = midRide ? Math.max(0, actualMinutes - stopWaitMinutes) : estimatedMinutes + Math.max(0, overtimeMinutes - stopWaitMinutes);
+  const timeAdjustmentMinutes = midRide ? 0 : Math.max(0, overtimeMinutes - stopWaitMinutes);
 
   const distanceChargeCents = Math.round(billableDistance * perMileCents);
   const baseTimeChargeCents = Math.round((midRide ? billableMinutes : estimatedMinutes) * perMinuteCents);
   const timeAdjustmentCents = Math.round(timeAdjustmentMinutes * perMinuteCents);
   const timeChargeCents = baseTimeChargeCents + timeAdjustmentCents;
   const calculatedSubtotalCents = distanceChargeCents + timeChargeCents;
-  const rideSubtotalCents = Math.max(minimumFareCents, calculatedSubtotalCents);
+  const driverEndedTrip = midRide && ["driver", "admin"].includes(ride.cancelledByRole);
+  const rideSubtotalCents = driverEndedTrip ? calculatedSubtotalCents : Math.max(minimumFareCents, calculatedSubtotalCents);
   const minimumFareAdjustmentCents = rideSubtotalCents - calculatedSubtotalCents;
-  const waitStart = timestampMillis(ride.pickupPaidWaitStartedAt);
+  const arrival = timestampMillis(ride.pickupWaitStartedAt ?? ride.arrivedAtPickupAt);
+  const waitStart = arrival != null ? arrival + 180000 : timestampMillis(ride.pickupPaidWaitStartedAt);
   const waitEnd = startedAt || endedAt;
   const paidWaitSeconds = waitStart && waitEnd > waitStart ? Math.floor((waitEnd - waitStart) / 1000) : 0;
-  const rawWaitChargeCents = Math.round((paidWaitSeconds / 60) * perMinuteCents);
+  const stopWaitChargeCents = Math.round(stopWaitMinutes * perMinuteCents);
+  const rawWaitChargeCents = Math.round((paidWaitSeconds / 60) * perMinuteCents) + (startedAt ? stopWaitChargeCents : 0);
   const cancelledBeforeStart = cancelled && !midRide;
-  const riderCancelled = ride.cancelledByRole === "rider" || ride.status === "riderCancelled";
+  const riderCancelled = ride.cancelledByRole === "rider" || ride.status === "riderCancelled" || ride.cancellationPolicy === "rider_no_show";
   const waitChargeCents = cancelledBeforeStart && !riderCancelled ? 0 : rawWaitChargeCents;
   const arrived = Boolean(timestampMillis(ride.arrivedAtPickupAt));
   const cancellationFeeCents = cancelledBeforeStart && riderCancelled && arrived
@@ -154,6 +160,8 @@ function calculateOutcome(ride, options = {}) {
       perMileCents,
       perMinuteCents,
       paidWaitSeconds,
+      stopWaitMinutes,
+      stopWaitChargeCents,
       evidenceSource: midRide
         ? (actualDistance >= 0 ? "trip_telemetry" : "elapsed_time_proration")
         : (ride.backendDistanceMiles != null && ride.backendDurationMinutes != null ? "backend_route" : "legacy_ride_estimate")

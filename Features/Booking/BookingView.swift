@@ -18,6 +18,7 @@ struct BookingView: View {
     let userName: String
 
     // 🔹 Ride flow
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject var rideManager: RideManager
     @EnvironmentObject private var session: UserSessionManager
     @State private var showDriverSheet = false
@@ -287,7 +288,25 @@ struct BookingView: View {
             guard let rideId else { return }
             Task { await rideManager.recoverActiveRide(rideId: rideId) }
         }
-        .onAppear { scheduledRideManager.startScheduleListener() }
+        .onAppear {
+            scheduledRideManager.startScheduleListener()
+            Task { await rideManager.checkPendingAuthorization() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await rideManager.checkPendingAuthorization() } }
+        }
+        .alert("Authorize your ride", isPresented: Binding(
+            get: { rideManager.pendingAuthorizationRideId != nil },
+            set: { if !$0 { rideManager.pendingAuthorizationRideId = nil } }
+        )) {
+            if let rideId = rideManager.pendingAuthorizationRideId {
+                Button("Authorize card") { Task { await rideManager.resumeAuthorization(rideId: rideId) } }
+                Button("Cancel request", role: .destructive) { Task { await rideManager.cancelPendingAuthorization(rideId: rideId) } }
+                Button("Later", role: .cancel) {}
+            }
+        } message: {
+            Text("We need to reserve the estimated fare on your card before sending this ride to a driver. This is a temporary hold, including for scheduled pickups.")
+        }
         .onReceive(NotificationCenter.default.publisher(for: .riderNotificationRouteRequested)) { notification in
             guard (notification.userInfo?["target"] as? String) == "scheduledRides",
                   let requestId = notification.userInfo?["requestId"] as? String else { return }
@@ -1363,6 +1382,16 @@ struct BookingView: View {
         let resolvedPickup = pickupText.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedDropoff = dropoffText.trimmingCharacters(in: .whitespacesAndNewlines)
         pushRecent(resolvedDropoff)
+        let stopName = stopText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var resolvedStop: CLLocationCoordinate2D?
+        if !stopName.isEmpty {
+            let search = MKLocalSearch.Request()
+            search.naturalLanguageQuery = stopName
+            search.region = region
+            do { resolvedStop = try await MKLocalSearch(request: search).start().mapItems.first?.placemark.coordinate }
+            catch { requestValidationMessage = "Choose a valid added stop before requesting your ride."; return }
+            guard resolvedStop != nil else { requestValidationMessage = "Choose a valid added stop before requesting your ride."; return }
+        }
         rideManager.requestDrivers(
             pickup: resolvedPickup,
             dropoff: resolvedDropoff,
@@ -1371,7 +1400,9 @@ struct BookingView: View {
             pickupCoordinate: pickupCoordinate,
             dropoffCoordinate: dropoffCoordinate,
             estimate: routeEstimate,
-            riderVerified: session.verifiedBadge
+            riderVerified: session.verifiedBadge,
+            stop: stopName.isEmpty ? nil : stopName,
+            stopCoordinate: resolvedStop
         )
         showDriverSheet = true
     }

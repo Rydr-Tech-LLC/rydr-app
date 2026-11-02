@@ -41,7 +41,7 @@ function canonicalRideTypes(profile) {
 }
 
 function isEligibleCandidate(profile, rideType) {
-  if (!profile || !premiumRideAllowed(profile, rideType) || profile.isOnline !== true || profile.standardDispatchEnabled === false) return false;
+  if (!profile || profile.stopRequestsAfterRide === true || !premiumRideAllowed(profile, rideType) || profile.isOnline !== true || profile.standardDispatchEnabled === false) return false;
   const availability = String(profile.availabilityStatus || "available");
   if (!["available", "onCurrentRide"].includes(availability)) return false;
   const types = canonicalRideTypes(profile);
@@ -73,10 +73,17 @@ async function selectNextCandidate({ db, request, attemptedDriverIds }) {
   const onlineIds = new Set(statusSnapshots
     .filter((snapshot) => snapshot.exists && hasCurrentOnlinePresence(snapshot.data(), nowMillis))
     .map((snapshot) => snapshot.id));
+  const profilesById = new Map(canonicalSnapshots.filter(snap => snap.exists).map(snap => [snap.id, snap.data()]));
   const candidates = snapshots
     .filter((snapshot) => approvedIds.has(snapshot.id) && onlineIds.has(snapshot.id)
       && snapshot.exists
       && isEligibleCandidate(snapshot.data(), request.rideType))
+    .filter(snapshot => {
+      if (request.driverRatePerMileCents == null) return true;
+      const rates = require("./rideRequestService").configuredRateObject(profilesById.get(snapshot.id), request.rideType);
+      return rates && rates.perMileCents === request.driverRatePerMileCents && rates.perMinuteCents === request.driverRatePerMinuteCents
+        && rates.minimumFareCents === request.driverMinimumFareCents;
+    })
     .map((snapshot) => ({ id: snapshot.id, profile: snapshot.data() }));
   return (await filterLiveBetaCandidates(db, candidates))[0] || null;
 }
@@ -218,6 +225,10 @@ async function advanceRideDispatch({ rideId, actorUid, actorRole, reason, reques
         dispatchUpdatedAt: now,
         updatedAt: now
       };
+      if (current.scheduledRideId) tx.set(db.collection("scheduledRideRequests").doc(current.scheduledRideId), {
+        status: "expired", terminalReason: "candidate_pool_exhausted", updatedAt: now
+      }, { merge: true });
+      tx.set(db.collection("authorizationReleaseJobs").doc(rideId), { rideId, status: "pending", createdAt: now });
       tx.set(requestRef, terminal, { merge: true });
       tx.set(signalRef, { status: "closed", expiresAt: now, updatedAt: now }, { merge: true });
       return dispatchResult({ ...current, ...terminal }, false);

@@ -6,6 +6,9 @@
 //
 
 import Foundation
+import StripePayments
+import StripePaymentsUI
+import UIKit
 import CoreLocation
 import FirebaseAuth
 import FirebaseAppCheck
@@ -13,6 +16,14 @@ import FirebaseFirestore
 
 final class FirestoreRideService: RideService, @unchecked Sendable {
     private var db: Firestore { RydrWorkspace.firestore }
+    private var requestedStopName: String?
+    private var requestedStopCoordinate: CLLocationCoordinate2D?
+
+    func setRequestedStop(name: String?, coordinate: CLLocationCoordinate2D?) {
+        requestedStopName = name
+        requestedStopCoordinate = coordinate
+    }
+
     private var activeMatchSessionId: String?
     private var activeQuoteFingerprints: [String: String] = [:]
 
@@ -53,6 +64,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
         rydrBankCode: String?,
+        paymentMethodId: String?,
         replacementForRideId: String?,
         riderPreferences: RiderRidePreferences?,
         riderVerified: Bool,
@@ -102,6 +114,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             payload["displayEstimatedDistanceMiles"] = estimate.distanceMiles
             payload["displayEstimatedDurationMinutes"] = estimate.durationMinutes
         }
+        if let paymentMethodId { payload["paymentMethodId"] = paymentMethodId }
         if let rydrBankCode, !rydrBankCode.isEmpty {
             payload["rydrBankCode"] = rydrBankCode
         }
@@ -119,7 +132,13 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(try await appCheckToken(), forHTTPHeaderField: "X-Firebase-AppCheck")
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        var (data, response) = try await URLSession.shared.data(for: request)
+        if let error = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           error["error"] as? String == "authentication_required",
+           let details = error["details"] as? [String: Any], let secret = details["clientSecret"] as? String {
+            try await RidePaymentAuthentication.authenticate(clientSecret: secret)
+            (data, response) = try await URLSession.shared.data(for: request)
+        }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let rideId = result["rideId"] as? String, !rideId.isEmpty else {
@@ -127,7 +146,7 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             throw NSError(
                 domain: "RydrRideBackend",
                 code: (response as? HTTPURLResponse)?.statusCode ?? -1,
-                userInfo: [NSLocalizedDescriptionKey: result?["error"] as? String ?? result?["message"] as? String ?? "Could not create the ride request."]
+                userInfo: [NSLocalizedDescriptionKey: result?["error"] as? String ?? result?["message"] as? String ?? "Could not create the ride request.", "authorizationRideId": ((result?["details"] as? [String: Any])?["rideId"] as? String) ?? ""]
             )
         }
         // The backend consumes a match session after creating the request.
@@ -168,6 +187,10 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             "pickupCoordinate": ["lat": pickupCoordinate.latitude, "lng": pickupCoordinate.longitude],
             "dropoffCoordinate": ["lat": dropoffCoordinate.latitude, "lng": dropoffCoordinate.longitude]
         ]
+        if let stop = requestedStopCoordinate {
+            body["stopCoordinate"] = ["lat": stop.latitude, "lng": stop.longitude]
+            body["stop"] = requestedStopName
+        }
         if let preferences = riderPreferences?.rideRequestPayload { body["riderPreferences"] = preferences }
         var request = RydrWorkspace.urlRequest(url: url)
         request.httpMethod = "POST"
@@ -347,6 +370,27 @@ final class FirestoreRideService: RideService, @unchecked Sendable {
             continuation.onTermination = { _ in
                 listener.remove()
             }
+        }
+    }
+
+    func resumeAuthorization(rideId: String) async throws {
+        guard let user = RydrWorkspace.auth.currentUser,
+              let base = Bundle.main.object(forInfoDictionaryKey: "RYDR_BACKEND_BASE_URL") as? String,
+              let url = URL(string: "\(base)/rides/\(rideId)/authorization/resume") else { throw URLError(.badURL) }
+        var request = RydrWorkspace.urlRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(try await user.getIDToken())", forHTTPHeaderField: "Authorization")
+        request.setValue(try await appCheckToken(), forHTTPHeaderField: "X-Firebase-AppCheck")
+        var (data, response) = try await URLSession.shared.data(for: request)
+        if let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           body["error"] as? String == "authentication_required",
+           let details = body["details"] as? [String: Any], let secret = details["clientSecret"] as? String {
+            try await RidePaymentAuthentication.authenticate(clientSecret: secret)
+            (data, response) = try await URLSession.shared.data(for: request)
+        }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw NSError(domain: "RidePayment", code: 402, userInfo: [NSLocalizedDescriptionKey: body?["error"] as? String ?? "Card authorization failed. Update your card and try again."])
         }
     }
 
@@ -676,6 +720,28 @@ private enum RideDispatchError: LocalizedError {
         switch self {
         case .notSignedIn:
             return "Sign in before requesting a ride."
+        }
+    }
+}
+
+@MainActor
+final class RidePaymentAuthentication: NSObject, @preconcurrency STPAuthenticationContext {
+    func authenticationPresentingViewController() -> UIViewController {
+        var controller = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow }.first?.rootViewController
+        while let presented = controller?.presentedViewController { controller = presented }
+        return controller ?? UIViewController()
+    }
+    static func authenticate(clientSecret: String) async throws {
+        await RydrStripeBackendConfig.configureStripePublishableKeyIfNeeded()
+        guard RydrStripeBackendConfig.hasConfiguredPublishableKey else { throw URLError(.cannotConnectToHost) }
+        let context = RidePaymentAuthentication()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            STPPaymentHandler.shared().handleNextAction(forPayment: clientSecret, with: context, returnURL: nil) { status, _, error in
+                _ = context
+                if status == .succeeded { continuation.resume() }
+                else { continuation.resume(throwing: error ?? NSError(domain: "RidePayment", code: 402, userInfo: [NSLocalizedDescriptionKey: "Card authentication was not completed."])) }
+            }
         }
     }
 }

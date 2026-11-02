@@ -282,7 +282,7 @@ export interface AccountDeletionRequestRecord {
 }
 
 // --- Ride payment status (Part 2/5 — written by stripe-backend) ----------
-export type RidePaymentStatus = "pending" | "processing" | "succeeded" | "failed" | "refunded";
+export type RidePaymentStatus = "pending" | "processing" | "succeeded" | "failed" | "refunded" | "paid_externally" | "written_off";
 
 export interface RideRecord {
   id: string;

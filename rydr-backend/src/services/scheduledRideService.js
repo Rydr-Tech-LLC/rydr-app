@@ -736,7 +736,18 @@ async function cancelScheduledRide({ uid, requestId, reason, db = getFirestore()
       updatedAt: now
     };
     if (pastDueUndispatched) update.riderArchivedAt = now;
-    await requestRef.set(update, { merge: true });
+    await db.runTransaction(async tx => {
+      const current = await tx.get(requestRef);
+      if (["active", "completed", "cancelled"].includes(current.data().status)) throw error("This scheduled ride can no longer be cancelled here", 409);
+      const pendingId = current.data().pendingAuthorizationRideId;
+      const pendingRef = pendingId ? db.collection("rideRequests").doc(pendingId) : null;
+      const pending = pendingRef ? await tx.get(pendingRef) : null;
+      if (pending?.exists && ["authorizing", "authorizationFailed"].includes(pending.data().status)) {
+        tx.set(pendingRef, { status: "cancelled", dispatchStatus: "cancelled", updatedAt: now }, { merge: true });
+        tx.set(db.collection("authorizationReleaseJobs").doc(pendingId), { rideId: pendingId, status: "pending", createdAt: now });
+      }
+      tx.set(requestRef, update, { merge: true });
+    });
     if (request.assignedDriverId) {
       await db.collection("drivers").doc(request.assignedDriverId).collection("scheduledRideLocks").doc(requestId)
         .set({ status: "cancelled", updatedAt: now }, { merge: true });
@@ -795,6 +806,16 @@ async function cancelScheduledRide({ uid, requestId, reason, db = getFirestore()
   return { status: request.mode === "quickSchedule" ? "replacementSearching" : "replacementApprovalRequired" };
 }
 
+async function updateScheduledActivationState(db, ref, update) {
+  return db.runTransaction(async tx => {
+    const snap = await tx.get(ref);
+    if (!snap.exists || ["cancelled", "expired", "completed"].includes(snap.data().status)
+        || (snap.data().status === "active" && update.status !== "active")) return false;
+    tx.set(ref, update, { merge: true });
+    return true;
+  });
+}
+
 async function activateScheduledRide({ requestId, db = getFirestore(), now = admin.firestore.Timestamp.now() }) {
   const requestRef = db.collection("scheduledRideRequests").doc(requestId);
   const snapshot = await requestRef.get();
@@ -802,7 +823,7 @@ async function activateScheduledRide({ requestId, db = getFirestore(), now = adm
   const request = snapshot.data();
   if (request.status === "active" && request.activeRideId) return { status: "active", rideId: request.activeRideId, duplicate: true };
   if (request.status !== "checkedIn" || !request.assignedDriverId) throw error("Scheduled ride is not ready to activate", 409);
-  await requestRef.set({ status: "activating", updatedAt: now }, { merge: true });
+  if (!(await updateScheduledActivationState(db, requestRef, { status: "activating", updatedAt: now }))) throw error("This scheduled ride is no longer available", 409);
   try {
     const result = await createRideRequest({
       riderId: request.riderId,
@@ -833,10 +854,10 @@ async function activateScheduledRide({ requestId, db = getFirestore(), now = adm
       trustedScheduledActivation: true,
       now
     });
-    await requestRef.set({ status: "active", activeRideId: result.rideId, activatedAt: now, updatedAt: now }, { merge: true });
+    if (!(await updateScheduledActivationState(db, requestRef, { status: "active", activeRideId: result.rideId, activatedAt: now, updatedAt: now }))) throw error("This scheduled ride is no longer available", 409);
     return { status: "active", rideId: result.rideId, duplicate: result.duplicate };
   } catch (activationError) {
-    await requestRef.set({ status: "checkedIn", activationError: activationError.message, updatedAt: now }, { merge: true });
+    await updateScheduledActivationState(db, requestRef, { status: "checkedIn", activationError: activationError.message, updatedAt: now });
     throw activationError;
   }
 }
@@ -890,7 +911,7 @@ async function activateScheduledDispatchFallback({ requestId, db = getFirestore(
   }
 
   const firstCandidate = candidates[0];
-  await requestRef.set({ status: "dispatchFallbackActivating", updatedAt: now }, { merge: true });
+  if (!(await updateScheduledActivationState(db, requestRef, { status: "dispatchFallbackActivating", updatedAt: now }))) return { status: "cancelled", rideId: null };
   try {
     const result = await createRideRequest({
       riderId: request.riderId,
@@ -921,23 +942,23 @@ async function activateScheduledDispatchFallback({ requestId, db = getFirestore(
       trustedScheduledActivation: true,
       now
     });
-    await requestRef.set({
+    await updateScheduledActivationState(db, requestRef, {
       status: "active",
       activeRideId: result.rideId,
       assignedDriverId: admin.firestore.FieldValue.delete(),
       fallbackDispatchedAt: now,
       fallbackReason: "scheduled_ride_unassigned_at_pickup",
       updatedAt: now
-    }, { merge: true });
+    });
     await closeRemainingOpportunities(requestRef, firstCandidate.driverId, now);
     await closeRemainingOffers(requestRef, null, now);
     return { status: "active", rideId: result.rideId, duplicate: result.duplicate };
   } catch (fallbackError) {
-    await requestRef.set({
+    await updateScheduledActivationState(db, requestRef, {
       status: "dispatchFallbackSearching",
       fallbackActivationError: fallbackError.message,
       updatedAt: now
-    }, { merge: true });
+    });
     return { status: "dispatchFallbackSearching", rideId: null };
   }
 }
@@ -978,8 +999,12 @@ async function sweepScheduledRides({ db = getFirestore(), now = admin.firestore.
       await doc.ref.set({ status: "checkInRequired", updatedAt: now }, { merge: true });
       results.push({ requestId: doc.id, action: "checkInRequired" });
     } else if (request.status === "checkedIn" && timestampMillis(request.activationAt) <= nowMillis) {
-      await activateScheduledRide({ requestId: doc.id, db, now });
-      results.push({ requestId: doc.id, action: "activated" });
+      try {
+        await activateScheduledRide({ requestId: doc.id, db, now });
+        results.push({ requestId: doc.id, action: "activated" });
+      } catch (err) {
+        results.push({ requestId: doc.id, action: "authorization_or_activation_required", error: err.message });
+      }
     } else if (["confirmed", "checkInRequired"].includes(request.status) && nowMillis >= pickupMillis - CHECK_IN_CUTOFF_MS) {
       if (request.assignedDriverId) {
         await db.collection("drivers").doc(request.assignedDriverId).collection("scheduledRideLocks").doc(doc.id)

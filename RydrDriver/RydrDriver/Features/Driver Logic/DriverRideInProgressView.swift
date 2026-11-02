@@ -28,6 +28,12 @@ struct DriverRideInProgressView: View {
     let driverSpeedMetersPerSecond: CLLocationSpeed?
     var driverCourseDegrees: CLLocationDirection? = nil
     let isUpdatingRide: Bool
+    var rideActionError: String? = nil
+    var stopRequestsAfterRide: Bool = false
+    var acceptedQueueCount: Int = 0
+    var onReleaseQueuedRides: () -> Void = {}
+    var isUpdatingRequestPreference: Bool = false
+    var onToggleRequests: () -> Void = {}
     let onStartNavigation: () -> Void
     let onArrivedAtPickup: () -> Void
     let onStartRide: () -> Void
@@ -46,6 +52,7 @@ struct DriverRideInProgressView: View {
         )
     )
     @State private var showCancelConfirm = false
+    @State private var showReleaseQueueConfirm = false
     @State private var showIncidentConfirm = false
     @State private var showIncidentSheet = false
     @State private var showMessageSheet = false
@@ -292,6 +299,30 @@ struct DriverRideInProgressView: View {
 
     private var routeControlTray: some View {
         VStack(spacing: 16) {
+            if let rideActionError {
+                Text(rideActionError).font(.caption).foregroundStyle(.red)
+                    .accessibilityLabel("Ride update failed: \(rideActionError)")
+            }
+            Button(action: onToggleRequests) {
+                Label(stopRequestsAfterRide ? "Requests stopped · Resume" : "Stop requests after this ride",
+                      systemImage: stopRequestsAfterRide ? "pause.circle.fill" : "pause.circle")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+            }
+            .disabled(isUpdatingRequestPreference)
+            .accessibilityHint("Stops new offers. Already accepted rides remain committed.")
+            if stopRequestsAfterRide {
+                Text(acceptedQueueCount == 0 ? "You’ll go offline when this ride ends." : "You have \(acceptedQueueCount) accepted ride remaining before going offline.")
+                    .font(.caption)
+                if acceptedQueueCount > 0 {
+                    Button("Release queued ride") { showReleaseQueueConfirm = true }
+                        .font(.caption.weight(.semibold))
+                        .confirmationDialog("Release your accepted queued ride?", isPresented: $showReleaseQueueConfirm, titleVisibility: .visible) {
+                            Button("Release queued ride", role: .destructive, action: onReleaseQueuedRides)
+                        } message: { Text("The next rider will be notified that you cancelled. Your current ride continues.") }
+                }
+            }
             Capsule()
                 .fill(Color.black.opacity(0.28))
                 .frame(width: 54, height: 5)

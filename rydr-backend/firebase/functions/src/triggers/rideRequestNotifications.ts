@@ -77,3 +77,12 @@ export const onRideChatMessageCreated = onDocumentCreated("rideChats/{rideId}/me
     route: { type: "rideMessage", target: "rideChat", rideId: event.params.rideId, chatId: event.params.rideId }
   });
 });
+
+export const onRideAuthorizationRequired = onDocumentUpdated("rideRequests/{requestId}", async event => {
+  const before = event.data?.before.data();
+  const after = event.data?.after.data();
+  if (!after?.riderId || after.status !== "authorizationFailed" || before?.status === "authorizationFailed") return;
+  await sendPushToUser({ audience: "rider", uid: after.riderId, title: "Authorize your ride",
+    body: "Open Rydr to authorize the estimated fare before your ride can be dispatched.",
+    route: { type: "paymentFailed", target: "payments", rideId: event.params.requestId } });
+});

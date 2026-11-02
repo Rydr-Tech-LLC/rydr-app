@@ -62,6 +62,7 @@ struct EndRideView: View {
                 .padding(.bottom, 30)
             }
             .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .onAppear { if let rideId = ride?.backendRideId { rideManager.observePaymentStatus(rideId: rideId) } }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(phase == .receipt ? "Done" : "Skip") {
@@ -476,7 +477,18 @@ struct EndRideView: View {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(Color.red.opacity(0.25), lineWidth: 1)
             )
-        } else if rideManager.paymentStatus == "processing" {
+        } else if rideManager.paymentStatus == "refunded" || rideManager.refundedAmountCents > 0 {
+            Label {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Refund recorded").font(.subheadline.weight(.semibold))
+                    Text((Double(rideManager.refundedAmountCents) / 100).formatted(.currency(code: "USD")))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } icon: { Image(systemName: "arrow.uturn.backward.circle") }
+            .cardStyle()
+        } else if ["paid_externally", "written_off"].contains(rideManager.paymentStatus ?? "") {
+            Label("Balance resolved by support", systemImage: "checkmark.circle").cardStyle()
+        } else if ["pending", "processing"].contains(rideManager.paymentStatus ?? "") {
             HStack(spacing: 12) {
                 ProgressView()
                 VStack(alignment: .leading, spacing: 2) {
@@ -540,7 +552,7 @@ struct EndRideView: View {
                 }
 
                 Divider()
-                receiptRow("Paid with", displayReceipt.cardMasked)
+                receiptRow("Payment method", displayReceipt.cardMasked)
             } else {
                 Text("Receipt details are not available for this test ride.")
                     .font(.subheadline)
@@ -618,7 +630,10 @@ struct EndRideView: View {
     }
 
     private var displayReceipt: Receipt? {
-        ride?.addingTip(cents: selectedTip)
+        if let rideId = ride?.backendRideId, let latest = rideManager.lastReceipt, latest.backendRideId == rideId {
+            return latest.addingTip(cents: selectedTip)
+        }
+        return ride?.addingTip(cents: selectedTip)
     }
 
     private var canSubmitFeedback: Bool {

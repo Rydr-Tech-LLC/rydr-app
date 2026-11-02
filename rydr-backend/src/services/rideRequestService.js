@@ -1,6 +1,7 @@
 const { assertLiveBetaAccess } = require("../../firebase/functions/src/services/liveBetaAccessPolicy");
 const { premiumRideAllowed } = require("../../firebase/functions/src/services/premiumVehiclePolicy");
 const { requireExecutiveEnabled } = require("./premiumPlatformService");
+const { authorizeRideEstimate } = require("./rideAuthorizationClient");
 const crypto = require("node:crypto");
 const { admin, getFirestore } = require("../config/firebase");
 const { getDirections } = require("./appleMapsService");
@@ -101,13 +102,14 @@ function configuredRateObject(profile, rideType) {
   return rateObject(profile, rideType);
 }
 
-function quoteFingerprint({ riderId, driverId, rideType, pickup, dropoff, route, rates }) {
+function quoteFingerprint({ riderId, driverId, rideType, pickup, dropoff, stop, route, rates }) {
   const canonical = JSON.stringify({
     riderId,
     driverId,
     rideType: canonicalRateKey(rideType),
     pickup: [pickup.latitude.toFixed(6), pickup.longitude.toFixed(6)],
     dropoff: [dropoff.latitude.toFixed(6), dropoff.longitude.toFixed(6)],
+    ...(stop ? { stop: [Number(stop.latitude ?? stop.lat).toFixed(6), Number(stop.longitude ?? stop.lng).toFixed(6)] } : {}),
     distanceMeters: Math.round(route.distanceMeters),
     durationSeconds: Math.round(route.durationSeconds),
     minimumFareCents: rates.minimumFareCents,
@@ -151,6 +153,39 @@ async function verifyPaymentReadiness({ authorization, fetchImpl = globalThis.fe
   return true;
 }
 
+async function dispatchAuthorizedRequest({ db, rideId, authorizationProvider, now }) {
+  const ref = db.collection("rideRequests").doc(rideId);
+  const snap = await ref.get();
+  const request = snap.data();
+  if (["cancelled", "riderCancelled", "driverCancelled", "adminCancelled", "expired", "noDriversAvailable"].includes(request.status)) throw error("This ride request is no longer active", 409);
+  if (!["authorizing", "authorizationFailed"].includes(request.status)) return;
+  await authorizationProvider({ rideId });
+  const dispatchResult = await db.runTransaction(async (tx) => {
+    const current = await tx.get(ref);
+    if (!["authorizing", "authorizationFailed"].includes(current.data().status)) return;
+    if (request.scheduledRideId) {
+      const scheduled = await tx.get(db.collection("scheduledRideRequests").doc(request.scheduledRideId));
+      if (!scheduled.exists || ["cancelled", "expired", "completed"].includes(scheduled.data().status)) {
+        tx.set(ref, { status: "cancelled", dispatchStatus: "cancelled", updatedAt: admin.firestore.Timestamp.now() }, { merge: true });
+        tx.set(db.collection("authorizationReleaseJobs").doc(rideId), { rideId, status: "pending", createdAt: admin.firestore.Timestamp.now() });
+        return { cancelled: true };
+      }
+    }
+    const offeredAt = admin.firestore.Timestamp.now();
+    const expiresAt = admin.firestore.Timestamp.fromMillis(offeredAt.toMillis() + OFFER_TTL_SECONDS * 1000);
+    if (request.scheduledRideId) tx.set(db.collection("scheduledRideRequests").doc(request.scheduledRideId), {
+      status: "active", activeRideId: rideId, activatedAt: offeredAt, updatedAt: offeredAt
+    }, { merge: true });
+    tx.set(ref, { status: "pending", dispatchStatus: "offered", authorizationStatus: "authorized", offerCreatedAt: offeredAt, offerExpiresAt: expiresAt, updatedAt: offeredAt }, { merge: true });
+    tx.set(db.collection("rideRequestSignals").doc(rideId), {
+      id: rideId, riderId: request.riderId, driverId: request.driverId, rideType: request.rideType,
+      status: "pending", source: request.source, pickupCoordinate: request.pickupCoordinate,
+      pickupGeoPoint: request.pickupGeoPoint, dispatchAttemptNumber: 1, expiresAt, createdAt: offeredAt, updatedAt: offeredAt
+    });
+  });
+  if (dispatchResult?.cancelled) throw error("This scheduled ride was cancelled before dispatch", 409);
+}
+
 async function createRideRequest({
   riderId,
   authorization,
@@ -158,6 +193,7 @@ async function createRideRequest({
   db = getFirestore(),
   routeProvider = getDirections,
   paymentVerifier = verifyPaymentReadiness,
+  authorizationProvider = authorizeRideEstimate,
   authUserProvider = (uid) => admin.auth().getUser(uid),
   authoritativeRateOverride = null,
   authoritativeRouteOverride = null,
@@ -173,6 +209,7 @@ async function createRideRequest({
   const existingIdempotency = await idempotencyRef.get();
   if (existingIdempotency.exists) {
     const existing = existingIdempotency.data();
+    await dispatchAuthorizedRequest({ db, rideId: existing.rideId, authorizationProvider, now });
     return { rideId: existing.rideId, duplicate: true, quoteFingerprint: existing.quoteFingerprint ?? null };
   }
 
@@ -264,7 +301,7 @@ async function createRideRequest({
     driverRatePerMileCents: rates.perMileCents,
     driverRatePerMinuteCents: rates.perMinuteCents
   });
-  const fingerprint = quoteFingerprint({ riderId, driverId: selectedCandidateId, rideType, pickup, dropoff, route, rates });
+  const fingerprint = quoteFingerprint({ riderId, driverId: selectedCandidateId, rideType, pickup, dropoff, stop: matchSession?.stopCoordinate, route, rates });
   if (!trustedScheduledActivation && fingerprint !== sessionCandidate.quoteFingerprint) {
     throw error("The selected driver's pricing changed. Refresh nearby drivers.", 409);
   }
@@ -287,6 +324,7 @@ async function createRideRequest({
     riderVerified: rider.verifiedRider === true || rider.identityVerified === true,
     verifiedRider: rider.verifiedRider === true || rider.identityVerified === true,
     driverId: selectedCandidateId,
+    ...(matchSession?.stopCoordinate ? { stop: matchSession.stop, stopCoordinate: matchSession.stopCoordinate } : {}),
     pickup: pickupName,
     dropoff: dropoffName,
     pickupCoordinate: { lat: pickup.latitude, lng: pickup.longitude },
@@ -296,11 +334,13 @@ async function createRideRequest({
     rideType,
     ridePreferences: payload.ridePreferences && typeof payload.ridePreferences === "object" ? payload.ridePreferences : {},
     replacementForRideId: text(payload.replacementForRideId, 128),
-    scheduledRideId: text(payload.scheduledRideId, 128),
+    scheduledRideId: trustedScheduledActivation ? text(payload.scheduledRideId, 128) : null,
     rydrBankCode: text(payload.rydrBankCode, 80),
+    requestedPaymentMethodId: text(payload.paymentMethodId, 128),
     source: payload.source === "scheduledRydr" ? "scheduledRydr" : "standardRydr",
-    status: "pending",
-    dispatchStatus: "offered",
+    authorizationPolicy: "estimate_hold_v1",
+    status: "authorizing",
+    dispatchStatus: "awaitingAuthorization",
     dispatchAttemptNumber: 1,
     dispatchCandidateIds: candidateIds,
     attemptedDriverIds: [],
@@ -353,26 +393,34 @@ async function createRideRequest({
     if (matchSessionRef && (!currentMatchSession?.exists || currentMatchSession.data().status !== "open")) {
       throw error("The driver match session is no longer valid", 409);
     }
+    const scheduledRef = request.scheduledRideId ? db.collection("scheduledRideRequests").doc(request.scheduledRideId) : null;
+    if (scheduledRef) {
+      const scheduled = await tx.get(scheduledRef);
+      if (!scheduled.exists || scheduled.data().riderId !== riderId || ["cancelled", "expired", "completed"].includes(scheduled.data().status)) throw error("This scheduled ride is no longer available", 409);
+    }
+    const riderLock = await tx.get(riderRef);
+    const activeRequests = await tx.get(db.collection("rideRequests").where("riderId", "==", riderId)
+      .where("status", "in", ["authorizing", "authorizationFailed", "pending", "accepted", "enRouteToPickup", "navigatingToPickup", "arrived", "arrivedAtPickup", "waitingForRider", "inProgress", "navigatingToStop", "arrivedAtStop", "waitingAtStop", "navigatingToDropoff"]).limit(10));
+    const previousId = activeRequests.docs.find(doc => doc.id !== rideId && doc.data().status !== "authorizationFailed")?.id
+      || riderLock.data()?.activeRideRequestId;
+    if (previousId && previousId !== rideId) {
+      const previous = await tx.get(db.collection("rideRequests").doc(previousId));
+      if (previous.exists && previous.data().status === "authorizationFailed") {
+        tx.set(previous.ref, { status: "cancelled", dispatchStatus: "cancelled", updatedAt: now }, { merge: true });
+        tx.set(db.collection("authorizationReleaseJobs").doc(previousId), { rideId: previousId, status: "pending", createdAt: now });
+      } else if (previous.exists && !["completed", "driverCancelled", "riderCancelled", "adminCancelled", "cancelled", "noDriversAvailable", "expired"].includes(previous.data().status)) {
+        throw error("You already have a ride in progress. Resume or cancel it before booking again.", 409);
+      }
+    }
+    if (scheduledRef) tx.set(scheduledRef, { pendingAuthorizationRideId: rideId }, { merge: true });
+    tx.set(riderRef, { activeRideRequestId: rideId }, { merge: true });
     tx.create(requestRef, request);
-    tx.create(signalRef, {
-      id: rideId,
-      riderId,
-      driverId: selectedCandidateId,
-      rideType,
-      status: "pending",
-      source: request.source,
-      pickupCoordinate: request.pickupCoordinate,
-      pickupGeoPoint: request.pickupGeoPoint,
-      dispatchAttemptNumber: 1,
-      expiresAt,
-      createdAt: now,
-      updatedAt: now
-    });
     tx.create(idempotencyRef, { riderId, rideId, quoteFingerprint: fingerprint, createdAt: now });
     if (matchSessionRef) tx.set(matchSessionRef, { status: "consumed", consumedAt: now, rideId }, { merge: true });
     return { duplicate: false, rideId, quoteFingerprint: fingerprint };
   });
 
+  await dispatchAuthorizedRequest({ db, rideId: transactionResult.rideId, authorizationProvider, now });
   if (transactionResult.duplicate) return transactionResult;
 
   return {
@@ -389,6 +437,7 @@ async function createRideRequest({
 }
 
 module.exports = {
+  dispatchAuthorizedRequest,
   createRideRequest,
   verifyPaymentReadiness,
   deterministicRideId,

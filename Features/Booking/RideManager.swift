@@ -108,7 +108,7 @@ struct ReceiptChargeBreakdown: Equatable {
             line("destination-change", "Destination change", destinationChangeCharge),
             line("additional-stop", "Additional stop", additionalStopCharge),
             line("time-adjustment", "Ride time adjustment", timeAdjustment),
-            line("promo", "RydrBank credit", promoDiscount),
+            line("promo", "Credits & promotions", promoDiscount),
             line("tip", "Tip", tip),
             line("adjustment", "Adjustment", otherAdjustment)
         ].compactMap { $0 }
@@ -345,6 +345,7 @@ enum RideRequestError: LocalizedError {
 }
 
 protocol RideService: AnyObject, Sendable {
+    func setRequestedStop(name: String?, coordinate: CLLocationCoordinate2D?)
     func fetchNearbyDrivers(
         pickup: String,
         dropoff: String,
@@ -364,6 +365,7 @@ protocol RideService: AnyObject, Sendable {
         dropoffCoordinate: CLLocationCoordinate2D?,
         estimate: RideEstimate?,
         rydrBankCode: String?,
+        paymentMethodId: String?,
         replacementForRideId: String?,
         riderPreferences: RiderRidePreferences?,
         riderVerified: Bool,
@@ -376,6 +378,10 @@ protocol RideService: AnyObject, Sendable {
     func driverLocationStream(rideId: String) -> AsyncStream<CLLocationCoordinate2D>
     func cancelRide(rideId: String, mode: RideCancellationMode) async throws -> BackendRideFinancialOutcome?
     func cancelMidRide(rideId: String) async throws -> BackendRideFinancialOutcome
+}
+
+extension RideService {
+    func setRequestedStop(name: String?, coordinate: CLLocationCoordinate2D?) {}
 }
 
 // MARK: - Manager (rider app)
@@ -407,6 +413,11 @@ final class RideManager: ObservableObject {
     @Published var savedCards: [PaymentCard] = []
     @Published var selectedCardIndex: Int = 0
     @Published var stripeCustomerId: String?
+    @Published var refundedAmountCents = 0
+    private var paymentStatusListener: ListenerRegistration?
+    private var observedPaymentRideId: String?
+    @Published var pendingAuthorizationRideId: String?
+    @Published var isResumingAuthorization = false
     @Published var paymentStatus: String?           // "pending" | "processing" | "succeeded" | "failed" | "refunded"
     @Published var paymentFailureReason: String?
     @Published var isRetryingPayment = false
@@ -460,6 +471,8 @@ final class RideManager: ObservableObject {
     private var replacementForRideId: String?
     private var currentAppliedRydrBankCode: String?
     private var lastCompletedDriverId: String?
+    private var cachedStopName: String?
+    private var cachedStopCoordinate: CLLocationCoordinate2D?
     private var cachedRidePreferences: RiderRidePreferences?
     private var cachedRiderVerified = false
     private var currentBaseFare: Double = 0
@@ -489,6 +502,7 @@ final class RideManager: ObservableObject {
     }
 
     deinit {
+        paymentStatusListener?.remove()
         decisionTask?.cancel()
         rideLifecycleTask?.cancel()
         pickupWaitCountdownTask?.cancel()
@@ -562,8 +576,13 @@ final class RideManager: ObservableObject {
         pickupCoordinate: CLLocationCoordinate2D? = nil,
         dropoffCoordinate: CLLocationCoordinate2D? = nil,
         estimate: RideEstimate? = nil,
-        riderVerified: Bool = false
+        riderVerified: Bool = false,
+        stop: String? = nil,
+        stopCoordinate: CLLocationCoordinate2D? = nil
     ) {
+        cachedStopName = stop
+        cachedStopCoordinate = stopCoordinate
+        rideService.setRequestedStop(name: stop, coordinate: stopCoordinate)
         let isSameTripDetails = Self.normalizedMatchmakingText(pickup) == Self.normalizedMatchmakingText(cachedPickup)
             && Self.normalizedMatchmakingText(dropoff) == Self.normalizedMatchmakingText(cachedDropoff)
             && Self.normalizedMatchmakingText(rideType) == Self.normalizedMatchmakingText(cachedRideType)
@@ -685,6 +704,7 @@ final class RideManager: ObservableObject {
                     dropoffCoordinate: cachedDropoffCoordinate,
                     estimate: cachedEstimate,
                     rydrBankCode: self.currentAppliedRydrBankCode,
+                    paymentMethodId: self.selectedCard?.stripePaymentMethodId,
                     replacementForRideId: self.replacementForRideId,
                     riderPreferences: cachedRidePreferences,
                     riderVerified: cachedRiderVerified,
@@ -695,6 +715,9 @@ final class RideManager: ObservableObject {
                 self.startDecisionMonitoring(rideId: rideId, reconcileFirst: false)
             } catch {
                 guard !Task.isCancelled else { return }
+                if let pendingId = (error as NSError).userInfo["authorizationRideId"] as? String, !pendingId.isEmpty {
+                    self.pendingAuthorizationRideId = pendingId
+                }
                 self.handleDecline(message: error.localizedDescription)
             }
         }
@@ -897,6 +920,7 @@ final class RideManager: ObservableObject {
         )
 
         lastReceipt = receipt
+        observePaymentStatus(rideId: backendRideId)
         lastCompletedDriverId = ride.driver.id
         history.insert(receipt, at: 0)
         currentRide = nil
@@ -1104,7 +1128,8 @@ final class RideManager: ObservableObject {
                 pickupCoordinate: cachedPickupCoordinate,
                 dropoffCoordinate: cachedDropoffCoordinate,
                 estimate: cachedEstimate,
-                riderVerified: cachedRiderVerified
+                riderVerified: cachedRiderVerified,
+                stop: cachedStopName, stopCoordinate: cachedStopCoordinate
             )
         } else {
             rideRequestErrorMessage = nil
@@ -1766,6 +1791,72 @@ final class RideManager: ObservableObject {
     /// payment flow"). Optionally pass a different `paymentMethodId` if the
     /// rider just updated their card. Backend rejects this unless the ride's
     /// current `paymentStatus` is "failed", so it can never double-charge.
+    func observePaymentStatus(rideId: String) {
+        guard observedPaymentRideId != rideId, let uid = RydrWorkspace.auth.currentUser?.uid,
+              let workspace = RydrWorkspace.identifier else { return }
+        paymentStatusListener?.remove()
+        observedPaymentRideId = rideId
+        paymentStatus = "pending"
+        refundedAmountCents = 0
+        paymentStatusListener = RydrWorkspace.firestore.collection("rides").document(rideId).addSnapshotListener { [weak self] snapshot, error in
+            DispatchQueue.main.async {
+                guard let self, RydrWorkspace.auth.currentUser?.uid == uid, RydrWorkspace.identifier == workspace else { return }
+                guard let data = snapshot?.data(), data["riderId"] as? String == uid else {
+                    if error != nil { self.paymentFailureReason = "Payment status is temporarily unavailable. Reopen your receipt to check again." }
+                    return
+                }
+                self.paymentStatus = data["paymentStatus"] as? String ?? "pending"
+                self.paymentFailureReason = data["failureReason"] as? String ?? data["paymentFailureReason"] as? String
+                self.refundedAmountCents = (data["refundedAmountCents"] as? NSNumber)?.intValue ?? 0
+                if let receipt = self.lastReceipt, receipt.backendRideId == rideId,
+                   let charge = data["finalRiderChargeCents"] as? NSNumber {
+                    var breakdown = receipt.chargeBreakdown
+                    if let discount = data["promoDiscountCents"] as? NSNumber { breakdown.promoDiscount = -discount.doubleValue / 100 }
+                    let total = charge.doubleValue / 100 + breakdown.tip
+                    breakdown.otherAdjustment += total - breakdown.calculatedTotal
+                    let updated = Receipt(id: receipt.id, rideId: receipt.rideId, date: receipt.date,
+                        driverName: receipt.driverName, pickup: receipt.pickup, dropoff: receipt.dropoff,
+                        distanceMiles: receipt.distanceMiles, durationMinutes: receipt.durationMinutes,
+                        fare: total, cardMasked: receipt.cardMasked, chargeBreakdown: breakdown, backendRideId: rideId)
+                    self.lastReceipt = updated
+                    if let index = self.history.firstIndex(where: { $0.id == receipt.id }) { self.history[index] = updated }
+                }
+            }
+        }
+    }
+
+    func checkPendingAuthorization() async {
+        guard let uid = RydrWorkspace.auth.currentUser?.uid, !isResumingAuthorization else { return }
+        do {
+            let rider = try await RydrWorkspace.firestore.collection("riders").document(uid).getDocument()
+            guard let rideId = rider.data()?["activeRideRequestId"] as? String else { return }
+            let request = try await RydrWorkspace.firestore.collection("rideRequests").document(rideId).getDocument()
+            if ["authorizing", "authorizationFailed"].contains(request.data()?["status"] as? String ?? "") {
+                pendingAuthorizationRideId = rideId
+            }
+        } catch { rideRequestErrorMessage = error.localizedDescription }
+    }
+
+    func resumeAuthorization(rideId: String) async {
+        guard !isResumingAuthorization else { return }
+        isResumingAuthorization = true
+        defer { isResumingAuthorization = false }
+        do {
+            try await FirestoreRideService().resumeAuthorization(rideId: rideId)
+            pendingAuthorizationRideId = nil
+            currentServiceRideId = rideId
+            state = .awaitingDriver
+            let decision = try await rideService.awaitDriverDecision(rideId: rideId)
+            if case .accepted = decision { await recoverActiveRide(rideId: rideId) }
+            else { state = .idle; rideRequestErrorMessage = "No driver is available. Your authorization will be released." }
+        } catch { rideRequestErrorMessage = error.localizedDescription }
+    }
+
+    func cancelPendingAuthorization(rideId: String) async {
+        do { _ = try await rideService.cancelRide(rideId: rideId, mode: .cancelRide); pendingAuthorizationRideId = nil }
+        catch { rideRequestErrorMessage = error.localizedDescription }
+    }
+
     func retryFailedPayment(rideId: String, paymentMethodId: String? = nil) async {
         guard !isRetryingPayment else { return }
         isRetryingPayment = true
@@ -1800,7 +1891,7 @@ final class RideManager: ObservableObject {
         }
     }
 
-    private func performChargeRequest(path: String, body: [String: Any]) async {
+    private func performChargeRequest(path: String, body: [String: Any], mayAuthenticate: Bool = true) async {
         paymentStatus = "processing"
         paymentFailureReason = nil
 
@@ -1810,12 +1901,19 @@ final class RideManager: ObservableObject {
             return
         }
         if let response = try? JSONDecoder().decode(StripePaymentIntentResponse_Ride.self, from: data) {
+            if response.error == "authentication_required", let secret = response.clientSecret, mayAuthenticate {
+                do {
+                    try await RidePaymentAuthentication.authenticate(clientSecret: secret)
+                    await performChargeRequest(path: path, body: body, mayAuthenticate: false)
+                } catch { paymentStatus = "failed"; paymentFailureReason = error.localizedDescription }
+                return
+            }
             if let error = response.error {
                 paymentStatus = "failed"
                 paymentFailureReason = response.message ?? error
                 print("❌ Ride charge failed: \(error)")
             } else {
-                paymentStatus = response.status == "succeeded" ? "succeeded" : "processing"
+                paymentStatus = response.status == "resolved" ? (response.resolutionType ?? "resolved") : response.status == "succeeded" ? "succeeded" : "processing"
                 paymentFailureReason = nil
                 print("✅ Ride charge succeeded: \(response.paymentIntentId ?? "") status=\(response.status ?? "")")
             }
@@ -1898,6 +1996,7 @@ private struct StripePaymentMethodsResponse_Ride: Decodable {
 }
 
 private struct StripePaymentIntentResponse_Ride: Decodable {
+    let resolutionType: String?
     let clientSecret: String?
     let paymentIntentId: String?
     let status: String?

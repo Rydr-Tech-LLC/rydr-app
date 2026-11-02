@@ -1,6 +1,7 @@
 const { admin, getFirestore } = require("../config/firebase");
 
 const TELEMETRY_STATUSES = new Set([
+  "accepted",
   "enRouteToPickup", "navigatingToPickup", "arrivedAtPickup", "inProgress",
   "navigatingToStop", "arrivedAtStop", "navigatingToDropoff"
 ]);

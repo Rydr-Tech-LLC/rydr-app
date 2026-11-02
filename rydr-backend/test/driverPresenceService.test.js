@@ -20,3 +20,9 @@ test("presence location accepts valid coordinates and rejects invalid ones", () 
 test("presence ride types are trimmed and deduplicated", () => {
   assert.deepEqual(normalizedRideTypes(["Rydr Go", " Rydr Go ", "Rydr XL", ""]), ["Rydr Go", "Rydr XL"]);
 });
+
+test("stopped requests are ineligible even with a current online lease", () => {
+  const { hasCurrentOnlinePresence } = require("../src/services/driverPresenceService");
+  assert.equal(hasCurrentOnlinePresence({ isOnline: true, availabilityStatus: "onCurrentRide", stopRequestsAfterRide: true,
+    presenceExpiresAt: { toMillis: () => 4000000000000 } }), false);
+});

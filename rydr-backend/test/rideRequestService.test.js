@@ -29,7 +29,17 @@ class Ref {
 }
 
 class Collection {
-  constructor(db, path) { this.db = db; this.path = path; }
+  constructor(db, path, filters = []) { this.db = db; this.path = path; this.filters = filters; }
+  where(field, op, value) { return new Collection(this.db, this.path, [...this.filters, [field, op, value]]); }
+  limit() { return this; }
+  async get() {
+    const docs = [];
+    for (const [path, value] of this.db.values) {
+      if (!path.startsWith(`${this.path}/`) || path.split("/").length !== this.path.split("/").length + 1) continue;
+      if (this.filters.every(([f, op, v]) => op === "in" ? v.includes(value[f]) : value[f] === v)) docs.push(new Snapshot(new Ref(this.db, path), value));
+    }
+    return { docs, empty: docs.length === 0 };
+  }
   doc(id) { return new Ref(this.db, `${this.path}/${id}`); }
 }
 
@@ -148,6 +158,7 @@ test("backend creates the authoritative request, signal, route, quote, and dispa
     payload: createPayload(),
     db,
     routeProvider,
+    authorizationProvider: async () => ({ status: "authorized" }),
     paymentVerifier: async () => true,
     authUserProvider: async () => ({ displayName: "Rider One", photoURL: null }),
     trustedScheduledActivation: true
@@ -179,6 +190,7 @@ test("trusted scheduled fallback preserves the backend-ranked dispatch candidate
     payload,
     db,
     routeProvider,
+    authorizationProvider: async () => ({ status: "authorized" }),
     paymentVerifier: async () => true,
     authUserProvider: async () => ({ displayName: "Rider One", photoURL: null }),
     trustedScheduledActivation: true
@@ -200,7 +212,8 @@ test("backend rejects an offline selected driver before writing", async () => {
       payload: createPayload(),
       db,
       routeProvider,
-      paymentVerifier: async () => true,
+      authorizationProvider: async () => ({ status: "authorized" }),
+    paymentVerifier: async () => true,
       authUserProvider: async () => ({}),
       trustedScheduledActivation: true
     }),
@@ -223,7 +236,8 @@ test("backend rejects a selected driver whose canonical account is suspended", a
       payload: createPayload(),
       db,
       routeProvider,
-      paymentVerifier: async () => true,
+      authorizationProvider: async () => ({ status: "authorized" }),
+    paymentVerifier: async () => true,
       authUserProvider: async () => ({}),
       trustedScheduledActivation: true
     }),
@@ -240,6 +254,7 @@ test("an idempotent retry returns the original ride without another payment or r
     payload: createPayload(),
     db,
     routeProvider: async (...args) => { validations += 1; return routeProvider(...args); },
+    authorizationProvider: async () => ({ status: "authorized" }),
     paymentVerifier: async () => { validations += 1; return true; },
     authUserProvider: async () => ({}),
     trustedScheduledActivation: true
@@ -276,6 +291,7 @@ test("standard ride creation requires and consumes the backend match-session fin
     payload: createPayload({ matchSessionId: "session-1", quoteFingerprint: fingerprint }),
     db,
     routeProvider,
+    authorizationProvider: async () => ({ status: "authorized" }),
     paymentVerifier: async () => true,
     authUserProvider: async () => ({}),
     now
@@ -294,10 +310,56 @@ test("standard ride creation requires and consumes the backend match-session fin
       }),
       db,
       routeProvider,
-      paymentVerifier: async () => true,
+      authorizationProvider: async () => ({ status: "authorized" }),
+    paymentVerifier: async () => true,
       authUserProvider: async () => ({}),
       now
     }),
     (err) => err.statusCode === 409
   );
+});
+
+test("no driver offer or demand signal is published until authorization succeeds", async () => {
+  const db = readyDb();
+  await createRideRequest({ riderId: "rider-1", payload: createPayload(), db, routeProvider,
+    paymentVerifier: async () => true, trustedScheduledActivation: true, authUserProvider: async () => ({}),
+    authorizationProvider: async ({ rideId }) => {
+      assert.equal(db.values.get(`rideRequests/${rideId}`).status, "authorizing");
+      assert.equal(db.values.has(`rideRequestSignals/${rideId}`), false);
+      return { status: "authorized" };
+    }
+  });
+});
+test("a declined estimate remains undispatched and retries resume the same booking", async () => {
+  const db = readyDb(); let attempts = 0;
+  const options = { riderId: "rider-1", payload: createPayload(), db, routeProvider,
+    paymentVerifier: async () => true, trustedScheduledActivation: true, authUserProvider: async () => ({}),
+    authorizationProvider: async () => { if (++attempts === 1) throw new Error("declined"); return { status: "authorized" }; }
+  };
+  await assert.rejects(createRideRequest(options), /declined/);
+  assert.equal([...db.values.keys()].some(key => key.startsWith("rideRequestSignals/")), false);
+  const result = await createRideRequest(options);
+  assert.equal(result.duplicate, true);
+  assert.equal(db.values.get(`rideRequests/${result.rideId}`).status, "pending");
+  assert.equal([...db.values.keys()].filter(key => key.startsWith("rideRequests/")).length, 1);
+});
+test("a different booking session cannot create a second active rider request", async () => {
+  const db = readyDb();
+  const options = { riderId: "rider-1", payload: createPayload(), db, routeProvider,
+    paymentVerifier: async () => true, authorizationProvider: async () => ({ status: "authorized" }),
+    trustedScheduledActivation: true, authUserProvider: async () => ({}) };
+  await createRideRequest(options);
+  await assert.rejects(createRideRequest({ ...options, payload: createPayload({ idempotencyKey: "request-0002" }) }), /already have a ride/);
+});
+
+test("cancelling a scheduled reservation during authorization cannot resurrect it in dispatch", async () => {
+  const db = readyDb();
+  db.values.set("scheduledRideRequests/scheduled-1", { riderId: "rider-1", status: "activating" });
+  await assert.rejects(createRideRequest({ riderId: "rider-1", payload: createPayload({ scheduledRideId: "scheduled-1" }), db, routeProvider,
+    paymentVerifier: async () => true, trustedScheduledActivation: true, authUserProvider: async () => ({}),
+    authorizationProvider: async () => { db.values.get("scheduledRideRequests/scheduled-1").status = "cancelled"; return { status: "authorized" }; }
+  }), /cancelled before dispatch/);
+  assert.equal(db.values.get("scheduledRideRequests/scheduled-1").status, "cancelled");
+  assert.equal([...db.values.keys()].some(key => key.startsWith("rideRequestSignals/")), false);
+  assert.equal([...db.values.keys()].some(key => key.startsWith("authorizationReleaseJobs/")), true);
 });

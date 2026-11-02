@@ -46,7 +46,8 @@ test("post-arrival cancellation is paid fully to the driver", () => {
     driverRatePerMileCents: 50,
     driverRatePerMinuteCents: 15,
     status: "riderCancelled",
-    arrivedAtPickupAt: at
+    arrivedAtPickupAt: at,
+    cancelledAt: { toMillis: () => 61000 }
   });
   assert.equal(outcome.cancellationFeeCents, 140);
   assert.equal(outcome.finalRiderChargeCents, 440);
@@ -56,7 +57,7 @@ test("post-arrival cancellation is paid fully to the driver", () => {
 
 test("paid wait on a cancellation remains subject to the 90/10 split", () => {
   const paidWaitStart = { toMillis: () => 1_000 };
-  const cancelledAt = { toMillis: () => 121_000 };
+  const cancelledAt = { toMillis: () => 301_000 };
   const outcome = calculateOutcome({
     rideType: "Rydr Go",
     estimatedDistanceMiles: 2,
@@ -187,4 +188,32 @@ test("original booking fees apply below five miles and switch at exactly five mi
       assert.equal(outcome.finalRiderChargeCents, 800 + outcome.bookingFeeCents);
     }
   }
+});
+
+test("pickup waiting is derived from arrival even when the screen never publishes paid wait", () => {
+  const outcome = calculateOutcome({ status: "riderCancelled", rideType: "go", cancelledByRole: "rider",
+    arrivedAtPickupAt: new Date(1000), cancelledAt: new Date(301000), driverRatePerMinuteCents: 50 });
+  assert.equal(outcome.calculationInputs.paidWaitSeconds, 120);
+  assert.equal(outcome.waitChargeCents, 100);
+});
+test("server-validated no-show compensates the driver rather than treating it as an ordinary driver cancellation", () => {
+  const outcome = calculateOutcome({ status: "driverCancelled", cancellationPolicy: "rider_no_show", cancelledByRole: "driver",
+    rideType: "go", arrivedAtPickupAt: new Date(1000), cancelledAt: new Date(301000), driverRatePerMinuteCents: 50 });
+  assert.equal(outcome.outcomeType, "rider_cancellation");
+  assert.ok(outcome.driverPayoutCents > 0);
+});
+test("paid stop waiting is itemized and excluded from overtime to avoid charging twice", () => {
+  const outcome = calculateOutcome({ status: "completed", rideType: "go", backendDistanceMiles: 2, backendDurationMinutes: 10,
+    driverRatePerMinuteCents: 50, driverMinimumFareCents: 0, rideStartedAt: new Date(1000), completedAt: new Date(1201000),
+    stopWaitStartedAt: new Date(301000), stopWaitEndedAt: new Date(901000) });
+  assert.equal(outcome.waitChargeCents, 500);
+  assert.equal(outcome.timeAdjustmentCents, 0);
+  assert.equal(outcome.calculationInputs.stopWaitMinutes, 10);
+});
+test("a driver-ended partial trip does not impose the full minimum fare", () => {
+  const outcome = calculateOutcome({ status: "driverCancelled", cancelledByRole: "driver", rideType: "go", backendDistanceMiles: 10,
+    backendDurationMinutes: 20, backendActualDistanceMiles: 0.1, driverMinimumFareCents: 700,
+    driverRatePerMileCents: 100, driverRatePerMinuteCents: 25, rideStartedAt: new Date(1000), cancelledAt: new Date(61000) });
+  assert.equal(outcome.rideSubtotalCents, 35);
+  assert.equal(outcome.minimumFareAdjustmentCents, 0);
 });

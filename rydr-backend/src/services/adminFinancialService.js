@@ -36,6 +36,9 @@ async function resolvePaymentFailure({ rideId, action, adminUid, reason, request
       lastAdminPaymentResolutionRequestId: requestId,
       updatedAt: now
     }, { merge: true });
+    tx.set(db.collection("authorizationReleaseJobs").doc(`resolution_${rideId}_${requestId}`), {
+      rideId, status: "pending", reason: policy.resolutionType, createdAt: now, updatedAt: now
+    });
     tx.set(jobRef, {
       rideId,
       status: "resolved",

@@ -3,6 +3,7 @@ const { premiumRideAllowed } = require("../../firebase/functions/src/services/pr
 const { admin, getFirestore } = require("../config/firebase");
 
 const ACTIVE_RIDE_STATUSES = new Set([
+  "arrived", "waitingForRider", "waitingAtStop",
   "accepted",
   "enRouteToPickup",
   "navigatingToPickup",
@@ -53,14 +54,14 @@ function timestampMillis(value) {
 }
 
 function hasCurrentOnlinePresence(presence, nowMillis = Date.now()) {
-  if (presence?.isOnline !== true) return false;
+  if (presence?.isOnline !== true || presence?.stopRequestsAfterRide === true) return false;
   if (!["available", "onCurrentRide"].includes(String(presence.availabilityStatus || ""))) return false;
   const expiresAt = timestampMillis(presence.presenceExpiresAt);
   return expiresAt != null && expiresAt >= nowMillis;
 }
 
 async function activeRideForDriver(db, uid) {
-  const snapshot = await db.collection("rides").where("driverId", "==", uid).limit(50).get();
+  const snapshot = await db.collection("rides").where("driverId", "==", uid).where("status", "in", [...ACTIVE_RIDE_STATUSES]).get();
   return snapshot.docs.find((doc) => {
     const ride = doc.data();
     return ACTIVE_RIDE_STATUSES.has(ride.status) && ride.driverQueueStatus !== "queued";
@@ -216,7 +217,23 @@ async function updateDriverPresence({ uid, online, selectedRideTypes, location }
   return { online, availabilityStatus, hasActiveRide, selectedRideTypes: effectiveRideTypes };
 }
 
+async function setDriverRequestPreference({ uid, stopRequestsAfterRide }) {
+  if (typeof stopRequestsAfterRide !== "boolean") throw error("stopRequestsAfterRide must be a boolean", 400);
+  const db = getFirestore();
+  return db.runTransaction(async (tx) => {
+    const ref = db.collection("drivers").doc(uid);
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw error("Driver profile not found", 404);
+    const update = { stopRequestsAfterRide, updatedAt: admin.firestore.Timestamp.now() };
+    tx.set(ref, update, { merge: true });
+    tx.set(db.collection("driver_status").doc(uid), update, { merge: true });
+    tx.set(db.collection("publicDriverProfiles").doc(uid), update, { merge: true });
+    return { stopRequestsAfterRide };
+  });
+}
+
 module.exports = {
+  setDriverRequestPreference,
   updateDriverPresence,
   getDriverAccess,
   isApprovedDriver,

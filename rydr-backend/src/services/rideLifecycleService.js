@@ -16,7 +16,8 @@ const {
   driverCoordinate,
   suggestedRatesFor
 } = require("./driverDemandService");
-const { queuedCandidates, ACTIVE_STATUSES } = require("./driverQueueService");
+const { isApprovedDriver, hasCurrentOnlinePresence } = require("./driverPresenceService");
+const { promoteNextQueuedRide, ACTIVE_STATUSES } = require("./driverQueueService");
 
 const ACTIONS = {
   driver_accept: { from: ["pending"], status: "accepted", fields: ["acceptedAt"], message: "Your driver is on the way." },
@@ -31,7 +32,7 @@ const ACTIONS = {
   leave_stop: { from: ["arrivedAtStop"], status: "inProgress", fields: ["headedToDropoffAt", "navigatingToDropoffAt"], message: "Your ride is headed to drop-off." },
   complete: { from: ["inProgress", "navigatingToDropoff"], status: "completed", fields: ["completedAt"], message: "Your ride is complete.", finalizes: true },
   driver_cancel: { from: ["accepted", "enRouteToPickup", "navigatingToPickup", "arrived", "arrivedAtPickup", "waitingForRider", "inProgress", "navigatingToStop", "arrivedAtStop", "waitingAtStop", "navigatingToDropoff"], status: "driverCancelled", fields: ["cancelledAt"], message: "Your driver cancelled this ride.", finalizes: true },
-  rider_cancel: { from: ["pending", "accepted", "enRouteToPickup", "navigatingToPickup", "arrived", "arrivedAtPickup", "waitingForRider", "inProgress", "navigatingToStop", "arrivedAtStop", "waitingAtStop", "navigatingToDropoff"], status: "riderCancelled", fields: ["cancelledAt"], message: "Ride cancelled.", finalizes: true },
+  rider_cancel: { from: ["authorizing", "authorizationFailed", "pending", "accepted", "enRouteToPickup", "navigatingToPickup", "arrived", "arrivedAtPickup", "waitingForRider", "inProgress", "navigatingToStop", "arrivedAtStop", "waitingAtStop", "navigatingToDropoff"], status: "riderCancelled", fields: ["cancelledAt"], message: "Ride cancelled.", finalizes: true },
   admin_cancel: { from: ["pending", "accepted", "enRouteToPickup", "navigatingToPickup", "arrivedAtPickup", "inProgress", "navigatingToStop", "arrivedAtStop", "navigatingToDropoff"], status: "adminCancelled", fields: ["cancelledAt", "adminCancelledAt"], message: "Support cancelled this ride.", finalizes: true }
 };
 
@@ -159,11 +160,9 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
   const outcomeRef = rideRef.collection("financial").doc("outcome");
 
   if (action === "promote_queue") {
-    const queueSnapshot = await db.collection("rides").where("driverId", "==", uid).limit(100).get();
-    const active = queueSnapshot.docs.find((doc) => ACTIVE_STATUSES.has(doc.data().status) && doc.data().driverQueueStatus !== "queued");
-    if (active) throw error("Driver still has an active ride", 409);
-    const next = queuedCandidates(queueSnapshot.docs)[0];
-    if (!next || next.id !== rideId) throw error("Only the next queued ride may be promoted", 409);
+    const promotion = await promoteNextQueuedRide({ driverId: uid, expectedRideId: rideId, requestId, db });
+    if (!promotion.promoted) throw error("No queued ride is available", 409);
+    return { status: promotion.status, outcome: null, duplicate: promotion.duplicate === true };
   }
 
   let backendActualDistanceMiles = null;
@@ -206,6 +205,7 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
     };
     if (!policy.from.includes(ride.status)) throw error(`Cannot ${action} from ${ride.status}`, 409);
     if (action === "driver_accept") {
+      if (ride.authorizationPolicy === "estimate_hold_v1" && ride.authorizationStatus !== "authorized") throw error("Card authorization is required before acceptance", 409);
       if (!["offered", "rematching"].includes(ride.dispatchStatus)) throw error("Ride offer is not active", 409);
       const offerExpiresAt = timestampMillis(ride.offerExpiresAt);
       if (offerExpiresAt === null || offerExpiresAt <= Date.now()) throw error("Ride offer expired", 409);
@@ -221,6 +221,31 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
       const compliancePolicy = (await tx.get(db.collection("platformConfig").doc("driverCompliance"))).data() ?? {};
       if (!evaluateDriverCompliance(driverSnap?.data() ?? {}, compliancePolicy).drivingAllowed || driverSnap?.data()?.documentComplianceHold === true || driverSnap?.data()?.backgroundCheckHold === true) throw error("Current documents and required screening are needed before driving", 409);
     }
+    let driverAssignments = null;
+    if (action === "driver_accept") {
+      const presence = await tx.get(db.collection("driver_status").doc(uid));
+      if (!driverSnap?.exists || !isApprovedDriver(driverSnap.data()) || driverSnap.data().stopRequestsAfterRide === true
+          || !presence.exists || !hasCurrentOnlinePresence(presence.data())) throw error("Driver is not accepting requests", 409);
+      driverAssignments = await tx.get(db.collection("rides").where("driverId", "==", uid).where("status", "in", [...ACTIVE_STATUSES]));
+      const otherRides = driverAssignments.docs.filter((doc) => doc.id !== rideId);
+      const current = otherRides.find((doc) => doc.data().driverQueueStatus !== "queued");
+      if (otherRides.some((doc) => doc.data().driverQueueStatus === "queued")) throw error("Driver already has a queued ride", 409);
+      queued = Boolean(current);
+    }
+    if (action === "start_paid_wait") {
+      const arrivedAt = timestampMillis(ride.pickupWaitStartedAt ?? ride.arrivedAtPickupAt);
+      if (!arrivedAt || Date.now() < arrivedAt + 180000) throw error("Complimentary pickup waiting has not ended", 409);
+    }
+    if (["arrive_pickup", "arrive_stop", "start_ride", "complete"].includes(action)) {
+      const location = ride.driverLocation;
+      const at = timestampMillis(location?.updatedAt);
+      const point = ["arrive_pickup", "start_ride"].includes(action) ? (ride.pickupCoordinate ?? ride.pickupGeoPoint)
+        : action === "arrive_stop" ? (ride.stopCoordinate ?? ride.stopGeoPoint) : (ride.dropoffCoordinate ?? ride.dropoffGeoPoint);
+      const coordinate = point && { lat: Number(point.lat ?? point.latitude), lng: Number(point.lng ?? point.longitude) };
+      if (!location || !Number.isFinite(Number(location.lat)) || !Number.isFinite(Number(location.lng)) || !at || Date.now() - at > 90000 || !coordinate || !Number.isFinite(coordinate.lat) || !Number.isFinite(coordinate.lng)
+          || distanceMiles(location, coordinate) > 250 / 1609.344) throw error("A recent driver location near this stop is required", 409);
+    }
+
     let bookingCreditSourceRef = null;
     let bookingFeeCreditCents = 0;
     const replacementForRideId = typeof ride.replacementForRideId === "string" ? ride.replacementForRideId.trim() : "";
@@ -281,16 +306,36 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
       }
     }
 
+    const noShow = action === "driver_cancel" && String(reason || "").toLowerCase() === "rider no-show";
+    if (noShow) {
+      const arrived = timestampMillis(ride.arrivedAtPickupAt);
+      if (timestampMillis(ride.rideStartedAt ?? ride.startedAt) || !arrived || Date.now() - arrived < 300000) throw error("No-show cancellation requires five minutes at pickup before the ride starts", 409);
+      const location = ride.driverLocation;
+      const pickup = ride.pickupCoordinate;
+      if (!location || !pickup || !timestampMillis(location.updatedAt) || Date.now() - timestampMillis(location.updatedAt) > 90000
+          || !Number.isFinite(location.lat) || !Number.isFinite(location.lng) || distanceMiles(location, pickup) > 250 / 1609.344) throw error("Remain near pickup to mark a rider no-show", 409);
+      const contact = await tx.get(db.collection("rideChats").doc(rideId).collection("messages").where("senderId", "==", uid).limit(1));
+      if (contact.empty) throw error("Message the rider before marking a no-show", 409);
+    }
     const now = admin.firestore.Timestamp.now();
     const hasStop = Boolean(ride.stop || ride.addedStop || ride.stopCoordinate || ride.stopGeoPoint);
     const resolvedStatus = action === "start_ride" && hasStop ? "navigatingToStop" : policy.status;
     const update = { status: resolvedStatus, riderRideState: resolvedStatus, riderStatusMessage: action === "start_ride" && hasStop ? "Your ride is headed to the added stop." : policy.message, updatedAt: now, lastLifecycleRequestId: requestId, lifecycleOwner: "backend" };
     for (const field of policy.fields) update[field] = now;
+    if (action === "arrive_pickup") {
+      update.pickupComplimentaryWaitSeconds = 180;
+      update.pickupPaidWaitStartedAt = admin.firestore.Timestamp.fromMillis(now.toMillis() + 180000);
+    }
     if (action === "start_ride" && hasStop) {
       delete update.navigatingToDropoffAt;
       update.navigatingToStopAt = now;
     }
-    if (action === "start_paid_wait") update.pickupComplimentaryWaitSeconds = 180;
+    if (action === "start_paid_wait") {
+      update.pickupComplimentaryWaitSeconds = 180;
+      update.pickupPaidWaitStartedAt = ride.pickupPaidWaitStartedAt || admin.firestore.Timestamp.fromMillis(timestampMillis(ride.pickupWaitStartedAt ?? ride.arrivedAtPickupAt) + 180000);
+    }
+    if (action === "arrive_stop") update.stopWaitStartedAt = ride.stopWaitStartedAt || now;
+    if (action === "leave_stop") update.stopWaitEndedAt = now;
     if (action === "promote_queue") update.driverQueueStatus = "active";
     if (action.endsWith("cancel")) Object.assign(update, {
       driverQueueStatus: "cancelled",
@@ -298,6 +343,7 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
       cancelledBy: uid,
       cancelledByRole: isAdminAction ? "admin" : isRiderAction ? "rider" : "driver",
       cancellationReason: String(reason || "Other").slice(0, 500),
+      ...(noShow ? { cancellationPolicy: "rider_no_show" } : {}),
       ...(isAdminAction ? { adminCancelledBy: uid } : {})
     });
     if (action === "driver_accept") {
@@ -321,8 +367,9 @@ async function transitionRide({ rideId, action, uid, reason, requestId, queued =
         [queued ? "queuedAt" : "activeAt"]: now,
         dispatchStatus: "accepted",
         riderStatusMessage: queued ? "Your driver is finishing a current ride. You're next in their queue." : policy.message,
-        ...serverRateFields(driverSnap?.data(), ride.rideType, acceptanceDemandLevel)
+        ...(ride.driverRatePerMileCents != null && ride.driverRatePerMinuteCents != null ? {} : serverRateFields(driverSnap?.data(), ride.rideType, acceptanceDemandLevel))
       });
+      tx.set(db.collection("drivers").doc(uid), { assignmentUpdatedAt: now }, { merge: true });
       tx.set(db.collection("rideChats").doc(rideId), {
         rideId,
         riderId: ride.riderId,
