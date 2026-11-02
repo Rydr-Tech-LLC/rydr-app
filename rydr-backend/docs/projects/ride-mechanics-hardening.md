@@ -1,6 +1,6 @@
 # Ride mechanics hardening
 
-Implemented November 2, 2026. This change is local source work; it does not deploy services or initiate real charges.
+Implemented and deployed to backend services November 2, 2026. No real card was charged during verification. Both iOS apps still require a new distributed build for their UI changes.
 
 ## Driver controls
 
@@ -36,7 +36,7 @@ A frozen settlement plan prevents promotions changing across retries. Recovery r
 
 Deploy the Firestore indexes first, then the Stripe service, core backend, Cloud Functions (including authorization release, standard-ride maintenance, payment reconciliation, and authorization notifications), and both apps. Both services and the functions must share `RYDR_INTERNAL_SERVICE_TOKEN`. Configure `RYDR_STRIPE_BACKEND_URL` on the core backend and functions, and `RYDR_BACKEND_URL` on the functions. Use the intended Stripe test/live mode consistently.
 
-Before production rollout, exercise Stripe test-mode authorization, 3DS, decline, cancellation, no-driver release, scheduled activation with the rider app closed, lower and increased final fares, response loss after capture, and Connect transfer recovery. No live payment, deployment, or simulator ride was performed by the source implementation task.
+Before production rollout, exercise Stripe test-mode authorization, 3DS, decline, cancellation, no-driver release, scheduled activation with the rider app closed, lower and increased final fares, response loss after capture, and Connect transfer recovery. Provider tests used Stripe test fixtures. Full app end-to-end ride verification remains outstanding; simulator execution is unavailable on this host.
 
 ## Additional recovery fixes
 
@@ -58,4 +58,14 @@ The rider receipt now observes authoritative payment state after ride completion
 - The two previously reported payout failures were test-clock errors: tests used the real date while their service used a fixed clock. They now use the injected clock, and the full Stripe suite passes.
 - Actual Stripe test-mode provider checks passed through the existing Render service: reserve $25 without capturing, capture a $23 final fare, retry that capture without duplicating it, release an unused hold, decline an unusable card, and require off-session 3DS. These isolated provider checks used test card fixtures without creating a Firebase ride or moving real money; they do not replace app end-to-end testing.
 
-The existing Render Stripe service has Test and Live keys and its internal service token configured. The deployed workspace bootstrap reports authentication version 2 and the expected separate Firebase projects. The Render workspace displays a billing-payment warning. Firebase deployment was attempted but stopped because the local CLI login expired; indexes and functions are not yet deployed from this branch. Refresh the existing Firebase login before continuing rollout.
+The existing Render Stripe service has Test and Live keys and its internal service token configured. The deployed workspace bootstrap reports authentication version 2 and the expected separate Firebase projects. The Render workspace displays a billing-payment warning.
+
+## Backend rollout — November 2, 2026
+
+- Commit `33716f0` was pushed directly to main. Render confirms that both the Stripe and core backend services are live on this commit; both health checks return HTTP 200.
+- Firebase authentication was refreshed. Firestore indexes were deployed to the Test default database and the Live project default and live-beta databases. All 17 composite indexes report READY in both the Test default and Live Beta databases.
+- Eight targeted functions deployed successfully in each workspace: payment job handling, paid-ride promotion settlement, authorization release jobs, payment maintenance, standard ride maintenance, request-created notifications, rematch notifications, and authorization-required notifications. All 16 report ACTIVE. Live triggers target only the live-beta database; Test triggers target the Test default database.
+- Functions use the existing service token and the verified service URLs: core `https://rydr-backend-2cl9.onrender.com` and Stripe `https://rydr-stripe-backend.onrender.com`. Local ignored dotenv files preserve these nonsecret deployment parameters.
+- Existing Test and Live platform Stripe webhook endpoints now include refund and dispute-created/updated/closed events. Existing event subscriptions, destination URLs, and signing secrets are preserved.
+- Validation also includes 62 Cloud Functions tests and 18 Firestore rules tests, for 419 passing automated tests in total.
+- No live charge, refund, payout, or driver clawback was initiated by this rollout. The mobile UI changes are in source and build successfully; they are not yet distributed through TestFlight or the App Store.
