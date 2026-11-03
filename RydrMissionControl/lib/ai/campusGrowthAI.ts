@@ -1,3 +1,4 @@
+import { providerError } from './providerError';
 import "server-only";
 
 import crypto from "crypto";
@@ -119,6 +120,7 @@ export interface AILeadCandidate {
 }
 
 export interface DiscoveryInput {
+  emailOutreach?: boolean;
   /** Bounded background-agent searches; manual discovery retains its existing cap. */
   strategyLimit?: number;
   discoveryGoal?: string;
@@ -182,7 +184,9 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
   const categories = cleanList(input.categories).length ? cleanList(input.categories) : DEFAULT_PRIORITY_CATEGORIES;
   const maxSearchResults = clamp(Number(input.maxSearchResults) || 5, 1, 20);
   const runId = crypto.randomUUID();
-  const planned = await planSearchStrategies(campusNames, categories, discoveryGoal, leadIntents);
+  const planned = input.emailOutreach
+    ? buildEmailContactQueries(campusNames)
+    : await planSearchStrategies(campusNames, categories, discoveryGoal, leadIntents);
   const searchStrategies = input.strategyLimit
     ? planned.slice(0, Math.max(1, Math.min(4, Math.floor(input.strategyLimit)))) : planned;
   const searchBatch = await runBraveSearches(searchStrategies, maxSearchResults);
@@ -243,6 +247,19 @@ export async function discoverCampusLeads(input: DiscoveryInput): Promise<Discov
     leads: cleaned,
     rejectedSources
   };
+}
+
+/** Search indexed contact information; never fetch or scrape organization pages. */
+export function buildEmailContactQueries(campuses: string[]): string[] {
+  return campuses.flatMap(campus => {
+    const name = campus.replace(/["\r\n]/g, ' ').trim();
+    return [
+      `"${name}" site:edu "student organization" "email"`,
+      `"${name}" site:edu "student government" "contact" "@"`,
+      `"${name}" site:edu "student club" "email"`,
+      `"${name}" site:edu "student life" "contact" "@"`,
+    ];
+  });
 }
 
 async function planSearchStrategies(campusNames: string[], categories: string[], discoveryGoal: string, leadIntents: string[]): Promise<string[]> {
@@ -782,7 +799,8 @@ async function extractLeadsWithAI(input: {
     })
   }).catch(() => null);
 
-  if (!response?.ok) return ruleBasedCandidates(input.searchResults, input.campusNames, input.categories);
+  if (!response) throw new Error('OpenAI lead extraction could not be reached.');
+  if (!response.ok) throw await providerError(response);
   const data = (await response.json()) as { output_text?: string; output?: Array<{ content?: Array<{ text?: string }> }> };
   const jsonText = data.output_text ?? data.output?.flatMap((part) => part.content ?? []).map((content) => content.text).find(Boolean);
   if (!jsonText) return [];

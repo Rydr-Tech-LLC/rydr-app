@@ -6,7 +6,7 @@ import { metaSettings } from './metaConnection';
 import { decryptMetaToken } from './metaSecurity';
 export class MetaRequestError extends Error {
   constructor(public uncertain: boolean, public code: number | null, public subcode: number | null) {
-    super(uncertain ? 'Meta response was uncertain. Check Instagram before resolving this item; it will not be retried automatically.' : `Meta rejected the request (code ${code ?? 'unavailable'}${subcode ? `/${subcode}` : ''}). Check account permissions and media requirements.`);
+    super(uncertain ? 'Meta response was uncertain. Check the relevant Instagram or Facebook account before resolving this item; it will not be retried automatically.' : `Meta rejected the request (code ${code ?? 'unavailable'}${subcode ? `/${subcode}` : ''}). Check account permissions and media requirements.`);
   }
 }
 export async function socialConnection() {
@@ -32,7 +32,7 @@ export async function socialGraph(path: string, params: Record<string, unknown> 
   if (!response.ok || data.error) {
     const error = new MetaRequestError(response.status >= 500, Number(data.error?.code) || null, Number(data.error?.error_subcode) || null);
     // Surface only known permission identifiers, never raw provider messages or credentials.
-    const required = ['pages_manage_metadata','pages_messaging','instagram_manage_messages','instagram_basic'].filter(scope => String(data.error?.message ?? '').includes(scope));
+    const required = ['pages_manage_posts','pages_manage_metadata','pages_messaging','instagram_manage_messages','instagram_basic'].filter(scope => String(data.error?.message ?? '').includes(scope));
     if (!error.uncertain && required.length) error.message += ` Meta identified: ${required.join(', ')}.`;
     throw error;
   }

@@ -55,11 +55,11 @@ Module._load = function(id, parent, ...rest) {
     if (id === '@/lib/workspace') return { currentWorkspace: async () => workspace };
     if (id === 'resend') return { Resend: class { emails = { send: async (...args) => { resendCalls.push(args); return { data: { id: 'provider-id' } }; } }; } };
   }
-  if (parent?.filename.endsWith('marketingAgent.ts')) {
+  if (parent?.filename.endsWith('marketingAgent.ts') || parent?.filename.endsWith('marketingShiftReport.ts') || parent?.filename.endsWith('rowenStatus.ts')) {
     if (id === './firebaseAdmin') return { getWorkspaceDb: async () => db };
     if (id === './workspace') return { currentWorkspace: async () => workspace };
     if (id === './ai/campusGrowthAI') return { discoveryFingerprint: () => 'existing-discovery', discoverCampusLeads: async input => {
-      discoveryCalls++; assert.deepEqual(input.manualUrls, []); assert.equal(input.strategyLimit, 4);
+      discoveryCalls++; assert.deepEqual(input.manualUrls, []); assert.equal(input.strategyLimit, 4); assert.equal(input.emailOutreach, true); assert.equal(input.maxSearchResults, 10);
       return { leads: discovered, warnings: [], searchResults: discovered.map(l => ({ link: l.sourceUrl, title: l.name, snippet: `Contact ${l.publicEmail}` })) };
     } };
     if (id === './ai/marketingCopy') return { draftMarketingCopy: async () => { copyCalls++; if (onDraft) await onDraft(); return { suitable: true, subject: 'Student Live Beta pilot', body: 'Would your group like to discuss a pilot?', instagramDraft: 'DM draft', reason: 'Student group', model: 'fake' }; } };
@@ -71,6 +71,7 @@ require.extensions['.ts'] = (mod, filename) => mod._compile(ts.transpileModule(f
 const policy = require('../lib/marketingAgentPolicy.ts');
 const agent = require('../lib/marketingAgent.ts');
 const inbox = require('../lib/marketingAgentInbox.ts');
+const shiftReports = require('../lib/marketingShiftReport.ts');
 const campaignPath = 'marketingAgentCampaigns/student-beta-october-2026';
 const leadId = email => crypto.createHash('sha256').update(email).digest('hex');
 const leadPath = email => `${campaignPath}/leads/${leadId(email)}`;
@@ -80,10 +81,35 @@ function config(overrides = {}) { return { name: 'Rowen', status: 'active', mode
   dayReserved: 0, totalReserved: 0, lastDiscoveryAt: now, ...overrides }; }
 function seed(email = lead.publicEmail, state = 'queued') { docs.set(leadPath(email), { ...lead, email, publicEmail: email, state, updatedAt: now, subject: 'Pilot invitation', body: 'Hello' }); }
 beforeEach(() => {
+  delete process.env.MARKETING_AGENT_REPORT_DATE; delete process.env.MARKETING_AGENT_REPORT_TO;
   docs.clear(); sent = []; discovered = []; discoveryCalls = 0; copyCalls = 0; workspace = 'live-beta'; onDraft = null;
   providerResult = { ok: true, providerMessageId: 'email-id' }; now = RealDate.parse('2026-10-27T16:00:00Z');
   Object.assign(process.env, { OPENAI_API_KEY: 'fake', BRAVE_SEARCH_API_KEY: 'fake', RESEND_API_KEY: 'fake', MARKETING_AGENT_SECRET: 'unit-test-only', MARKETING_AGENT_PUBLIC_URL: 'https://mc.example.com' });
   docs.set(campaignPath, config());
+});
+
+test('cloud report sends once under concurrency, after shift, without using outreach counters', async () => {
+  process.env.MARKETING_AGENT_REPORT_DATE = '2026-10-27';
+  process.env.MARKETING_AGENT_REPORT_TO = 'khris.nunnally@rydr-go.com';
+  assert.equal((await shiftReports.sendDueShiftReport()).skipped, true);
+  now = RealDate.parse('2026-10-27T21:37:00Z');
+  await Promise.all([shiftReports.sendDueShiftReport(), shiftReports.sendDueShiftReport()]);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, 'khris.nunnally@rydr-go.com');
+  assert.match(sent[0].subject, /Rowen shift report/);
+  assert.equal(docs.get(campaignPath).totalReserved, 0);
+  assert.equal(docs.get(campaignPath + '/shiftReports/2026-10-27').status, 'sent');
+  await inbox.receiveDeliveryEvent('email-id', 'email.delivered');
+  assert.equal(docs.get(campaignPath + '/shiftReports/2026-10-27').deliveryEvent, 'email.delivered');
+  await shiftReports.sendDueShiftReport(); assert.equal(sent.length, 1);
+});
+
+test('ambiguous report delivery remains held and is never blindly retried', async () => {
+  Object.assign(process.env, { MARKETING_AGENT_REPORT_DATE: '2026-10-27', MARKETING_AGENT_REPORT_TO: 'khris.nunnally@rydr-go.com' });
+  now = RealDate.parse('2026-10-27T21:37:00Z'); providerResult = { ok:false, error:'timeout' };
+  await assert.rejects(shiftReports.sendDueShiftReport());
+  await shiftReports.sendDueShiftReport(); assert.equal(sent.length, 1);
+  assert.equal(docs.get(campaignPath + '/shiftReports/2026-10-27').status, 'unknown');
 });
 
 test('initial deadline is November 1 Eastern and campaign can be extended', () => {
@@ -118,7 +144,7 @@ test('concurrent runs send each contact once with a stable idempotency key', asy
   assert.match(sent[0].idempotencyKey, /marketing\/live-beta\//);
   assert.match(sent[0].body, /AI campus outreach assistant/); assert.match(sent[0].body, /unsubscribe/);
   assert.equal(sent[0].from, 'Rowen | Rydr Tech LLC <marketing@rydr-go.com>');
-  assert.equal(sent[0].replyTo, actor.email); assert.equal(docs.get(campaignPath).totalReserved, 1);
+  assert.equal(sent[0].replyTo, "support@rydr-go.com"); assert.equal(sent[0].bcc, actor.email); assert.equal(docs.get(campaignPath).totalReserved, 1);
 });
 test('review mode does not send until explicit approval and a subsequent run', async () => {
   docs.set(campaignPath, config({ mode: 'review' })); seed(); await agent.runMarketingAgent();
@@ -243,4 +269,79 @@ test('shift analytics distinguish sent, simulated, received and excluded work', 
   seed(); await agent.runMarketingAgent(); await inbox.receiveMarketingEmail(incoming());
   const snapshot = await agent.agentSnapshot(); assert.equal(snapshot.shift.outreach, 1); assert.equal(snapshot.shift.replies, 1); assert.equal(snapshot.shift.drafted, 1); assert.equal(snapshot.shift.simulated, 0); assert.equal(snapshot.shift.batches, 1);
   now = RealDate.parse('2026-10-28T16:00:00Z'); const next = await agent.agentSnapshot(); assert.equal(next.shift.outreach, 0); assert.equal(next.shift.replies, 0);
+});
+
+
+test('saving an unstarted campaign preserves activation and verified inbox metadata', async () => {
+ Object.assign(docs.get(campaignPath), { inboxVerifiedAt: now-1000, inboxProbeSubject: 'pending probe', totalReserved: 3, dayReserved: 2, createdBy: 'original' });
+ await agent.saveAgent(config({ dailyLimit: 8 }), actor);
+ const saved=docs.get(campaignPath);
+ assert.equal(saved.status,'active');assert.equal(saved.inboxVerifiedAt,now-1000);assert.equal(saved.inboxProbeSubject,'pending probe');
+ assert.equal(saved.totalReserved,3);assert.equal(saved.dayReserved,2);assert.equal(saved.createdBy,'original');assert.equal(saved.dailyLimit,8);
+ docs.get(campaignPath).status='paused';await agent.saveAgent(config(),actor);assert.equal(docs.get(campaignPath).status,'paused');
+ docs.delete(campaignPath);await agent.saveAgent(config(),actor);assert.equal(docs.get(campaignPath).status,'paused');
+});
+
+
+test('scheduled breaks block sends and lunch follows Eastern daylight saving time', async () => {
+ const {rowenShift}=require('../lib/rowenShift.ts');
+ for(const iso of ['2026-10-28T14:45:00Z','2026-10-28T16:30:00Z','2026-10-28T19:00:00Z','2026-11-02T17:30:00Z']){
+  now=RealDate.parse(iso);assert.equal(policy.withinSendingHours(),false);assert.equal(rowenShift().onShift,true);
+  assert.equal((await agent.runMarketingAgent()).skipped,true);
+ }
+ for(const iso of ['2026-10-28T15:00:00Z','2026-10-28T17:00:00Z','2026-10-28T19:15:00Z','2026-11-02T18:00:00Z'])assert.equal(policy.withinSendingHours(new RealDate(iso)),true);
+ assert.equal(rowenShift(new RealDate('2026-10-28T20:45:00Z')).label,'Ending Shift');
+ assert.equal(rowenShift(new RealDate('2026-10-31T16:30:00Z')).label,'Off shift');
+ assert.equal(sent.length,0);
+});
+
+
+test('live status reports real work, lunch, and scheduler failure distinctly', async () => {
+ const {rowenStatus}=require('../lib/rowenStatus.ts');
+ Object.assign(docs.get(campaignPath),{schedulerLastSeen:now,leaseUntil:now+60000,activity:'Drafting an invitation'});
+ assert.equal((await rowenStatus()).label,'Working · Live Beta Marketing');
+ docs.get(campaignPath).leaseUntil=0;
+ assert.equal((await rowenStatus()).label,'Waiting for next task');
+ docs.get(campaignPath).lastError='Provider unavailable';
+ assert.equal((await rowenStatus()).label,'Needs attention');
+ now=RealDate.parse('2026-10-27T16:30:00Z');
+ assert.equal((await rowenStatus()).label,'On Lunch');
+});
+
+test('provider diagnostics distinguish billing and rate limits without exposing response details', async () => {
+ const {providerError}=require('../lib/ai/providerError.ts');
+ for(const code of ['insufficient_quota','credit_balance_exhausted','organization_spend_limit_exceeded','project_spend_limit_exceeded','organization_usage_limit_exceeded']){
+  const err=await providerError(new Response(JSON.stringify({error:{code,message:'private provider content'}}),{status:429}));
+  assert.match(err.message,/quota exhausted/);assert.doesNotMatch(err.message,/private/);
+ }
+ assert.match((await providerError(new Response(JSON.stringify({error:{code:'rate_limit_exceeded'}}),{status:429}))).message,/rate limit reached/);
+ assert.match((await providerError(new Response('{}',{status:429}))).message,/billing and rate limits/);
+});
+
+test('contact-focused discovery reviews email evidence and automatically sends eligible outreach', async () => {
+ docs.set(campaignPath, config({lastDiscoveryAt:0}));discovered=[lead,{...lead,name:'Student club without contact',publicEmail:''}];
+ const report=await agent.runMarketingAgent();
+ assert.equal(report.discovered,1);assert.equal(report.sent,1);
+ assert.equal(report.exclusionReasons['No public email'],1);
+ assert.equal(sent[0].to,lead.publicEmail);
+ assert.equal(docs.get(leadPath(lead.publicEmail)).state,'sent');
+});
+
+test('admin command saves a review draft and sends it once only after confirmation',async()=>{
+ const draft=await agent.prepareRowenCommand('Email club@example.edu at Example University about a Live Beta for their student robotics club.',actor);
+ assert.equal(docs.get(leadPath(lead.publicEmail)).state,'review');assert.equal(sent.length,0);
+ await agent.runMarketingAgent();assert.equal(sent.length,0);
+ await agent.sendRowenCommand(draft.id,actor);await agent.sendRowenCommand(draft.id,actor);
+ assert.equal(sent.length,1);assert.equal(sent[0].to,lead.publicEmail);
+ await assert.rejects(agent.prepareRowenCommand('Email club@example.edu about the student club.',actor),/already exists/);
+});
+
+test('commands reject missing/multiple/no-reply recipients and honor suppressions and breaks',async()=>{
+ for(const command of ['Email the club','Email a@example.edu and b@example.edu','Email noreply@example.edu'])await assert.rejects(agent.prepareRowenCommand(command,actor));
+ docs.set('marketingAgentContacts/'+leadId('blocked@example.edu'),{blocked:true});
+ await assert.rejects(agent.prepareRowenCommand('Email blocked@example.edu for the student club.',actor));
+ const draft=await agent.prepareRowenCommand('Email club@example.edu for the student club.',actor);
+ now=RealDate.parse('2026-10-27T16:30:00Z');
+ assert.equal((await agent.sendRowenCommand(draft.id,actor)).status,'skipped');assert.equal(sent.length,0);
+ assert.equal(docs.get(leadPath(lead.publicEmail)).state,'ready');
 });
