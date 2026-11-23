@@ -1,10 +1,26 @@
 import DeclineDocumentForm from "./DeclineDocumentForm";
+import RerunDocumentReview from "./RerunDocumentReview";
 import { DOCUMENT_REJECTION_LABELS } from "../../../../../rydr-backend/firebase/functions/src/services/documentReviewFeedback";
 import ImageViewer from "@/components/ImageViewer";
 import { driverDocumentReviewItems, uploadedDocumentPath } from "@/lib/driverDocumentReview";
 import { toDateSafe } from "@/lib/format";
 
-const fields: Record<string, string> = { documentType: "Detected document", name: "Name", dateOfBirth: "Date of birth", licenseNumber: "License number", state: "State", expirationDate: "Expiration", insurancePolicyNumber: "Policy number", vin: "VIN", plateNumber: "License plate" };
+const fields = {
+  driverLicense: {
+    documentType: "Detected document", licenseClass: "Class", state: "Issuing state",
+    issuanceDate: "Issue date", expirationDate: "Expiration date", licenseNumber: "License number"
+  },
+  insurance: {
+    insurancePolicyNumber: "Policy number", effectiveDate: "Effective date", expirationDate: "End date",
+    policyholderFirstName: "Policyholder first name", policyholderLastName: "Policyholder last name",
+    vin: "VIN", vehicleYear: "Year", vehicleMake: "Make", vehicleModel: "Model"
+  },
+  registration: {
+    vin: "VIN", vehicleMake: "Make", vehicleModel: "Model", vehicleYear: "Year", expirationDate: "Expiration date"
+  },
+  vehicleInspection: { expirationDate: "Expiration date", vin: "VIN", plateNumber: "License plate" }
+};
+
 const labels: Record<string, string> = { approved: "Approved", pending: "Automated review processing", needs_review: "Manual review required", rejected: "Rejected — needs attention", expired: "Expired", awaiting_automation: "Uploaded — review result missing", missing: "Not uploaded" };
 export default function DriverDocumentReviewPanel({ uid, driver, history }: { uid: string; driver: any; history: any[] }) {
   const items = driverDocumentReviewItems(driver);
@@ -13,11 +29,32 @@ export default function DriverDocumentReviewPanel({ uid, driver, history }: { ui
     <div className="grid gap-4 lg:grid-cols-2">{items.filter(item => item.kind !== "vehicleInspection" || item.uploaded).map(item => {
       const record = item.record;
       const previews = (["front", "back"] as const).filter(side => uploadedDocumentPath(driver, uid, item.kind, side));
-      const reviewed = toDateSafe(record.reviewedAt);
+      const reviewed = toDateSafe(record.automationReviewedAt ?? record.reviewedAt);
+      const canRead = item.kind !== "vehicleInspection" && !item.processing
+        && uploadedDocumentPath(driver, uid, item.kind, item.kind === "driverLicense" ? "front" : "single");
+      const legacyOcr = item.kind !== "vehicleInspection" && record.extractedFields && record.ocrSchemaVersion !== 2;
+      const ocrFields = legacyOcr ? {} : record.extractedFields ?? {};
+      const verifiedExpiry = record.approvedRecord?.expirationDate;
+      const expiryDisagrees = record.manualReviewId === record.reviewId && record.manualReviewId
+        && typeof verifiedExpiry === "string" && ocrFields.expirationDate && verifiedExpiry !== ocrFields.expirationDate;
       return <article key={item.kind} className="rounded-2xl border border-line p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{item.label}</h3><span className={`rounded-full px-3 py-1 text-xs font-medium ${item.attention ? "bg-amber-100 text-amber-900" : item.status === "approved" ? "bg-emerald-50 text-emerald-800" : "bg-grouped text-muted"}`}>{labels[item.status] ?? item.status}</span></div>
         <p className="mt-2 text-sm text-muted">{record.reviewReason || (item.uploaded ? "The upload is available. Automated review details will appear here." : "No upload has been recorded.")}</p>
         <div className="mt-3 grid grid-cols-2 gap-2">{previews.map(side => <ImageViewer key={side} label={`${item.label} ${side}`} url={`/api/drivers/${encodeURIComponent(uid)}/documents/${item.kind}/${side}`} />)}</div>
-        <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">{Object.entries(fields).filter(([key]) => !item.processing && item.status !== "awaiting_automation" && record.extractedFields?.[key]).map(([key, label]) => <div key={key}><dt className="text-muted">{label}</dt><dd className="break-all font-medium">{String(record.extractedFields[key])}</dd></div>)}</dl>
+        {legacyOcr && !item.processing && <p className="mt-2 text-xs text-muted">Re-run automated review to refresh fields from this upload.</p>}
+        {item.uploaded && !item.processing && item.status !== "awaiting_automation" && <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
+          {Object.entries(fields[item.kind]).map(([key, label]) => {
+            const value = ocrFields[key];
+            return <div key={key}><dt className="text-muted">{label}</dt><dd className={value ? "break-words font-medium" : "text-muted"}>
+              {key === "documentType" && value === "driverLicense" ? "Driver’s license" : value || "Not detected"}
+            </dd></div>;
+          })}
+        </dl>}
+        {expiryDisagrees && <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">
+          The OCR expiration date differs from the staff-verified date ({verifiedExpiry}). Check the upload before updating the verified date.
+        </p>}
+        {record.automationStatus && record.manualReviewId && record.manualReviewId === record.reviewId &&
+          <p className="mt-2 text-xs text-muted">{labels[record.automationStatus] ?? record.automationStatus}. {record.automationReason}</p>}
+        {canRead && <RerunDocumentReview uid={uid} kind={item.kind} reviewId={record.reviewId ?? ""} />}
         {record.storagePath && <DeclineDocumentForm uid={uid} kind={item.kind} storagePath={record.storagePath} reviewId={record.reviewId ?? ""} reasons={DOCUMENT_REJECTION_LABELS} />}
         {reviewed && <p className="mt-2 text-xs text-muted">Reviewed {reviewed.toLocaleString("en-US", { timeZone: "America/New_York" })} ET</p>}
         {record.approvedRecord && item.status !== "approved" && <p className="mt-2 rounded-lg bg-grouped p-2 text-xs">Previous approved proof retained. Its validity and driving holds are evaluated separately.</p>}

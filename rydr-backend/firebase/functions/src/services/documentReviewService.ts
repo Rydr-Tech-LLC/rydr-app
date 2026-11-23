@@ -1,7 +1,7 @@
-import { currentDocument, documentDeadline, nestedFields } from "./driverCompliancePolicy";
+import { currentDocument, documentDeadline, georgiaDate, latestDocument, nestedFields } from "./driverCompliancePolicy";
 import { createHash } from "crypto";
-import fetch from "node-fetch";
 import { db, FieldValue } from "../admin";
+import { extractDriverProofFields, vehicleMakeToken, vehicleToken, type ExtractedFields } from "./driverDocumentFields";
 
 type OwnerType = "driver" | "rider";
 type DriverDocumentKind = "driverLicense" | "insurance" | "registration" | "vehicleInspection";
@@ -17,18 +17,6 @@ type ParsedDocumentPath = {
   storagePath: string;
 };
 
-type ExtractedFields = {
-  documentType?: string;
-  name?: string;
-  dateOfBirth?: string;
-  licenseNumber?: string;
-  state?: string;
-  expirationDate?: string;
-  insurancePolicyNumber?: string;
-  vin?: string;
-  plateNumber?: string;
-};
-
 type DriverProfile = {
   firstName?: string | null;
   lastName?: string | null;
@@ -37,6 +25,9 @@ type DriverProfile = {
   licenseState?: string | null;
   vehicleVin?: string | null;
   vehiclePlate?: string | null;
+  vehicleMake?: string | null;
+  vehicleModel?: string | null;
+  vehicleYear?: string | null;
 };
 
 type ReviewDecision = {
@@ -122,7 +113,11 @@ export async function reviewUploadedDocument(params: {
   const reviewId = documentReviewId(params.bucket, parsed.storagePath);
   const downloadURL = downloadURLForObject(params.bucket, parsed.storagePath, params.metadata);
   const generation = params.generation == null ? null : String(params.generation);
-  await writePendingReview(parsed, reviewId, params.bucket, generation, downloadURL);
+  if (parsed.ownerType === "driver" && parsed.kind === "driverLicense" && parsed.side === "back") {
+    await saveLicenseBack(parsed, generation, downloadURL);
+    return;
+  }
+  if (!await writePendingReview(parsed, reviewId, params.bucket, generation, downloadURL)) return;
 
   if (!params.contentType?.startsWith("image/")) {
     await writeFinalReview(parsed, {
@@ -131,7 +126,7 @@ export async function reviewUploadedDocument(params: {
       downloadURL,
       reviewId,
       extractedText: "",
-      extractedFields: { documentType: parsed.kind },
+      extractedFields: {},
       decision: {
         status: "rejected",
         reviewReason: "Unsupported upload type. Documents must be uploaded as readable images.",
@@ -151,7 +146,7 @@ export async function reviewUploadedDocument(params: {
       downloadURL,
       reviewId,
       extractedText: "",
-      extractedFields: { documentType: parsed.kind },
+      extractedFields: {},
       decision: {
         status: "needs_review",
         reviewReason: error instanceof Error ? `Vision OCR failed: ${error.message}` : "Vision OCR failed.",
@@ -161,11 +156,15 @@ export async function reviewUploadedDocument(params: {
     throw error;
   }
 
-  const extractedFields = extractFields(parsed.kind, extractedText);
-
   if (parsed.ownerType === "driver") {
-    const profile = await loadDriverProfile(parsed.uid);
-    const decision = decideDriverDocument(parsed.kind as DriverDocumentKind, extractedText, extractedFields, profile);
+    const driver = (await db.collection("drivers").doc(parsed.uid).get()).data() ?? {};
+    const kind = parsed.kind as DriverDocumentKind;
+    const result = kind === "vehicleInspection"
+      ? { extractedFields: extractFields(extractedText) }
+      : reviewDriverProof(kind, extractedText, driver);
+    const { extractedFields } = result;
+    const decision = "decision" in result ? result.decision
+      : decideDriverDocument(kind, extractedText, extractedFields, driverProfile(driver));
     await writeFinalReview(parsed, {
       bucket: params.bucket,
       generation,
@@ -178,6 +177,7 @@ export async function reviewUploadedDocument(params: {
     return;
   }
 
+  const extractedFields = extractFields(extractedText);
   await writeFinalReview(parsed, {
     bucket: params.bucket,
     generation,
@@ -189,7 +189,7 @@ export async function reviewUploadedDocument(params: {
   });
 }
 
-function decideDriverDocument(
+export function decideDriverDocument(
   kind: DriverDocumentKind,
   extractedText: string,
   fields: ExtractedFields,
@@ -197,10 +197,9 @@ function decideDriverDocument(
 ): ReviewDecision {
   const checks: ReviewDecision["checks"] = {
     readable: extractedText.trim().length >= 35,
-    documentTypeMatched: inferredTypeMatches(kind, fields.documentType),
+    documentTypeMatched: fields.documentType === kind,
     expirationPresent: Boolean(fields.expirationDate),
     expirationValid: null,
-    requiredFieldsPresent: requiredDriverFieldsPresent(kind, fields),
     nameMatches: null,
     vehicleMatches: null
   };
@@ -208,27 +207,37 @@ function decideDriverDocument(
   const failures: string[] = [];
   if (!checks.readable) failures.push("Image appears unreadable or OCR returned too little text.");
   if (!checks.documentTypeMatched) failures.push("Document type is uncertain.");
-  if (!checks.requiredFieldsPresent) failures.push("Required document fields are missing.");
+  const missing = missingDriverFields(kind, fields);
+  checks.requiredFieldsPresent = missing.length === 0;
+  if (missing.length) failures.push(`Missing or unreadable: ${missing.join(", ")}.`);
 
   const expiration = fields.expirationDate ? parseDate(fields.expirationDate) : null;
+  let expired = false;
   if (fields.expirationDate && expiration) {
     checks.expirationValid = documentDeadline(fields.expirationDate) > Date.now();
-    if (!checks.expirationValid) {
-      return {
-        status: "expired",
-        reviewReason: `Document expired on ${fields.expirationDate}.`,
-        checks
-      };
-    }
+    expired = !checks.expirationValid;
   } else if (requiresExpiration(kind)) {
     checks.expirationValid = false;
-    failures.push("Expiration date is missing or unreadable.");
   }
 
   if (kind === "driverLicense") {
-    const nameMatch = namesMatch(fields.name, profile);
-    checks.nameMatches = nameMatch;
-    if (!nameMatch) failures.push("Extracted name does not match the driver profile.");
+    if (fields.name) {
+      checks.nameMatches = namesMatch(fields.name, profile);
+      if (!checks.nameMatches) failures.push("Extracted name does not match the driver profile.");
+    } else if (!profile.licenseNumber) {
+      failures.push("Driver name is unreadable and no profile license number is available for matching.");
+    }
+
+    if (fields.state && profile.licenseState) {
+      checks.licenseStateMatches = normalizeToken(fields.state) === normalizeToken(profile.licenseState);
+      if (!checks.licenseStateMatches) failures.push("Issuing state does not match the driver profile.");
+    }
+    if (fields.issuanceDate && fields.expirationDate && fields.issuanceDate >= fields.expirationDate) {
+      failures.push("The license issue date must precede expiration.");
+    }
+    if (fields.issuanceDate && fields.issuanceDate > georgiaDate(Date.now())) {
+      failures.push("The license issue date is in the future.");
+    }
 
     if (fields.dateOfBirth && profile.dob) {
       const dobMatches = sameCalendarDate(parseDate(fields.dateOfBirth), profile.dob);
@@ -243,8 +252,35 @@ function decideDriverDocument(
     }
   }
 
-  if (kind === "registration" || kind === "insurance" || kind === "vehicleInspection") {
-    const vehicleMatch = vehicleFieldsMatch(fields, profile, kind);
+  if (kind === "insurance") {
+    if (fields.policyholderFirstName && fields.policyholderLastName) {
+      checks.policyholderMatches = normalizeNamePart(fields.policyholderFirstName) === normalizeNamePart(profile.firstName ?? "")
+        && normalizeNamePart(fields.policyholderLastName) === normalizeNamePart(profile.lastName ?? "");
+      if (!checks.policyholderMatches) failures.push("The named insured does not match the driver profile.");
+    }
+    if (fields.effectiveDate && fields.expirationDate && fields.effectiveDate >= fields.expirationDate) {
+      failures.push("The policy effective date must precede expiration.");
+    }
+    if (fields.effectiveDate && fields.effectiveDate > georgiaDate(Date.now())) {
+      failures.push("Insurance coverage has not started.");
+    }
+  }
+
+  if (kind === "registration" || kind === "insurance") {
+    checks.vinMatches = Boolean(fields.vin && profile.vehicleVin && normalizeVin(fields.vin) === normalizeVin(profile.vehicleVin));
+    if (!checks.vinMatches && fields.vin) failures.push("The VIN could not be matched to the driver vehicle.");
+    const evidence = [
+      [fields.vehicleYear, profile.vehicleYear, vehicleToken],
+      [fields.vehicleMake, profile.vehicleMake, vehicleMakeToken],
+      [fields.vehicleModel, profile.vehicleModel, vehicleToken]
+    ] as const;
+    const printed = evidence.filter(([value]) => value);
+    const detailsMatch = printed.every(([value, expected, normalize]) => Boolean(expected)
+      && normalize(value) === normalize(expected));
+    checks.vehicleMatches = checks.vinMatches && detailsMatch;
+    if (!detailsMatch) failures.push("The printed year, make or model could not be matched to the driver vehicle.");
+  } else if (kind === "vehicleInspection") {
+    const vehicleMatch = vehicleFieldsMatch(fields, profile);
     checks.vehicleMatches = vehicleMatch.matched;
     if (!vehicleMatch.matched) failures.push(vehicleMatch.reason);
   }
@@ -253,6 +289,7 @@ function decideDriverDocument(
     return { status: "needs_review", reviewReason: failures.join(" "), checks };
   }
 
+  if (expired) return { status: "expired", reviewReason: `Document expired on ${fields.expirationDate}.`, checks };
   return { status: "approved", reviewReason: "OCR fields matched required driver and vehicle profile data.", checks };
 }
 
@@ -273,9 +310,9 @@ function decideRiderDocument(extractedText: string, fields: ExtractedFields): Re
   };
 }
 
-function extractFields(kind: DocumentKind, text: string): ExtractedFields {
+function extractFields(text: string): ExtractedFields {
   const aamva = extractAamvaFields(text);
-  const inferredDocumentType = inferDocumentType(kind, text);
+  const inferredDocumentType = inferDocumentType(text);
   return compactFields({
     documentType: inferredDocumentType,
     name: aamva.name ?? extractName(text),
@@ -308,7 +345,7 @@ function extractAamvaFields(text: string): Partial<ExtractedFields> {
   return compactFields(fields);
 }
 
-function inferDocumentType(kind: DocumentKind, text: string): string {
+function inferDocumentType(text: string): string {
   const normalizedText = normalizeText(text);
   const matches = Object.entries(DOCUMENT_KEYWORDS).map(([documentType, keywords]) => ({
     documentType,
@@ -318,24 +355,17 @@ function inferDocumentType(kind: DocumentKind, text: string): string {
   return best && best.score > 0 ? best.documentType : "unknown";
 }
 
-function inferredTypeMatches(expected: DriverDocumentKind, inferred: string | undefined): boolean {
-  if (!inferred) return false;
-  if (expected === inferred) return true;
-  if (expected === "vehicleInspection" && inferred === "registration") return false;
-  return expected === "driverLicense" && ["identity", "stateId"].includes(inferred);
-}
-
-function requiredDriverFieldsPresent(kind: DriverDocumentKind, fields: ExtractedFields): boolean {
-  switch (kind) {
-    case "driverLicense":
-      return Boolean(fields.name && fields.expirationDate && (fields.licenseNumber || fields.dateOfBirth));
-    case "insurance":
-      return Boolean(fields.insurancePolicyNumber && fields.expirationDate);
-    case "registration":
-      return Boolean(fields.expirationDate && (fields.vin || fields.plateNumber));
-    case "vehicleInspection":
-      return Boolean(fields.expirationDate || fields.vin || fields.plateNumber);
+function missingDriverFields(kind: DriverDocumentKind, fields: ExtractedFields): string[] {
+  const required: Partial<Record<keyof ExtractedFields, string>> = {
+    driverLicense: { licenseClass: "class", state: "issuing state", issuanceDate: "issue date", expirationDate: "expiration date", licenseNumber: "license number" },
+    insurance: { insurancePolicyNumber: "policy number", effectiveDate: "effective date", expirationDate: "end date", policyholderFirstName: "policyholder first name", policyholderLastName: "policyholder last name", vin: "VIN" },
+    registration: { vin: "VIN", vehicleMake: "make", vehicleModel: "model", vehicleYear: "year", expirationDate: "expiration date" },
+    vehicleInspection: {}
+  }[kind];
+  if (kind === "vehicleInspection" && !(fields.expirationDate || fields.vin || fields.plateNumber)) {
+    return ["expiration date, VIN or license plate"];
   }
+  return Object.entries(required).filter(([key]) => !fields[key as keyof ExtractedFields]).map(([, label]) => label);
 }
 
 function requiresExpiration(kind: DriverDocumentKind): boolean {
@@ -350,8 +380,7 @@ function namesMatch(extractedName: string | undefined, profile: DriverProfile): 
 
 function vehicleFieldsMatch(
   fields: ExtractedFields,
-  profile: DriverProfile,
-  kind: DriverDocumentKind
+  profile: DriverProfile
 ): { matched: boolean; reason: string } {
   const expectedVin = normalizeVin(profile.vehicleVin);
   const expectedPlate = normalizePlate(profile.vehiclePlate);
@@ -378,9 +407,15 @@ function vehicleFieldsMatch(
   };
 }
 
-async function loadDriverProfile(uid: string): Promise<DriverProfile> {
-  const snap = await db.collection("drivers").doc(uid).get();
-  const data = snap.data() ?? {};
+export function reviewDriverProof(kind: Exclude<DriverDocumentKind, "vehicleInspection">, text: string, data: Record<string, unknown>) {
+  const profile = driverProfile(data);
+  const extractedFields = extractDriverProofFields(kind, text, {
+    make: profile.vehicleMake, model: profile.vehicleModel, year: profile.vehicleYear
+  });
+  return { extractedFields, decision: decideDriverDocument(kind, text, extractedFields, profile) };
+}
+
+function driverProfile(data: Record<string, unknown>): DriverProfile {
   const vehicle = asRecord(data.vehicle);
   const license = asRecord(data.license);
   return {
@@ -390,18 +425,22 @@ async function loadDriverProfile(uid: string): Promise<DriverProfile> {
     licenseNumber: asString(license.number) ?? asString(data.licenseNumber) ?? asString(data.driverLicenseNumber),
     licenseState: asString(license.state) ?? asString(data.licenseState),
     vehicleVin: asString(vehicle.vin) ?? asString(data.vin),
-    vehiclePlate: asString(vehicle.plate) ?? asString(data.plate) ?? asString(data.licensePlate)
+    vehiclePlate: asString(vehicle.plate) ?? asString(data.plate) ?? asString(data.licensePlate),
+    vehicleMake: asString(vehicle.make) ?? asString(data.vehicleMake),
+    vehicleModel: asString(vehicle.model) ?? asString(data.vehicleModel),
+    vehicleYear: asString(String(vehicle.year ?? data.vehicleYear ?? ""))
   };
 }
 
-async function detectDocumentText(gcsUri: string): Promise<string> {
-  const accessToken = await getCloudFunctionsAccessToken();
+export async function detectDocumentText(gcsUri: string, credentialToken?: string): Promise<string> {
+  const accessToken = credentialToken ?? await getCloudFunctionsAccessToken();
   if (!accessToken) {
     throw new Error("Could not acquire Google Cloud access token for Vision OCR.");
   }
 
   const response = await fetch("https://vision.googleapis.com/v1/images:annotate", {
     method: "POST",
+    signal: AbortSignal.timeout(30_000),
     headers: {
       authorization: `Bearer ${accessToken}`,
       "content-type": "application/json"
@@ -433,6 +472,7 @@ async function detectDocumentText(gcsUri: string): Promise<string> {
 
 async function getCloudFunctionsAccessToken(): Promise<string | null> {
   const response = await fetch(METADATA_TOKEN_URL, {
+    signal: AbortSignal.timeout(10_000),
     headers: { "Metadata-Flavor": "Google" }
   });
   if (!response.ok) {
@@ -443,13 +483,36 @@ async function getCloudFunctionsAccessToken(): Promise<string | null> {
   return payload.access_token ?? null;
 }
 
+function generationAtLeast(candidate: string | null, previous: unknown): boolean {
+  if (!candidate || typeof previous !== "string" || !/^\d+$/.test(candidate) || !/^\d+$/.test(previous)) return true;
+  return BigInt(candidate) >= BigInt(previous);
+}
+
+async function saveLicenseBack(parsed: ParsedDocumentPath, generation: string | null, downloadURL: string | null) {
+  const ref = db.collection("drivers").doc(parsed.uid);
+  await db.runTransaction(async tx => {
+    const current = latestDocument((await tx.get(ref)).data() ?? {}, parsed.kind);
+    if (!generationAtLeast(generation, current.backGeneration)) return;
+    tx.set(ref, nestedFields({
+      ...sideSpecificDocumentPointers(parsed, downloadURL),
+      "documents.driverLicense.backGeneration": generation,
+      updatedAt: FieldValue.serverTimestamp()
+    }), { merge: true });
+  });
+}
+
+function manuallyReviewed(current: Record<string, unknown>, path: string, generation: string | null): boolean {
+  return Boolean(current.manualReviewId && current.manualReviewStoragePath === path
+    && (current.manualReviewGeneration == null || String(current.manualReviewGeneration) === generation));
+}
+
 async function writePendingReview(
   parsed: ParsedDocumentPath,
   reviewId: string,
   bucket: string,
   generation: string | null,
   downloadURL: string | null
-): Promise<void> {
+): Promise<boolean> {
   const now = FieldValue.serverTimestamp();
   const payload = {
     documentType: parsed.kind,
@@ -465,12 +528,14 @@ async function writePendingReview(
 
   if (parsed.ownerType === "driver") {
     const driverRef = db.collection("drivers").doc(parsed.uid);
-    await db.runTransaction(async tx => {
+    return db.runTransaction(async tx => {
       const driver = (await tx.get(driverRef)).data() ?? {};
-      const current = driver.documents?.[parsed.kind] ?? {};
-      tx.set(driverRef.collection("documentReviews").doc(reviewId), payload, { merge: true });
-      if (generation && typeof current.latestGeneration === "string" && /^\d+$/.test(generation) && /^\d+$/.test(current.latestGeneration) && BigInt(generation) < BigInt(current.latestGeneration)) return;
-      if (current.manualReviewId && current.manualReviewStoragePath === parsed.storagePath && String(current.manualReviewGeneration ?? '') === String(generation ?? '')) return;
+      const current = latestDocument(driver, parsed.kind);
+      const reviewRef = driverRef.collection("documentReviews").doc(reviewId);
+      const previous = (await tx.get(reviewRef)).data();
+      if (previous?.generation === generation && previous.status !== "pending") return false;
+      if (!generationAtLeast(generation, current.latestGeneration) || manuallyReviewed(current, parsed.storagePath, generation)) return false;
+      tx.set(reviewRef, payload, { merge: true });
       const prior = currentDocument(driver, parsed.kind);
       const previousApproved = prior.status === "approved" ? { status: "approved", extractedFields: prior.extractedFields ?? {}, expirationDate: prior.expirationDate ?? prior.extractedFields?.expirationDate ?? null, storagePath: prior.storagePath ?? null, reviewId: prior.reviewId ?? null, generation: prior.generation ?? null } : null;
       tx.set(driverRef, nestedFields({
@@ -486,6 +551,7 @@ async function writePendingReview(
         ...legacyDriverDocumentImagePointers(parsed, downloadURL),
         updatedAt: now
       }), { merge: true });
+      return true;
     });
   } else {
     const riderRef = db.collection("riders").doc(parsed.uid);
@@ -505,6 +571,7 @@ async function writePendingReview(
       { merge: true }
     );
     await batch.commit();
+    return true;
   }
 }
 
@@ -546,35 +613,38 @@ async function writeFinalReview(
     const driverRef = db.collection("drivers").doc(parsed.uid);
     await db.runTransaction(async tx => {
       const driver = (await tx.get(driverRef)).data() ?? {};
-      const current = driver.documents?.[parsed.kind] ?? {};
-      const isAtLeast = (candidate: string | null, previous: unknown) => {
-        if (!candidate || typeof previous !== "string" || !/^\d+$/.test(candidate) || !/^\d+$/.test(previous)) return true;
-        return BigInt(candidate) >= BigInt(previous);
-      };
-      tx.set(driverRef.collection("documentReviews").doc(options.reviewId), reviewPayload, { merge: true });
-      const fields: Record<string, unknown> = {};
-      if (current.manualReviewId && current.manualReviewStoragePath === parsed.storagePath && String(current.manualReviewGeneration ?? '') === String(options.generation ?? '')) return;
+      const current = latestDocument(driver, parsed.kind);
+      const reviewRef = driverRef.collection("documentReviews").doc(options.reviewId);
+      const previous = (await tx.get(reviewRef)).data();
+      if (previous?.generation !== options.generation || previous?.status !== "pending") return;
+      tx.set(reviewRef, reviewPayload, { mergeFields: Object.keys(reviewPayload) });
+      if (manuallyReviewed(current, parsed.storagePath, options.generation)
+        || current.storagePath !== parsed.storagePath || current.reviewId !== options.reviewId
+        || !generationAtLeast(options.generation, current.latestGeneration)) return;
 
-      if (isAtLeast(options.generation, current.latestGeneration)) {
-        Object.assign(fields, {
-          [`documents.${parsed.kind}.status`]: options.decision.status,
-          [`documents.${parsed.kind}.reviewReason`]: options.decision.reviewReason,
-          [`documents.${parsed.kind}.reviewId`]: options.reviewId,
-          [`documents.${parsed.kind}.latestGeneration`]: options.generation,
-          [`documents.${parsed.kind}.lastUploadedSide`]: parsed.side,
-          [`documents.${parsed.kind}.storagePath`]: parsed.storagePath,
-          [`documents.${parsed.kind}.downloadURL`]: options.downloadURL,
-          ...sideSpecificDocumentPointers(parsed, options.downloadURL),
-          ...legacyDriverDocumentImagePointers(parsed, options.downloadURL),
-          [`documents.${parsed.kind}.extractedFields`]: options.extractedFields,
-          [`documents.${parsed.kind}.reviewedAt`]: now,
-          updatedAt: now
-        });
-      }
-      if (options.decision.status === "approved" && isAtLeast(options.generation, current.approvedRecord?.generation)) {
+      const fields: Record<string, unknown> = {
+        [`documents.${parsed.kind}.status`]: options.decision.status,
+        [`documents.${parsed.kind}.reviewReason`]: options.decision.reviewReason,
+        [`documents.${parsed.kind}.reviewId`]: options.reviewId,
+        [`documents.${parsed.kind}.latestGeneration`]: options.generation,
+        [`documents.${parsed.kind}.lastUploadedSide`]: parsed.side,
+        [`documents.${parsed.kind}.storagePath`]: parsed.storagePath,
+        [`documents.${parsed.kind}.downloadURL`]: options.downloadURL,
+        ...sideSpecificDocumentPointers(parsed, options.downloadURL),
+        ...legacyDriverDocumentImagePointers(parsed, options.downloadURL),
+        [`documents.${parsed.kind}.extractedFields`]: options.extractedFields,
+        [`documents.${parsed.kind}.automationStatus`]: options.decision.status,
+        [`documents.${parsed.kind}.automationReason`]: options.decision.reviewReason,
+        [`documents.${parsed.kind}.automationReviewedAt`]: now,
+        [`documents.${parsed.kind}.ocrSchemaVersion`]: parsed.kind === "vehicleInspection" ? 1 : 2,
+        [`documents.${parsed.kind}.reviewedAt`]: now,
+        updatedAt: now
+      };
+      if (options.decision.status === "approved") {
         fields[`documents.${parsed.kind}.approvedRecord`] = { status: "approved", extractedFields: options.extractedFields, expirationDate: options.extractedFields.expirationDate ?? null, storagePath: parsed.storagePath, reviewId: options.reviewId, generation: options.generation, reviewedAt: now };
+        fields[`documents.${parsed.kind}.expirationDate`] = options.extractedFields.expirationDate ?? null;
       }
-      if (Object.keys(fields).length > 0) tx.set(driverRef, nestedFields(fields), { merge: true });
+      tx.set(driverRef, nestedFields(fields), { mergeFields: Object.keys(fields) });
     });
     return;
   } else {
@@ -719,11 +789,6 @@ function formatDate(date: Date | null): string | undefined {
   return date.toISOString().slice(0, 10);
 }
 
-function startOfToday(): Date {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-}
-
 function sameCalendarDate(lhs: Date | null, rhs: Date | null): boolean {
   if (!lhs || !rhs) return false;
   return lhs.getUTCFullYear() === rhs.getUTCFullYear()
@@ -825,7 +890,7 @@ function normalizeText(value: string): string {
 }
 
 function normalizeNamePart(value: string): string {
-  return value.toLowerCase().replace(/[^a-z]/g, "");
+  return value.normalize("NFKD").toLowerCase().replace(/[^a-z]/g, "");
 }
 
 function nameTokens(value: string): string[] {

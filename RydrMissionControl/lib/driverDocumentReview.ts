@@ -4,11 +4,12 @@ export const DOCUMENT_LABELS: Record<DriverDocumentKind, string> = { driverLicen
 
 export function latestDriverDocument(driver: any, kind: DriverDocumentKind): Record<string, any> {
   const record = { ...(driver.documents?.[kind] ?? (kind === "driverLicense" ? driver.documents?.license : null) ?? {}) };
-  for (const field of ["status", "reviewReason", "reviewId", "storagePath", "frontPath", "backPath", "documentPath", "downloadURL", "frontURL", "backURL", "documentURL", "extractedFields", "reviewedAt"]) {
+  for (const field of ["status", "reviewReason", "reviewId", "lastUploadedSide", "storagePath", "frontPath", "backPath", "documentPath", "downloadURL", "frontURL", "backURL", "documentURL", "extractedFields", "reviewedAt"]) {
     record[field] ??= driver[`documents.${kind}.${field}`];
   }
   if (kind === "driverLicense") {
     record.frontPath ??= driver.licenseSubmission?.frontStoragePath;
+    if (record.storagePath && /\/back(?:-|\.)/.test(record.storagePath)) record.lastUploadedSide ??= "back";
     record.backPath ??= driver.licenseSubmission?.backStoragePath;
   } else if (kind === "insurance") record.documentPath ??= driver.vehicleDocumentSubmission?.insuranceStoragePath;
   else if (kind === "registration") record.documentPath ??= driver.vehicleDocumentSubmission?.registrationStoragePath;
