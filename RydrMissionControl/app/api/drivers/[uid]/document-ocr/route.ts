@@ -3,10 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getWorkspaceAuth, getWorkspaceDb, getWorkspaceStorage } from "@/lib/firebaseAdmin";
 import { latestDriverDocument, uploadedDocumentPath } from "@/lib/driverDocumentReview";
 import { getAdminSession } from "@/lib/session";
-import {
-  detectDocumentText,
-  reviewDriverProof
-} from "../../../../../../rydr-backend/firebase/functions/src/services/documentReviewService";
+import { detectDocumentText } from "../../../../../../rydr-backend/firebase/functions/src/services/documentOcr";
+import { reviewDriverProof } from "../../../../../../rydr-backend/firebase/functions/src/services/driverDocumentReviewLogic";
 
 export const maxDuration = 60;
 

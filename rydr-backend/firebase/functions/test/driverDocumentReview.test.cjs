@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { reviewDriverProof } = require("../lib/services/documentReviewService");
+const { reviewDriverProof } = require("../lib/services/driverDocumentReviewLogic");
 
 const vin = "1HGBH41JXMN109186";
 const profile = {
