@@ -1880,9 +1880,16 @@ fieldset input {
   max-width: 690px;
 }
 
-.cash-hero-copy h1 {
-  max-width: 540px;
-  font-size: clamp(3rem, 3.6vw, 4.3rem);
+.cash-hero-copy {
+  container-type: inline-size;
+}
+
+.cash-cinema-hero .cash-hero-copy h1 {
+  max-width: 100%;
+  font-size: clamp(2rem, 3.8vw, 4.3rem);
+  font-size: clamp(2rem, 11cqi, 4.3rem);
+  line-height: 0.94;
+  overflow-wrap: anywhere;
 }
 
 .cash-hero-copy h1 span {
@@ -2062,12 +2069,6 @@ fieldset input {
 }
 
 @media (max-width: 640px) {
-  .cash-hero-copy h1 {
-    max-width: 100%;
-    font-size: clamp(2.22rem, 9.6vw, 3rem);
-    line-height: 0.94;
-  }
-
   .cash-hero-copy .hero-actions {
     display: grid;
     grid-template-columns: 1fr;
@@ -2930,13 +2931,6 @@ fieldset input {
 }
 
 @media (max-width: 640px) {
-  .cash-hero-copy h1 {
-    max-width: 100%;
-    font-size: clamp(2.22rem, 9.6vw, 3rem);
-    line-height: 0.94;
-    overflow-wrap: anywhere;
-  }
-
   .rider-story-section > *,
   .rider-story-copy,
   .choice-tokens {
