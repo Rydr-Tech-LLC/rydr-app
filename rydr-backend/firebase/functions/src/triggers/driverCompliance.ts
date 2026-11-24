@@ -2,7 +2,7 @@ import { sendPushToUser, type NotificationType } from "../services/notificationS
 import { onDocumentWritten } from "../workspaceFunctions";
 import { onSchedule } from "../workspaceFunctions";
 import { db } from "../admin";
-import { reconcileDriverCompliance } from "../services/driverComplianceService";
+import { notifyDriverDocumentApprovals, reconcileDriverCompliance } from "../services/driverComplianceService";
 
 async function reconcileAllDrivers() {
   const policy = (await db.collection("platformConfig").doc("driverCompliance").get()).data() ?? {};
@@ -32,5 +32,8 @@ export const onDriverComplianceChanged = onDocumentWritten("drivers/{uid}", asyn
   if (!after) return;
   const relevant = (data: any) => JSON.stringify([data?.documents, data?.backgroundScreening, data?.driverApprovalStatus, data?.accountStatus, data?.safetyHold, data?.safetyReviewStatus, data?.isApproved, ...Object.entries(data ?? {}).filter(([key]) => key.startsWith("documents."))]);
   if (relevant(before) === relevant(after)) return;
-  await reconcileDriverCompliance(event.params.uid);
+  await Promise.all([
+    reconcileDriverCompliance(event.params.uid),
+    before && notifyDriverDocumentApprovals(event.params.uid, before, after)
+  ]);
 });

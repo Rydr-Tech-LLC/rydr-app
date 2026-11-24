@@ -1,13 +1,42 @@
 import { documentDeclines } from "./documentReviewFeedback";
 import { createHash } from "node:crypto";
 import { db, FieldValue, Timestamp } from "../admin";
-import { evaluateDriverCompliance, timestamp, georgiaDate } from "./driverCompliancePolicy";
+import { DOCUMENT_KINDS, DOCUMENT_LABELS, evaluateDriverCompliance, timestamp, georgiaDate, latestDocument } from "./driverCompliancePolicy";
 import { sendPushToUser } from "./notificationSender";
 
 function baseApprovalAllowsDriving(driver: Record<string, any>) {
   return !["rejected", "needs_attention"].includes(driver.driverApprovalStatus) && (driver.driverApprovalStatus === "approved" || driver.isApproved === true)
     && !["suspended", "removed", "deletion_requested"].includes(driver.accountStatus)
     && driver.safetyReviewStatus !== "suspended" && driver.safetyHold !== true;
+}
+
+export async function notifyDriverDocumentApprovals(
+  uid: string,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>
+) {
+  for (const kind of DOCUMENT_KINDS) {
+    const current = latestDocument(after, kind);
+    if (current.status !== "approved" || !current.reviewId) continue;
+
+    const previous = latestDocument(before, kind);
+    const generation = current.latestGeneration ?? current.approvedRecord?.generation ?? null;
+    const previousGeneration = previous.latestGeneration ?? previous.approvedRecord?.generation ?? null;
+    if (previous.status === "approved" && (previous.reviewId === current.reviewId
+      || (current.storagePath && previous.storagePath === current.storagePath && previousGeneration === generation))) continue;
+
+    const revision = JSON.stringify([kind, current.storagePath ?? current.reviewId, generation]);
+    const id = createHash("sha256").update(revision).digest("hex");
+    const label = DOCUMENT_LABELS[kind as keyof typeof DOCUMENT_LABELS];
+    await sendPushToUser({
+      audience: "driver",
+      uid,
+      notificationId: `approved_document_${id}`,
+      title: `${label} approved`,
+      body: `Your ${label.toLowerCase()} was approved. View its status in Documents.`,
+      route: { type: "driverDocumentReminder", target: "documents" }
+    });
+  }
 }
 
 export async function reconcileDriverCompliance(uid: string, policy?: Record<string, any>, nowMillis = Date.now()) {

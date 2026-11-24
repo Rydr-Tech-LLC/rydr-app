@@ -29,7 +29,7 @@ Module._load = function(request, parent, isMain) {
   if (request === '../admin' && parent?.filename.includes(`${path.sep}lib${path.sep}services${path.sep}`)) return fakeAdmin;
   return originalLoad.apply(this, arguments);
 };
-const { reconcileDriverCompliance } = require('../lib/services/driverComplianceService');
+const { notifyDriverDocumentApprovals, reconcileDriverCompliance } = require('../lib/services/driverComplianceService');
 const { sendPushToUser } = require('../lib/services/notificationSender');
 Module._load = originalLoad;
 const now = Date.parse('2026-10-14T16:00:00Z');
@@ -144,4 +144,51 @@ test('declined replacement notifies but preserves still-current approved proof',
  await reconcileDriverCompliance('fixture',{requireVerifiedDocumentExpirations:true},now);
  assert.equal(driver.documentComplianceHold,false);assert.equal(driver.canGoOnline,true);
  assert.equal([...rows.keys()].some(key=>key.includes('/notifications/document_declined_')),true);
+});
+
+test('automatic and manual document approvals send one inbox item per approved upload', async () => {
+  seed('2027-02-01');
+  const licensePath = 'driverDocuments/fixture/driverLicense/front-example.jpg';
+  const registrationPath = 'driverDocuments/fixture/registration/single-example.jpg';
+  const before = { documents: {
+    driverLicense: { status: 'pending', reviewId: 'auto-review', storagePath: licensePath, latestGeneration: '12' },
+    registration: { status: 'needs_review', reviewId: 'uncertain-review', storagePath: registrationPath }
+  } };
+  const after = { documents: {
+    driverLicense: { ...before.documents.driverLicense, status: 'approved' },
+    registration: { ...before.documents.registration, status: 'approved', reviewId: 'manual-review', manualReviewId: 'manual-review' }
+  } };
+
+  await notifyDriverDocumentApprovals('fixture', before, after);
+  await notifyDriverDocumentApprovals('fixture', before, after);
+  await notifyDriverDocumentApprovals('fixture', after, {
+    documents: { ...after.documents, registration: { ...after.documents.registration, reviewId: 'verified-again' } }
+  });
+
+  const inbox = [...rows.entries()].filter(([key]) => key.includes('/notifications/approved_document_'));
+  assert.deepEqual(inbox.map(([, notice]) => notice.title), ['Driver license approved', 'Vehicle registration approved']);
+  assert.equal(pushes.length, 2);
+  assert.equal(inbox.every(([, notice]) => notice.target === 'documents' && !notice.isRead), true);
+  assert.equal(pushes.every(message => message.data.target === 'documents'), true);
+});
+
+test('replacement approvals appear in the inbox without a device and survive compliance reconciliation', async () => {
+  seed('2027-02-01');
+  rows.delete('drivers/fixture/notificationTokens/device');
+  const old = { status: 'approved', reviewId: 'old', storagePath: 'driverDocuments/fixture/insurance/old.jpg' };
+  const before = { documents: { insurance: { ...old, status: 'needs_review', approvedRecord: old } } };
+  await notifyDriverDocumentApprovals('fixture', { documents: { insurance: old } }, before);
+  assert.equal([...rows.keys()].some(key => key.includes('/notifications/approved_document_')), false);
+
+  const after = { documents: { insurance: {
+    status: 'approved', reviewId: 'replacement', storagePath: 'driverDocuments/fixture/insurance/new.jpg'
+  } } };
+  await notifyDriverDocumentApprovals('fixture', before, after);
+  await reconcileDriverCompliance('fixture', {}, now);
+
+  const inbox = [...rows.entries()].filter(([key]) => key.includes('/notifications/approved_document_'));
+  assert.equal(inbox.length, 1);
+  assert.equal(inbox[0][1].title, 'Insurance approved');
+  assert.equal(inbox[0][1].pushStatus, 'awaiting_device');
+  assert.equal(pushes.length, 0);
 });
