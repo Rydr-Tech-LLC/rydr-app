@@ -1,7 +1,10 @@
+# Vercel builds the public website and Mission Control from this repository.
 # Mission Control also imports shared policies from the backend source tree.
 /*
 !/RydrMissionControl
+!/Rydr_Website
 !/rydr-backend
+**/.DS_Store
 **/node_modules/**
 **/.env*
 **/.git/**
