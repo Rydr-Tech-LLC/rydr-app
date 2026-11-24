@@ -615,6 +615,23 @@ li {
   font-weight: 950;
 }
 
+.product-detail-card {
+  padding: clamp(24px, 4vw, 48px);
+}
+
+.product-detail-card :is(ul, ol) {
+  margin: 0;
+  padding-inline-start: 1.3em;
+}
+
+.product-detail-card li + li {
+  margin-block-start: 0.5rem;
+}
+
+.product-detail-card > :last-child {
+  margin-block-end: 0;
+}
+
 .split-inner,
 .showcase-inner,
 .waitlist-inner {
@@ -2249,11 +2266,9 @@ fieldset input {
 }
 
 .qualification-grid strong {
-  display: grid;
-  width: 64px;
-  height: 64px;
-  place-items: center;
-  border-radius: 50%;
+  width: fit-content;
+  padding: 8px 14px;
+  border-radius: 999px;
   color: #fff;
   background: linear-gradient(135deg, var(--red), var(--red-deep));
   box-shadow: 0 16px 36px rgba(255, 51, 66, 0.24);
@@ -2271,7 +2286,7 @@ fieldset input {
 
 .fare-flow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px minmax(0, 1fr) 36px minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   align-items: center;
   margin-top: 30px;
@@ -2297,18 +2312,6 @@ fieldset input {
   font-weight: 850;
 }
 
-.fare-flow i {
-  height: 2px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(255, 51, 66, 0.1), rgba(255, 51, 66, 0.9));
-  animation: fareLine 1.8s ease-in-out infinite alternate;
-}
-
-@keyframes fareLine {
-  from { opacity: 0.35; transform: scaleX(0.7); }
-  to { opacity: 1; transform: scaleX(1); }
-}
-
 .driver-final-cta {
   background:
     linear-gradient(135deg, rgba(255, 51, 66, 0.12), transparent 44%),
@@ -2320,20 +2323,10 @@ fieldset input {
   .qualification-grid {
     grid-template-columns: 1fr 1fr;
   }
-
-  .fare-flow {
-    grid-template-columns: 1fr;
-  }
-
-  .fare-flow i {
-    width: 2px;
-    height: 32px;
-    margin: 0 auto;
-    transform-origin: center;
-  }
 }
 
 @media (max-width: 640px) {
+  .fare-flow,
   .driver-control-metrics,
   .driver-standards-grid,
   .qualification-grid {
